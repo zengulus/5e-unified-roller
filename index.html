@@ -98,6 +98,7 @@
         .field-group { display: flex; flex-direction: column; }
         label { font-size: 0.7rem; color: #888; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
         
+        /* Global Input Style */
         input[type="text"], input[type="number"], select, textarea { 
             background: var(--input-bg); border: 1px solid var(--border); color: #fff; padding: 10px; 
             border-radius: 6px; font-size: 1rem; width: 100%; box-sizing: border-box; -webkit-appearance: none; 
@@ -145,11 +146,14 @@
         .hp-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
         .hp-box input { text-align: center; font-weight: bold; font-size: 1.2rem; }
         
-        /* NEW HP MANAGER STYLES */
+        /* HP MANAGER ROW */
         .hp-manage-row {
             display: flex; gap: 10px; margin-top: 10px; align-items: center;
             background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333;
         }
+        /* Override generic input width for the damage input */
+        #hpInteractVal { width: 80px !important; text-align: center; flex-shrink: 0; }
+
         .btn-heal { background: #27ae60; color: white; flex: 1; font-weight: bold; }
         .btn-dmg { background: #c0392b; color: white; flex: 1; font-weight: bold; }
         .btn-heal:active, .btn-dmg:active { transform: translateY(1px); opacity: 0.8; }
@@ -172,7 +176,16 @@
             background: #252525; padding: 8px; border-radius: 8px;
         }
         .spell-lvl { width: 30px; font-weight: bold; color: var(--slot); font-size: 0.9rem; }
-        .spell-max { width: 50px; text-align: center; padding: 5px; height: 30px; }
+        
+        /* FIX: '!important' forces this width to override the global input width */
+        .spell-max { 
+            width: 50px !important; 
+            text-align: center; 
+            padding: 5px; 
+            height: 30px; 
+            flex-shrink: 0;
+        }
+        
         .spell-bubbles { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; }
         .bubble { 
             width: 20px; height: 20px; border-radius: 50%; border: 2px solid #555; 
@@ -201,6 +214,7 @@
         .grid-6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .stat-card { background: var(--card-bg); padding: 8px; border-radius: 8px; text-align: center; border: 1px solid var(--border); display: flex; flex-direction: column; }
         .stat-card h3 { margin: 0 0 2px 0; font-size: 0.8rem; color: #aaa; }
+        /* Ensure score inputs also override global width if needed, but 100% is fine here inside grid */
         .score-input { width: 100% !important; text-align: center; font-size: 1.1rem; font-weight: bold; margin-bottom: 2px; padding: 4px !important; background: transparent !important; border: none !important; color: #fff !important; }
         .mod-display { font-size: 0.85rem; color: #888; margin-bottom: 4px; }
         .defense-box { background: #252525; padding: 2px; border-radius: 4px; border-top: 2px solid var(--accent); margin-top: 4px; flex-grow: 1; }
@@ -313,7 +327,7 @@
                 </div>
 
                 <div class="hp-manage-row">
-                    <input type="number" id="hpInteractVal" placeholder="Amount" style="width: 80px; text-align: center;">
+                    <input type="number" id="hpInteractVal" placeholder="Amount">
                     <button class="btn-dmg" onclick="applyDamage()">Damage Me</button>
                     <button class="btn-heal" onclick="applyHeal()">Heal</button>
                 </div>
@@ -423,7 +437,7 @@
     let consumeInspirationOnNextRoll = false;
 
     function init() {
-        const saved = localStorage.getItem('unifiedSheetDataV13'); // Version bumped
+        const saved = localStorage.getItem('unifiedSheetDataV14'); // Version bumped
         
         let defaultSpells = [];
         for(let i=1; i<=9; i++) defaultSpells.push({ lvl: i, max: 0, used: 0 });
@@ -846,7 +860,7 @@
         data.vitals.temp = document.getElementById('hpTemp').value;
         data.vitals.hitDice = document.getElementById('hitDice').value;
         data.vitals.inspiration = parseInt(document.getElementById('inspirationVal').value) || 0;
-        localStorage.setItem('unifiedSheetDataV13', JSON.stringify(data)); 
+        localStorage.setItem('unifiedSheetDataV14', JSON.stringify(data)); 
     }
 
     function showIoMsg(txt) { document.getElementById('ioMsg').innerText = txt; setTimeout(() => document.getElementById('ioMsg').innerText = "", 3000); }
