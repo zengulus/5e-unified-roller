@@ -89,18 +89,30 @@
             flex: 1; text-align: right; margin-left: 20px; 
         }
 
-        /* --- UI ELEMENTS --- */
+        /* --- UI ELEMENTS (INPUTS FIXED) --- */
         .card { background: var(--card-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); }
         .section-title { margin: 15px 0 8px 0; color: #888; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; letter-spacing: 0.05em; font-weight: bold; }
 
         .header-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .field-group { display: flex; flex-direction: column; }
         label { font-size: 0.7rem; color: #888; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
-        input, select, textarea { 
+        
+        /* TEXT / NUMBER / SELECT ONLY */
+        input[type="text"], input[type="number"], select, textarea { 
             background: var(--input-bg); border: 1px solid var(--border); color: #fff; padding: 10px; 
             border-radius: 6px; font-size: 1rem; width: 100%; box-sizing: border-box; -webkit-appearance: none; 
         }
         input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+        /* CHECKBOXES (Restored) */
+        input[type="checkbox"] {
+            -webkit-appearance: checkbox; /* Force native look */
+            appearance: checkbox;
+            width: 18px; height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent); /* Theme color checkmark */
+            margin: 0;
+        }
 
         /* --- HP & INSPIRATION --- */
         .hp-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-top: 15px; }
@@ -109,19 +121,19 @@
         .hp-temp { color: var(--temp); border-color: var(--temp); }
         
         .insp-row { 
-            display: flex; gap: 10px; margin-top: 10px; align-items: center; 
-            background: #252525; padding: 8px; border-radius: 8px; border: 1px solid #333;
+            display: flex; gap: 10px; margin-top: 10px; align-items: flex-end; 
+            background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333;
         }
-        .insp-toggle { 
-            display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1;
-            font-size: 0.9rem; font-weight: bold; color: var(--gold);
+        .insp-input-group { flex: 1; display:flex; flex-direction:column; }
+        .insp-input { 
+            color: var(--gold); border-color: #555; font-weight: bold; text-align: center; 
+            font-size: 1.2rem;
         }
-        .insp-toggle input { width: 20px; height: 20px; margin: 0; }
         .btn-use-insp {
-            background: var(--gold); color: #000; border: none; padding: 8px 12px;
-            border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.8rem;
+            background: var(--gold); color: #000; border: none; padding: 10px 15px; height: 42px;
+            border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.85rem; white-space: nowrap;
         }
-        .btn-use-insp:active { opacity: 0.8; }
+        .btn-use-insp:active { opacity: 0.8; transform: translateY(1px); }
 
         /* --- SPELL SLOTS --- */
         .spell-row { 
@@ -151,10 +163,18 @@
         .grid-6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .stat-card { background: var(--card-bg); padding: 8px; border-radius: 8px; text-align: center; border: 1px solid var(--border); position: relative; }
         .stat-card h3 { margin: 0 0 2px 0; font-size: 0.8rem; color: #aaa; }
-        .score-input { width: 100%; text-align: center; font-size: 1.1rem; font-weight: bold; margin-bottom: 2px; padding: 4px !important; background: transparent !important; border: none !important; color: #fff !important; }
+        .score-input { width: 100% !important; text-align: center; font-size: 1.1rem; font-weight: bold; margin-bottom: 2px; padding: 4px !important; background: transparent !important; border: none !important; color: #fff !important; }
         .mod-display { font-size: 0.85rem; color: #888; margin-bottom: 4px; }
         .defense-box { background: #252525; padding: 2px; border-radius: 4px; border-top: 2px solid var(--accent); margin-top: 4px; }
         .defense-val { font-size: 1.1rem; font-weight: bold; color: var(--accent); }
+        
+        /* Save Prof Labeling Fixed */
+        .save-prof { 
+            font-size: 0.75rem; font-weight: bold; color: #888; 
+            display: flex; justify-content: center; align-items: center; gap: 6px; 
+            margin-bottom: 5px; cursor: pointer;
+        }
+        
         .roll-stat-btn { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: transparent; border: none; z-index: 5; cursor: pointer; } 
 
         .skill-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
@@ -177,7 +197,7 @@
             .header-grid { grid-template-columns: 1fr; }
             .webhook-row { grid-column: span 1; }
             .log-area { display: none; }
-            .hp-grid { grid-template-columns: 1fr 1fr; } /* 2x2 grid for HP on phones */
+            .hp-grid { grid-template-columns: 1fr 1fr; } 
         }
     </style>
 </head>
@@ -234,11 +254,11 @@
 
             <div class="webhook-row" style="border-top:none; padding-top:0;">
                 <div class="insp-row">
-                    <label class="insp-toggle">
-                        <input type="checkbox" id="hasInspiration" onchange="save()"> 
-                        <span>Has Inspiration?</span>
-                    </label>
-                    <button class="btn-use-insp" onclick="useInspiration()">Use on Next Roll</button>
+                    <div class="insp-input-group">
+                        <label style="color:#aaa; font-size:0.75rem; text-transform:uppercase;">Banked Inspiration</label>
+                        <input type="number" id="inspirationVal" class="insp-input" value="0" placeholder="0" oninput="save()">
+                    </div>
+                    <button class="btn-use-insp" onclick="useInspiration()">Use (Spend 1)</button>
                 </div>
             </div>
 
@@ -253,7 +273,7 @@
 
             <div class="webhook-row">
                 <input type="text" id="webhookUrl" placeholder="Discord Webhook URL..." oninput="save()">
-                <label class="discord-toggle" id="discordLabel" style="display:flex; align-items:center; gap:8px; margin-top:5px; color:#aaa;">
+                <label class="discord-toggle" id="discordLabel" style="display:flex; align-items:center; gap:8px; margin-top:5px; color:#aaa; font-size:0.9rem;">
                     <input type="checkbox" id="sendToDiscord" onchange="toggleDiscord(this.checked)"> 
                     <span>Active (Send to Discord)</span>
                 </label>
@@ -324,7 +344,7 @@
 
     let data = {
         meta: { player: '', name: '', level: 1, webhook: '', discordActive: false },
-        vitals: { curr: '', max: '', temp: '', hitDice: '', inspiration: false },
+        vitals: { curr: '', max: '', temp: '', hitDice: '', inspiration: 0 },
         stats: { str: {val:10,save:false}, dex: {val:10,save:false}, con: {val:10,save:false}, int: {val:10,save:false}, wis: {val:10,save:false}, cha: {val:10,save:false} },
         skills: {}, attacks: [], spells: [], rollMode: 'norm'
     };
@@ -333,20 +353,23 @@
     let consumeInspirationOnNextRoll = false;
 
     function init() {
-        const saved = localStorage.getItem('unifiedSheetDataV7'); // Version bumped
+        const saved = localStorage.getItem('unifiedSheetDataV9'); // Version bumped
         
-        // Default Spells (Levels 1-9)
         let defaultSpells = [];
         for(let i=1; i<=9; i++) defaultSpells.push({ lvl: i, max: 0, used: 0 });
 
         if (saved) {
             const parsed = JSON.parse(saved);
             data = { ...data, ...parsed };
-            // Merge nested objects carefully
             if(parsed.meta) data.meta = {...data.meta, ...parsed.meta};
             if(parsed.vitals) data.vitals = {...data.vitals, ...parsed.vitals};
             if(parsed.stats) data.stats = {...data.stats, ...parsed.stats};
             if(!data.spells || data.spells.length === 0) data.spells = defaultSpells;
+            
+            // Migration
+            if (typeof data.vitals.inspiration === 'boolean') {
+                data.vitals.inspiration = data.vitals.inspiration ? 1 : 0;
+            }
         } else {
             Object.keys(skillsMap).forEach(s => data.skills[s] = 0);
             data.spells = defaultSpells;
@@ -365,7 +388,7 @@
         document.getElementById('hpMax').value = data.vitals.max || '';
         document.getElementById('hpTemp').value = data.vitals.temp || '';
         document.getElementById('hitDice').value = data.vitals.hitDice || '';
-        document.getElementById('hasInspiration').checked = data.vitals.inspiration || false;
+        document.getElementById('inspirationVal').value = data.vitals.inspiration || 0;
 
         renderStats();
         renderSkills();
@@ -424,7 +447,6 @@
         const list = document.getElementById('spellSlotsList');
         list.innerHTML = '';
         data.spells.forEach((slot, idx) => {
-            // Generate bubbles
             let bubblesHtml = '';
             for(let i=0; i<slot.max; i++) {
                 const isUsed = i < slot.used;
@@ -468,22 +490,26 @@
 
     // --- INSPIRATION & HP ---
     function useInspiration() {
-        if(!data.vitals.inspiration) {
-            alert("You don't have inspiration marked!");
+        let val = parseInt(document.getElementById('inspirationVal').value) || 0;
+        if(val <= 0) {
+            showToast("No inspiration to spend!");
             return;
         }
+        
+        val--;
+        document.getElementById('inspirationVal').value = val;
+        data.vitals.inspiration = val;
+        save();
+
         consumeInspirationOnNextRoll = true;
         setMode('adv');
-        showToast("Inspiration set! Next roll will be Advantage.");
+        showToast("Spent 1 Inspiration! Next roll has Advantage.");
     }
     
     function consumeInspiration() {
         if(consumeInspirationOnNextRoll) {
-            data.vitals.inspiration = false;
-            document.getElementById('hasInspiration').checked = false;
             consumeInspirationOnNextRoll = false;
-            save();
-            setMode('norm'); // Reset after use
+            setMode('norm'); 
         }
     }
 
@@ -494,12 +520,11 @@
         save(); renderSpells();
     }
     function toggleSpellSlot(idx, bubbleIdx) {
-        // If clicking the last used bubble, uncheck it. Otherwise check up to clicked.
         const currentUsed = data.spells[idx].used;
         if (bubbleIdx + 1 === currentUsed) {
-            data.spells[idx].used = bubbleIdx; // Remove one
+            data.spells[idx].used = bubbleIdx; 
         } else {
-            data.spells[idx].used = bubbleIdx + 1; // Set to this one
+            data.spells[idx].used = bubbleIdx + 1; 
         }
         save(); renderSpells();
     }
@@ -551,7 +576,6 @@
         
         sendToDiscord(label + modeStr, `Dice: ${displayFormula}`, `**${total}**`, type);
         
-        // Handle Inspiration Consumption
         if(allowAdvantage && consumeInspirationOnNextRoll) {
             consumeInspiration();
         }
@@ -561,7 +585,6 @@
         const formula = document.getElementById('customFormula').value.trim();
         if(!formula) return;
         
-        // Simple parser: XdY + Z
         const regex = /^(\d+)?d(\d+)\s*([+-]\s*\d+)?$/i;
         const match = formula.match(regex);
         
@@ -673,8 +696,8 @@
         data.vitals.max = document.getElementById('hpMax').value;
         data.vitals.temp = document.getElementById('hpTemp').value;
         data.vitals.hitDice = document.getElementById('hitDice').value;
-        data.vitals.inspiration = document.getElementById('hasInspiration').checked;
-        localStorage.setItem('unifiedSheetDataV7', JSON.stringify(data)); 
+        data.vitals.inspiration = parseInt(document.getElementById('inspirationVal').value) || 0;
+        localStorage.setItem('unifiedSheetDataV9', JSON.stringify(data)); 
     }
 
     function showIoMsg(txt) { document.getElementById('ioMsg').innerText = txt; setTimeout(() => document.getElementById('ioMsg').innerText = "", 3000); }
@@ -693,7 +716,6 @@
         try {
             const jsonStr = decodeURIComponent(atob(str).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
             const parsed = JSON.parse(jsonStr);
-            // Deep merge logic simplified for import
             data = parsed; 
             save(); init(); field.value = ""; showIoMsg("Loaded!");
         } catch(e) { showIoMsg("Invalid Code"); console.error(e); }
