@@ -13,7 +13,10 @@
             --input-bg: #2d2d2d;
             --accent: #4ecdc4; /* Cyan */
             --accent-atk: #ff6b6b; /* Red */
-            --misc: #f1c40f; /* Yellow */
+            --gold: #f1c40f; /* Inspiration/Misc */
+            --hp: #e74c3c;    /* Health Red */
+            --temp: #3498db;  /* Temp HP Blue */
+            --slot: #9b59b6;  /* Spells Purple */
             --text: #e0e0e0;
             --border: #333;
         }
@@ -23,7 +26,7 @@
             color: var(--text); 
             padding: 0; 
             margin: 0; 
-            padding-top: 80px; /* Increased to clear the header */
+            padding-top: 80px; 
             padding-bottom: 50px; 
         }
         .sheet-container { 
@@ -37,11 +40,11 @@
             box-sizing: border-box; 
         }
         
-        /* --- STICKY HEADER (FIXED) --- */
+        /* --- STICKY HEADER --- */
         .roller-bar { 
             background: rgba(30, 30, 30, 0.98);
             backdrop-filter: blur(8px); 
-            padding: 10px 15px; /* Comfortable padding */
+            padding: 10px 15px; 
             border-bottom: 1px solid #444; 
             display: flex; 
             justify-content: space-between; 
@@ -50,112 +53,101 @@
             top: 0; left: 0; right: 0; 
             z-index: 1000; 
             box-shadow: 0 4px 12px rgba(0,0,0,0.4); 
-            min-height: 60px; /* Allow it to grow if needed */
+            min-height: 60px;
             box-sizing: border-box;
         }
         
-        .controls-left {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
+        .controls-left { display: flex; align-items: center; gap: 12px; }
         .adv-controls { display: flex; gap: 4px; }
         .adv-btn { 
-            background: #333; 
-            border: 1px solid #444; 
-            color: #888; 
-            padding: 0 12px; 
-            height: 38px; /* Slightly taller for easy tapping */
-            border-radius: 6px; 
-            cursor: pointer; 
-            font-weight: bold; 
-            font-size: 0.75rem; 
-            transition: 0.2s; 
-            display: flex;
-            align-items: center;
+            background: #333; border: 1px solid #444; color: #888; 
+            padding: 0 12px; height: 38px; border-radius: 6px; 
+            cursor: pointer; font-weight: bold; font-size: 0.75rem; 
+            transition: 0.2s; display: flex; align-items: center;
         }
-        .adv-btn:hover { background: #444; color: #fff; }
         .adv-btn.active[data-mode="adv"] { background: #27ae60; color: #fff; border-color: #27ae60; }
         .adv-btn.active[data-mode="dis"] { background: #c0392b; color: #fff; border-color: #c0392b; }
         .adv-btn.active[data-mode="norm"] { background: #2980b9; color: #fff; border-color: #2980b9; }
 
-        /* MISC BOX FIX */
         .misc-wrapper { 
-            display: flex; 
-            flex-direction: column; 
-            justify-content: center;
-            align-items: center;
-            position: relative;
+            display: flex; flex-direction: column; justify-content: center; 
+            align-items: center; position: relative;
         }
         .misc-wrapper input { 
-            width: 45px; 
-            height: 30px; 
-            text-align: center; 
-            font-weight: bold; 
-            color: var(--misc); 
-            border: 1px solid #444; 
-            background: #222; 
-            border-radius: 6px; 
-            font-size: 1rem; 
-            padding: 0; 
-            margin-top: 14px; /* Space for the label inside the flow */
+            width: 45px; height: 30px; text-align: center; font-weight: bold; 
+            color: var(--gold); border: 1px solid #444; background: #222; 
+            border-radius: 6px; font-size: 1rem; padding: 0; margin-top: 14px;
         }
-        .misc-wrapper input:focus { outline: 1px solid var(--misc); border-color: var(--misc); }
         .misc-label { 
-            font-size: 0.6rem; 
-            color: #aaa; 
-            text-transform: uppercase; 
-            font-weight: 600;
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            text-align: center;
+            font-size: 0.6rem; color: #aaa; text-transform: uppercase; 
+            font-weight: 600; position: absolute; top: 0; left: 0; width: 100%; text-align: center;
         }
 
         .log-area { 
-            font-family: monospace; 
-            font-size: 0.9rem; 
-            color: var(--accent); 
-            white-space: nowrap; 
-            overflow: hidden; 
-            text-overflow: ellipsis; 
-            flex: 1; 
-            text-align: right; 
-            margin-left: 20px; 
+            font-family: monospace; font-size: 0.9rem; color: var(--accent); 
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+            flex: 1; text-align: right; margin-left: 20px; 
         }
 
-        /* --- CARDS & LAYOUT --- */
+        /* --- UI ELEMENTS --- */
         .card { background: var(--card-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); }
-        .section-title { margin: 15px 0 8px 0; color: #888; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; letter-spacing: 0.05em; }
+        .section-title { margin: 15px 0 8px 0; color: #888; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; letter-spacing: 0.05em; font-weight: bold; }
 
-        /* MAIN GRID FIX */
-        .header-grid { 
-            display: grid; 
-            grid-template-columns: 1fr 1fr; /* Default to 2 columns (Tablet/PC) */
-            gap: 12px; 
-        }
-        
+        .header-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .field-group { display: flex; flex-direction: column; }
         label { font-size: 0.7rem; color: #888; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
-        input[type="text"], input[type="number"], select, textarea { 
-            background: var(--input-bg); border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 6px; font-size: 1rem; 
-            -webkit-appearance: none; 
-            width: 100%; /* Ensure inputs don't overflow */
-            box-sizing: border-box; /* Include padding in width */
+        input, select, textarea { 
+            background: var(--input-bg); border: 1px solid var(--border); color: #fff; padding: 10px; 
+            border-radius: 6px; font-size: 1rem; width: 100%; box-sizing: border-box; -webkit-appearance: none; 
         }
-        input:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+        input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+        /* --- HP & INSPIRATION --- */
+        .hp-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-top: 15px; }
+        .hp-box input { text-align: center; font-weight: bold; font-size: 1.2rem; }
+        .hp-curr { color: var(--hp); border-color: var(--hp); }
+        .hp-temp { color: var(--temp); border-color: var(--temp); }
         
-        .read-only-box { background: #252525; border: 1px solid #333; color: #888; font-weight: bold; padding: 10px; border-radius: 6px; text-align: center; font-size: 1rem; }
+        .insp-row { 
+            display: flex; gap: 10px; margin-top: 10px; align-items: center; 
+            background: #252525; padding: 8px; border-radius: 8px; border: 1px solid #333;
+        }
+        .insp-toggle { 
+            display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1;
+            font-size: 0.9rem; font-weight: bold; color: var(--gold);
+        }
+        .insp-toggle input { width: 20px; height: 20px; margin: 0; }
+        .btn-use-insp {
+            background: var(--gold); color: #000; border: none; padding: 8px 12px;
+            border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.8rem;
+        }
+        .btn-use-insp:active { opacity: 0.8; }
 
-        .webhook-row { grid-column: span 2; margin-top: 5px; padding-top: 10px; border-top: 1px solid #333; }
-        .webhook-input { width: 100%; font-size: 0.8rem !important; color: #666 !important; margin-bottom: 8px; box-sizing: border-box; }
-        .discord-toggle { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: #aaa; cursor: pointer; padding: 5px 0; }
-        .discord-toggle input { width: 18px; height: 18px; margin: 0; }
-        .discord-active { color: #5865F2; font-weight: bold; }
+        /* --- SPELL SLOTS --- */
+        .spell-row { 
+            display: flex; align-items: center; gap: 10px; margin-bottom: 8px; 
+            background: #252525; padding: 8px; border-radius: 8px;
+        }
+        .spell-lvl { width: 30px; font-weight: bold; color: var(--slot); font-size: 0.9rem; }
+        .spell-max { width: 50px; text-align: center; padding: 5px; height: 30px; }
+        .spell-bubbles { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; }
+        .bubble { 
+            width: 20px; height: 20px; border-radius: 50%; border: 2px solid #555; 
+            cursor: pointer; background: #1a1a1a;
+        }
+        .bubble.used { background: var(--slot); border-color: var(--slot); box-shadow: 0 0 5px var(--slot); }
 
-        /* STATS */
+        /* --- ARBITRARY ROLLER --- */
+        .dice-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 5px; }
+        .dice-btn { 
+            background: #333; color: #fff; border: 1px solid #444; padding: 10px; 
+            border-radius: 6px; font-weight: bold; cursor: pointer;
+        }
+        .dice-btn:hover { background: var(--accent); color: #000; }
+        .custom-roll-row { display: flex; gap: 10px; margin-top: 10px; }
+        .btn-roll-custom { background: var(--accent); color: #000; font-weight: bold; border:none; padding: 0 20px; border-radius: 6px; cursor: pointer;}
+
+        /* --- STATS & SKILLS (Reused) --- */
         .grid-6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .stat-card { background: var(--card-bg); padding: 8px; border-radius: 8px; text-align: center; border: 1px solid var(--border); position: relative; }
         .stat-card h3 { margin: 0 0 2px 0; font-size: 0.8rem; color: #aaa; }
@@ -163,47 +155,29 @@
         .mod-display { font-size: 0.85rem; color: #888; margin-bottom: 4px; }
         .defense-box { background: #252525; padding: 2px; border-radius: 4px; border-top: 2px solid var(--accent); margin-top: 4px; }
         .defense-val { font-size: 1.1rem; font-weight: bold; color: var(--accent); }
-        .defense-label { font-size: 0.55rem; text-transform: uppercase; color: #666; }
-        
-        .save-prof { font-size: 0.65rem; display: flex; justify-content: center; align-items: center; gap: 3px; color: #888; }
         .roll-stat-btn { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: transparent; border: none; z-index: 5; cursor: pointer; } 
 
-        /* SKILLS */
         .skill-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
         .skill-row { background: var(--card-bg); padding: 10px 12px; border-radius: 8px; display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); }
         .skill-name { flex: 1; font-size: 0.95rem; font-weight: 500; cursor: pointer; }
-        .skill-bonus { font-weight: bold; color: #ddd; min-width: 25px; text-align: right; }
         .prof-toggle { font-size: 1.2rem; padding: 5px; cursor: pointer; } 
         .prof-toggle.prof { color: var(--accent); }
-        .prof-toggle.exp { color: #f1c40f; }
+        .prof-toggle.exp { color: var(--gold); }
 
-        /* ATTACKS */
         .atk-row { display: grid; grid-template-columns: 1fr 70px 60px; gap: 8px; margin-bottom: 10px; background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333; }
         .atk-controls { grid-column: span 3; display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-top: 5px; }
         
         button { border: none; border-radius: 6px; font-weight: bold; cursor: pointer; height: 40px; font-size: 0.9rem; }
-        .btn-roll { background: var(--accent); color: #000; }
-        .btn-dmg { background: #333; color: #ccc; border: 1px solid #444; }
-        .btn-del { background: transparent; color: #666; font-size: 1.5rem; padding: 0 10px; }
         .add-btn { background: var(--accent-atk); color: #000; width: 100%; margin-top: 5px; }
 
-        /* IO */
-        .io-card { margin-top: 20px; border-color: #444; }
-        .io-row { display: flex; gap: 10px; margin-top: 10px; }
+        .webhook-row { grid-column: span 2; margin-top: 5px; padding-top: 10px; border-top: 1px solid #333; }
+        .discord-active { color: #5865F2; font-weight: bold; }
 
-        /* --- MOBILE SPECIFIC OVERRIDES --- */
         @media (max-width: 600px) {
-            /* Fix horizontal overflow by stacking inputs */
-            .header-grid { 
-                grid-template-columns: 1fr; 
-            }
+            .header-grid { grid-template-columns: 1fr; }
             .webhook-row { grid-column: span 1; }
-            
-            /* Hide log on phones to save header space */
             .log-area { display: none; }
-            
-            /* Ensure skills don't cramp */
-            .skill-list { grid-template-columns: 1fr; }
+            .hp-grid { grid-template-columns: 1fr 1fr; } /* 2x2 grid for HP on phones */
         }
     </style>
 </head>
@@ -216,13 +190,11 @@
             <button class="adv-btn active" onclick="setMode('norm')" data-mode="norm"> - </button>
             <button class="adv-btn" onclick="setMode('adv')" data-mode="adv">ADV</button>
         </div>
-        
         <div class="misc-wrapper">
             <span class="misc-label">Misc</span>
             <input type="number" id="globalMisc" placeholder="0">
         </div>
     </div>
-
     <div id="logArea" class="log-area">Ready...</div>
 </div>
 
@@ -238,6 +210,38 @@
                 <label>Character Name</label>
                 <input type="text" id="charName" placeholder="Character Name" oninput="save()">
             </div>
+            
+            <div class="webhook-row" style="border:none; padding:0; margin:0; grid-column: span 2;">
+                <div class="hp-grid">
+                    <div class="field-group hp-box">
+                        <label>Current</label>
+                        <input type="number" id="hpCurr" class="hp-curr" placeholder="0" oninput="save()">
+                    </div>
+                    <div class="field-group hp-box">
+                        <label>Max</label>
+                        <input type="number" id="hpMax" placeholder="0" oninput="save()">
+                    </div>
+                    <div class="field-group hp-box">
+                        <label>Temp</label>
+                        <input type="number" id="hpTemp" class="hp-temp" placeholder="0" oninput="save()">
+                    </div>
+                    <div class="field-group hp-box">
+                        <label>Hit Dice</label>
+                        <input type="text" id="hitDice" placeholder="1d8" oninput="save()">
+                    </div>
+                </div>
+            </div>
+
+            <div class="webhook-row" style="border-top:none; padding-top:0;">
+                <div class="insp-row">
+                    <label class="insp-toggle">
+                        <input type="checkbox" id="hasInspiration" onchange="save()"> 
+                        <span>Has Inspiration?</span>
+                    </label>
+                    <button class="btn-use-insp" onclick="useInspiration()">Use on Next Roll</button>
+                </div>
+            </div>
+
             <div class="field-group">
                 <label>Level</label>
                 <input type="number" id="charLevel" value="1" min="1" max="20" oninput="updateLevel(this.value)">
@@ -248,8 +252,8 @@
             </div>
 
             <div class="webhook-row">
-                <input type="text" id="webhookUrl" class="webhook-input" placeholder="Paste Discord Webhook URL..." oninput="save()">
-                <label class="discord-toggle" id="discordLabel">
+                <input type="text" id="webhookUrl" placeholder="Discord Webhook URL..." oninput="save()">
+                <label class="discord-toggle" id="discordLabel" style="display:flex; align-items:center; gap:8px; margin-top:5px; color:#aaa;">
                     <input type="checkbox" id="sendToDiscord" onchange="toggleDiscord(this.checked)"> 
                     <span>Active (Send to Discord)</span>
                 </label>
@@ -258,7 +262,7 @@
     </div>
 
     <div>
-        <div class="section-title">Attributes (Tap to Roll)</div>
+        <div class="section-title">Attributes</div>
         <div class="grid-6" id="statsGrid"></div>
     </div>
 
@@ -268,19 +272,41 @@
         <button class="add-btn" onclick="addAttack()">+ Add Weapon / Spell</button>
     </div>
 
+    <div class="card">
+        <div class="section-title" style="margin-top:0;">Spell Slots</div>
+        <div id="spellSlotsList"></div>
+    </div>
+
     <div>
         <div class="section-title">Skills</div>
         <div class="skill-list" id="skillGrid"></div>
     </div>
 
-    <div class="card io-card">
-        <div class="section-title" style="border:none; margin-top:0;">Backup Data</div>
-        <textarea id="ioField" rows="2" placeholder="Save string..." style="width:100%; box-sizing:border-box; font-family:monospace; color:var(--accent); resize:none;"></textarea>
-        <div class="io-row">
-            <button class="btn-dmg" style="flex:1" onclick="exportData()">Copy Save</button>
-            <button class="btn-roll" style="flex:1" onclick="importData()">Load Save</button>
+    <div class="card">
+        <div class="section-title" style="margin-top:0;">Arbitrary Roller</div>
+        <div class="dice-grid">
+            <button class="dice-btn" onclick="rollDie(4,0,'d4',false,'check')">d4</button>
+            <button class="dice-btn" onclick="rollDie(6,0,'d6',false,'check')">d6</button>
+            <button class="dice-btn" onclick="rollDie(8,0,'d8',false,'check')">d8</button>
+            <button class="dice-btn" onclick="rollDie(10,0,'d10',false,'check')">d10</button>
+            <button class="dice-btn" onclick="rollDie(12,0,'d12',false,'check')">d12</button>
+            <button class="dice-btn" onclick="rollDie(20,0,'d20',true,'check')">d20</button>
+            <button class="dice-btn" onclick="rollDie(100,0,'d100',false,'check')">d100</button>
         </div>
-        <div id="ioMsg" style="text-align:center; color: var(--accent); font-size:0.8rem; margin-top:8px; height:1rem;"></div>
+        <div class="custom-roll-row">
+            <input type="text" id="customFormula" placeholder="e.g. 2d6+4">
+            <button class="btn-roll-custom" onclick="rollCustom()">Roll</button>
+        </div>
+    </div>
+
+    <div class="card io-card" style="margin-top:20px;">
+        <div class="section-title" style="margin-top:0;">Backup Data</div>
+        <textarea id="ioField" rows="2" placeholder="Save string..." style="width:100%; font-family:monospace; color:var(--accent); resize:none;"></textarea>
+        <div style="display:flex; gap:10px; margin-top:10px;">
+            <button style="flex:1; background:#333; color:#ccc;" onclick="exportData()">Copy Save</button>
+            <button style="flex:1; background:var(--accent); color:#000;" onclick="importData()">Load Save</button>
+        </div>
+        <div id="ioMsg" style="text-align:center; color: var(--accent); font-size:0.8rem; margin-top:8px;"></div>
     </div>
 
 </div>
@@ -289,51 +315,67 @@
     // --- CONFIG ---
     const stats = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const skillsMap = {
-        'acrobatics': 'dex', 'animal handling': 'wis', 'arcana': 'int', 
-        'athletics': 'str', 'deception': 'cha', 'history': 'int', 
-        'insight': 'wis', 'intimidation': 'cha', 'investigation': 'int', 
-        'medicine': 'wis', 'nature': 'int', 'perception': 'wis', 
-        'performance': 'cha', 'persuasion': 'cha', 'religion': 'int', 
-        'sleight of hand': 'dex', 'stealth': 'dex', 'survival': 'wis'
+        'acrobatics': 'dex', 'animal handling': 'wis', 'arcana': 'int', 'athletics': 'str', 
+        'deception': 'cha', 'history': 'int', 'insight': 'wis', 'intimidation': 'cha', 
+        'investigation': 'int', 'medicine': 'wis', 'nature': 'int', 'perception': 'wis', 
+        'performance': 'cha', 'persuasion': 'cha', 'religion': 'int', 'sleight of hand': 'dex', 
+        'stealth': 'dex', 'survival': 'wis'
     };
 
     let data = {
         meta: { player: '', name: '', level: 1, webhook: '', discordActive: false },
-        stats: {
-            str: { val: 10, save: false }, dex: { val: 10, save: false },
-            con: { val: 10, save: false }, int: { val: 10, save: false },
-            wis: { val: 10, save: false }, cha: { val: 10, save: false }
-        },
-        skills: {}, 
-        attacks: [],
-        rollMode: 'norm'
+        vitals: { curr: '', max: '', temp: '', hitDice: '', inspiration: false },
+        stats: { str: {val:10,save:false}, dex: {val:10,save:false}, con: {val:10,save:false}, int: {val:10,save:false}, wis: {val:10,save:false}, cha: {val:10,save:false} },
+        skills: {}, attacks: [], spells: [], rollMode: 'norm'
     };
+    
+    // Auto-consume inspiration flag
+    let consumeInspirationOnNextRoll = false;
 
-    // --- INIT ---
     function init() {
-        const saved = localStorage.getItem('unifiedSheetDataV6');
+        const saved = localStorage.getItem('unifiedSheetDataV7'); // Version bumped
+        
+        // Default Spells (Levels 1-9)
+        let defaultSpells = [];
+        for(let i=1; i<=9; i++) defaultSpells.push({ lvl: i, max: 0, used: 0 });
+
         if (saved) {
             const parsed = JSON.parse(saved);
-            data = { ...data, ...parsed, meta: { ...data.meta, ...parsed.meta }, stats: { ...data.stats, ...parsed.stats } };
-            
-            document.getElementById('playerName').value = data.meta.player || '';
-            document.getElementById('charName').value = data.meta.name || '';
-            document.getElementById('charLevel').value = data.meta.level || 1;
-            document.getElementById('webhookUrl').value = data.meta.webhook || '';
-            document.getElementById('sendToDiscord').checked = data.meta.discordActive || false;
-            toggleDiscord(data.meta.discordActive);
+            data = { ...data, ...parsed };
+            // Merge nested objects carefully
+            if(parsed.meta) data.meta = {...data.meta, ...parsed.meta};
+            if(parsed.vitals) data.vitals = {...data.vitals, ...parsed.vitals};
+            if(parsed.stats) data.stats = {...data.stats, ...parsed.stats};
+            if(!data.spells || data.spells.length === 0) data.spells = defaultSpells;
         } else {
             Object.keys(skillsMap).forEach(s => data.skills[s] = 0);
+            data.spells = defaultSpells;
         }
-        
+
+        // Fill Fields
+        document.getElementById('playerName').value = data.meta.player || '';
+        document.getElementById('charName').value = data.meta.name || '';
+        document.getElementById('charLevel').value = data.meta.level || 1;
+        document.getElementById('webhookUrl').value = data.meta.webhook || '';
+        document.getElementById('sendToDiscord').checked = data.meta.discordActive || false;
+        toggleDiscord(data.meta.discordActive);
+
+        // Vitals
+        document.getElementById('hpCurr').value = data.vitals.curr || '';
+        document.getElementById('hpMax').value = data.vitals.max || '';
+        document.getElementById('hpTemp').value = data.vitals.temp || '';
+        document.getElementById('hitDice').value = data.vitals.hitDice || '';
+        document.getElementById('hasInspiration').checked = data.vitals.inspiration || false;
+
         renderStats();
         renderSkills();
         renderAttacks();
+        renderSpells();
         updateAll();
-        setMode(data.rollMode || 'norm'); 
+        setMode(data.rollMode || 'norm');
     }
 
-    // --- RENDER ---
+    // --- RENDERERS ---
     function renderStats() {
         document.getElementById('statsGrid').innerHTML = stats.map(s => `
             <div class="stat-card">
@@ -356,7 +398,7 @@
             <div class="skill-row">
                 <span class="prof-toggle ${cls}" onclick="cycleSkill('${s}')">${icon}</span>
                 <span class="skill-name" onclick="rollSkill('${s}')">${s.charAt(0).toUpperCase() + s.slice(1)}</span>
-                <span class="skill-bonus" id="skill-bonus-${s}">+0</span>
+                <span style="font-weight:bold; color:#ddd;" id="skill-bonus-${s}">+0</span>
             </div>`;
         }).join('');
     }
@@ -370,22 +412,41 @@
                     ${stats.map(s => `<option value="${s}" ${atk.stat === s ? 'selected' : ''}>${s.toUpperCase()}</option>`).join('')}
                 </select>
                 <div class="atk-controls">
-                    <button class="btn-roll" onclick="rollAttack(${i})">Attack</button>
-                    <button class="btn-dmg" onclick="rollDamage(${i})">Damage</button>
-                    <button class="btn-del" onclick="delAttack(${i})">&times;</button>
+                    <button style="background:var(--accent); color:#000;" onclick="rollAttack(${i})">Atk</button>
+                    <button style="background:#333; color:#ccc; border:1px solid #444;" onclick="rollDamage(${i})">Dmg</button>
+                    <button style="background:transparent; color:#666; font-size:1.5rem;" onclick="delAttack(${i})">&times;</button>
                 </div>
             </div>
         `).join('');
+    }
+
+    function renderSpells() {
+        const list = document.getElementById('spellSlotsList');
+        list.innerHTML = '';
+        data.spells.forEach((slot, idx) => {
+            // Generate bubbles
+            let bubblesHtml = '';
+            for(let i=0; i<slot.max; i++) {
+                const isUsed = i < slot.used;
+                bubblesHtml += `<div class="bubble ${isUsed ? 'used' : ''}" onclick="toggleSpellSlot(${idx}, ${i})"></div>`;
+            }
+            
+            const div = document.createElement('div');
+            div.className = 'spell-row';
+            div.innerHTML = `
+                <div class="spell-lvl">Lvl ${slot.lvl}</div>
+                <input type="number" class="spell-max" value="${slot.max}" placeholder="0" onchange="updateSpellMax(${idx}, this.value)">
+                <div class="spell-bubbles">${bubblesHtml}</div>
+            `;
+            list.appendChild(div);
+        });
     }
 
     // --- LOGIC ---
     function getMod(score) { return Math.floor((score - 10) / 2); }
     function getPB(level) { return Math.ceil(level / 4) + 1; }
 
-    function updateLevel(val) {
-        data.meta.level = Math.min(20, Math.max(1, parseInt(val)));
-        save(); updateAll();
-    }
+    function updateLevel(val) { data.meta.level = Math.min(20, Math.max(1, parseInt(val))); save(); updateAll(); }
 
     function updateAll() {
         const pb = getPB(data.meta.level);
@@ -405,48 +466,56 @@
         });
     }
 
-    // --- DISCORD ---
-    function toggleDiscord(active) {
-        data.meta.discordActive = active;
-        const label = document.getElementById('discordLabel');
-        if(active) label.classList.add('discord-active');
-        else label.classList.remove('discord-active');
-        save();
+    // --- INSPIRATION & HP ---
+    function useInspiration() {
+        if(!data.vitals.inspiration) {
+            alert("You don't have inspiration marked!");
+            return;
+        }
+        consumeInspirationOnNextRoll = true;
+        setMode('adv');
+        showToast("Inspiration set! Next roll will be Advantage.");
+    }
+    
+    function consumeInspiration() {
+        if(consumeInspirationOnNextRoll) {
+            data.vitals.inspiration = false;
+            document.getElementById('hasInspiration').checked = false;
+            consumeInspirationOnNextRoll = false;
+            save();
+            setMode('norm'); // Reset after use
+        }
     }
 
-    function sendToDiscord(label, formulaStr, result, type = 'check') {
-        if (!data.meta.discordActive || !data.meta.webhook) return;
-
-        let color = 5164484; // Cyan
-        if (type === 'atk') color = 16739179; // Red
-        if (type === 'dmg') color = 9807270; // Grey
-
-        const charName = data.meta.name || "Unknown Character";
-        const playerName = data.meta.player || "Unknown Player";
-
-        const payload = {
-            username: charName,
-            embeds: [{
-                title: label,
-                description: `**Result:** ${result}\n\n${formulaStr}`,
-                color: color,
-                footer: { text: `Player: ${playerName}` }
-            }]
-        };
-
-        fetch(data.meta.webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).catch(err => console.error("Discord Error:", err));
+    // --- SPELL SLOTS LOGIC ---
+    function updateSpellMax(idx, val) {
+        data.spells[idx].max = parseInt(val) || 0;
+        if(data.spells[idx].used > data.spells[idx].max) data.spells[idx].used = data.spells[idx].max;
+        save(); renderSpells();
+    }
+    function toggleSpellSlot(idx, bubbleIdx) {
+        // If clicking the last used bubble, uncheck it. Otherwise check up to clicked.
+        const currentUsed = data.spells[idx].used;
+        if (bubbleIdx + 1 === currentUsed) {
+            data.spells[idx].used = bubbleIdx; // Remove one
+        } else {
+            data.spells[idx].used = bubbleIdx + 1; // Set to this one
+        }
+        save(); renderSpells();
     }
 
-    // --- ROLLING ---
+    // --- ROLLING SYSTEM ---
     function setMode(mode) {
         data.rollMode = mode;
         save(); 
         document.querySelectorAll('.adv-btn').forEach(b => b.classList.remove('active'));
         document.querySelector(`.adv-btn[data-mode="${mode}"]`).classList.add('active');
+    }
+
+    function showToast(msg) {
+        const log = document.getElementById('logArea');
+        log.style.display = 'block';
+        log.innerHTML = `<span style="color:#fff">${msg}</span>`;
     }
 
     function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check') {
@@ -476,12 +545,52 @@
         if(bonus !== 0) displayFormula += ` ${bonus>=0?'+':''}${bonus}`;
         if(misc !== 0) displayFormula += ` ${misc>=0?'+':''}${misc}`;
 
-        // Toast
         const log = document.getElementById('logArea');
         log.style.display = 'block'; 
         log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">${label}</span>`;
         
         sendToDiscord(label + modeStr, `Dice: ${displayFormula}`, `**${total}**`, type);
+        
+        // Handle Inspiration Consumption
+        if(allowAdvantage && consumeInspirationOnNextRoll) {
+            consumeInspiration();
+        }
+    }
+
+    function rollCustom() {
+        const formula = document.getElementById('customFormula').value.trim();
+        if(!formula) return;
+        
+        // Simple parser: XdY + Z
+        const regex = /^(\d+)?d(\d+)\s*([+-]\s*\d+)?$/i;
+        const match = formula.match(regex);
+        
+        if(!match) {
+            showToast("Invalid: Use '2d6+4' format");
+            return;
+        }
+
+        const count = parseInt(match[1]) || 1;
+        const sides = parseInt(match[2]);
+        const modStr = match[3] ? match[3].replace(/\s/g, '') : "+0";
+        const mod = parseInt(modStr);
+
+        let total = 0;
+        let rolls = [];
+        for(let i=0; i<count; i++) {
+            let r = Math.floor(Math.random() * sides) + 1;
+            total += r;
+            rolls.push(r);
+        }
+        total += mod;
+
+        const displayFormula = `[${rolls.join('+')}] ${modStr}`;
+        
+        const log = document.getElementById('logArea');
+        log.style.display = 'block';
+        log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">CUST</span>`;
+        
+        sendToDiscord("Custom Roll: " + formula, `Dice: ${displayFormula}`, `**${total}**`, 'dmg');
     }
 
     function rollDamage(idx) {
@@ -491,14 +600,12 @@
         
         const regex = /(\d+)d(\d+)/i;
         const match = dmgStr.match(regex);
-        
         if (!match) return; 
 
         const count = parseInt(match[1]);
         const sides = parseInt(match[2]);
         let total = 0;
         let rolls = [];
-
         for (let i = 0; i < count; i++) {
             let r = Math.floor(Math.random() * sides) + 1;
             total += r;
@@ -506,17 +613,16 @@
         }
         total += mod;
         
-        const formulaStr = `[${rolls.join('+')}] + ${mod}`;
+        const formulaStr = `[${rolls.join('+')}] ${mod>=0?'+':''}${mod}`;
         
         const log = document.getElementById('logArea');
         log.style.display = 'block';
         log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">DMG</span>`;
-
         sendToDiscord((atk.name || 'Weapon') + " Damage", `Dice: ${formulaStr}`, `**${total}**`, 'dmg');
     }
 
+    // --- WRAPPERS ---
     function rollCheck(stat) { rollDie(20, getMod(data.stats[stat].val), stat.toUpperCase(), true, 'check'); }
-    
     function rollSkill(skill) {
         const stat = skillsMap[skill];
         const pb = getPB(data.meta.level);
@@ -524,7 +630,6 @@
         const profLevel = data.skills[skill] || 0;
         rollDie(20, mod + (profLevel * pb), skill.charAt(0).toUpperCase() + skill.slice(1), true, 'check');
     }
-
     function rollAttack(idx) {
         const atk = data.attacks[idx];
         const pb = getPB(data.meta.level);
@@ -532,57 +637,66 @@
         rollDie(20, mod + pb, (atk.name || 'Weapon') + " Atk", true, 'atk');
     }
 
-    // --- DATA ---
+    // --- DATA & IO ---
     function updateStat(stat, val) { data.stats[stat].val = parseInt(val); save(); updateAll(); }
     function toggleSave(stat, e) { 
-        if(e.target.tagName !== 'INPUT') { 
-            data.stats[stat].save = !data.stats[stat].save; 
-            save(); renderStats(); updateAll(); 
-        } else {
-             data.stats[stat].save = e.target.checked;
-             save(); updateAll();
-        }
+        if(e.target.tagName !== 'INPUT') { data.stats[stat].save = !data.stats[stat].save; save(); renderStats(); updateAll(); } 
+        else { data.stats[stat].save = e.target.checked; save(); updateAll(); }
     }
     function cycleSkill(skill) { data.skills[skill] = ( (data.skills[skill] || 0) + 1) % 3; save(); renderSkills(); updateAll(); }
     function addAttack() { data.attacks.push({ name: '', stat: 'str', dmg: '1d8' }); save(); renderAttacks(); }
     function updateAttack(idx, field, val) { data.attacks[idx][field] = val; save(); }
     function delAttack(idx) { data.attacks.splice(idx, 1); save(); renderAttacks(); }
+    function toggleDiscord(active) {
+        data.meta.discordActive = active;
+        const label = document.getElementById('discordLabel');
+        if(active) label.classList.add('discord-active'); else label.classList.remove('discord-active');
+        save();
+    }
+    function sendToDiscord(label, formulaStr, result, type = 'check') {
+        if (!data.meta.discordActive || !data.meta.webhook) return;
+        let color = 5164484; // Cyan
+        if (type === 'atk') color = 16739179; // Red
+        if (type === 'dmg') color = 9807270; // Grey
+        const payload = {
+            username: data.meta.name || "Character",
+            embeds: [{ title: label, description: `**Result:** ${result}\n\n${formulaStr}`, color: color, footer: { text: `Player: ${data.meta.player}` } }]
+        };
+        fetch(data.meta.webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(err => console.error(err));
+    }
     
     function save() { 
         data.meta.player = document.getElementById('playerName').value;
         data.meta.name = document.getElementById('charName').value;
         data.meta.webhook = document.getElementById('webhookUrl').value;
-        localStorage.setItem('unifiedSheetDataV6', JSON.stringify(data)); 
+        data.vitals.curr = document.getElementById('hpCurr').value;
+        data.vitals.max = document.getElementById('hpMax').value;
+        data.vitals.temp = document.getElementById('hpTemp').value;
+        data.vitals.hitDice = document.getElementById('hitDice').value;
+        data.vitals.inspiration = document.getElementById('hasInspiration').checked;
+        localStorage.setItem('unifiedSheetDataV7', JSON.stringify(data)); 
     }
 
-    // --- IO ---
     function showIoMsg(txt) { document.getElementById('ioMsg').innerText = txt; setTimeout(() => document.getElementById('ioMsg').innerText = "", 3000); }
-
     function exportData() {
         save();
         try {
             const jsonStr = JSON.stringify(data);
             const base64 = btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, (match, p1) => String.fromCharCode('0x' + p1)));
-            const field = document.getElementById('ioField');
-            field.value = base64;
-            field.select();
-            field.setSelectionRange(0, 99999);
+            const field = document.getElementById('ioField'); field.value = base64; field.select(); field.setSelectionRange(0, 99999);
             navigator.clipboard.writeText(base64).then(() => showIoMsg("Copied!"));
-        } catch(e) { showIoMsg("Error exporting"); }
+        } catch(e) { showIoMsg("Error"); }
     }
-
     function importData() {
-        const field = document.getElementById('ioField');
-        const str = field.value.trim();
+        const field = document.getElementById('ioField'); const str = field.value.trim();
         if(!str) return showIoMsg("Empty!");
         try {
             const jsonStr = decodeURIComponent(atob(str).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-            data = JSON.parse(jsonStr);
-            save(); 
-            init(); 
-            field.value = "";
-            showIoMsg("Loaded!");
-        } catch(e) { showIoMsg("Invalid Code"); }
+            const parsed = JSON.parse(jsonStr);
+            // Deep merge logic simplified for import
+            data = parsed; 
+            save(); init(); field.value = ""; showIoMsg("Loaded!");
+        } catch(e) { showIoMsg("Invalid Code"); console.error(e); }
     }
 
     init();
