@@ -89,7 +89,7 @@
             flex: 1; text-align: right; margin-left: 20px; 
         }
 
-        /* --- UI ELEMENTS (INPUTS FIXED) --- */
+        /* --- UI ELEMENTS --- */
         .card { background: var(--card-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); }
         .section-title { margin: 15px 0 8px 0; color: #888; font-size: 0.85rem; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 5px; letter-spacing: 0.05em; font-weight: bold; }
 
@@ -97,21 +97,15 @@
         .field-group { display: flex; flex-direction: column; }
         label { font-size: 0.7rem; color: #888; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
         
-        /* TEXT / NUMBER / SELECT ONLY */
         input[type="text"], input[type="number"], select, textarea { 
             background: var(--input-bg); border: 1px solid var(--border); color: #fff; padding: 10px; 
             border-radius: 6px; font-size: 1rem; width: 100%; box-sizing: border-box; -webkit-appearance: none; 
         }
         input:focus { outline: 2px solid var(--accent); border-color: transparent; }
 
-        /* CHECKBOXES (Restored) */
         input[type="checkbox"] {
-            -webkit-appearance: checkbox; /* Force native look */
-            appearance: checkbox;
-            width: 18px; height: 18px;
-            cursor: pointer;
-            accent-color: var(--accent); /* Theme color checkmark */
-            margin: 0;
+            -webkit-appearance: checkbox; appearance: checkbox;
+            width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); margin: 0;
         }
 
         /* --- HP & INSPIRATION --- */
@@ -125,10 +119,7 @@
             background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333;
         }
         .insp-input-group { flex: 1; display:flex; flex-direction:column; }
-        .insp-input { 
-            color: var(--gold); border-color: #555; font-weight: bold; text-align: center; 
-            font-size: 1.2rem;
-        }
+        .insp-input { color: var(--gold); border-color: #555; font-weight: bold; text-align: center; font-size: 1.2rem; }
         .btn-use-insp {
             background: var(--gold); color: #000; border: none; padding: 10px 15px; height: 42px;
             border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.85rem; white-space: nowrap;
@@ -159,7 +150,7 @@
         .custom-roll-row { display: flex; gap: 10px; margin-top: 10px; }
         .btn-roll-custom { background: var(--accent); color: #000; font-weight: bold; border:none; padding: 0 20px; border-radius: 6px; cursor: pointer;}
 
-        /* --- STATS & SKILLS (Reused) --- */
+        /* --- STATS & SKILLS --- */
         .grid-6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .stat-card { background: var(--card-bg); padding: 8px; border-radius: 8px; text-align: center; border: 1px solid var(--border); position: relative; }
         .stat-card h3 { margin: 0 0 2px 0; font-size: 0.8rem; color: #aaa; }
@@ -167,14 +158,11 @@
         .mod-display { font-size: 0.85rem; color: #888; margin-bottom: 4px; }
         .defense-box { background: #252525; padding: 2px; border-radius: 4px; border-top: 2px solid var(--accent); margin-top: 4px; }
         .defense-val { font-size: 1.1rem; font-weight: bold; color: var(--accent); }
-        
-        /* Save Prof Labeling Fixed */
         .save-prof { 
             font-size: 0.75rem; font-weight: bold; color: #888; 
             display: flex; justify-content: center; align-items: center; gap: 6px; 
             margin-bottom: 5px; cursor: pointer;
         }
-        
         .roll-stat-btn { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: transparent; border: none; z-index: 5; cursor: pointer; } 
 
         .skill-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
@@ -184,8 +172,20 @@
         .prof-toggle.prof { color: var(--accent); }
         .prof-toggle.exp { color: var(--gold); }
 
-        .atk-row { display: grid; grid-template-columns: 1fr 70px 60px; gap: 8px; margin-bottom: 10px; background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333; }
-        .atk-controls { grid-column: span 3; display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-top: 5px; }
+        /* --- ATTACKS (UPDATED LAYOUT) --- */
+        .atk-row { 
+            display: flex; flex-direction: column; gap: 8px; 
+            margin-bottom: 15px; background: #252525; padding: 10px; 
+            border-radius: 8px; border: 1px solid #333; 
+        }
+        .atk-top { display: grid; grid-template-columns: 1fr 70px 60px; gap: 8px; }
+        .atk-desc { 
+            font-size: 0.85rem; font-style: italic; color: #aaa; 
+            border: none; border-bottom: 1px solid #444; background: transparent; 
+            padding: 5px; border-radius: 0; 
+        }
+        .atk-desc:focus { outline: none; border-bottom-color: var(--accent); }
+        .atk-controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
         
         button { border: none; border-radius: 6px; font-weight: bold; cursor: pointer; height: 40px; font-size: 0.9rem; }
         .add-btn { background: var(--accent-atk); color: #000; width: 100%; margin-top: 5px; }
@@ -304,6 +304,9 @@
 
     <div class="card">
         <div class="section-title" style="margin-top:0;">Arbitrary Roller</div>
+        <div class="custom-roll-row" style="margin-bottom:10px;">
+             <input type="text" id="customLabel" placeholder="Optional Label (e.g. Healing Potion)">
+        </div>
         <div class="dice-grid">
             <button class="dice-btn" onclick="rollDie(4,0,'d4',false,'check')">d4</button>
             <button class="dice-btn" onclick="rollDie(6,0,'d6',false,'check')">d6</button>
@@ -349,11 +352,10 @@
         skills: {}, attacks: [], spells: [], rollMode: 'norm'
     };
     
-    // Auto-consume inspiration flag
     let consumeInspirationOnNextRoll = false;
 
     function init() {
-        const saved = localStorage.getItem('unifiedSheetDataV9'); // Version bumped
+        const saved = localStorage.getItem('unifiedSheetDataV10'); // Version bumped
         
         let defaultSpells = [];
         for(let i=1; i<=9; i++) defaultSpells.push({ lvl: i, max: 0, used: 0 });
@@ -365,8 +367,6 @@
             if(parsed.vitals) data.vitals = {...data.vitals, ...parsed.vitals};
             if(parsed.stats) data.stats = {...data.stats, ...parsed.stats};
             if(!data.spells || data.spells.length === 0) data.spells = defaultSpells;
-            
-            // Migration
             if (typeof data.vitals.inspiration === 'boolean') {
                 data.vitals.inspiration = data.vitals.inspiration ? 1 : 0;
             }
@@ -383,7 +383,6 @@
         document.getElementById('sendToDiscord').checked = data.meta.discordActive || false;
         toggleDiscord(data.meta.discordActive);
 
-        // Vitals
         document.getElementById('hpCurr').value = data.vitals.curr || '';
         document.getElementById('hpMax').value = data.vitals.max || '';
         document.getElementById('hpTemp').value = data.vitals.temp || '';
@@ -429,11 +428,14 @@
     function renderAttacks() {
         document.getElementById('attackList').innerHTML = data.attacks.map((atk, i) => `
             <div class="atk-row">
-                <input type="text" placeholder="Weapon" value="${atk.name}" onchange="updateAttack(${i}, 'name', this.value)">
-                <input type="text" placeholder="1d8" value="${atk.dmg}" onchange="updateAttack(${i}, 'dmg', this.value)">
-                <select onchange="updateAttack(${i}, 'stat', this.value)">
-                    ${stats.map(s => `<option value="${s}" ${atk.stat === s ? 'selected' : ''}>${s.toUpperCase()}</option>`).join('')}
-                </select>
+                <div class="atk-top">
+                    <input type="text" placeholder="Weapon" value="${atk.name}" onchange="updateAttack(${i}, 'name', this.value)">
+                    <input type="text" placeholder="1d8" value="${atk.dmg}" onchange="updateAttack(${i}, 'dmg', this.value)">
+                    <select onchange="updateAttack(${i}, 'stat', this.value)">
+                        ${stats.map(s => `<option value="${s}" ${atk.stat === s ? 'selected' : ''}>${s.toUpperCase()}</option>`).join('')}
+                    </select>
+                </div>
+                <input class="atk-desc" placeholder="Attack description / effect..." value="${atk.desc || ''}" onchange="updateAttack(${i}, 'desc', this.value)">
                 <div class="atk-controls">
                     <button style="background:var(--accent); color:#000;" onclick="rollAttack(${i})">Atk</button>
                     <button style="background:#333; color:#ccc; border:1px solid #444;" onclick="rollDamage(${i})">Dmg</button>
@@ -488,32 +490,22 @@
         });
     }
 
-    // --- INSPIRATION & HP ---
     function useInspiration() {
         let val = parseInt(document.getElementById('inspirationVal').value) || 0;
-        if(val <= 0) {
-            showToast("No inspiration to spend!");
-            return;
-        }
-        
+        if(val <= 0) { showToast("No inspiration to spend!"); return; }
         val--;
         document.getElementById('inspirationVal').value = val;
         data.vitals.inspiration = val;
         save();
-
         consumeInspirationOnNextRoll = true;
         setMode('adv');
         showToast("Spent 1 Inspiration! Next roll has Advantage.");
     }
     
     function consumeInspiration() {
-        if(consumeInspirationOnNextRoll) {
-            consumeInspirationOnNextRoll = false;
-            setMode('norm'); 
-        }
+        if(consumeInspirationOnNextRoll) { consumeInspirationOnNextRoll = false; setMode('norm'); }
     }
 
-    // --- SPELL SLOTS LOGIC ---
     function updateSpellMax(idx, val) {
         data.spells[idx].max = parseInt(val) || 0;
         if(data.spells[idx].used > data.spells[idx].max) data.spells[idx].used = data.spells[idx].max;
@@ -521,15 +513,11 @@
     }
     function toggleSpellSlot(idx, bubbleIdx) {
         const currentUsed = data.spells[idx].used;
-        if (bubbleIdx + 1 === currentUsed) {
-            data.spells[idx].used = bubbleIdx; 
-        } else {
-            data.spells[idx].used = bubbleIdx + 1; 
-        }
+        if (bubbleIdx + 1 === currentUsed) { data.spells[idx].used = bubbleIdx; } 
+        else { data.spells[idx].used = bubbleIdx + 1; }
         save(); renderSpells();
     }
 
-    // --- ROLLING SYSTEM ---
     function setMode(mode) {
         data.rollMode = mode;
         save(); 
@@ -543,7 +531,7 @@
         log.innerHTML = `<span style="color:#fff">${msg}</span>`;
     }
 
-    function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check') {
+    function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check', customDesc = '') {
         const miscInput = document.getElementById('globalMisc');
         const misc = parseInt(miscInput.value) || 0;
         
@@ -574,24 +562,20 @@
         log.style.display = 'block'; 
         log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">${label}</span>`;
         
-        sendToDiscord(label + modeStr, `Dice: ${displayFormula}`, `**${total}**`, type);
+        sendToDiscord(label + modeStr, `Dice: ${displayFormula}`, `**${total}**`, type, customDesc);
         
-        if(allowAdvantage && consumeInspirationOnNextRoll) {
-            consumeInspiration();
-        }
+        if(allowAdvantage && consumeInspirationOnNextRoll) { consumeInspiration(); }
     }
 
     function rollCustom() {
         const formula = document.getElementById('customFormula').value.trim();
+        const label = document.getElementById('customLabel').value.trim() || 'Custom Roll';
         if(!formula) return;
         
         const regex = /^(\d+)?d(\d+)\s*([+-]\s*\d+)?$/i;
         const match = formula.match(regex);
         
-        if(!match) {
-            showToast("Invalid: Use '2d6+4' format");
-            return;
-        }
+        if(!match) { showToast("Invalid: Use '2d6+4' format"); return; }
 
         const count = parseInt(match[1]) || 1;
         const sides = parseInt(match[2]);
@@ -608,12 +592,11 @@
         total += mod;
 
         const displayFormula = `[${rolls.join('+')}] ${modStr}`;
-        
         const log = document.getElementById('logArea');
         log.style.display = 'block';
         log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">CUST</span>`;
         
-        sendToDiscord("Custom Roll: " + formula, `Dice: ${displayFormula}`, `**${total}**`, 'dmg');
+        sendToDiscord(label + ": " + formula, `Dice: ${displayFormula}`, `**${total}**`, 'dmg');
     }
 
     function rollDamage(idx) {
@@ -641,7 +624,9 @@
         const log = document.getElementById('logArea');
         log.style.display = 'block';
         log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">DMG</span>`;
-        sendToDiscord((atk.name || 'Weapon') + " Damage", `Dice: ${formulaStr}`, `**${total}**`, 'dmg');
+        
+        // Pass Description
+        sendToDiscord((atk.name || 'Weapon') + " Damage", `Dice: ${formulaStr}`, `**${total}**`, 'dmg', atk.desc);
     }
 
     // --- WRAPPERS ---
@@ -657,7 +642,8 @@
         const atk = data.attacks[idx];
         const pb = getPB(data.meta.level);
         const mod = getMod(data.stats[atk.stat].val);
-        rollDie(20, mod + pb, (atk.name || 'Weapon') + " Atk", true, 'atk');
+        // Pass Description
+        rollDie(20, mod + pb, (atk.name || 'Weapon') + " Atk", true, 'atk', atk.desc);
     }
 
     // --- DATA & IO ---
@@ -667,23 +653,31 @@
         else { data.stats[stat].save = e.target.checked; save(); updateAll(); }
     }
     function cycleSkill(skill) { data.skills[skill] = ( (data.skills[skill] || 0) + 1) % 3; save(); renderSkills(); updateAll(); }
-    function addAttack() { data.attacks.push({ name: '', stat: 'str', dmg: '1d8' }); save(); renderAttacks(); }
+    function addAttack() { data.attacks.push({ name: '', stat: 'str', dmg: '1d8', desc: '' }); save(); renderAttacks(); }
     function updateAttack(idx, field, val) { data.attacks[idx][field] = val; save(); }
     function delAttack(idx) { data.attacks.splice(idx, 1); save(); renderAttacks(); }
+    
     function toggleDiscord(active) {
         data.meta.discordActive = active;
         const label = document.getElementById('discordLabel');
         if(active) label.classList.add('discord-active'); else label.classList.remove('discord-active');
         save();
     }
-    function sendToDiscord(label, formulaStr, result, type = 'check') {
+    
+    function sendToDiscord(label, formulaStr, result, type = 'check', customDesc = '') {
         if (!data.meta.discordActive || !data.meta.webhook) return;
         let color = 5164484; // Cyan
         if (type === 'atk') color = 16739179; // Red
         if (type === 'dmg') color = 9807270; // Grey
+        
+        let descText = `**Result:** ${result}\n\n${formulaStr}`;
+        if (customDesc) {
+            descText = `*${customDesc}*\n\n` + descText;
+        }
+
         const payload = {
             username: data.meta.name || "Character",
-            embeds: [{ title: label, description: `**Result:** ${result}\n\n${formulaStr}`, color: color, footer: { text: `Player: ${data.meta.player}` } }]
+            embeds: [{ title: label, description: descText, color: color, footer: { text: `Player: ${data.meta.player}` } }]
         };
         fetch(data.meta.webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(err => console.error(err));
     }
@@ -697,7 +691,7 @@
         data.vitals.temp = document.getElementById('hpTemp').value;
         data.vitals.hitDice = document.getElementById('hitDice').value;
         data.vitals.inspiration = parseInt(document.getElementById('inspirationVal').value) || 0;
-        localStorage.setItem('unifiedSheetDataV9', JSON.stringify(data)); 
+        localStorage.setItem('unifiedSheetDataV10', JSON.stringify(data)); 
     }
 
     function showIoMsg(txt) { document.getElementById('ioMsg').innerText = txt; setTimeout(() => document.getElementById('ioMsg').innerText = "", 3000); }
