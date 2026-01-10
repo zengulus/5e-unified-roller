@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Unified 5e Sheet v2.3</title>
+    <title>Unified 5e Sheet v2.4</title>
     <meta name="theme-color" content="#1e1e1e">
     
     <style>
@@ -104,7 +104,6 @@
             display: flex; justify-content: space-between; align-items: center;
         }
 
-        /* Accordion specific styles */
         .accordion-trigger { cursor: pointer; user-select: none; }
         .accordion-trigger::after {
             content: '▼'; font-size: 0.7rem; color: #666; transition: transform 0.3s ease;
@@ -159,7 +158,7 @@
         .btn-dmg { background: #c0392b; color: white; flex: 1; font-weight: bold; }
         .btn-heal:active, .btn-dmg:active { transform: translateY(1px); opacity: 0.8; }
 
-        /* NEW HIT DIE ROW */
+        /* HIT DIE ROW */
         .hd-row {
             display: flex; align-items: center; gap: 10px;
             background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333;
@@ -293,20 +292,36 @@
         .webhook-row { grid-column: span 2; margin-top: 5px; padding-top: 10px; border-top: 1px solid #333; }
         .discord-active { color: #5865F2; font-weight: bold; }
 
+        /* NEW COUNTER STYLES */
         .combat-row {
             display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
             margin-bottom: 10px;
         }
         .resource-list { display: flex; flex-direction: column; gap: 8px; }
         .resource-row {
-            display: flex; align-items: center; gap: 10px;
+            display: flex; align-items: center; gap: 6px;
             background: #252525; padding: 8px; border-radius: 8px; border: 1px solid #333;
         }
-        .res-name { flex: 1; font-weight: bold; font-size: 0.9rem; background: transparent; border: none; color: #fff; }
-        .res-val { width: 50px !important; text-align: center; font-weight: bold; }
+        .res-name { flex: 1; font-weight: bold; font-size: 0.9rem; background: transparent; border: none; color: #fff; min-width: 0; }
+        .res-val { width: 60px !important; text-align: center; font-weight: bold; padding: 5px !important; }
         .res-sep { color: #666; font-weight: bold; }
-        .btn-del-res { color: #666; background: transparent; font-size: 1.2rem; padding: 0 5px; }
+        .btn-del-res { color: #666; background: transparent; font-size: 1.2rem; padding: 0 5px; width: 30px;}
         .btn-del-res:hover { color: var(--fail); }
+        
+        .btn-res-cycle { 
+            background: #333; color: #888; border: 1px solid #444; 
+            width: 45px; height: 35px; font-size: 0.7rem; padding: 0;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .btn-res-cycle[data-rest="sr"] { background: #e67e22; color: white; border-color: #e67e22; }
+        .btn-res-cycle[data-rest="lr"] { background: #9b59b6; color: white; border-color: #9b59b6; }
+        
+        .btn-res-minus {
+            background: #333; color: var(--fail); border: 1px solid #444;
+            width: 35px; height: 35px; font-size: 1.2rem; font-weight: bold;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .btn-res-minus:active { background: var(--fail); color: white; }
 
         @media (max-width: 600px) {
             .header-grid { grid-template-columns: 1fr; }
@@ -390,7 +405,7 @@
                     <span style="color:#666; font-weight:bold;">/</span>
                     <input type="number" id="hdMax" class="hd-val" placeholder="Max" oninput="save()">
                     <button class="btn-roll-hd" onclick="rollHitDie()">
-                        <span>🎲</span> Short Rest (Roll)
+                        <span>🎲</span> Use (Roll)
                     </button>
                 </div>
 
@@ -412,7 +427,8 @@
                 </div>
 
                 <div class="rest-row">
-                    <button class="btn-rest" onclick="longRest()">Long Rest (Reset HP, Spell, 1/2 HD)</button>
+                    <button class="btn-rest" onclick="shortRest()">Short Rest (Reset SR Counters)</button>
+                    <button class="btn-rest" onclick="longRest()">Long Rest (Reset All)</button>
                 </div>
 
             </div>
@@ -861,9 +877,21 @@
         showLog(formula, total);
         sendToDiscord("Short Rest", `Used 1${dieStr}. Formula: ${formula}`, `**Healed ${healedAmt} HP**`, 'check');
     }
+    
+    function shortRest() {
+        if(!confirm("SHORT REST\n\n- Reset SR Counters?\n(Hit Dice must be rolled manually)")) return;
+        
+        data.resources.forEach(r => {
+            if(r.rest === 'sr') r.curr = r.max;
+        });
+        
+        save();
+        renderResources();
+        showLog("Short Rest", "Counters Reset");
+    }
 
     function longRest() {
-        if(!confirm("LONG REST\n\n- Reset HP to Max\n- Reset Spell Slots\n- Regain ½ Max Hit Dice\n- Reset Death Saves")) return;
+        if(!confirm("LONG REST\n\n- Reset HP to Max\n- Reset Spell Slots\n- Regain ½ Max Hit Dice\n- Reset Death Saves\n- Reset SR/LR Counters")) return;
         
         // 1. Reset HP
         document.getElementById('hpCurr').value = document.getElementById('hpMax').value;
@@ -885,6 +913,11 @@
         // 4. Reset Death Saves
         data.vitals.ds = {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false};
         
+        // 5. Reset Counters (SR and LR)
+        data.resources.forEach(r => {
+            if(r.rest === 'sr' || r.rest === 'lr') r.curr = r.max;
+        });
+
         save();
         init(); 
         showLog("Long Rest", "Completed");
@@ -1111,19 +1144,25 @@
     // --- NEW LOGIC: RESOURCES & INITIATIVE ---
     function renderResources() {
         const list = document.getElementById('resourceList');
-        list.innerHTML = data.resources.map((res, i) => `
+        list.innerHTML = data.resources.map((res, i) => {
+            const restLabel = res.rest === 'sr' ? 'SR' : (res.rest === 'lr' ? 'LR' : 'MAN');
+            return `
             <div class="resource-row">
-                <input type="text" class="res-name" placeholder="Label (e.g. Ki, Rages)" value="${res.name}" onchange="updateRes(${i}, 'name', this.value)">
+                <input type="text" class="res-name" placeholder="Name" value="${res.name}" onchange="updateRes(${i}, 'name', this.value)">
+                
+                <button class="btn-res-cycle" data-rest="${res.rest || 'none'}" onclick="toggleResRest(${i})">${restLabel}</button>
+                <button class="btn-res-minus" onclick="decrementRes(${i})">-</button>
+                
                 <input type="number" class="res-val" value="${res.curr}" onchange="updateRes(${i}, 'curr', this.value)">
                 <span class="res-sep">/</span>
                 <input type="number" class="res-val" value="${res.max}" onchange="updateRes(${i}, 'max', this.value)">
                 <button class="btn-del-res" onclick="delRes(${i})">&times;</button>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     function addResource() {
-        data.resources.push({ name: '', curr: 0, max: 0 });
+        data.resources.push({ name: '', curr: 0, max: 0, rest: 'none' });
         save();
         renderResources();
     }
@@ -1132,6 +1171,23 @@
         if(field !== 'name') val = parseInt(val) || 0;
         data.resources[i][field] = val;
         save();
+    }
+    
+    function decrementRes(i) {
+        if(data.resources[i].curr > 0) {
+            data.resources[i].curr--;
+            save();
+            renderResources();
+        }
+    }
+
+    function toggleResRest(i) {
+        const modes = ['none', 'sr', 'lr'];
+        const current = data.resources[i].rest || 'none';
+        const next = modes[(modes.indexOf(current) + 1) % 3];
+        data.resources[i].rest = next;
+        save();
+        renderResources();
     }
 
     function delRes(i) {
@@ -1221,8 +1277,13 @@
         if (customDesc) descText = `*${customDesc}*\n\n` + descText;
 
         const payload = {
-            username: data.meta.name || "Character",
-            embeds: [{ title: label, description: descText, color: color, footer: { text: `Player: ${data.meta.player}` } }]
+            embeds: [{ 
+                author: { name: data.meta.name || "Character" }, 
+                title: label, 
+                description: descText, 
+                color: color, 
+                footer: { text: `Player: ${data.meta.player}` } 
+            }]
         };
         fetch(data.meta.webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(err => console.error(err));
     }
@@ -1254,7 +1315,8 @@
                 f3: document.getElementById('ds-f3').checked,
             };
         }
-
+        
+        // Ensure counters rest mode is saved (it's part of data.resources which is stringified entirely below)
         localStorage.setItem('unifiedSheetDataV2', JSON.stringify(data)); 
     }
 
