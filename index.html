@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Unified 5e Sheet v2</title>
+    <title>Unified 5e Sheet v2.1</title>
     <meta name="theme-color" content="#1e1e1e">
     
     <style>
@@ -46,7 +46,7 @@
             position: fixed; top: 0; left: 0; right: 0; 
             z-index: 1000; 
             box-shadow: 0 4px 12px rgba(0,0,0,0.4); 
-            min-height: 70px; /* Taller for 2-line log */
+            min-height: 70px; 
             box-sizing: border-box;
             transition: border-color 0.3s, box-shadow 0.3s;
         }
@@ -254,6 +254,22 @@
         .webhook-row { grid-column: span 2; margin-top: 5px; padding-top: 10px; border-top: 1px solid #333; }
         .discord-active { color: #5865F2; font-weight: bold; }
 
+        /* --- NEW CSS: RESOURCES & COMBAT ROW --- */
+        .combat-row {
+            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+            margin-bottom: 10px;
+        }
+        .resource-list { display: flex; flex-direction: column; gap: 8px; }
+        .resource-row {
+            display: flex; align-items: center; gap: 10px;
+            background: #252525; padding: 8px; border-radius: 8px; border: 1px solid #333;
+        }
+        .res-name { flex: 1; font-weight: bold; font-size: 0.9rem; background: transparent; border: none; color: #fff; }
+        .res-val { width: 50px !important; text-align: center; font-weight: bold; }
+        .res-sep { color: #666; font-weight: bold; }
+        .btn-del-res { color: #666; background: transparent; font-size: 1.2rem; padding: 0 5px; }
+        .btn-del-res:hover { color: var(--fail); }
+
         @media (max-width: 600px) {
             .header-grid { grid-template-columns: 1fr; }
             .webhook-row { grid-column: span 1; }
@@ -388,6 +404,31 @@
         </div>
     </div>
 
+    <div class="card">
+        <div class="section-title" style="margin-top:0;">Combat Stats</div>
+        <div class="combat-row">
+            <div class="field-group">
+                <label>Initiative</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="number" id="initBonus" placeholder="+0" oninput="save()">
+                    <button class="btn-sm-roll" style="width:40px;" onclick="rollInitiative()">🎲</button>
+                </div>
+            </div>
+            <div class="field-group">
+                <label>Speed (ft)</label>
+                <input type="text" id="speedVal" placeholder="30" oninput="save()">
+            </div>
+            <div class="field-group">
+                <label>Spell DC</label>
+                <div class="read-only-box" id="globalDC" style="text-align:center; color:var(--slot);">--</div>
+            </div>
+        </div>
+
+        <div class="section-title">Class Resources / Ammo</div>
+        <div id="resourceList" class="resource-list"></div>
+        <button class="add-btn" style="background: #2c3e50; color: #fff; margin-top:10px;" onclick="addResource()">+ Add Counter</button>
+    </div>
+
     <div>
         <div class="section-title">Attributes</div>
         <div class="grid-6" id="statsGrid"></div>
@@ -452,10 +493,10 @@
     };
 
     let data = {
-        meta: { player: '', name: '', level: 1, webhook: '', discordActive: false },
+        meta: { player: '', name: '', level: 1, webhook: '', discordActive: false, init: 0, speed: '' },
         vitals: { curr: '', max: '', temp: '', hitDice: '', inspiration: 0, ds: {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false} },
         stats: { str: {val:10,save:false}, dex: {val:10,save:false}, con: {val:10,save:false}, int: {val:10,save:false}, wis: {val:10,save:false}, cha: {val:10,save:false} },
-        skills: {}, attacks: [], spells: [], rollMode: 'norm'
+        skills: {}, attacks: [], spells: [], resources: [], rollMode: 'norm'
     };
     
     let consumeInspirationOnNextRoll = false;
@@ -475,6 +516,11 @@
             if(!data.vitals.ds) data.vitals.ds = {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false};
             if(parsed.stats) data.stats = {...data.stats, ...parsed.stats};
             if(!data.spells || data.spells.length === 0) data.spells = defaultSpells;
+            
+            // New fields safety
+            if (!data.resources) data.resources = []; 
+            if (data.meta.init === undefined) data.meta.init = 0;
+            if (data.meta.speed === undefined) data.meta.speed = "";
         } else {
             Object.keys(skillsMap).forEach(s => data.skills[s] = 0);
             data.spells = defaultSpells;
@@ -485,6 +531,11 @@
         document.getElementById('charLevel').value = data.meta.level || 1;
         document.getElementById('webhookUrl').value = data.meta.webhook || '';
         document.getElementById('sendToDiscord').checked = data.meta.discordActive || false;
+        
+        // Load New Inputs
+        document.getElementById('initBonus').value = data.meta.init;
+        document.getElementById('speedVal').value = data.meta.speed;
+        
         toggleDiscord(data.meta.discordActive);
 
         document.getElementById('hpCurr').value = data.vitals.curr || '';
@@ -506,6 +557,7 @@
         renderSkills();
         renderAttacks();
         renderSpells();
+        renderResources();
         updateAll();
         setMode(data.rollMode || 'norm');
     }
@@ -613,6 +665,8 @@
         const percProf = data.skills['perception'] || 0;
         const passPerc = 10 + wisMod + (percProf * pb);
         document.getElementById('passivePerc').innerText = passPerc;
+        
+        updateGlobalDC();
     }
 
     // --- HP BAR & MANAGEMENT LOGIC ---
@@ -917,6 +971,94 @@
         rollDie(20, mod + pb, (atk.name || 'Weapon') + " Atk", true, 'atk', atk.desc);
     }
 
+    // --- NEW LOGIC: RESOURCES & INITIATIVE ---
+    function renderResources() {
+        const list = document.getElementById('resourceList');
+        list.innerHTML = data.resources.map((res, i) => `
+            <div class="resource-row">
+                <input type="text" class="res-name" placeholder="Label (e.g. Ki, Rages)" value="${res.name}" onchange="updateRes(${i}, 'name', this.value)">
+                <input type="number" class="res-val" value="${res.curr}" onchange="updateRes(${i}, 'curr', this.value)">
+                <span class="res-sep">/</span>
+                <input type="number" class="res-val" value="${res.max}" onchange="updateRes(${i}, 'max', this.value)">
+                <button class="btn-del-res" onclick="delRes(${i})">&times;</button>
+            </div>
+        `).join('');
+    }
+
+    function addResource() {
+        data.resources.push({ name: '', curr: 0, max: 0 });
+        save();
+        renderResources();
+    }
+
+    function updateRes(i, field, val) {
+        if(field !== 'name') val = parseInt(val) || 0;
+        data.resources[i][field] = val;
+        save();
+    }
+
+    function delRes(i) {
+        data.resources.splice(i, 1);
+        save();
+        renderResources();
+    }
+
+    function rollInitiative() {
+        // Save the bonus input first
+        data.meta.init = parseInt(document.getElementById('initBonus').value) || 0;
+        save();
+
+        const dexMod = getMod(data.stats.dex.val);
+        const bonus = data.meta.init;
+        const totalBonus = dexMod + bonus;
+        
+        // Auto-calculate tie-breaker (using straight Dex score as decimal)
+        // e.g., A roll of 15 with 14 Dex becomes 15.14
+        const tieBreaker = data.stats.dex.val / 100; 
+
+        // Standard d20 roll logic
+        const sides = 20;
+        const r1 = Math.floor(Math.random() * sides) + 1;
+        const r2 = Math.floor(Math.random() * sides) + 1;
+        
+        let roll = r1;
+        let formulaStr = `[${r1}]`;
+
+        // Handle Advantage/Disadvantage on Init
+        if (data.rollMode === 'adv') {
+            roll = Math.max(r1, r2);
+            formulaStr = `[${r1}, ${r2}] (High)`;
+        } else if (data.rollMode === 'dis') {
+            roll = Math.min(r1, r2);
+            formulaStr = `[${r1}, ${r2}] (Low)`;
+        }
+
+        const total = roll + totalBonus;
+        const finalScore = (total + tieBreaker).toFixed(2);
+
+        showLog(`Init (Dex ${dexMod>=0?'+':''}${dexMod} + ${bonus})`, finalScore);
+        sendToDiscord("Initiative", `Dice: ${formulaStr} + ${totalBonus}`, `**${finalScore}**`, 'check');
+        
+        // Consume inspiration if active
+        if(data.rollMode !== 'norm') consumeInspiration();
+    }
+
+    function updateGlobalDC() {
+        // Calculates a generic Spell Save DC assuming the highest casting stat
+        const pb = getPB(data.meta.level);
+        const statsArr = ['int', 'wis', 'cha'];
+        let maxMod = -5;
+        
+        // Find highest mental stat mod
+        statsArr.forEach(s => {
+            const m = getMod(data.stats[s].val);
+            if(m > maxMod) maxMod = m;
+        });
+
+        const dc = 8 + pb + maxMod;
+        document.getElementById('globalDC').innerText = dc;
+    }
+
     // --- DATA & IO ---
     function updateStat(stat, val) { data.stats[stat].val = parseInt(val); save(); updateAll(); }
     function toggleSave(stat, e) { 
@@ -962,6 +1104,10 @@
         data.vitals.hitDice = document.getElementById('hitDice').value;
         data.vitals.inspiration = parseInt(document.getElementById('inspirationVal').value) || 0;
         
+        // Save New Inputs
+        data.meta.init = parseInt(document.getElementById('initBonus').value) || 0;
+        data.meta.speed = document.getElementById('speedVal').value;
+
         // Save DS
         if(document.getElementById('ds-s1')) {
             data.vitals.ds = {
