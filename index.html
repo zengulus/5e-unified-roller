@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Unified 5e Sheet</title>
+    <title>Unified 5e Sheet v2</title>
     <meta name="theme-color" content="#1e1e1e">
     
     <style>
@@ -11,59 +11,56 @@
             --bg: #121212;
             --card-bg: #1e1e1e;
             --input-bg: #2d2d2d;
-            --accent: #4ecdc4; /* Cyan */
-            --accent-atk: #ff6b6b; /* Red */
-            --gold: #f1c40f; /* Inspiration/Misc */
-            --hp-max: #4a1a1a; /* Dark Red Background */
-            --hp-curr: #ef4444; /* Bright Red Foreground */
-            --hp-temp: rgba(59, 130, 246, 0.7); /* Blue Shield Overlay */
-            --slot: #9b59b6;  /* Spells Purple */
+            --accent: #4ecdc4; 
+            --accent-atk: #ff6b6b; 
+            --gold: #f1c40f; 
+            --hp-max: #4a1a1a; 
+            --hp-curr: #ef4444; 
+            --hp-temp: rgba(59, 130, 246, 0.7); 
+            --slot: #9b59b6;  
             --text: #e0e0e0;
             --border: #333;
+            --crit: #2ecc71;
+            --fail: #e74c3c;
         }
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
             background: var(--bg); 
             color: var(--text); 
-            padding: 0; 
-            margin: 0; 
-            padding-top: 80px; 
+            padding: 0; margin: 0; 
+            padding-top: 85px; /* Increased for taller header */
             padding-bottom: 50px; 
         }
         .sheet-container { 
-            width: 100%; 
-            max-width: 800px; 
-            margin: 0 auto; 
-            padding: 10px; 
-            display: flex; 
-            flex-direction: column; 
-            gap: 15px; 
-            box-sizing: border-box; 
+            width: 100%; max-width: 800px; margin: 0 auto; padding: 10px; 
+            display: flex; flex-direction: column; gap: 15px; box-sizing: border-box; 
         }
         
         /* --- STICKY HEADER --- */
         .roller-bar { 
             background: rgba(30, 30, 30, 0.98);
             backdrop-filter: blur(8px); 
-            padding: 10px 15px; 
+            padding: 8px 15px; 
             border-bottom: 1px solid #444; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            position: fixed; 
-            top: 0; left: 0; right: 0; 
+            display: flex; justify-content: space-between; align-items: center; 
+            position: fixed; top: 0; left: 0; right: 0; 
             z-index: 1000; 
             box-shadow: 0 4px 12px rgba(0,0,0,0.4); 
-            min-height: 60px;
+            min-height: 70px; /* Taller for 2-line log */
             box-sizing: border-box;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .roller-bar.insp-active {
+            border-bottom: 2px solid var(--gold);
+            box-shadow: 0 4px 15px rgba(241, 196, 15, 0.2);
         }
         
-        .controls-left { display: flex; align-items: center; gap: 12px; }
+        .controls-left { display: flex; align-items: center; gap: 10px; }
         .adv-controls { display: flex; gap: 4px; }
         .adv-btn { 
             background: #333; border: 1px solid #444; color: #888; 
-            padding: 0 12px; height: 38px; border-radius: 6px; 
-            cursor: pointer; font-weight: bold; font-size: 0.75rem; 
+            padding: 0 10px; height: 38px; border-radius: 6px; 
+            cursor: pointer; font-weight: bold; font-size: 0.7rem; 
             transition: 0.2s; display: flex; align-items: center;
         }
         .adv-btn.active[data-mode="adv"] { background: #27ae60; color: #fff; border-color: #27ae60; }
@@ -71,13 +68,10 @@
         .adv-btn.active[data-mode="norm"] { background: #2980b9; color: #fff; border-color: #2980b9; }
 
         .misc-wrapper { 
-            display: flex; flex-direction: column; justify-content: center; 
-            align-items: center; position: relative;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative;
         }
         .misc-wrapper input { 
-            /* FIX: Added !important to force width to stay small on mobile */
-            width: 90px !important; 
-            height: 30px; text-align: center; font-weight: bold; 
+            width: 50px !important; height: 30px; text-align: center; font-weight: bold; 
             color: var(--gold); border: 1px solid #444; background: #222; 
             border-radius: 6px; font-size: 1rem; padding: 0; margin-top: 14px;
         }
@@ -86,11 +80,16 @@
             font-weight: 600; position: absolute; top: 0; left: 0; width: 100%; text-align: center;
         }
 
+        /* --- LOG AREA REDESIGN --- */
         .log-area { 
-            font-family: monospace; font-size: 0.9rem; color: var(--accent); 
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
-            flex: 1; text-align: right; margin-left: 20px; 
+            display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
+            flex: 1; text-align: right; margin-left: 15px; overflow: hidden;
+            height: 55px;
         }
+        .log-formula { font-family: monospace; font-size: 0.8rem; color: #888; white-space: nowrap; margin-bottom: 2px; }
+        .log-result { font-family: sans-serif; font-size: 1.8rem; font-weight: 900; line-height: 1; color: var(--accent); }
+        .crit-text { color: var(--crit); text-shadow: 0 0 10px rgba(46, 204, 113, 0.3); }
+        .fail-text { color: var(--fail); text-shadow: 0 0 10px rgba(231, 76, 60, 0.3); }
 
         /* --- UI ELEMENTS --- */
         .card { background: var(--card-bg); padding: 15px; border-radius: 12px; border: 1px solid var(--border); }
@@ -106,48 +105,26 @@
         }
         input:focus { outline: 2px solid var(--accent); border-color: transparent; }
 
-        input[type="checkbox"] {
-            -webkit-appearance: checkbox; appearance: checkbox;
-            width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); margin: 0;
-        }
-
-        /* --- HP BAR & GRID --- */
+        /* --- HP & VITALS --- */
         .hp-visual-bar {
-            position: relative;
-            width: 100%;
-            height: 24px;
-            background-color: var(--hp-max);
-            border-radius: 6px;
-            overflow: hidden;
-            margin-bottom: 10px;
-            border: 1px solid #333;
+            position: relative; width: 100%; height: 24px;
+            background-color: var(--hp-max); border-radius: 6px;
+            overflow: hidden; margin-bottom: 10px; border: 1px solid #333;
         }
-        .hp-fill-curr {
-            background-color: var(--hp-curr);
-            height: 100%;
-            width: 50%; /* JS updates this */
-            transition: width 0.3s ease;
+        .hp-fill-curr { background-color: var(--hp-curr); height: 100%; width: 50%; transition: width 0.3s ease; }
+        .hp-fill-temp { 
+            position: absolute; top: 0; left: 0; height: 100%; width: 0%; 
+            background-color: var(--hp-temp); border-right: 2px solid rgba(255,255,255,0.3); transition: width 0.3s ease; 
         }
-        .hp-fill-temp {
-            position: absolute;
-            top: 0; left: 0;
-            height: 100%;
-            width: 0%; /* JS updates this */
-            background-color: var(--hp-temp);
-            border-right: 2px solid rgba(255,255,255,0.3);
-            transition: width 0.3s ease;
-        }
-        .hp-text-overlay {
+        .hp-text-overlay { 
             position: absolute; top:0; left:0; width:100%; height:100%;
             display: flex; align-items: center; justify-content: center;
-            font-size: 0.8rem; font-weight: bold; color: #fff;
-            text-shadow: 0 1px 2px #000; pointer-events: none;
+            font-size: 0.8rem; font-weight: bold; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none;
         }
 
         .hp-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
         .hp-box input { text-align: center; font-weight: bold; font-size: 1.2rem; }
 
-        /* HP MANAGER ROW */
         .hp-manage-row {
             display: flex; gap: 10px; margin-top: 10px; align-items: center;
             background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333;
@@ -157,6 +134,29 @@
         .btn-dmg { background: #c0392b; color: white; flex: 1; font-weight: bold; }
         .btn-heal:active, .btn-dmg:active { transform: translateY(1px); opacity: 0.8; }
 
+        /* DEATH SAVES */
+        .death-save-row {
+            display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 10px; 
+            align-items: center; background: #252525; padding: 8px; border-radius: 6px; margin-top: 10px;
+            border: 1px solid #333;
+        }
+        .ds-group { display: flex; gap: 4px; align-items: center; justify-content: center; }
+        .ds-check { 
+            appearance: none; -webkit-appearance: none;
+            width: 16px; height: 16px; border-radius: 50%; 
+            border: 2px solid #555; cursor: pointer; background: #1a1a1a;
+        }
+        .ds-check:checked { box-shadow: 0 0 5px currentColor; border-color: transparent; }
+        .ds-succ:checked { background: #2ecc71; color: #2ecc71; }
+        .ds-fail:checked { background: #e74c3c; color: #e74c3c; }
+        .btn-ds-roll { background: #333; color: #fff; font-size: 0.7rem; font-weight: bold; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+
+        /* REST BUTTONS */
+        .rest-row { display: flex; gap: 10px; margin-top: 10px; }
+        .btn-rest { flex: 1; background: #2c3e50; color: #ccc; padding: 8px; border-radius: 6px; font-weight: bold; font-size: 0.8rem; cursor: pointer; border: 1px solid #444; }
+        .btn-rest:hover { background: #34495e; color: #fff; }
+
+        /* INSPIRATION & PASSIVE */
         .insp-row { 
             display: flex; gap: 10px; margin-top: 10px; align-items: flex-end; 
             background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333;
@@ -167,8 +167,12 @@
             background: var(--gold); color: #000; border: none; padding: 10px 15px; height: 42px;
             border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.85rem; white-space: nowrap;
         }
-        .btn-use-insp:active { opacity: 0.8; transform: translateY(1px); }
-
+        
+        .passive-row {
+            display: flex; justify-content: space-between; align-items: center; 
+            background: #1a1a1a; padding: 8px; border-radius: 6px; margin-top: 5px; border: 1px solid #333;
+        }
+        
         /* --- SPELLS --- */
         .spell-row { 
             display: flex; align-items: center; gap: 10px; margin-bottom: 8px; 
@@ -193,7 +197,6 @@
         .custom-roll-row { display: flex; gap: 10px; margin-top: 10px; }
         .btn-roll-custom { background: var(--accent); color: #000; font-weight: bold; border:none; padding: 0 20px; border-radius: 6px; cursor: pointer;}
         
-
         /* --- STATS & SAVES --- */
         .grid-6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .stat-card { background: var(--card-bg); padding: 8px; border-radius: 8px; text-align: center; border: 1px solid var(--border); display: flex; flex-direction: column; }
@@ -207,27 +210,15 @@
             display: flex; justify-content: center; align-items: center; gap: 6px; 
             margin-bottom: 2px; cursor: pointer; white-space: nowrap;
         }
-        
         .read-only-box {
             background: transparent; border: 1px solid transparent; color: #fff; 
             font-weight: bold; padding: 10px; font-size: 1rem;
         }
-
-        /* NEW SPLIT BUTTONS FOR CHECK/SAVE */
-        .stat-btn-row {
-            display: flex; gap: 5px; margin-top: 6px; width: 100%;
-        }
-        .btn-sm-roll {
-            flex: 1; background: #333; color: #ccc; border: 1px solid #444; border-radius: 4px;
-            font-size: 0.7rem; font-weight: bold; padding: 6px 0; cursor: pointer; text-transform: uppercase;
-        }
+        .stat-btn-row { display: flex; gap: 5px; margin-top: 6px; width: 100%; }
+        .btn-sm-roll { flex: 1; background: #333; color: #ccc; border: 1px solid #444; border-radius: 4px; font-size: 0.7rem; font-weight: bold; padding: 6px 0; cursor: pointer; text-transform: uppercase; }
         .btn-sm-roll:hover { background: #444; color: white; }
-        .btn-sm-save {
-            flex: 1; background: #2c3e50; color: #fff; border: 1px solid #444; border-radius: 4px;
-            font-size: 0.7rem; font-weight: bold; padding: 6px 0; cursor: pointer; text-transform: uppercase;
-        }
+        .btn-sm-save { flex: 1; background: #2c3e50; color: #fff; border: 1px solid #444; border-radius: 4px; font-size: 0.7rem; font-weight: bold; padding: 6px 0; cursor: pointer; text-transform: uppercase; }
         .btn-sm-save:hover { background: var(--accent); color: #000; }
-
 
         /* --- SKILLS --- */
         .skill-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
@@ -266,14 +257,15 @@
         @media (max-width: 600px) {
             .header-grid { grid-template-columns: 1fr; }
             .webhook-row { grid-column: span 1; }
-            .log-area { display: none; }
+            .log-area { max-width: 140px; margin-left: 10px; }
+            .log-result { font-size: 1.5rem; }
             .hp-grid { grid-template-columns: 1fr 1fr; } 
         }
     </style>
 </head>
 <body>
 
-<div class="roller-bar">
+<div class="roller-bar" id="rollerBar">
     <div class="controls-left">
         <div class="adv-controls">
             <button class="adv-btn" onclick="setMode('dis')" data-mode="dis">DIS</button>
@@ -285,7 +277,10 @@
             <input type="number" id="globalMisc" placeholder="0">
         </div>
     </div>
-    <div id="logArea" class="log-area">Ready...</div>
+    <div id="logArea" class="log-area">
+        <div class="log-formula">Ready...</div>
+        <div class="log-result">-</div>
+    </div>
 </div>
 
 <div class="sheet-container">
@@ -332,16 +327,38 @@
                     <button class="btn-dmg" onclick="applyDamage()">Damage Me</button>
                     <button class="btn-heal" onclick="applyHeal()">Heal</button>
                 </div>
+                
+                <div class="death-save-row" id="deathSaveRow" style="display:none;">
+                    <button class="btn-ds-roll" onclick="rollDeathSave()">Roll DS</button>
+                    <div class="ds-group">
+                        <span style="font-size:0.6rem; color:#2ecc71;">SUCC</span>
+                        <input type="checkbox" class="ds-check ds-succ" id="ds-s1" onchange="save()">
+                        <input type="checkbox" class="ds-check ds-succ" id="ds-s2" onchange="save()">
+                        <input type="checkbox" class="ds-check ds-succ" id="ds-s3" onchange="save()">
+                    </div>
+                    <div class="ds-group">
+                        <span style="font-size:0.6rem; color:#e74c3c;">FAIL</span>
+                        <input type="checkbox" class="ds-check ds-fail" id="ds-f1" onchange="save()">
+                        <input type="checkbox" class="ds-check ds-fail" id="ds-f2" onchange="save()">
+                        <input type="checkbox" class="ds-check ds-fail" id="ds-f3" onchange="save()">
+                    </div>
+                    <div style="font-size:0.7rem; font-weight:bold; color:#888;">DEATH<br>SAVES</div>
+                </div>
+
+                <div class="rest-row">
+                    <button class="btn-rest" onclick="shortRest()">Short Rest (Hit Die)</button>
+                    <button class="btn-rest" onclick="longRest()">Long Rest (Reset)</button>
+                </div>
 
             </div>
 
             <div class="webhook-row" style="border-top:none; padding-top:0;">
                 <div class="insp-row">
                     <div class="insp-input-group">
-                        <label style="color:#aaa; font-size:0.75rem; text-transform:uppercase;">Banked Inspiration</label>
+                        <label style="color:#aaa; font-size:0.75rem; text-transform:uppercase;">Inspiration</label>
                         <input type="number" id="inspirationVal" class="insp-input" value="0" placeholder="0" oninput="save()">
                     </div>
-                    <button class="btn-use-insp" onclick="useInspiration()">Use (Spend 1)</button>
+                    <button class="btn-use-insp" onclick="useInspiration()">Use (Next d20)</button>
                 </div>
             </div>
 
@@ -352,6 +369,13 @@
             <div class="field-group">
                 <label>Prof. Bonus</label>
                 <div class="read-only-box" id="charPB">+2</div>
+            </div>
+            
+            <div class="field-group" style="grid-column: span 2;">
+                <div class="passive-row">
+                    <span style="color:#888; font-weight:bold; font-size:0.9rem;">Passive Perception</span>
+                    <span id="passivePerc" style="color:#fff; font-weight:bold; font-size:1.1rem;">10</span>
+                </div>
             </div>
 
             <div class="webhook-row">
@@ -418,7 +442,6 @@
 </div>
 
 <script>
-    // --- CONFIG ---
     const stats = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const skillsMap = {
         'acrobatics': 'dex', 'animal handling': 'wis', 'arcana': 'int', 'athletics': 'str', 
@@ -430,7 +453,7 @@
 
     let data = {
         meta: { player: '', name: '', level: 1, webhook: '', discordActive: false },
-        vitals: { curr: '', max: '', temp: '', hitDice: '', inspiration: 0 },
+        vitals: { curr: '', max: '', temp: '', hitDice: '', inspiration: 0, ds: {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false} },
         stats: { str: {val:10,save:false}, dex: {val:10,save:false}, con: {val:10,save:false}, int: {val:10,save:false}, wis: {val:10,save:false}, cha: {val:10,save:false} },
         skills: {}, attacks: [], spells: [], rollMode: 'norm'
     };
@@ -438,7 +461,7 @@
     let consumeInspirationOnNextRoll = false;
 
     function init() {
-        const saved = localStorage.getItem('unifiedSheetDataV15'); // Version bumped
+        const saved = localStorage.getItem('unifiedSheetDataV2'); 
         
         let defaultSpells = [];
         for(let i=1; i<=9; i++) defaultSpells.push({ lvl: i, max: 0, used: 0 });
@@ -446,19 +469,17 @@
         if (saved) {
             const parsed = JSON.parse(saved);
             data = { ...data, ...parsed };
+            // Merge deep objects to avoid overwriting new fields
             if(parsed.meta) data.meta = {...data.meta, ...parsed.meta};
             if(parsed.vitals) data.vitals = {...data.vitals, ...parsed.vitals};
+            if(!data.vitals.ds) data.vitals.ds = {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false};
             if(parsed.stats) data.stats = {...data.stats, ...parsed.stats};
             if(!data.spells || data.spells.length === 0) data.spells = defaultSpells;
-            if (typeof data.vitals.inspiration === 'boolean') {
-                data.vitals.inspiration = data.vitals.inspiration ? 1 : 0;
-            }
         } else {
             Object.keys(skillsMap).forEach(s => data.skills[s] = 0);
             data.spells = defaultSpells;
         }
 
-        // Fill Fields
         document.getElementById('playerName').value = data.meta.player || '';
         document.getElementById('charName').value = data.meta.name || '';
         document.getElementById('charLevel').value = data.meta.level || 1;
@@ -471,8 +492,16 @@
         document.getElementById('hpTemp').value = data.vitals.temp || '';
         document.getElementById('hitDice').value = data.vitals.hitDice || '';
         document.getElementById('inspirationVal').value = data.vitals.inspiration || 0;
+        
+        // Death Saves
+        document.getElementById('ds-s1').checked = data.vitals.ds.s1;
+        document.getElementById('ds-s2').checked = data.vitals.ds.s2;
+        document.getElementById('ds-s3').checked = data.vitals.ds.s3;
+        document.getElementById('ds-f1').checked = data.vitals.ds.f1;
+        document.getElementById('ds-f2').checked = data.vitals.ds.f2;
+        document.getElementById('ds-f3').checked = data.vitals.ds.f3;
 
-        updateHP(); // Initialize Bar
+        updateHP(); 
         renderStats();
         renderSkills();
         renderAttacks();
@@ -578,6 +607,12 @@
             const bonus = mod + (profLevel * pb);
             document.getElementById(`skill-bonus-${s}`).innerText = (bonus >= 0 ? "+" : "") + bonus;
         });
+        
+        // Passive Perception
+        const wisMod = getMod(data.stats.wis.val);
+        const percProf = data.skills['perception'] || 0;
+        const passPerc = 10 + wisMod + (percProf * pb);
+        document.getElementById('passivePerc').innerText = passPerc;
     }
 
     // --- HP BAR & MANAGEMENT LOGIC ---
@@ -588,8 +623,7 @@
         
         let currPct = 0;
         if(max > 0) currPct = (curr / max) * 100;
-        if(currPct > 100) currPct = 100;
-        if(currPct < 0) currPct = 0;
+        if(currPct > 100) currPct = 100; if(currPct < 0) currPct = 0;
         
         let tempPct = 0;
         if(max > 0) tempPct = (temp / max) * 100;
@@ -599,78 +633,95 @@
         document.getElementById('barTemp').style.width = tempPct + "%";
         document.getElementById('barText').innerText = `${curr} / ${max}` + (temp > 0 ? ` (+${temp})` : "");
         
+        // Auto-show Death Saves if 0 HP
+        const dsRow = document.getElementById('deathSaveRow');
+        if (curr <= 0 && max > 0) dsRow.style.display = 'grid';
+        else dsRow.style.display = 'none';
+
         save();
     }
 
     function applyDamage() {
         let amt = parseInt(document.getElementById('hpInteractVal').value) || 0;
         if (amt <= 0) return;
-        
         let temp = parseInt(document.getElementById('hpTemp').value) || 0;
         let curr = parseInt(document.getElementById('hpCurr').value) || 0;
 
-        // 1. Absorb with Temp
         if (temp > 0) {
-            if (amt >= temp) {
-                amt -= temp;
-                temp = 0;
-            } else {
-                temp -= amt;
-                amt = 0;
-            }
+            if (amt >= temp) { amt -= temp; temp = 0; } 
+            else { temp -= amt; amt = 0; }
         }
-        
-        // 2. Absorb with Current
         curr -= amt;
-        
-        // Validation: Cannot go below 0
         if (curr < 0) curr = 0;
 
         document.getElementById('hpTemp').value = temp;
         document.getElementById('hpCurr').value = curr;
         document.getElementById('hpInteractVal').value = ''; 
-        
         updateHP();
-        showToast("Damage Applied");
     }
 
     function applyHeal() {
         let amt = parseInt(document.getElementById('hpInteractVal').value) || 0;
         if (amt <= 0) return;
-
         let curr = parseInt(document.getElementById('hpCurr').value) || 0;
         let max = parseInt(document.getElementById('hpMax').value) || 0;
-
         curr += amt;
-
-        // Validation: Cannot exceed Max (if Max is set)
-        if (max > 0 && curr > max) {
-            curr = max;
-        }
-
+        if (max > 0 && curr > max) curr = max;
         document.getElementById('hpCurr').value = curr;
         document.getElementById('hpInteractVal').value = ''; 
-        
         updateHP();
-        showToast("Healed!");
+    }
+    
+    // --- REST SYSTEM ---
+    function shortRest() {
+        const hitDice = document.getElementById('hitDice').value || "No Hit Dice Set";
+        const amt = prompt(`SHORT REST\n\nYou have ${hitDice}.\nEnter HP amount rolled to heal:`);
+        if (amt) {
+            document.getElementById('hpInteractVal').value = amt;
+            applyHeal();
+        }
+    }
+    
+    function longRest() {
+        if(!confirm("LONG REST\n\nReset HP, Hit Dice, Spell Slots and Death Saves?")) return;
+        
+        // Reset HP
+        document.getElementById('hpCurr').value = document.getElementById('hpMax').value;
+        document.getElementById('hpTemp').value = 0;
+        
+        // Reset Spells
+        data.spells.forEach(s => s.used = 0);
+        
+        // Reset Death Saves
+        data.vitals.ds = {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false};
+        
+        save();
+        init(); // Re-render everything
     }
 
+    // --- INSPIRATION ---
     function useInspiration() {
         let val = parseInt(document.getElementById('inspirationVal').value) || 0;
-        if(val <= 0) { showToast("No inspiration to spend!"); return; }
+        if(val <= 0) { showLog("No Insp!", "0"); return; }
         val--;
         document.getElementById('inspirationVal').value = val;
         data.vitals.inspiration = val;
         save();
         consumeInspirationOnNextRoll = true;
         setMode('adv');
-        showToast("Spent 1 Inspiration! Next roll has Advantage.");
+        document.getElementById('rollerBar').classList.add('insp-active');
+        showLog("Inspiration!", "Active");
     }
     
     function consumeInspiration() {
-        if(consumeInspirationOnNextRoll) { consumeInspirationOnNextRoll = false; setMode('norm'); }
+        if(consumeInspirationOnNextRoll) { 
+            consumeInspirationOnNextRoll = false; 
+            setMode('norm'); 
+            document.getElementById('rollerBar').classList.remove('insp-active');
+        }
     }
 
+    // --- SPELLS ---
     function updateSpellMax(idx, val) {
         data.spells[idx].max = parseInt(val) || 0;
         if(data.spells[idx].used > data.spells[idx].max) data.spells[idx].used = data.spells[idx].max;
@@ -690,47 +741,66 @@
         document.querySelector(`.adv-btn[data-mode="${mode}"]`).classList.add('active');
     }
 
-    function showToast(msg) {
-        const log = document.getElementById('logArea');
-        log.style.display = 'block';
-        log.innerHTML = `<span style="color:#fff">${msg}</span>`;
-        setTimeout(() => { if(log.innerHTML.includes(msg)) log.innerHTML = "Ready..."; }, 3000);
+    // --- ROLLING LOGIC ---
+    function showLog(formula, result, isCrit = false, isFail = false) {
+        const logArea = document.getElementById('logArea');
+        let resClass = 'log-result';
+        if(isCrit) resClass += ' crit-text';
+        if(isFail) resClass += ' fail-text';
+        
+        logArea.innerHTML = `
+            <div class="log-formula">${formula}</div>
+            <div class="${resClass}">${result}</div>
+        `;
     }
 
     function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check', customDesc = '') {
         const miscInput = document.getElementById('globalMisc');
         const misc = parseInt(miscInput.value) || 0;
         
+        // Inspiration Check
+        let effectiveMode = data.rollMode;
+        let consumedInsp = false;
+        
+        // Only use advantage logic if allowAdvantage is true (d20 stuff)
+        if(allowAdvantage && consumeInspirationOnNextRoll) {
+            effectiveMode = 'adv';
+            consumedInsp = true;
+        }
+
         let r1 = Math.floor(Math.random() * sides) + 1;
         let r2 = Math.floor(Math.random() * sides) + 1;
         let roll = r1;
-        let formula = `[${r1}]`;
+        let formulaBase = `[${r1}]`;
         let modeStr = "";
 
         if (allowAdvantage && sides === 20) {
-            if (data.rollMode === 'adv') {
+            if (effectiveMode === 'adv') {
                 roll = Math.max(r1, r2);
-                formula = `[${r1}, ${r2}] (High)`;
+                formulaBase = `[${r1}, ${r2}] (High)`;
                 modeStr = " (ADV)";
-            } else if (data.rollMode === 'dis') {
+            } else if (effectiveMode === 'dis') {
                 roll = Math.min(r1, r2);
-                formula = `[${r1}, ${r2}] (Low)`;
+                formulaBase = `[${r1}, ${r2}] (Low)`;
                 modeStr = " (DIS)";
             }
         }
 
         const total = roll + bonus + misc;
-        let displayFormula = `${formula}`;
-        if(bonus !== 0) displayFormula += ` ${bonus>=0?'+':''}${bonus}`;
-        if(misc !== 0) displayFormula += ` ${misc>=0?'+':''}${misc}`;
+        
+        let formulaText = `${formulaBase}`;
+        if(bonus !== 0) formulaText += ` ${bonus>=0?'+':''}${bonus}`;
+        if(misc !== 0) formulaText += ` ${misc>=0?'+':''}${misc} (Misc)`;
+        if(modeStr) formulaText += modeStr;
 
-        const log = document.getElementById('logArea');
-        log.style.display = 'block'; 
-        log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">${label}</span>`;
+        const isCrit = (sides === 20 && roll === 20);
+        const isFail = (sides === 20 && roll === 1);
+
+        showLog(formulaText, total, isCrit, isFail);
         
-        sendToDiscord(label + modeStr, `Dice: ${displayFormula}`, `**${total}**`, type, customDesc);
+        sendToDiscord(label + modeStr, `Dice: ${formulaText}`, `**${total}**`, type, customDesc);
         
-        if(allowAdvantage && consumeInspirationOnNextRoll) { consumeInspiration(); }
+        if(consumedInsp) consumeInspiration();
     }
 
     function rollCustom() {
@@ -740,8 +810,7 @@
         
         const regex = /^(\d+)?d(\d+)\s*([+-]\s*\d+)?$/i;
         const match = formula.match(regex);
-        
-        if(!match) { showToast("Invalid: Use '2d6+4' format"); return; }
+        if(!match) { showLog("Error", "Invalid"); return; }
 
         const count = parseInt(match[1]) || 1;
         const sides = parseInt(match[2]);
@@ -757,24 +826,15 @@
         }
         total += mod;
 
-        const displayFormula = `[${rolls.join('+')}] ${modStr}`;
-        const log = document.getElementById('logArea');
-        log.style.display = 'block';
-        log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">CUST</span>`;
-        
-        sendToDiscord(label + ": " + formula, `Dice: ${displayFormula}`, `**${total}**`, 'dmg');
+        showLog(`[${rolls.join('+')}] ${modStr}`, total);
+        sendToDiscord(label + ": " + formula, `Dice: [${rolls.join('+')}] ${modStr}`, `**${total}**`, 'dmg');
     }
 
     function rollDamage(idx) {
         const atk = data.attacks[idx];
-        
         let mod = 0;
-        if (atk.stat !== 'none') {
-            mod = getMod(data.stats[atk.stat].val);
-        }
-
+        if (atk.stat !== 'none') { mod = getMod(data.stats[atk.stat].val); }
         const dmgStr = atk.dmg || "1d4"; 
-        
         const regex = /(\d+)d(\d+)/i;
         const match = dmgStr.match(regex);
         if (!match) return; 
@@ -791,12 +851,44 @@
         total += mod;
         
         const formulaStr = `[${rolls.join('+')}] ${mod>=0?'+':''}${mod}`;
-        
-        const log = document.getElementById('logArea');
-        log.style.display = 'block';
-        log.innerHTML = `<strong>${total}</strong> <span style="font-size:0.7em">DMG</span>`;
-        
+        showLog(formulaStr, total);
         sendToDiscord((atk.name || 'Weapon') + " Damage", `Dice: ${formulaStr}`, `**${total}**`, 'dmg', atk.desc);
+    }
+
+    function rollDeathSave() {
+        const r = Math.floor(Math.random() * 20) + 1;
+        let msg = "Failure";
+        let isCrit = false; let isFail = false;
+        
+        if (r === 20) { 
+            msg = "Regain 1 HP!"; isCrit = true; 
+            // Auto heal 1
+            document.getElementById('hpCurr').value = 1; 
+            updateHP();
+        } else if (r === 1) {
+            msg = "2 Failures"; isFail = true;
+            addDeathFail(); addDeathFail();
+        } else if (r >= 10) {
+            msg = "Success"; isCrit = true;
+            addDeathSuccess();
+        } else {
+            msg = "Failure"; isFail = true;
+            addDeathFail();
+        }
+        
+        showLog("Death Save", r, isCrit, isFail);
+        sendToDiscord("Death Save", `Rolled: ${r}`, `**${msg}**`, 'save');
+    }
+    
+    function addDeathSuccess() {
+        const d = data.vitals.ds;
+        if(!d.s1) d.s1 = true; else if(!d.s2) d.s2 = true; else if(!d.s3) d.s3 = true;
+        save(); init();
+    }
+    function addDeathFail() {
+        const d = data.vitals.ds;
+        if(!d.f1) d.f1 = true; else if(!d.f2) d.f2 = true; else if(!d.f3) d.f3 = true;
+        save(); init();
     }
 
     // --- WRAPPERS ---
@@ -820,12 +912,8 @@
     function rollAttack(idx) {
         const atk = data.attacks[idx];
         const pb = getPB(data.meta.level);
-        
         let mod = 0;
-        if (atk.stat !== 'none') {
-            mod = getMod(data.stats[atk.stat].val);
-        }
-        
+        if (atk.stat !== 'none') { mod = getMod(data.stats[atk.stat].val); }
         rollDie(20, mod + pb, (atk.name || 'Weapon') + " Atk", true, 'atk', atk.desc);
     }
 
@@ -849,15 +937,13 @@
     
     function sendToDiscord(label, formulaStr, result, type = 'check', customDesc = '') {
         if (!data.meta.discordActive || !data.meta.webhook) return;
-        let color = 5164484; // Cyan (Check)
-        if (type === 'atk') color = 16739179; // Red
-        if (type === 'dmg') color = 9807270; // Grey
-        if (type === 'save') color = 3066993; // Orange/Green-ish (Save)
+        let color = 5164484; 
+        if (type === 'atk') color = 16739179; 
+        if (type === 'dmg') color = 9807270; 
+        if (type === 'save') color = 3066993; 
         
         let descText = `**Result:** ${result}\n\n${formulaStr}`;
-        if (customDesc) {
-            descText = `*${customDesc}*\n\n` + descText;
-        }
+        if (customDesc) descText = `*${customDesc}*\n\n` + descText;
 
         const payload = {
             username: data.meta.name || "Character",
@@ -875,7 +961,20 @@
         data.vitals.temp = document.getElementById('hpTemp').value;
         data.vitals.hitDice = document.getElementById('hitDice').value;
         data.vitals.inspiration = parseInt(document.getElementById('inspirationVal').value) || 0;
-        localStorage.setItem('unifiedSheetDataV15', JSON.stringify(data)); 
+        
+        // Save DS
+        if(document.getElementById('ds-s1')) {
+            data.vitals.ds = {
+                s1: document.getElementById('ds-s1').checked,
+                s2: document.getElementById('ds-s2').checked,
+                s3: document.getElementById('ds-s3').checked,
+                f1: document.getElementById('ds-f1').checked,
+                f2: document.getElementById('ds-f2').checked,
+                f3: document.getElementById('ds-f3').checked,
+            };
+        }
+
+        localStorage.setItem('unifiedSheetDataV2', JSON.stringify(data)); 
     }
 
     function showIoMsg(txt) { document.getElementById('ioMsg').innerText = txt; setTimeout(() => document.getElementById('ioMsg').innerText = "", 3000); }
@@ -903,4 +1002,3 @@
 </script>
 </body>
 </html>
-
