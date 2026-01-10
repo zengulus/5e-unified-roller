@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>All-In-One Roller - 5e</title>
+    <title>Unified 5e Sheet v2.3</title>
     <meta name="theme-color" content="#1e1e1e">
     
     <style>
@@ -158,6 +158,20 @@
         .btn-heal { background: #27ae60; color: white; flex: 1; font-weight: bold; }
         .btn-dmg { background: #c0392b; color: white; flex: 1; font-weight: bold; }
         .btn-heal:active, .btn-dmg:active { transform: translateY(1px); opacity: 0.8; }
+
+        /* NEW HIT DIE ROW */
+        .hd-row {
+            display: flex; align-items: center; gap: 10px;
+            background: #252525; padding: 10px; border-radius: 8px; border: 1px solid #333;
+            margin-top: 10px;
+        }
+        .hd-val { width: 50px !important; text-align: center; font-weight: bold; color: #fff; }
+        .btn-roll-hd { 
+            background: #e67e22; color: #fff; flex: 1; 
+            font-weight: bold; font-size: 0.85rem; height: 38px;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .btn-roll-hd:disabled { background: #555; color: #888; cursor: not-allowed; }
 
         /* DEATH SAVES */
         .death-save-row {
@@ -338,11 +352,13 @@
             
             <div class="webhook-row" style="border:none; padding:0; margin:0; grid-column: span 2;">
                 <div class="section-title" style="margin-top:0; border-bottom:none;">Vitals (HP)</div>
+                
                 <div class="hp-visual-bar">
                     <div class="hp-fill-curr" id="barCurr"></div>
                     <div class="hp-fill-temp" id="barTemp"></div>
                     <div class="hp-text-overlay" id="barText"></div>
                 </div>
+
                 <div class="hp-grid">
                     <div class="field-group hp-box">
                         <label>Current</label>
@@ -357,17 +373,27 @@
                         <input type="number" id="hpTemp" style="color:#3498db; border-color:#3498db;" placeholder="0" oninput="updateHP()">
                     </div>
                     <div class="field-group hp-box">
-                        <label>Hit Dice</label>
-                        <input type="text" id="hitDice" placeholder="1d8" oninput="save()">
+                        <label>Die Size</label>
+                        <input type="text" id="hdDie" placeholder="d8" oninput="save()">
                     </div>
                 </div>
 
                 <div class="hp-manage-row">
-                    <input type="number" id="hpInteractVal" placeholder="Amount">
-                    <button class="btn-dmg" onclick="applyDamage()">Damage Me</button>
+                    <input type="number" id="hpInteractVal" placeholder="Amt">
+                    <button class="btn-dmg" onclick="applyDamage()">Dmg</button>
                     <button class="btn-heal" onclick="applyHeal()">Heal</button>
                 </div>
                 
+                <div class="hd-row">
+                    <label style="margin:0; white-space:nowrap;">Hit Dice:</label>
+                    <input type="number" id="hdCurr" class="hd-val" placeholder="Curr" oninput="save()">
+                    <span style="color:#666; font-weight:bold;">/</span>
+                    <input type="number" id="hdMax" class="hd-val" placeholder="Max" oninput="save()">
+                    <button class="btn-roll-hd" onclick="rollHitDie()">
+                        <span>🎲</span> Short Rest (Roll)
+                    </button>
+                </div>
+
                 <div class="death-save-row" id="deathSaveRow" style="display:none;">
                     <button class="btn-ds-roll" onclick="rollDeathSave()">Roll DS</button>
                     <div class="ds-group">
@@ -386,8 +412,7 @@
                 </div>
 
                 <div class="rest-row">
-                    <button class="btn-rest" onclick="shortRest()">Short Rest (Hit Die)</button>
-                    <button class="btn-rest" onclick="longRest()">Long Rest (Reset)</button>
+                    <button class="btn-rest" onclick="longRest()">Long Rest (Reset HP, Spell, 1/2 HD)</button>
                 </div>
 
             </div>
@@ -532,10 +557,15 @@
 
     let data = {
         meta: { player: '', name: '', level: 1, webhook: '', discordActive: false, init: 0, speed: '' },
-        vitals: { curr: '', max: '', temp: '', hitDice: '', inspiration: 0, ds: {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false} },
+        vitals: { 
+            curr: '', max: '', temp: '', 
+            hdDie: 'd8', hdCurr: 1, hdMax: 1,
+            inspiration: 0, 
+            ds: {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false} 
+        },
         stats: { str: {val:10,save:false}, dex: {val:10,save:false}, con: {val:10,save:false}, int: {val:10,save:false}, wis: {val:10,save:false}, cha: {val:10,save:false} },
         skills: {}, attacks: [], spells: [], resources: [], rollMode: 'norm',
-        uiState: {} // Stores closed/open state of accordions
+        uiState: {} 
     };
     
     let consumeInspirationOnNextRoll = false;
@@ -559,6 +589,12 @@
             if(data.meta.init === undefined) data.meta.init = 0;
             if(data.meta.speed === undefined) data.meta.speed = "";
             if(!data.uiState) data.uiState = {};
+
+            // Ensure HD fields exist if loading from older version
+            if (data.vitals.hdCurr === undefined) data.vitals.hdCurr = data.meta.level || 1;
+            if (data.vitals.hdMax === undefined) data.vitals.hdMax = data.meta.level || 1;
+            if (data.vitals.hdDie === undefined) data.vitals.hdDie = parsed.vitals.hitDice || 'd8'; // Migrate old value
+
         } else {
             Object.keys(skillsMap).forEach(s => data.skills[s] = 0);
             data.spells = defaultSpells;
@@ -578,9 +614,13 @@
         document.getElementById('hpCurr').value = data.vitals.curr || '';
         document.getElementById('hpMax').value = data.vitals.max || '';
         document.getElementById('hpTemp').value = data.vitals.temp || '';
-        document.getElementById('hitDice').value = data.vitals.hitDice || '';
         document.getElementById('inspirationVal').value = data.vitals.inspiration || 0;
         
+        // Populate Hit Dice
+        document.getElementById('hdDie').value = data.vitals.hdDie || 'd8';
+        document.getElementById('hdCurr').value = data.vitals.hdCurr;
+        document.getElementById('hdMax').value = data.vitals.hdMax;
+
         // Death Saves
         document.getElementById('ds-s1').checked = data.vitals.ds.s1;
         document.getElementById('ds-s2').checked = data.vitals.ds.s2;
@@ -592,7 +632,7 @@
         // Restore Accordion States
         const accKeys = ['combat', 'attr', 'atk', 'spells', 'skills', 'roller', 'io'];
         accKeys.forEach(key => {
-            const isClosed = data.uiState[key] === false; // Defaults to open if undefined
+            const isClosed = data.uiState[key] === false; 
             if (isClosed) {
                 document.getElementById('head-'+key).classList.add('collapsed');
                 document.getElementById('body-'+key).classList.add('collapsed');
@@ -616,7 +656,6 @@
         head.classList.toggle('collapsed');
         body.classList.toggle('collapsed');
         
-        // Save state (true = open, false = closed)
         const isOpen = !body.classList.contains('collapsed');
         data.uiState[key] = isOpen;
         save();
@@ -786,31 +825,69 @@
         updateHP();
     }
     
-    // --- REST SYSTEM ---
-    function shortRest() {
-        const hitDice = document.getElementById('hitDice').value || "No Hit Dice Set";
-        const amt = prompt(`SHORT REST\n\nYou have ${hitDice}.\nEnter HP amount rolled to heal:`);
-        if (amt) {
-            document.getElementById('hpInteractVal').value = amt;
-            applyHeal();
-        }
-    }
-    
-    function longRest() {
-        if(!confirm("LONG REST\n\nReset HP, Hit Dice, Spell Slots and Death Saves?")) return;
+    // --- REST SYSTEM & HIT DICE ---
+    function rollHitDie() {
+        let currHD = parseInt(document.getElementById('hdCurr').value) || 0;
+        const maxHD = parseInt(document.getElementById('hdMax').value) || 0;
         
-        // Reset HP
+        if (currHD <= 0) {
+            alert("No Hit Dice remaining!");
+            return;
+        }
+
+        const dieStr = document.getElementById('hdDie').value || "d8";
+        const sides = parseInt(dieStr.replace(/\D/g,'')) || 8; 
+        const conMod = getMod(data.stats.con.val);
+
+        const roll = Math.floor(Math.random() * sides) + 1;
+        const total = Math.max(0, roll + conMod); 
+
+        let hpCurr = parseInt(document.getElementById('hpCurr').value) || 0;
+        const hpMax = parseInt(document.getElementById('hpMax').value) || 0;
+        
+        const oldHp = hpCurr;
+        hpCurr += total;
+        if (hpMax > 0 && hpCurr > hpMax) hpCurr = hpMax;
+        const healedAmt = hpCurr - oldHp;
+
+        currHD--;
+        document.getElementById('hpCurr').value = hpCurr;
+        document.getElementById('hdCurr').value = currHD;
+        
+        updateHP(); 
+        save();
+
+        const formula = `[${roll}] ${conMod>=0?'+':''}${conMod} (Con)`;
+        showLog(formula, total);
+        sendToDiscord("Short Rest", `Used 1${dieStr}. Formula: ${formula}`, `**Healed ${healedAmt} HP**`, 'check');
+    }
+
+    function longRest() {
+        if(!confirm("LONG REST\n\n- Reset HP to Max\n- Reset Spell Slots\n- Regain ½ Max Hit Dice\n- Reset Death Saves")) return;
+        
+        // 1. Reset HP
         document.getElementById('hpCurr').value = document.getElementById('hpMax').value;
         document.getElementById('hpTemp').value = 0;
         
-        // Reset Spells
+        // 2. Reset Spells
         data.spells.forEach(s => s.used = 0);
         
-        // Reset Death Saves
+        // 3. Regain Hit Dice
+        let hdCurr = parseInt(document.getElementById('hdCurr').value) || 0;
+        const hdMax = parseInt(document.getElementById('hdMax').value) || 0;
+        
+        const regain = Math.max(1, Math.floor(hdMax / 2));
+        hdCurr += regain;
+        if (hdCurr > hdMax) hdCurr = hdMax;
+        
+        document.getElementById('hdCurr').value = hdCurr;
+
+        // 4. Reset Death Saves
         data.vitals.ds = {s1:false, s2:false, s3:false, f1:false, f2:false, f3:false};
         
         save();
-        init(); // Re-render everything
+        init(); 
+        showLog("Long Rest", "Completed");
     }
 
     // --- INSPIRATION ---
@@ -1157,11 +1234,15 @@
         data.vitals.curr = document.getElementById('hpCurr').value;
         data.vitals.max = document.getElementById('hpMax').value;
         data.vitals.temp = document.getElementById('hpTemp').value;
-        data.vitals.hitDice = document.getElementById('hitDice').value;
         data.vitals.inspiration = parseInt(document.getElementById('inspirationVal').value) || 0;
         
         data.meta.init = parseInt(document.getElementById('initBonus').value) || 0;
         data.meta.speed = document.getElementById('speedVal').value;
+
+        // Hit Dice Saves
+        data.vitals.hdDie = document.getElementById('hdDie').value;
+        data.vitals.hdCurr = parseInt(document.getElementById('hdCurr').value) || 0;
+        data.vitals.hdMax = parseInt(document.getElementById('hdMax').value) || 0;
 
         if(document.getElementById('ds-s1')) {
             data.vitals.ds = {
