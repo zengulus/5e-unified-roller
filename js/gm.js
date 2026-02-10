@@ -57,8 +57,8 @@ function renderBestiary() {
                 <div style="display:flex; justify-content:space-between; align-items:center; background:#111; padding:8px; border-radius:6px; border:1px solid #333;">
                     <span style="font-weight:bold; color:#ddd;">${b.name}</span>
                     <div style="display:flex; gap:5px;">
-                        <button class="btn-sec btn-sm" onclick="loadMobPreset(${i})">Load</button>
-                        <button class="btn-danger btn-sm" onclick="delMobPreset(${i})">&times;</button>
+                        <button class="btn-sec btn-sm" data-action="load-preset" data-index="${i}">Load</button>
+                        <button class="btn-danger btn-sm" data-action="delete-preset" data-index="${i}">&times;</button>
                     </div>
                 </div>
             `).join('');
@@ -383,9 +383,9 @@ function renderCombat() {
             const bloodied = (c.hp <= c.maxHp / 2) ? 'color:#e74c3c;' : 'color:#2ecc71;';
             hpHtml = `
                     <div class="hp-controls">
-                        <button class="btn-dmg-qs" onclick="modHP(${i}, -1)">-1</button>
-                        <button class="btn-dmg-qs" onclick="modHP(${i}, -5)">-5</button>
-                        <div class="hp-display" style="${bloodied}" onclick="setHP(${i})">${c.hp}</div>
+                        <button class="btn-dmg-qs" data-action="mod-hp" data-index="${i}" data-delta="-1">-1</button>
+                        <button class="btn-dmg-qs" data-action="mod-hp" data-index="${i}" data-delta="-5">-5</button>
+                        <div class="hp-display" style="${bloodied}" data-action="set-hp" data-index="${i}">${c.hp}</div>
                     </div>
                 `;
         }
@@ -402,7 +402,7 @@ function renderCombat() {
                 </div>
                 <div style="display:flex; align-items:center;">
                     ${hpHtml}
-                    <button class="btn-del" onclick="delCombatant(${i})">&times;</button>
+                    <button class="btn-del" data-action="delete-combatant" data-index="${i}">&times;</button>
                 </div>
             </div>
             `;
@@ -472,7 +472,7 @@ function renderConditions() {
     const div = document.getElementById('conditionsList');
     div.innerHTML = Object.keys(conditions).map(k => `
             <div>
-                <button class="accordion-btn" onclick="this.nextElementSibling.classList.toggle('show')">${k}</button>
+                <button class="accordion-btn" data-action="toggle-condition">${k}</button>
                 <div class="accordion-body">
                     <span class="cond-tag">${k.toUpperCase()}</span> ${conditions[k]}
                 </div>
@@ -537,11 +537,134 @@ function genLoot(type) {
     }
 }
 
-function switchTab(id) {
+function switchTab(id, tabEl) {
     document.querySelectorAll('.container').forEach(c => c.classList.remove('active'));
     document.getElementById('tab-' + id).classList.add('active');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    event.currentTarget.classList.add('active');
+    if (tabEl) tabEl.classList.add('active');
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const accentBtn = document.querySelector('[data-action="accent"]');
+    if (accentBtn) accentBtn.addEventListener('click', triggerAccentPicker);
+
+    const bgBtn = document.querySelector('[data-action="cycle-bg"]');
+    if (bgBtn) bgBtn.addEventListener('click', cycleBgStyle);
+
+    const accentInput = document.getElementById('accent-picker-input');
+    if (accentInput) accentInput.addEventListener('change', (event) => setAccentColor(event.target.value));
+
+    const navBar = document.querySelector('.nav-bar');
+    if (navBar) {
+        navBar.addEventListener('click', (event) => {
+            const tab = event.target.closest('.nav-item');
+            if (!tab) return;
+            switchTab(tab.dataset.tab, tab);
+        });
+    }
+
+    const addSingleBtn = document.getElementById('btn-add-single');
+    if (addSingleBtn) addSingleBtn.addEventListener('click', addSingle);
+
+    const mobToggle = document.getElementById('mob-toggle');
+    if (mobToggle) {
+        mobToggle.addEventListener('click', () => {
+            const body = document.getElementById('mobBody');
+            if (!body) return;
+            body.style.display = body.style.display === 'none' ? 'flex' : 'none';
+        });
+    }
+
+    const mobBtn = document.getElementById('btn-gen-mobs');
+    if (mobBtn) mobBtn.addEventListener('click', genMobs);
+
+    const clearBtn = document.getElementById('btn-clear-combat');
+    if (clearBtn) clearBtn.addEventListener('click', clearCombat);
+
+    const prevBtn = document.getElementById('btn-prev-turn');
+    if (prevBtn) prevBtn.addEventListener('click', prevTurn);
+
+    const nextBtn = document.getElementById('btn-next-turn');
+    if (nextBtn) nextBtn.addEventListener('click', nextTurn);
+
+    const rollLevelInput = document.getElementById('rollLevel');
+    if (rollLevelInput) rollLevelInput.addEventListener('input', updateBonuses);
+
+    document.querySelectorAll('.toggle-btn[data-mode]').forEach((btn) => {
+        btn.addEventListener('click', () => setMode(btn.dataset.mode));
+    });
+    document.querySelectorAll('.toggle-btn[data-luck]').forEach((btn) => {
+        btn.addEventListener('click', () => setLuck(btn.dataset.luck));
+    });
+    document.querySelectorAll('.btn-tier[data-tier]').forEach((btn) => {
+        btn.addEventListener('click', () => rollTier(btn.dataset.tier));
+    });
+
+    const rollManualBtn = document.getElementById('btn-roll-manual');
+    if (rollManualBtn) rollManualBtn.addEventListener('click', rollManual);
+
+    const webhookInput = document.getElementById('webhookUrl');
+    if (webhookInput) webhookInput.addEventListener('input', saveGM);
+    const discordActive = document.getElementById('discordActive');
+    if (discordActive) discordActive.addEventListener('change', saveGM);
+
+    const dcRange = document.getElementById('dcRange');
+    if (dcRange) dcRange.addEventListener('input', (event) => updateDC(event.target.value));
+
+    const saveMobBtn = document.getElementById('btn-save-mob');
+    if (saveMobBtn) saveMobBtn.addEventListener('click', saveMobPreset);
+
+    const exportBtn = document.getElementById('btn-export-gm');
+    if (exportBtn) exportBtn.addEventListener('click', exportGM);
+    const importBtn = document.getElementById('btn-import-gm');
+    if (importBtn) importBtn.addEventListener('click', importGM);
+
+    document.querySelectorAll('[data-loot]').forEach((btn) => {
+        btn.addEventListener('click', () => genLoot(btn.dataset.loot));
+    });
+
+    const scratchpad = document.getElementById('scratchpad');
+    if (scratchpad) scratchpad.addEventListener('input', saveGM);
+
+    const bestiaryList = document.getElementById('bestiaryList');
+    if (bestiaryList) {
+        bestiaryList.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-action]');
+            if (!btn) return;
+            const idx = Number(btn.dataset.index);
+            if (!Number.isInteger(idx)) return;
+            if (btn.dataset.action === 'load-preset') loadMobPreset(idx);
+            if (btn.dataset.action === 'delete-preset') delMobPreset(idx);
+        });
+    }
+
+    const combatList = document.getElementById('combatList');
+    if (combatList) {
+        combatList.addEventListener('click', (event) => {
+            const actionEl = event.target.closest('[data-action]');
+            if (!actionEl) return;
+            const idx = Number(actionEl.dataset.index);
+            if (!Number.isInteger(idx)) return;
+            if (actionEl.dataset.action === 'mod-hp') {
+                const delta = Number(actionEl.dataset.delta);
+                if (!Number.isNaN(delta)) modHP(idx, delta);
+            } else if (actionEl.dataset.action === 'set-hp') {
+                setHP(idx);
+            } else if (actionEl.dataset.action === 'delete-combatant') {
+                delCombatant(idx);
+            }
+        });
+    }
+
+    const conditionsList = document.getElementById('conditionsList');
+    if (conditionsList) {
+        conditionsList.addEventListener('click', (event) => {
+            const btn = event.target.closest('[data-action="toggle-condition"]');
+            if (!btn) return;
+            const body = btn.nextElementSibling;
+            if (body) body.classList.toggle('show');
+        });
+    }
+});
 
 init();

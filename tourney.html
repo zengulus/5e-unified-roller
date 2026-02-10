@@ -21,7 +21,7 @@
                 <label style="color:#aaa; font-size:0.9rem; display:flex; align-items:center; cursor: pointer;">
                     <input type="checkbox" id="chkRand" checked style="margin-right: 8px;"> Randomize
                 </label>
-                <button class="btn-p" onclick="generate()" style="padding: 10px 20px;">GENERATE</button>
+                <button class="btn-p" id="btn-generate" style="padding: 10px 20px;">GENERATE</button>
             </div>
         </div>
     </div>
@@ -35,15 +35,15 @@
         <div class="hero-actions">
             <div class="hero-action-bar primary">
                 <a class="hero-btn ghost" href="tools.html">Portal</a>
-                <button class="hero-btn ghost" onclick="autoFit()">Auto-Fit</button>
-                <button class="hero-btn accent" onclick="reset()">New Bracket</button>
+                <button class="hero-btn ghost" id="btn-autofit">Auto-Fit</button>
+                <button class="hero-btn accent" id="btn-reset">New Bracket</button>
             </div>
             <div class="hero-action-bar secondary">
-                <button class="hero-btn ghost" onclick="triggerAccentPicker()">🎨 Accent</button>
-                <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
+                <button class="hero-btn ghost" data-action="accent">🎨 Accent</button>
+                <button class="hero-btn ghost" id="btn-bg-style" data-action="cycle-bg">🌌 BG: Field</button>
             </div>
             <input type="color" id="accent-picker-input"
-                style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+                style="position:absolute; opacity:0; pointer-events:none;">
         </div>
     </header>
 
@@ -60,23 +60,23 @@
                 <span id="mP1"
                     style="font-weight:bold; max-width:140px; overflow:hidden; text-overflow: ellipsis;">P1</span>
                 <div style="display: flex; align-items: center; gap: 5px;">
-                    <button class="btn-adj" onclick="mod(-1, 1)">-</button>
+                    <button class="btn-adj" data-mod="-1" data-player="1">-</button>
                     <input id="sP1" class="sc-inp" readonly value="0">
-                    <button class="btn-adj" onclick="mod(1, 1)">+</button>
+                    <button class="btn-adj" data-mod="1" data-player="1">+</button>
                 </div>
             </div>
             <div class="score-row">
                 <span id="mP2"
                     style="font-weight:bold; max-width:140px; overflow:hidden; text-overflow: ellipsis;">P2</span>
                 <div style="display: flex; align-items: center; gap: 5px;">
-                    <button class="btn-adj" onclick="mod(-1, 2)">-</button>
+                    <button class="btn-adj" data-mod="-1" data-player="2">-</button>
                     <input id="sP2" class="sc-inp" readonly value="0">
-                    <button class="btn-adj" onclick="mod(1, 2)">+</button>
+                    <button class="btn-adj" data-mod="1" data-player="2">+</button>
                 </div>
             </div>
             <div style="display:flex; gap:15px; margin-top:25px;">
-                <button class="btn" style="flex:1; border-color: #555;" onclick="closeScore()">Cancel</button>
-                <button class="btn-p" style="flex:1" onclick="saveScore()">Confirm</button>
+                <button class="btn" id="btn-close-score" style="flex:1; border-color: #555;">Cancel</button>
+                <button class="btn-p" id="btn-save-score" style="flex:1">Confirm</button>
             </div>
         </div>
     </div>

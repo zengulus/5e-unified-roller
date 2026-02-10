@@ -294,6 +294,41 @@ let data = { matches: [], active: false, meta: {} };
         function save() { localStorage.setItem('uni_v6', JSON.stringify(data)); }
         function reset() { if (confirm("Clear?")) { localStorage.removeItem('uni_v6'); location.reload(); } }
 
+        document.addEventListener('DOMContentLoaded', () => {
+            const generateBtn = document.getElementById('btn-generate');
+            if (generateBtn) generateBtn.addEventListener('click', generate);
+
+            const autoFitBtn = document.getElementById('btn-autofit');
+            if (autoFitBtn) autoFitBtn.addEventListener('click', autoFit);
+
+            const resetBtn = document.getElementById('btn-reset');
+            if (resetBtn) resetBtn.addEventListener('click', reset);
+
+            const accentBtn = document.querySelector('[data-action="accent"]');
+            if (accentBtn) accentBtn.addEventListener('click', triggerAccentPicker);
+
+            const bgBtn = document.querySelector('[data-action="cycle-bg"]');
+            if (bgBtn) bgBtn.addEventListener('click', cycleBgStyle);
+
+            const accentInput = document.getElementById('accent-picker-input');
+            if (accentInput) accentInput.addEventListener('change', (event) => setAccentColor(event.target.value));
+
+            document.querySelectorAll('.btn-adj[data-mod]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const delta = Number(btn.dataset.mod);
+                    const player = Number(btn.dataset.player);
+                    if (Number.isNaN(delta) || Number.isNaN(player)) return;
+                    mod(delta, player);
+                });
+            });
+
+            const closeBtn = document.getElementById('btn-close-score');
+            if (closeBtn) closeBtn.addEventListener('click', closeScore);
+
+            const saveBtn = document.getElementById('btn-save-score');
+            if (saveBtn) saveBtn.addEventListener('click', saveScore);
+        });
+
         // Init
         const s = localStorage.getItem('uni_v6');
         if (s) { data = JSON.parse(s); if (data.active) { document.getElementById('setup-modal').classList.remove('active'); render(); } }

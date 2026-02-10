@@ -24,18 +24,18 @@
                 <a class="hero-btn ghost" href="tools.html">Portal</a>
             </div>
             <div class="hero-action-bar secondary">
-                <button class="hero-btn ghost" onclick="triggerAccentPicker()">🎨 Accent</button>
-                <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
+                <button class="hero-btn ghost" data-action="accent">🎨 Accent</button>
+                <button class="hero-btn ghost" id="btn-bg-style" data-action="cycle-bg">🌌 BG: Field</button>
             </div>
             <input type="color" id="accent-picker-input"
-                style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+                style="position:absolute; opacity:0; pointer-events:none;">
         </div>
     </header>
 
     <div class="nav-bar">
-        <div class="nav-item active" onclick="switchTab('tracker')">Tracker</div>
-        <div class="nav-item" onclick="switchTab('roller')">Roller</div>
-        <div class="nav-item" onclick="switchTab('ref')">Ref & Loot</div>
+        <div class="nav-item active" data-tab="tracker">Tracker</div>
+        <div class="nav-item" data-tab="roller">Roller</div>
+        <div class="nav-item" data-tab="ref">Ref & Loot</div>
     </div>
 
     <div id="tab-tracker" class="container active">
@@ -50,16 +50,14 @@
                 <input type="number" id="addDex" placeholder="Dex Score" style="width:80px;"
                     title="Dex Score (Tie Breaker)">
                 <input type="number" id="addHP" placeholder="HP" style="width:80px;">
-                <button class="btn-success" style="flex:1;" onclick="addSingle()">Add</button>
+                <button class="btn-success" style="flex:1;" id="btn-add-single">Add</button>
             </div>
             <div style="font-size:0.7rem; color:#666; text-align:center;">*Init is final roll. Dex is score (10-20) for
                 tie-break.</div>
         </div>
 
         <div class="card" style="border-top: 2px solid var(--accent);">
-            <div class="section-header"
-                onclick="document.getElementById('mobBody').style.display = document.getElementById('mobBody').style.display=='none'?'flex':'none'"
-                style="cursor:pointer;">
+            <div class="section-header" id="mob-toggle" style="cursor:pointer;">
                 <span>Mob Generator</span> <span>▼</span>
             </div>
             <div id="mobBody" style="display:none; flex-direction:column; gap:10px;">
@@ -72,12 +70,12 @@
                     <input type="number" id="mobDexScore" placeholder="Dex Score (14)">
                     <input type="number" id="mobHP" placeholder="HP (7)">
                 </div>
-                <button class="btn-main" onclick="genMobs()">Roll & Generate</button>
+                <button class="btn-main" id="btn-gen-mobs">Roll & Generate</button>
             </div>
         </div>
 
         <div style="text-align:center; margin-top:20px; padding-bottom:20px;">
-            <button class="btn-danger btn-sm" onclick="clearCombat()">⚠ Clear Encounter</button>
+            <button class="btn-danger btn-sm" id="btn-clear-combat">⚠ Clear Encounter</button>
         </div>
 
         <div id="combatList" class="combat-list"></div>
@@ -87,8 +85,8 @@
                 <span>Round</span>
                 <span class="round-val" id="roundVal">1</span>
             </div>
-            <button class="btn-sec" onclick="prevTurn()" style="width:50px;">◀</button>
-            <button class="btn-main" style="flex:1;" onclick="nextTurn()">Next Turn ▶</button>
+            <button class="btn-sec" id="btn-prev-turn" style="width:50px;">◀</button>
+            <button class="btn-main" id="btn-next-turn" style="flex:1;">Next Turn ▶</button>
         </div>
     </div>
 
@@ -108,7 +106,7 @@
             <div class="row" style="margin-top:5px;">
                 <div style="flex:1; display:flex; align-items:center; gap:10px;">
                     <label style="font-size:0.8rem; color:#888; white-space:nowrap;">Level / CR:</label>
-                    <input type="number" id="rollLevel" value="1" min="1" max="30" oninput="updateBonuses()"
+                    <input type="number" id="rollLevel" value="1" min="1" max="30"
                         style="width:50px; text-align:center; font-weight:bold;">
                     <div style="font-size:0.8rem; color:var(--accent);" id="pbDisplay">PB: +2</div>
                 </div>
@@ -118,40 +116,40 @@
                 <div>
                     <div class="section-header">Roll Mode</div>
                     <div class="toggle-box">
-                        <button class="toggle-btn" data-mode="dis" onclick="setMode('dis')">DIS</button>
-                        <button class="toggle-btn active" data-mode="norm" onclick="setMode('norm')">—</button>
-                        <button class="toggle-btn" data-mode="adv" onclick="setMode('adv')">ADV</button>
+                        <button class="toggle-btn" data-mode="dis">DIS</button>
+                        <button class="toggle-btn active" data-mode="norm">—</button>
+                        <button class="toggle-btn" data-mode="adv">ADV</button>
                     </div>
                 </div>
                 <div>
                     <div class="section-header">Luck Mod</div>
                     <div class="toggle-box">
-                        <button class="toggle-btn" data-luck="bad" onclick="setLuck('bad')">Bad</button>
-                        <button class="toggle-btn active" data-luck="norm" onclick="setLuck('norm')">—</button>
-                        <button class="toggle-btn" data-luck="good" onclick="setLuck('good')">Good</button>
+                        <button class="toggle-btn" data-luck="bad">Bad</button>
+                        <button class="toggle-btn active" data-luck="norm">—</button>
+                        <button class="toggle-btn" data-luck="good">Good</button>
                     </div>
                 </div>
             </div>
 
             <div class="section-header" style="margin-top:15px;">Quick Checks</div>
             <div class="tier-grid">
-                <button class="btn-tier" onclick="rollTier('crap')">
+                <button class="btn-tier" data-tier="crap">
                     <span>Crap <span style="font-size:0.7rem; color:#666;">(d20 - 1)</span></span>
                     <span class="tier-bonus" id="bonus-inc">-1</span>
                 </button>
-                <button class="btn-tier" onclick="rollTier('competent')">
+                <button class="btn-tier" data-tier="competent">
                     <span>Competent <span style="font-size:0.7rem; color:#666;">(PB)</span></span>
                     <span class="tier-bonus" id="bonus-comp">+2</span>
                 </button>
-                <button class="btn-tier" onclick="rollTier('talented')">
+                <button class="btn-tier" data-tier="talented">
                     <span>Talented <span style="font-size:0.7rem; color:#666;">(PB + 2)</span></span>
                     <span class="tier-bonus" id="bonus-tal">+4</span>
                 </button>
-                <button class="btn-tier" onclick="rollTier('expert')">
+                <button class="btn-tier" data-tier="expert">
                     <span>Expert <span style="font-size:0.7rem; color:#666;">(2xPB + 2)</span></span>
                     <span class="tier-bonus" id="bonus-exp">+6</span>
                 </button>
-                <button class="btn-tier" onclick="rollTier('master')">
+                <button class="btn-tier" data-tier="master">
                     <span>Master <span style="font-size:0.7rem; color:#666;">(2xPB + 5)</span></span>
                     <span class="tier-bonus" id="bonus-mas">+9</span>
                 </button>
@@ -161,14 +159,14 @@
                 Roll</div>
             <div class="row">
                 <input type="number" id="manualBonus" placeholder="Mod (+/-)" style="font-weight:bold;">
-                <button class="btn-sec" style="width:100px;" onclick="rollManual()">Roll</button>
+                <button class="btn-sec" id="btn-roll-manual" style="width:100px;">Roll</button>
             </div>
 
             <div class="webhook-box">
                 <div class="section-header">Discord Integration</div>
-                <input type="text" id="webhookUrl" placeholder="Webhook URL..." oninput="saveGM()">
+                <input type="text" id="webhookUrl" placeholder="Webhook URL...">
                 <label style="display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer;">
-                    <input type="checkbox" id="discordActive" onchange="saveGM()">
+                    <input type="checkbox" id="discordActive">
                     <span style="color:#fff; font-weight:bold;">Active</span>
                 </label>
                 <label style="display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer;">
@@ -180,7 +178,7 @@
 
         <div class="card">
             <div class="section-header">DC Estimator</div>
-            <input type="range" min="5" max="30" value="10" step="5" oninput="updateDC(this.value)">
+            <input type="range" id="dcRange" min="5" max="30" value="10" step="5">
             <div style="text-align:center;">
                 <div style="font-size:2rem; font-weight:bold; color:var(--accent);" id="dcDisplay">DC 10</div>
                 <div style="color:#888; font-size:0.9rem;" id="dcDesc">Medium</div>
@@ -194,7 +192,7 @@
             <div class="section-header">Bestiary / Presets</div>
             <div style="display:flex; gap:10px;">
                 <input type="text" id="mobSaveName" placeholder="Preset Name (e.g. Goblin)">
-                <button class="btn-main" onclick="saveMobPreset()" style="width:80px;">Save</button>
+                <button class="btn-main" id="btn-save-mob" style="width:80px;">Save</button>
             </div>
             <div style="font-size:0.7rem; color:#888; margin-top:5px;">Saves current Mob Generator settings.</div>
 
@@ -204,8 +202,8 @@
         <div class="card">
             <div class="section-header">Data Management</div>
             <div class="grid-2">
-                <button class="btn-sec" onclick="exportGM()">💾 Export JSON</button>
-                <button class="btn-sec" onclick="importGM()">📂 Import JSON</button>
+                <button class="btn-sec" id="btn-export-gm">💾 Export JSON</button>
+                <button class="btn-sec" id="btn-import-gm">📂 Import JSON</button>
             </div>
         </div>
 
@@ -223,8 +221,8 @@
                 </label>
             </div>
             <div class="grid-2">
-                <button class="btn-sec" onclick="genLoot('pocket')">Pocket Lint</button>
-                <button class="btn-sec" onclick="genLoot('trinket')">Trinket</button>
+                <button class="btn-sec" data-loot="pocket">Pocket Lint</button>
+                <button class="btn-sec" data-loot="trinket">Trinket</button>
             </div>
             <div id="lootResult"
                 style="margin-top:15px; font-style:italic; color:var(--accent); min-height:20px; text-align:left; transition: opacity 0.2s ease-in-out; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.4; padding: 0 10px;">
@@ -233,7 +231,7 @@
 
         <div class="card">
             <div class="section-header">Scratchpad</div>
-            <textarea id="scratchpad" rows="6" placeholder="Notes..." oninput="saveGM()"></textarea>
+            <textarea id="scratchpad" rows="6" placeholder="Notes..."></textarea>
         </div>
 
         <div class="card" style="padding:0; overflow:hidden;">

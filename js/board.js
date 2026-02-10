@@ -777,11 +777,56 @@ function handleBoardResize() {
     applyMobileModeClass();
 }
 
-window.onload = () => {
+function bindStaticControls() {
+    document.querySelectorAll('[data-action]').forEach((el) => {
+        const action = el.dataset.action;
+        if (action === 'toggle-pan') el.addEventListener('click', togglePanMode);
+        if (action === 'save-board') el.addEventListener('click', saveBoard);
+        if (action === 'clear-board') el.addEventListener('click', clearBoard);
+        if (action === 'accent') el.addEventListener('click', triggerAccentPicker);
+        if (action === 'cycle-bg') el.addEventListener('click', cycleBgStyle);
+        if (action === 'toggle-toolbar') el.addEventListener('click', toggleToolbar);
+    });
+
+    const accentInput = document.getElementById('accent-picker-input');
+    if (accentInput) accentInput.addEventListener('change', (event) => setAccentColor(event.target.value));
+
+    const toolbarWrapper = document.getElementById('toolbar-wrapper');
+    if (toolbarWrapper) {
+        toolbarWrapper.addEventListener('dragstart', (event) => {
+            const tool = event.target.closest('.tool-item[data-node-type]');
+            if (!tool) return;
+            startDragNew(event, tool.dataset.nodeType);
+        });
+        toolbarWrapper.addEventListener('click', (event) => {
+            const popup = event.target.closest('.tool-item[data-popup-target]');
+            if (!popup) return;
+            event.stopPropagation();
+            window.togglePopup(popup.dataset.popupTarget);
+        });
+    }
+
+    const contextMenuEl = document.getElementById('context-menu');
+    if (contextMenuEl) {
+        contextMenuEl.addEventListener('click', (event) => {
+            const item = event.target.closest('[data-context-action]');
+            if (!item) return;
+            const action = item.dataset.contextAction;
+            if (action === 'edit-text') editTargetNode();
+            if (action === 'set-image') setTargetNodeImageUrl();
+            if (action === 'center-optimize') centerAndOptimize();
+            if (action === 'undo-optimize') undoLastOptimize();
+            if (action === 'delete-node') deleteTargetNode();
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
     applyMobileModeClass();
     bindMobileHandlers();
     pruneBoardTimelineNoise();
     resizeCanvas();
+    bindStaticControls();
     initToolbars();
     initCaseSwitcher();
     loadBoard();
@@ -789,9 +834,9 @@ window.onload = () => {
     initCaseNameTracking();
     window.addEventListener('rtf-store-updated', handleRemoteStoreUpdate);
     requestAnimationFrame(loop);
-};
+});
 
-window.onresize = () => handleBoardResize();
+window.addEventListener('resize', handleBoardResize);
 
 function resizeCanvas() {
     canvas.width = window.innerWidth;

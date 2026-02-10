@@ -26,11 +26,11 @@
                 <a class="hero-btn ghost" href="tools.html">Portal</a>
             </div>
             <div class="hero-action-bar secondary">
-                <button class="hero-btn ghost" onclick="triggerAccentPicker()">🎨 Accent</button>
-                <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
+                <button class="hero-btn ghost" data-action="accent">🎨 Accent</button>
+                <button class="hero-btn ghost" id="btn-bg-style" data-action="cycle-bg">🌌 BG: Field</button>
             </div>
             <input type="color" id="accent-picker-input"
-                style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+                style="position:absolute; opacity:0; pointer-events:none;">
         </div>
     </header>
 
@@ -38,7 +38,7 @@
 
         <div class="card">
             <div class="section-title" style="cursor: default;">The Street (Moment-to-Moment)</div>
-            <button class="btn-gen" onclick="genStreetScene()">Generate Incident</button>
+            <button class="btn-gen" data-action="gen-street">Generate Incident</button>
             <div class="output-box" id="out-street">
                 <div class="dispatch-grid" id="dispatch-content">
                 </div>
@@ -48,12 +48,12 @@
         <div class="card">
             <div class="section-title" style="cursor: default;">Scene Texture (Combinatoric)</div>
             <div class="grid-2-tight" style="margin-bottom:6px;">
-                <button class="btn-small" onclick="genTexture('struct')">🧱 Structure</button>
-                <button class="btn-small" onclick="genTexture('guts')">⚙️ Infrastructure</button>
+                <button class="btn-small" data-texture="struct">🧱 Structure</button>
+                <button class="btn-small" data-texture="guts">⚙️ Infrastructure</button>
             </div>
             <div class="grid-2-tight">
-                <button class="btn-small" onclick="genTexture('debris')">🥡 Debris</button>
-                <button class="btn-small" onclick="genTexture('atmos')">💡 Atmosphere</button>
+                <button class="btn-small" data-texture="debris">🥡 Debris</button>
+                <button class="btn-small" data-texture="atmos">💡 Atmosphere</button>
             </div>
             <div class="output-box" id="out-texture">
                 <div class="texture-out" id="texture-content"></div>
@@ -62,14 +62,14 @@
 
         <div class="card">
             <div class="section-title" style="cursor: default;">NPC Improvisation</div>
-            <button class="btn-small" onclick="genNPC()">👤 Generate NPC Want/Leverage</button>
+            <button class="btn-small" data-action="gen-npc">👤 Generate NPC Want/Leverage</button>
             <div class="output-box" id="out-npc">
                 <div class="text-output" id="npc-content"></div>
             </div>
         </div>
 
         <div class="card">
-            <div class="section-title" onclick="toggleRef('clue-ref')">
+            <div class="section-title" data-toggle-ref="clue-ref">
                 <span>🔍 Clue Signatures (Quick Ref)</span>
                 <span>▼</span>
             </div>
@@ -90,10 +90,10 @@
             <div class="section-title" style="cursor: default;">Friction & Hazards</div>
             <div class="grid-2">
                 <button class="btn-small" style="color:var(--danger); border-color: rgba(255, 107, 107, 0.3);"
-                    onclick="genHazard()">⚠️
+                    data-action="gen-hazard">⚠️
                     Hazard (2d6)</button>
                 <button class="btn-small" style="color:var(--gold); border-color: rgba(241, 196, 15, 0.3);"
-                    onclick="genSnag()">🚧 Snag
+                    data-action="gen-snag">🚧 Snag
                     (2d20)</button>
             </div>
             <div class="output-box" id="out-hazard">
@@ -103,14 +103,14 @@
 
         <div class="card">
             <div class="section-title" style="cursor: default;">Debrief Phase</div>
-            <button class="btn-small" onclick="genBroadsheet()">📰 Generate Broadsheet Headline</button>
+            <button class="btn-small" data-action="gen-broadsheet">📰 Generate Broadsheet Headline</button>
             <div class="output-box" id="out-paper">
                 <div class="text-output" id="paper-content"></div>
             </div>
         </div>
 
         <div class="card">
-            <div class="section-title" onclick="toggleRef('guild-ref')">
+            <div class="section-title" data-toggle-ref="guild-ref">
                 <span>🏦 Guild Jurisdictions</span>
                 <span>▼</span>
             </div>

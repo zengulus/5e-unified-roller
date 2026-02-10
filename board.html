@@ -36,16 +36,16 @@
             </div>
             <div class="hero-action-bar primary">
                 <a class="hero-btn ghost" href="tools.html">Portal</a>
-                <button class="hero-btn ghost" id="btn-pan" onclick="togglePanMode()">🖐️ Pan: OFF</button>
-                <button class="hero-btn ghost" onclick="saveBoard()">💾 Save</button>
-                <button class="hero-btn danger" onclick="clearBoard()">🗑️ Clear</button>
+                <button class="hero-btn ghost" id="btn-pan" data-action="toggle-pan">🖐️ Pan: OFF</button>
+                <button class="hero-btn ghost" data-action="save-board">💾 Save</button>
+                <button class="hero-btn danger" data-action="clear-board">🗑️ Clear</button>
             </div>
             <div class="hero-action-bar secondary">
-                <button class="hero-btn ghost" onclick="triggerAccentPicker()">🎨 Accent</button>
-                <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
+                <button class="hero-btn ghost" data-action="accent">🎨 Accent</button>
+                <button class="hero-btn ghost" id="btn-bg-style" data-action="cycle-bg">🌌 BG: Field</button>
             </div>
             <input type="color" id="accent-picker-input"
-                style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+                style="position:absolute; opacity:0; pointer-events:none;">
         </div>
     </header>
 
@@ -55,25 +55,25 @@
     <!-- Container for string labels (separate to sit on top of canvas but below focused nodes) -->
     <div id="string-label-container"></div>
 
-    <div id="toolbar-toggle" onclick="toggleToolbar()">Hide Toolbar</div>
+    <div id="toolbar-toggle" data-action="toggle-toolbar">Hide Toolbar</div>
 
     <div class="toolbar-scroll-wrapper" id="toolbar-wrapper">
         <div class="toolbar">
             <!-- CORE TOOLS -->
             <div class="tool-group">
-                <div class="tool-item" data-node-type="person" draggable="true" ondragstart="startDragNew(event, 'person')">
+                <div class="tool-item" data-node-type="person" draggable="true">
                     <div class="icon">👤</div>
                     <div class="label">Person</div>
                 </div>
-                <div class="tool-item" data-node-type="location" draggable="true" ondragstart="startDragNew(event, 'location')">
+                <div class="tool-item" data-node-type="location" draggable="true">
                     <div class="icon">📍</div>
                     <div class="label">Location</div>
                 </div>
-                <div class="tool-item" data-node-type="clue" draggable="true" ondragstart="startDragNew(event, 'clue')">
+                <div class="tool-item" data-node-type="clue" draggable="true">
                     <div class="icon">🔍</div>
                     <div class="label">Clue</div>
                 </div>
-                <div class="tool-item" data-node-type="note" draggable="true" ondragstart="startDragNew(event, 'note')">
+                <div class="tool-item" data-node-type="note" draggable="true">
                     <div class="icon">📝</div>
                     <div class="label">Note</div>
                 </div>
@@ -83,27 +83,23 @@
 
             <!-- POPUP TRIGGERS -->
             <div class="tool-group">
-                <div class="tool-item" id="btn-guilds"
-                    onclick="event.stopPropagation(); window.togglePopup('guild-popup')">
+                <div class="tool-item" id="btn-guilds" data-popup-target="guild-popup">
                     <div class="icon">🏛️</div>
                     <div class="label">Guilds</div>
                 </div>
-                <div class="tool-item" id="btn-npcs" onclick="event.stopPropagation(); window.togglePopup('npc-popup')">
+                <div class="tool-item" id="btn-npcs" data-popup-target="npc-popup">
                     <div class="icon">👥</div>
                     <div class="label">NPCs</div>
                 </div>
-                <div class="tool-item" id="btn-locations"
-                    onclick="event.stopPropagation(); window.togglePopup('location-popup')">
+                <div class="tool-item" id="btn-locations" data-popup-target="location-popup">
                     <div class="icon">📍</div>
                     <div class="label">Places</div>
                 </div>
-                <div class="tool-item" id="btn-events"
-                    onclick="event.stopPropagation(); window.togglePopup('event-popup')">
+                <div class="tool-item" id="btn-events" data-popup-target="event-popup">
                     <div class="icon">🕰️</div>
                     <div class="label">Events</div>
                 </div>
-                <div class="tool-item" id="btn-reqs"
-                    onclick="event.stopPropagation(); window.togglePopup('req-popup')">
+                <div class="tool-item" id="btn-reqs" data-popup-target="req-popup">
                     <div class="icon">📦</div>
                     <div class="label">Reqs</div>
                 </div>
@@ -124,11 +120,11 @@
 
     <!-- Context Menu (Simplified, mostly replaced by direct interaction) -->
     <div id="context-menu" class="context-menu">
-        <div class="menu-item" onclick="editTargetNode()">✏️ Edit Text</div>
-        <div class="menu-item" id="menu-set-image" onclick="setTargetNodeImageUrl()">🖼️ Set Image URL</div>
-        <div class="menu-item" onclick="centerAndOptimize()">🎯 Center & Optimize</div>
-        <div class="menu-item" id="menu-undo-optimize" onclick="undoLastOptimize()">↩️ Undo Last Optimize</div>
-        <div class="menu-item delete" onclick="deleteTargetNode()">🗑️ Delete Node</div>
+        <div class="menu-item" data-context-action="edit-text">✏️ Edit Text</div>
+        <div class="menu-item" id="menu-set-image" data-context-action="set-image">🖼️ Set Image URL</div>
+        <div class="menu-item" data-context-action="center-optimize">🎯 Center & Optimize</div>
+        <div class="menu-item" id="menu-undo-optimize" data-context-action="undo-optimize">↩️ Undo Last Optimize</div>
+        <div class="menu-item delete" data-context-action="delete-node">🗑️ Delete Node</div>
     </div>
 
     <script src="js/data-guilds.js"></script>

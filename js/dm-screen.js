@@ -184,6 +184,40 @@
     window.genBroadsheet = genBroadsheet;
     window.toggleRef = toggleRef;
 
+    document.addEventListener('DOMContentLoaded', () => {
+        const accentBtn = document.querySelector('[data-action="accent"]');
+        if (accentBtn) accentBtn.addEventListener('click', triggerAccentPicker);
+
+        const bgBtn = document.querySelector('[data-action="cycle-bg"]');
+        if (bgBtn) bgBtn.addEventListener('click', cycleBgStyle);
+
+        const accentInput = document.getElementById('accent-picker-input');
+        if (accentInput) accentInput.addEventListener('change', (event) => setAccentColor(event.target.value));
+
+        const streetBtn = document.querySelector('[data-action="gen-street"]');
+        if (streetBtn) streetBtn.addEventListener('click', genStreetScene);
+
+        document.querySelectorAll('[data-texture]').forEach((btn) => {
+            btn.addEventListener('click', () => genTexture(btn.dataset.texture));
+        });
+
+        const npcBtn = document.querySelector('[data-action="gen-npc"]');
+        if (npcBtn) npcBtn.addEventListener('click', genNPC);
+
+        const hazardBtn = document.querySelector('[data-action="gen-hazard"]');
+        if (hazardBtn) hazardBtn.addEventListener('click', genHazard);
+
+        const snagBtn = document.querySelector('[data-action="gen-snag"]');
+        if (snagBtn) snagBtn.addEventListener('click', genSnag);
+
+        const broadsheetBtn = document.querySelector('[data-action="gen-broadsheet"]');
+        if (broadsheetBtn) broadsheetBtn.addEventListener('click', genBroadsheet);
+
+        document.querySelectorAll('[data-toggle-ref]').forEach((toggle) => {
+            toggle.addEventListener('click', () => toggleRef(toggle.dataset.toggleRef));
+        });
+    });
+
     console.log("DM Screen Script Loaded Successfully. Data Present:", !!data);
     console.log("Exposed functions:", {
         genStreetScene: !!window.genStreetScene,
