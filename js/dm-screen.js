@@ -102,9 +102,9 @@
         const res = npcs[roll];
         const g = rand(guilds.length ? guilds : ['Unknown Faction']);
         setText('out-npc', `
-            <div class="out-main"><span style="color:var(--accent)">${g}</span> NPC</div>
-            <div style="margin-top:5px; font-size:0.9rem;"><strong>Wants:</strong> ${res.w}</div>
-            <div style="margin-top:2px; font-size:0.9rem;"><strong>Leverage:</strong> ${res.l}</div>
+            <div class="out-main"><span class="out-accent">${g}</span> NPC</div>
+            <div class="out-line wants-line"><strong>Wants:</strong> ${res.w}</div>
+            <div class="out-line leverage-line"><strong>Leverage:</strong> ${res.l}</div>
         `);
     }
 
@@ -129,7 +129,7 @@
         setText('out-hazard', `
             <div class="out-main out-heat">${s.n}</div>
             <div class="out-sub">${s.e}</div>
-            <div class="out-sub" style="margin-top:4px;">Roll: ${roll}</div>
+            <div class="out-sub out-sub-spaced">Roll: ${roll}</div>
         `);
     }
 
@@ -145,7 +145,7 @@
         setText('out-paper', `
             <div class="out-main">${p.n}</div>
             <div class="out-sub">Tone: ${p.t}</div>
-            <div class="${cls}" style="font-weight:bold; font-size:0.8rem; margin-top:5px;">${p.e}</div>
+            <div class="${cls} out-emphasis">${p.e}</div>
         `);
     }
 
@@ -166,10 +166,10 @@
             console.log("Filling accordion content for:", id);
             if (id === 'clue-ref') {
                 body.innerHTML = clueSigs.map(c => `
-                    <tr><td class="ref-hl">${c.g}</td><td><span class="clue-type">PHYSICAL:</span> ${c.p}<br><span class="clue-type" style="margin-top:4px;">SOCIAL:</span> ${c.s}<br><span class="clue-type" style="margin-top:4px; color:var(--accent-dim); text-shadow:0 0 1px var(--accent);">ARCANE:</span> ${c.a}</td></tr>
+                    <tr><td class="ref-hl">${c.g}</td><td><span class="clue-type">PHYSICAL:</span> ${c.p}<br><span class="clue-type clue-type-spaced">SOCIAL:</span> ${c.s}<br><span class="clue-type clue-type-arcane">ARCANE:</span> ${c.a}</td></tr>
                 `).join('');
             } else if (id === 'guild-ref') {
-                body.innerHTML = guildRefs.map(g => `<tr><td class="ref-hl">${g.n}</td><td>${g.j}</td><td style="color:#fff;">${g.b}</td></tr>`).join('');
+                body.innerHTML = guildRefs.map(g => `<tr><td class="ref-hl">${g.n}</td><td>${g.j}</td><td class="ref-bright">${g.b}</td></tr>`).join('');
             }
         }
         el.classList.toggle('open');

@@ -51,12 +51,12 @@ function renderBestiary() {
     const list = document.getElementById('bestiaryList');
     if (!list || !gmData.bestiary) return;
 
-    if (gmData.bestiary.length === 0) { list.innerHTML = '<div style="color:#666; font-style:italic; padding:10px;">No presets saved.</div>'; return; }
+    if (gmData.bestiary.length === 0) { list.innerHTML = '<div class="bestiary-empty">No presets saved.</div>'; return; }
 
     list.innerHTML = gmData.bestiary.map((b, i) => `
-                <div style="display:flex; justify-content:space-between; align-items:center; background:#111; padding:8px; border-radius:6px; border:1px solid #333;">
-                    <span style="font-weight:bold; color:#ddd;">${b.name}</span>
-                    <div style="display:flex; gap:5px;">
+                <div class="bestiary-row">
+                    <span class="bestiary-name">${b.name}</span>
+                    <div class="bestiary-actions">
                         <button class="btn-sec btn-sm" onclick="loadMobPreset(${i})">Load</button>
                         <button class="btn-danger btn-sm" onclick="delMobPreset(${i})">&times;</button>
                     </div>
@@ -380,12 +380,11 @@ function renderCombat() {
         const activeClass = (i === gmData.activeIdx) ? 'active' : '';
         let hpHtml = '';
         if (c.hp !== null) {
-            const bloodied = (c.hp <= c.maxHp / 2) ? 'color:#e74c3c;' : 'color:#2ecc71;';
             hpHtml = `
                     <div class="hp-controls">
                         <button class="btn-dmg-qs" onclick="modHP(${i}, -1)">-1</button>
                         <button class="btn-dmg-qs" onclick="modHP(${i}, -5)">-5</button>
-                        <div class="hp-display" style="${bloodied}" onclick="setHP(${i})">${c.hp}</div>
+                        <div class="hp-display ${c.hp <= c.maxHp / 2 ? 'hp-bloodied' : 'hp-healthy'}" onclick="setHP(${i})">${c.hp}</div>
                     </div>
                 `;
         }
@@ -398,9 +397,9 @@ function renderCombat() {
                 </div>
                 <div class="name-box">
                     <div class="name-main">${c.name}</div>
-                    ${activeClass ? '<div class="name-meta" style="color:var(--accent);">Taking Turn...</div>' : ''}
+                    ${activeClass ? '<div class="name-meta name-meta-active">Taking Turn...</div>' : ''}
                 </div>
-                <div style="display:flex; align-items:center;">
+                <div class="combat-actions">
                     ${hpHtml}
                     <button class="btn-del" onclick="delCombatant(${i})">&times;</button>
                 </div>

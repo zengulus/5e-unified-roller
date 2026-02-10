@@ -117,16 +117,16 @@ let data = { matches: [], active: false, meta: {} };
 
             // Center
             const center = mk('div', 'center-stack');
-            center.innerHTML = `<div class="label" style="color:var(--gold)">GRAND FINALS</div><div id="slot-gf" style="width:100%"></div>`;
+            center.innerHTML = `<div class="label label-grand-finals">GRAND FINALS</div><div id="slot-gf" class="slot-full"></div>`;
 
             const wfMatches = data.matches.filter(m => m.type === 'wb' && m.side === 'center');
             wfMatches.forEach(m => {
-                center.innerHTML += `<div class="label" style="color:var(--accent); margin-top:15px">WINNERS FINAL</div>`;
+                center.innerHTML += `<div class="label label-winners-final">WINNERS FINAL</div>`;
                 center.appendChild(createNode(m, 'final-node'));
             });
 
             const lbCenterMatches = data.matches.filter(m => m.type === 'lb' && m.side === 'center').sort((a, b) => b.r - a.r);
-            if (lbCenterMatches.length) center.innerHTML += `<div class="label" style="color:#777; margin-top:20px">L-FINALS</div>`;
+            if (lbCenterMatches.length) center.innerHTML += `<div class="label label-l-finals">L-FINALS</div>`;
             lbCenterMatches.forEach(m => center.appendChild(createNode(m, 'lb-final-node')));
 
             // Render GF into slot

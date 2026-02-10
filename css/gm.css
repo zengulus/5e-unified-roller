@@ -234,9 +234,221 @@
             border: 1px solid rgba(0, 230, 118, 0.3);
         }
 
-        .btn-success:hover {
+.btn-success:hover {
             background: rgba(0, 230, 118, 0.4);
             text-shadow: 0 0 8px var(--green);
+        }
+
+        .accent-picker-hidden {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .card-border-green {
+            border-top: 2px solid var(--green);
+        }
+
+        .card-border-accent {
+            border-top: 2px solid var(--accent);
+        }
+
+        .input-bold {
+            font-weight: bold;
+        }
+
+        .input-compact {
+            width: 80px;
+        }
+
+        .flex-fill {
+            flex: 1;
+        }
+
+        .init-note {
+            font-size: 0.7rem;
+            color: #666;
+            text-align: center;
+        }
+
+        .section-toggle {
+            cursor: pointer;
+        }
+
+        .mob-body {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .tracker-actions {
+            text-align: center;
+            margin-top: 20px;
+            padding-bottom: 20px;
+        }
+
+        .btn-turn {
+            width: 50px;
+        }
+
+        .row-tight {
+            margin-top: 5px;
+        }
+
+        .level-row {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .label-muted-nowrap {
+            font-size: 0.8rem;
+            color: #888;
+            white-space: nowrap;
+        }
+
+        .input-level {
+            width: 50px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .pb-display {
+            font-size: 0.8rem;
+            color: var(--accent);
+        }
+
+        .grid-top {
+            margin-top: 15px;
+        }
+
+        .section-header-spaced {
+            margin-top: 15px;
+        }
+
+        .tier-note {
+            font-size: 0.7rem;
+            color: #666;
+        }
+
+        .section-header-divider {
+            margin-top: 15px;
+            border-top: 1px solid #333;
+            padding-top: 10px;
+        }
+
+        .btn-fixed-100 {
+            width: 100px;
+        }
+
+        .btn-fixed-80 {
+            width: 80px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+
+        .label-strong {
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .label-accent {
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        .dc-display {
+            text-align: center;
+        }
+
+        .dc-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .dc-desc {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .bestiary-save-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .help-text {
+            font-size: 0.7rem;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .bestiary-list {
+            margin-top: 15px;
+            display: grid;
+            gap: 8px;
+        }
+
+        .loot-row {
+            margin-bottom: 10px;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .loot-qty {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .label-muted {
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .input-qty {
+            width: 50px;
+            text-align: center;
+        }
+
+        .loot-label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .loot-output {
+            margin-top: 15px;
+            font-style: italic;
+            color: var(--accent);
+            min-height: 20px;
+            text-align: left;
+            transition: opacity 0.2s ease-in-out;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            padding: 0 10px;
+        }
+
+        .card-flush {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .section-header-tight {
+            margin: 10px 10px 0 10px;
+            border: none;
         }
 
         .btn-sm {
@@ -523,4 +735,47 @@
             margin-top: 20px;
             border-top: 1px solid #444;
             padding-top: 10px;
+        }
+
+        .bestiary-empty {
+            color: #666;
+            font-style: italic;
+            padding: 10px;
+        }
+
+        .bestiary-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #111;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #333;
+        }
+
+        .bestiary-name {
+            font-weight: bold;
+            color: #ddd;
+        }
+
+        .bestiary-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .hp-bloodied {
+            color: #e74c3c;
+        }
+
+        .hp-healthy {
+            color: #2ecc71;
+        }
+
+        .name-meta-active {
+            color: var(--accent);
+        }
+
+        .combat-actions {
+            display: flex;
+            align-items: center;
         }

@@ -44,8 +44,7 @@
                 <button class="hero-btn ghost" onclick="triggerAccentPicker()">🎨 Accent</button>
                 <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
             </div>
-            <input type="color" id="accent-picker-input"
-                style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+            <input type="color" id="accent-picker-input" class="accent-picker-hidden" onchange="setAccentColor(this.value)">
         </div>
     </header>
 

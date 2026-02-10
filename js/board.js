@@ -894,7 +894,7 @@ function initGuildToolbar() {
     const entries = getBoardGuildEntries();
 
     if (!entries.length) {
-        list.innerHTML = '<div style="padding:10px; color:#666; font-size:0.8rem;">No guild entries available.</div>';
+        list.innerHTML = '<div class="popup-empty">No guild entries available.</div>';
         return;
     }
 
@@ -955,7 +955,7 @@ function renderNPCs() {
     });
 
     if (filtered.length === 0) {
-        listContainer.innerHTML = '<div style="padding:10px; color:#666; font-size:0.8rem;">No NPCs found.</div>';
+        listContainer.innerHTML = '<div class="popup-empty">No NPCs found.</div>';
         return;
     }
 
@@ -1023,7 +1023,7 @@ function renderLocations() {
     });
 
     if (filtered.length === 0) {
-        listContainer.innerHTML = '<div style="padding:10px; color:#666; font-size:0.8rem;">No Locations found.</div>';
+        listContainer.innerHTML = '<div class="popup-empty">No Locations found.</div>';
         return;
     }
 
@@ -1091,7 +1091,7 @@ function renderBoardEvents() {
     }).sort((a, b) => (b.created || '').localeCompare(a.created || ''));
 
     if (filtered.length === 0) {
-        listContainer.innerHTML = '<div style="padding:10px; color:#666; font-size:0.8rem;">No events logged.</div>';
+        listContainer.innerHTML = '<div class="popup-empty">No events logged.</div>';
         return;
     }
 
@@ -1104,8 +1104,8 @@ function renderBoardEvents() {
         const focus = sanitizeText(evt.focus || '');
         const heat = parseInt(evt.heatDelta, 10);
         const meta = focus ? focus : '';
-        const heatBadge = !isNaN(heat) && heat !== 0 ? `<span style="color:${heat > 0 ? 'var(--danger)' : 'var(--accent)'}; font-size:0.75rem; margin-left:6px;">${heat > 0 ? '+' : ''}${heat} Heat</span>` : '';
-        el.innerHTML = `<div class="icon">🕰️</div><div class="label">${title}${heatBadge}${meta ? `<div style="font-size:0.7rem; color:#aaa;">${meta}</div>` : ''}</div>`;
+        const heatBadge = !isNaN(heat) && heat !== 0 ? `<span class="heat-badge ${heat > 0 ? 'heat-positive' : 'heat-negative'}">${heat > 0 ? '+' : ''}${heat} Heat</span>` : '';
+        el.innerHTML = `<div class="icon">🕰️</div><div class="label">${title}${heatBadge}${meta ? `<div class="tool-sub">${meta}</div>` : ''}</div>`;
 
         const lines = [];
         if (evt.focus) lines.push(`<strong>Focus:</strong> ${sanitizeText(evt.focus)}`);
@@ -1168,7 +1168,7 @@ function renderBoardRequisitions() {
     });
 
     if (filtered.length === 0) {
-        listContainer.innerHTML = '<div style="padding:10px; color:#666; font-size:0.8rem;">No requisitions logged.</div>';
+        listContainer.innerHTML = '<div class="popup-empty">No requisitions logged.</div>';
         return;
     }
 
@@ -1179,7 +1179,7 @@ function renderBoardRequisitions() {
         el.draggable = true;
         const title = sanitizeText(req.item || 'Requisition');
         const sub = `${sanitizeText(req.requester || 'Unassigned')}${req.priority ? ' • ' + sanitizeText(req.priority) : ''}`;
-        el.innerHTML = `<div class="icon">📦</div><div class="label">${title}<div style="font-size:0.7rem; color:#aaa;">${sub}</div></div>`;
+        el.innerHTML = `<div class="icon">📦</div><div class="label">${title}<div class="tool-sub">${sub}</div></div>`;
 
         const lines = [];
         lines.push(`<strong>Agent:</strong> ${sanitizeText(req.requester || 'Unassigned')}`);

@@ -240,6 +240,30 @@
             line-height: 1.4;
         }
 
+        .accent-picker-hidden {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .section-title-static {
+            cursor: default;
+        }
+
+        .grid-compact {
+            margin-bottom: 6px;
+        }
+
+        .btn-hazard {
+            color: var(--danger);
+            border-color: rgba(255, 107, 107, 0.3);
+        }
+
+        .btn-snag {
+            color: var(--gold);
+            border-color: rgba(241, 196, 15, 0.3);
+        }
+
         .out-sub {
             font-size: 0.9rem;
             color: #bbb;
@@ -321,4 +345,44 @@
             font-size: 0.7rem;
             margin-bottom: 3px;
             letter-spacing: 0.5px;
+        }
+
+        .out-accent {
+            color: var(--accent);
+        }
+
+        .out-line {
+            font-size: 0.9rem;
+        }
+
+        .wants-line {
+            margin-top: 5px;
+        }
+
+        .leverage-line {
+            margin-top: 2px;
+        }
+
+        .out-sub-spaced {
+            margin-top: 4px;
+        }
+
+        .out-emphasis {
+            font-weight: bold;
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+
+        .clue-type-spaced {
+            margin-top: 4px;
+        }
+
+        .clue-type-arcane {
+            margin-top: 4px;
+            color: var(--accent-dim);
+            text-shadow: 0 0 1px var(--accent);
+        }
+
+        .ref-bright {
+            color: #fff;
         }

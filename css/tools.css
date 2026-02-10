@@ -44,6 +44,12 @@ body {
     pointer-events: none;
 }
 
+.accent-picker-hidden {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
 .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -77,6 +83,14 @@ a {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     position: relative;
     overflow: hidden;
+}
+
+.card-accent {
+    border-color: var(--accent);
+}
+
+.card-alert {
+    border-color: #ff4444;
 }
 
 .card::before {

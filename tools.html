@@ -51,7 +51,7 @@
                     <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
                 </div>
                 <input type="color" id="accent-picker-input"
-                    style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+                    class="accent-picker-hidden" onchange="setAccentColor(this.value)">
             </div>
         </header>
 
@@ -167,7 +167,7 @@
 
         <div class="grid">
             <a href="index.html">
-                <div class="card" style="border-color: var(--accent);">
+                <div class="card card-accent">
                     <div class="icon">🧙‍♂️</div>
                     <div class="title">My Character</div>
                     <div class="desc">Character sheet, dice roller, and stats.</div>
@@ -248,7 +248,7 @@
 
             <!-- DM ONLY TOOLS -->
             <a href="gm.html" class="dm-only">
-                <div class="card" style="border-color: #ff4444;">
+                <div class="card card-alert">
                     <div class="icon">⚔️</div>
                     <div class="title">Combat Dashboard</div>
                     <div class="desc">Initiative tracker, HP management, dice roller, and loot tables.</div>
@@ -256,7 +256,7 @@
             </a>
 
             <a href="dm-screen.html" class="dm-only">
-                <div class="card" style="border-color: #ff4444;">
+                <div class="card card-alert">
                     <div class="icon">📽️</div>
                     <div class="title">Narrative Screen</div>
                     <div class="desc">Street scenes, atmospheric texture, NPC quirks, and quick references.</div>
@@ -264,7 +264,7 @@
             </a>
 
             <a href="clue.html" class="dm-only">
-                <div class="card" style="border-color: #ff4444;">
+                <div class="card card-alert">
                     <div class="icon">🔍</div>
                     <div class="title">Clue Generator</div>
                     <div class="desc">Procedural mystery intersection generator (Signal vs Noise).</div>
@@ -272,7 +272,7 @@
             </a>
 
             <a href="encounters.html" class="dm-only">
-                <div class="card" style="border-color: #ff4444;">
+                <div class="card card-alert">
                     <div class="icon">⚙️</div>
                     <div class="title">Encounter Recipes</div>
                     <div class="desc">Prep custom enemy packages, hazards, and rewards.</div>

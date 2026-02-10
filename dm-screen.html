@@ -29,15 +29,14 @@
                 <button class="hero-btn ghost" onclick="triggerAccentPicker()">🎨 Accent</button>
                 <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
             </div>
-            <input type="color" id="accent-picker-input"
-                style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+            <input type="color" id="accent-picker-input" class="accent-picker-hidden" onchange="setAccentColor(this.value)">
         </div>
     </header>
 
     <div class="container">
 
         <div class="card">
-            <div class="section-title" style="cursor: default;">The Street (Moment-to-Moment)</div>
+            <div class="section-title section-title-static">The Street (Moment-to-Moment)</div>
             <button class="btn-gen" onclick="genStreetScene()">Generate Incident</button>
             <div class="output-box" id="out-street">
                 <div class="dispatch-grid" id="dispatch-content">
@@ -46,8 +45,8 @@
         </div>
 
         <div class="card">
-            <div class="section-title" style="cursor: default;">Scene Texture (Combinatoric)</div>
-            <div class="grid-2-tight" style="margin-bottom:6px;">
+            <div class="section-title section-title-static">Scene Texture (Combinatoric)</div>
+            <div class="grid-2-tight grid-compact">
                 <button class="btn-small" onclick="genTexture('struct')">🧱 Structure</button>
                 <button class="btn-small" onclick="genTexture('guts')">⚙️ Infrastructure</button>
             </div>
@@ -61,7 +60,7 @@
         </div>
 
         <div class="card">
-            <div class="section-title" style="cursor: default;">NPC Improvisation</div>
+            <div class="section-title section-title-static">NPC Improvisation</div>
             <button class="btn-small" onclick="genNPC()">👤 Generate NPC Want/Leverage</button>
             <div class="output-box" id="out-npc">
                 <div class="text-output" id="npc-content"></div>
@@ -87,13 +86,11 @@
         </div>
 
         <div class="card">
-            <div class="section-title" style="cursor: default;">Friction & Hazards</div>
+            <div class="section-title section-title-static">Friction & Hazards</div>
             <div class="grid-2">
-                <button class="btn-small" style="color:var(--danger); border-color: rgba(255, 107, 107, 0.3);"
-                    onclick="genHazard()">⚠️
+                <button class="btn-small btn-hazard" onclick="genHazard()">⚠️
                     Hazard (2d6)</button>
-                <button class="btn-small" style="color:var(--gold); border-color: rgba(241, 196, 15, 0.3);"
-                    onclick="genSnag()">🚧 Snag
+                <button class="btn-small btn-snag" onclick="genSnag()">🚧 Snag
                     (2d20)</button>
             </div>
             <div class="output-box" id="out-hazard">
@@ -102,7 +99,7 @@
         </div>
 
         <div class="card">
-            <div class="section-title" style="cursor: default;">Debrief Phase</div>
+            <div class="section-title section-title-static">Debrief Phase</div>
             <button class="btn-small" onclick="genBroadsheet()">📰 Generate Broadsheet Headline</button>
             <div class="output-box" id="out-paper">
                 <div class="text-output" id="paper-content"></div>

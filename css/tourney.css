@@ -330,3 +330,90 @@
             background: rgba(255, 255, 255, 0.2);
             border-color: #aaa;
         }
+
+        .accent-picker-hidden {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .setup-title {
+            margin-top: 0;
+            color: var(--accent);
+        }
+
+        .setup-actions {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+            align-items: center;
+        }
+
+        .setup-randomize {
+            color: #aaa;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .setup-randomize-box {
+            margin-right: 8px;
+        }
+
+        .btn-generate {
+            padding: 10px 20px;
+        }
+
+        .score-title {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: #fff;
+            font-size: 1rem;
+        }
+
+        .score-player {
+            font-weight: bold;
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .score-controls {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .score-actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .btn-cancel,
+        .btn-confirm {
+            flex: 1;
+        }
+
+        .btn-cancel {
+            border-color: #555;
+        }
+
+        .label-grand-finals {
+            color: var(--gold);
+        }
+
+        .slot-full {
+            width: 100%;
+        }
+
+        .label-winners-final {
+            color: var(--accent);
+            margin-top: 15px;
+        }
+
+        .label-l-finals {
+            color: #777;
+            margin-top: 20px;
+        }

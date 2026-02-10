@@ -188,6 +188,12 @@ body.mobile-board .popup-menu * {
     font-weight: bold;
 }
 
+.accent-picker-hidden {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
 /* --- NODES --- */
 .node {
     position: absolute;
@@ -1269,4 +1275,28 @@ body.focus-active .header-overlay {
         transform: scale(1.06);
         z-index: 1000;
     }
+}
+
+.popup-empty {
+    padding: 10px;
+    color: #666;
+    font-size: 0.8rem;
+}
+
+.heat-badge {
+    font-size: 0.75rem;
+    margin-left: 6px;
+}
+
+.heat-positive {
+    color: var(--danger);
+}
+
+.heat-negative {
+    color: var(--accent);
+}
+
+.tool-sub {
+    font-size: 0.7rem;
+    color: #aaa;
 }

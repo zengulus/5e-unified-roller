@@ -15,13 +15,13 @@
 
     <div id="setup-modal" class="active">
         <div class="modal-box">
-            <h3 style="margin-top:0; color:var(--accent)">Dynamic Setup</h3>
+            <h3 class="setup-title">Dynamic Setup</h3>
             <textarea id="pInput" placeholder="Names (4-64 supported)..."></textarea>
-            <div style="display:flex; justify-content:space-between; margin-top:20px; align-items: center;">
-                <label style="color:#aaa; font-size:0.9rem; display:flex; align-items:center; cursor: pointer;">
-                    <input type="checkbox" id="chkRand" checked style="margin-right: 8px;"> Randomize
+            <div class="setup-actions">
+                <label class="setup-randomize">
+                    <input type="checkbox" id="chkRand" checked class="setup-randomize-box"> Randomize
                 </label>
-                <button class="btn-p" onclick="generate()" style="padding: 10px 20px;">GENERATE</button>
+                <button class="btn-p btn-generate" onclick="generate()">GENERATE</button>
             </div>
         </div>
     </div>
@@ -42,8 +42,7 @@
                 <button class="hero-btn ghost" onclick="triggerAccentPicker()">🎨 Accent</button>
                 <button class="hero-btn ghost" id="btn-bg-style" onclick="cycleBgStyle()">🌌 BG: Field</button>
             </div>
-            <input type="color" id="accent-picker-input"
-                style="position:absolute; opacity:0; pointer-events:none;" onchange="setAccentColor(this.value)">
+            <input type="color" id="accent-picker-input" class="accent-picker-hidden" onchange="setAccentColor(this.value)">
         </div>
     </header>
 
@@ -55,11 +54,11 @@
 
     <div id="score-modal">
         <div class="modal-box">
-            <h3 style="margin-top:0; margin-bottom: 20px; color:#fff; font-size: 1rem;">Report Score</h3>
+            <h3 class="score-title">Report Score</h3>
             <div class="score-row">
                 <span id="mP1"
-                    style="font-weight:bold; max-width:140px; overflow:hidden; text-overflow: ellipsis;">P1</span>
-                <div style="display: flex; align-items: center; gap: 5px;">
+                    class="score-player">P1</span>
+                <div class="score-controls">
                     <button class="btn-adj" onclick="mod(-1, 1)">-</button>
                     <input id="sP1" class="sc-inp" readonly value="0">
                     <button class="btn-adj" onclick="mod(1, 1)">+</button>
@@ -67,16 +66,16 @@
             </div>
             <div class="score-row">
                 <span id="mP2"
-                    style="font-weight:bold; max-width:140px; overflow:hidden; text-overflow: ellipsis;">P2</span>
-                <div style="display: flex; align-items: center; gap: 5px;">
+                    class="score-player">P2</span>
+                <div class="score-controls">
                     <button class="btn-adj" onclick="mod(-1, 2)">-</button>
                     <input id="sP2" class="sc-inp" readonly value="0">
                     <button class="btn-adj" onclick="mod(1, 2)">+</button>
                 </div>
             </div>
-            <div style="display:flex; gap:15px; margin-top:25px;">
-                <button class="btn" style="flex:1; border-color: #555;" onclick="closeScore()">Cancel</button>
-                <button class="btn-p" style="flex:1" onclick="saveScore()">Confirm</button>
+            <div class="score-actions">
+                <button class="btn btn-cancel" onclick="closeScore()">Cancel</button>
+                <button class="btn-p btn-confirm" onclick="saveScore()">Confirm</button>
             </div>
         </div>
     </div>
