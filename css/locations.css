@@ -80,7 +80,7 @@
     width: 100%;
     height: clamp(240px, 40vh, 420px);
     max-width: none;
-    background: #000;
+    background: rgba(0, 0, 0, 0.1);
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.18);
     overflow: hidden;
@@ -97,7 +97,7 @@
     border-radius: 0;
     border: 0;
     display: block;
-    background: #000;
+    background: transparent;
 }
 
 .locations-district {
