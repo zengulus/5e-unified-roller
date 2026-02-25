@@ -1098,7 +1098,8 @@
                 pendingConflict: null,
                 localSoftLocks: new Map(),
                 remoteSoftLocks: new Map(),
-                remotePeers: new Map()
+                remotePeers: new Map(),
+                hadStoredStateAtBoot: false
             };
 
             if (coercedSyncConfig.changed) {
@@ -1329,6 +1330,7 @@
         load() {
             try {
                 const raw = localStorage.getItem(STORE_KEY);
+                this.sync.hadStoredStateAtBoot = !!raw;
                 if (raw) {
                     const loaded = JSON.parse(raw);
                     this.state = sanitizeState(loaded);
@@ -1342,14 +1344,22 @@
                 this.ensureCampaignEntityIds(false);
                 this.syncActiveCaseLegacyState();
                 if (this.ingestPreloadedData()) {
+                    const dirtyBeforeSeed = this.sync.localDirtyScopes
+                        ? new Set(this.sync.localDirtyScopes)
+                        : new Set();
                     // Preloaded seed data should persist locally but not be treated as unsynced user edits.
                     this.save({ scope: 'campaign', skipCloud: true });
-                    this.clearLocalDirtyScopes('campaign');
+                    const dirtyAfterSeed = this.sync.localDirtyScopes
+                        ? Array.from(this.sync.localDirtyScopes.values())
+                        : [];
+                    const seededScopes = dirtyAfterSeed.filter((scope) => !dirtyBeforeSeed.has(scope));
+                    this.clearLocalDirtyScopes(seededScopes.length ? seededScopes : 'campaign');
                 }
                 this.sync.lastSyncedState = sanitizeState(this.state);
                 this.sync.lastKnownRemoteRevision = toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0);
             } catch (e) {
                 console.error("RTF_STORE: Load failed", e);
+                this.sync.hadStoredStateAtBoot = false;
                 this.state = sanitizeState(null);
                 this.syncActiveCaseLegacyState();
                 this.sync.lastSyncedState = sanitizeState(this.state);
@@ -1728,6 +1738,23 @@
                 this.sync.localDirtyScopes.delete(scope);
             });
             this.persistDirtyScopes();
+        }
+
+        getLatestDirtyScopeUpdatedAt(scopes = null) {
+            const dirtyScopes = Array.isArray(scopes) ? normalizeScopeList(scopes) : this.getDirtyScopesSnapshot();
+            const scopeUpdated = this.state
+                && this.state.meta
+                && this.state.meta.scopeUpdated
+                && typeof this.state.meta.scopeUpdated === 'object'
+                ? this.state.meta.scopeUpdated
+                : {};
+            let latest = 0;
+            dirtyScopes.forEach((scope) => {
+                const ts = toTimestamp(scopeUpdated[scope], 0);
+                if (ts > latest) latest = ts;
+            });
+            if (!latest) latest = toTimestamp(this.state && this.state.meta && this.state.meta.updated, 0);
+            return latest;
         }
 
         clearExpiredSoftLocks(now = Date.now()) {
@@ -2545,8 +2572,7 @@
                     message: 'Connected to cloud sync.'
                 });
 
-                const hasLocalDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
-                const shouldForceInitialPull = !this.sync.lastPullAt && !hasLocalDirty;
+                const shouldForceInitialPull = !this.sync.hadStoredStateAtBoot && !this.sync.lastPullAt;
                 const pull = await this.pullFromCloud({ force: shouldForceInitialPull, silent: true });
                 if (!pull.ok && pull.reason !== 'conflict') {
                     throw new Error(pull.error || 'Initial cloud pull failed.');
@@ -3694,8 +3720,34 @@
             const localRevision = toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0);
             const localUpdatedAt = toTimestamp(this.state.meta.updated, 0);
             const hasLocalDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
-            if (!force && hasLocalDirty && remoteRevision > localRevision) {
-                const conflict = this.buildConflictRecord(row, this.getDirtyScopesSnapshot());
+            const localIsOlder = (remoteRevision > localRevision)
+                || (remoteRevision === localRevision && remoteUpdatedAt > localUpdatedAt);
+            const dirtyScopes = hasLocalDirty ? this.getDirtyScopesSnapshot() : [];
+            if (!force && hasLocalDirty && localIsOlder) {
+                const latestDirtyAt = this.getLatestDirtyScopeUpdatedAt(dirtyScopes);
+                const localDirtyIsOlder = !!latestDirtyAt && !!remoteUpdatedAt && latestDirtyAt <= remoteUpdatedAt;
+                if (localDirtyIsOlder) {
+                    const appliedStale = this.applyRemoteState(row.state, {
+                        source: 'pull-stale-local',
+                        updatedAt: remoteUpdatedAt,
+                        updatedBy: row.updatedBy,
+                        revision: remoteRevision,
+                        force: true
+                    });
+                    if (appliedStale) {
+                        this.sync.lastPullAt = Date.now();
+                        this.updateSyncStatus({
+                            lastPullAt: this.sync.lastPullAt,
+                            mode: 'ready',
+                            connected: true,
+                            pendingPush: false,
+                            message: 'Pulled latest cloud state (local was older).'
+                        });
+                    }
+                    return { ok: true, reason: appliedStale ? 'applied-stale-local' : 'skipped-stale-local', applied: appliedStale };
+                }
+
+                const conflict = this.buildConflictRecord(row, dirtyScopes);
                 if (conflict.overlappingScopes.length) {
                     this.setPendingConflict(conflict);
                     return { ok: false, reason: 'conflict', conflict: this.getPendingConflict() };
@@ -3704,9 +3756,7 @@
                 this.sync.lastPullAt = Date.now();
                 return { ok: true, reason: 'merged', applied: false, merged: true };
             }
-            const shouldApply = force
-                || (remoteRevision > localRevision)
-                || (remoteRevision === localRevision && remoteUpdatedAt > localUpdatedAt);
+            const shouldApply = force || localIsOlder;
 
             if (!shouldApply) {
                 if (localRevision > remoteRevision || localUpdatedAt > remoteUpdatedAt) {
