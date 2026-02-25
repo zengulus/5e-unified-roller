@@ -65,9 +65,13 @@
 
 .roster-npc-summary {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 10px;
     align-items: start;
+}
+
+.roster-npc-identity {
+    min-width: 0;
 }
 
 .roster-npc-name {
@@ -93,16 +97,24 @@
 .roster-npc-guild {
     color: var(--accent);
     font-weight: bold;
+    margin-top: 2px;
 }
 
 .roster-npc-meta-block {
     font-size: 0.9rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .roster-npc-meta-label {
     color: #888;
     font-size: 0.8rem;
     text-transform: uppercase;
+}
+
+.roster-npc-meta-wants,
+.roster-npc-meta-leverage {
+    min-height: 48px;
 }
 
 .roster-track-row {

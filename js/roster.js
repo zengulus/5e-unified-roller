@@ -505,18 +505,20 @@ function render() {
             ${imageMarkup}
             <div class="roster-npc-content">
                 <div class="roster-npc-summary">
-                    <div class="roster-npc-name">${escapeHtml(npc.name)}</div>
-                    <div class="roster-npc-guild">${escapeHtml(npc.guild)}</div>
+                    <div class="roster-npc-identity">
+                        <div class="roster-npc-name">${escapeHtml(npc.name)}</div>
+                        <div class="roster-npc-guild">${escapeHtml(npc.guild)}</div>
+                    </div>
 
-                    <div class="roster-npc-meta-block">
+                    <div class="roster-npc-meta-block roster-npc-meta-wants">
                         <div class="roster-npc-meta-label">Wants</div>
                         ${escapeHtml(npc.wants || '-')}
                     </div>
-                    <div class="roster-npc-meta-block">
+                    <div class="roster-npc-meta-block roster-npc-meta-leverage">
                         <div class="roster-npc-meta-label">Leverage</div>
                         ${escapeHtml(npc.leverage || '-')}
                     </div>
-                    <div class="roster-npc-meta-block">
+                    <div class="roster-npc-meta-block roster-npc-meta-trust">
                         <div class="roster-npc-meta-label">Trust</div>
                         <div class="roster-track-row">
                             <button class="btn roster-track-btn" data-onclick="updateNPCTrack('${npcIdArg}', 'trust', -1)">-</button>
@@ -524,7 +526,7 @@ function render() {
                             <button class="btn roster-track-btn" data-onclick="updateNPCTrack('${npcIdArg}', 'trust', 1)">+</button>
                         </div>
                     </div>
-                    <div class="roster-npc-meta-block">
+                    <div class="roster-npc-meta-block roster-npc-meta-stigma">
                         <div class="roster-npc-meta-label">Stigma</div>
                         <div class="roster-track-row">
                             <button class="btn roster-track-btn" data-onclick="updateNPCTrack('${npcIdArg}', 'stigma', -1)">-</button>
