@@ -43,9 +43,7 @@
 
 .roster-npc-row {
     position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
+    display: block;
     align-items: start;
     padding: 15px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -56,7 +54,7 @@
 }
 
 .roster-npc-row.no-image {
-    grid-template-columns: minmax(0, 1fr) auto;
+    display: block;
 }
 
 .roster-npc-content {
@@ -80,7 +78,7 @@
 
 .roster-npc-main {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 12px;
     align-items: start;
 }
@@ -98,7 +96,7 @@
 
 .roster-npc-image {
     width: 100%;
-    max-width: clamp(220px, 42vw, 360px);
+    max-width: none;
 }
 
 .roster-npc-image img {
@@ -188,6 +186,7 @@
     justify-content: flex-end;
     gap: 6px;
     flex-wrap: wrap;
+    margin-top: 4px;
 }
 
 .roster-npc-edit-btn {
@@ -262,22 +261,17 @@
     }
 
     .roster-npc-row {
-        grid-template-columns: 1fr;
-        gap: 8px;
+        display: block;
     }
 
     .roster-npc-row.no-image {
-        grid-template-columns: 1fr;
+        display: block;
     }
 
     .roster-npc-title {
         flex-direction: column;
         align-items: flex-start;
         gap: 2px;
-    }
-
-    .roster-npc-main {
-        grid-template-columns: 1fr;
     }
 
     .roster-npc-image {

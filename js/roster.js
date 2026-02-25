@@ -548,13 +548,13 @@ function render() {
                     <div class="roster-npc-meta-label">Notes</div>
                     ${escapeHtml(npc.notes || '-')}
                 </div>
-            </div>
 
-            <div class="roster-npc-actions">
-                <button class="btn roster-npc-board-btn" data-onclick="openNPCInBoard('${npcIdArg}')" title="Open on board">🧩</button>
-                <button class="btn roster-npc-link-btn" data-onclick="copyNPCLink('${npcIdArg}')" title="Copy deep link">🔗</button>
-                ${editButton}
-                <button class="btn roster-npc-delete-btn" data-onclick="deleteNPC('${npcIdArg}')" title="Delete NPC">&times;</button>
+                <div class="roster-npc-actions">
+                    <button class="btn roster-npc-board-btn" data-onclick="openNPCInBoard('${npcIdArg}')" title="Open on board">🧩</button>
+                    <button class="btn roster-npc-link-btn" data-onclick="copyNPCLink('${npcIdArg}')" title="Copy deep link">🔗</button>
+                    ${editButton}
+                    <button class="btn roster-npc-delete-btn" data-onclick="deleteNPC('${npcIdArg}')" title="Delete NPC">&times;</button>
+                </div>
             </div>
         </div>
     `;
