@@ -502,8 +502,9 @@ function render() {
 
         return `
         <div class="roster-npc-row ${rowClass}" data-npc-id="${escapeHtml(npcId)}">
-            ${imageMarkup}
             <div class="roster-npc-content">
+                ${imageMarkup}
+
                 <div class="roster-npc-title">
                     <div class="roster-npc-identity">
                         <div class="roster-npc-name">${escapeHtml(npc.name || '')}</div>
@@ -549,10 +550,12 @@ function render() {
                 </div>
             </div>
 
-            ${editButton}
-            <button class="btn roster-npc-board-btn" data-onclick="openNPCInBoard('${npcIdArg}')" title="Open on board">🧩</button>
-            <button class="btn roster-npc-link-btn" data-onclick="copyNPCLink('${npcIdArg}')" title="Copy deep link">🔗</button>
-            <button class="btn roster-npc-delete-btn" data-onclick="deleteNPC('${npcIdArg}')" title="Delete NPC">&times;</button>
+            <div class="roster-npc-actions">
+                <button class="btn roster-npc-board-btn" data-onclick="openNPCInBoard('${npcIdArg}')" title="Open on board">🧩</button>
+                <button class="btn roster-npc-link-btn" data-onclick="copyNPCLink('${npcIdArg}')" title="Copy deep link">🔗</button>
+                ${editButton}
+                <button class="btn roster-npc-delete-btn" data-onclick="deleteNPC('${npcIdArg}')" title="Delete NPC">&times;</button>
+            </div>
         </div>
     `;
     }).join('');

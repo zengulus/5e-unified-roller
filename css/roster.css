@@ -44,19 +44,19 @@
 .roster-npc-row {
     position: relative;
     display: grid;
-    grid-template-columns: clamp(132px, 20vw, 184px) minmax(0, 1fr);
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
     align-items: start;
     padding: 15px;
-    padding-right: 138px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     background: rgba(0, 0, 0, 0.1);
     margin-bottom: 5px;
     border-radius: 4px;
+    overflow: hidden;
 }
 
 .roster-npc-row.no-image {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .roster-npc-content {
@@ -80,7 +80,7 @@
 
 .roster-npc-main {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     align-items: start;
 }
@@ -98,12 +98,12 @@
 
 .roster-npc-image {
     width: 100%;
-    max-width: 184px;
+    max-width: clamp(220px, 42vw, 360px);
 }
 
 .roster-npc-image img {
     width: 100%;
-    aspect-ratio: 16 / 11;
+    aspect-ratio: 16 / 9;
     object-fit: cover;
     object-position: center;
     border-radius: 8px;
@@ -145,6 +145,9 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    width: 100%;
+    justify-content: space-between;
+    box-sizing: border-box;
     padding: 2px 6px;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -152,24 +155,17 @@
 }
 
 .roster-track-btn {
+    flex: 0 0 28px;
+    min-width: 28px;
     padding: 2px 7px;
     line-height: 1.2;
 }
 
 .roster-track-value {
-    min-width: 64px;
-    text-align: center;
-    font-size: 0.8rem;
-}
-
-.roster-npc-column-tracks .roster-track-row {
-    width: 100%;
-    justify-content: space-between;
-}
-
-.roster-npc-column-tracks .roster-track-value {
     flex: 1;
     min-width: 0;
+    text-align: center;
+    font-size: 0.8rem;
 }
 
 .roster-npc-notes {
@@ -186,60 +182,55 @@
     font-style: normal;
 }
 
-.roster-npc-lock-icon {
-    position: absolute;
-    right: 44px;
-    top: 10px;
-    color: #888;
-    font-size: 1rem;
+.roster-npc-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 .roster-npc-edit-btn {
-    position: absolute;
-    right: 44px;
-    top: 8px;
-    padding: 4px 7px;
+    padding: 0;
     color: var(--accent);
-    border: none;
-    background: transparent;
-    font-size: 1rem;
-    cursor: pointer;
 }
 
 .roster-npc-link-btn {
-    position: absolute;
-    right: 76px;
-    top: 8px;
-    padding: 4px 7px;
+    padding: 0;
     color: var(--accent-secondary);
-    border: none;
-    background: transparent;
-    font-size: 0.95rem;
-    cursor: pointer;
 }
 
 .roster-npc-board-btn {
-    position: absolute;
-    right: 108px;
-    top: 8px;
-    padding: 4px 7px;
+    padding: 0;
     color: var(--accent-secondary);
-    border: none;
-    background: transparent;
-    font-size: 0.95rem;
-    cursor: pointer;
 }
 
 .roster-npc-delete-btn {
-    position: absolute;
-    right: 10px;
-    top: 10px;
-    padding: 4px 8px;
+    padding: 0;
     color: var(--danger);
-    border: none;
-    background: transparent;
-    font-size: 1.2rem;
+}
+
+.roster-npc-edit-btn,
+.roster-npc-link-btn,
+.roster-npc-board-btn,
+.roster-npc-delete-btn {
+    position: static;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.18);
     cursor: pointer;
+    line-height: 1;
+    font-size: 0.95rem;
+}
+
+.roster-npc-delete-btn {
+    font-size: 1.2rem;
 }
 
 .roster-linked-focus {
@@ -272,7 +263,6 @@
 
     .roster-npc-row {
         grid-template-columns: 1fr;
-        padding-right: 15px;
         gap: 8px;
     }
 
@@ -294,12 +284,7 @@
         max-width: none;
     }
 
-    .roster-npc-lock-icon,
-    .roster-npc-edit-btn,
-    .roster-npc-board-btn,
-    .roster-npc-link-btn,
-    .roster-npc-delete-btn {
-        position: static;
-        justify-self: flex-end;
+    .roster-npc-actions {
+        justify-content: flex-end;
     }
 }
