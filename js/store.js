@@ -2,6 +2,7 @@
     const STORE_KEY = 'ravnica_unified_v1';
     const LEGACY_HUB_KEY = 'ravnicaHubV3_2';
     const LEGACY_BOARD_KEY = 'invBoardData';
+    const DIRTY_SCOPES_KEY = 'ravnica_sync_dirty_scopes_v1';
 
     const SYNC_CONFIG_KEY = 'ravnica_sync_config_v1';
     const SYNC_STATUS_EVENT = 'rtf-sync-status';
@@ -462,6 +463,172 @@
         return out;
     };
 
+    const ENTITY_SCOPE_ORDER_TOKEN = '__order';
+    const CAMPAIGN_ENTITY_SCOPE_PREFIXES = Object.freeze({
+        players: 'campaign.players',
+        npcs: 'campaign.npcs',
+        locations: 'campaign.locations',
+        requisitions: 'campaign.requisitions',
+        encounters: 'campaign.encounters'
+    });
+    const normalizeEntityScopeId = (value) => {
+        const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+        if (!raw) return '';
+        return raw.replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+    };
+    const buildEntityOrderScope = (scopePrefix) => `${scopePrefix}.${ENTITY_SCOPE_ORDER_TOKEN}`;
+    const buildEntityScope = (scopePrefix, entityId) => {
+        const id = normalizeEntityScopeId(entityId);
+        if (!id || id === ENTITY_SCOPE_ORDER_TOKEN) return '';
+        return `${scopePrefix}.${id}`;
+    };
+    const buildCampaignEntityScope = (key, entityId) => {
+        const scopePrefix = CAMPAIGN_ENTITY_SCOPE_PREFIXES[key];
+        if (!scopePrefix) return '';
+        return buildEntityScope(scopePrefix, entityId);
+    };
+    const buildPlayerEntityScope = (playerId) => buildCampaignEntityScope('players', playerId);
+    const buildNPCEntityScope = (npcId) => buildCampaignEntityScope('npcs', npcId);
+    const buildLocationEntityScope = (locationId) => buildCampaignEntityScope('locations', locationId);
+    const buildRequisitionEntityScope = (requisitionId) => buildCampaignEntityScope('requisitions', requisitionId);
+    const buildEncounterEntityScope = (encounterId) => buildCampaignEntityScope('encounters', encounterId);
+    const buildCaseEventsScopePrefix = (caseId) => `cases.${sanitizeCaseId(caseId, 'case_primary')}.events`;
+    const buildCaseEventEntityScope = (caseId, eventId) => buildEntityScope(buildCaseEventsScopePrefix(caseId), eventId);
+    const buildCaseEventOrderScope = (caseId) => buildEntityOrderScope(buildCaseEventsScopePrefix(caseId));
+    const findEntityIndexByScopeId = (list, scopeId) => {
+        if (!Array.isArray(list) || !scopeId) return -1;
+        return list.findIndex((entry) => normalizeEntityScopeId(entry && entry.id) === scopeId);
+    };
+    const addEntityScopesToSnapshot = (map, scopePrefix, sourceList) => {
+        const list = Array.isArray(sourceList) ? sourceList : [];
+        const scopeIds = [];
+        const seenScopeIds = new Set();
+        let fallbackToBroadScope = false;
+
+        list.forEach((entry) => {
+            const scope = buildEntityScope(scopePrefix, entry && entry.id);
+            if (!scope) {
+                fallbackToBroadScope = true;
+                return;
+            }
+            const scopeId = scope.slice((scopePrefix + '.').length);
+            if (!scopeId || seenScopeIds.has(scopeId)) {
+                fallbackToBroadScope = true;
+                return;
+            }
+            seenScopeIds.add(scopeId);
+            scopeIds.push(scopeId);
+            map.set(scope, entry);
+        });
+
+        map.set(buildEntityOrderScope(scopePrefix), scopeIds);
+        if (fallbackToBroadScope) map.set(scopePrefix, list);
+    };
+    const applyEntityScopeFromSourceList = (targetList, sourceList, scopeId) => {
+        if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) return;
+        const targetIdx = findEntityIndexByScopeId(targetList, scopeId);
+        const sourceIdx = findEntityIndexByScopeId(sourceList, scopeId);
+
+        if (sourceIdx >= 0) {
+            const sourceEntry = deepClone(sourceList[sourceIdx]);
+            if (targetIdx >= 0) targetList[targetIdx] = sourceEntry;
+            else targetList.push(sourceEntry);
+            return;
+        }
+        if (targetIdx >= 0) targetList.splice(targetIdx, 1);
+    };
+    const applyEntityOrderScopeFromSourceList = (targetList, sourceList) => {
+        const desiredOrder = [];
+        const desiredSet = new Set();
+        sourceList.forEach((entry) => {
+            const id = normalizeEntityScopeId(entry && entry.id);
+            if (!id || desiredSet.has(id)) return;
+            desiredSet.add(id);
+            desiredOrder.push(id);
+        });
+        if (!desiredOrder.length) return;
+
+        const targetById = new Map();
+        const extras = [];
+        targetList.forEach((entry) => {
+            const id = normalizeEntityScopeId(entry && entry.id);
+            if (!id || !desiredSet.has(id) || targetById.has(id)) {
+                extras.push(entry);
+                return;
+            }
+            targetById.set(id, entry);
+        });
+
+        const sourceById = new Map();
+        sourceList.forEach((entry) => {
+            const id = normalizeEntityScopeId(entry && entry.id);
+            if (!id || sourceById.has(id)) return;
+            sourceById.set(id, entry);
+        });
+
+        const ordered = [];
+        desiredOrder.forEach((id) => {
+            if (targetById.has(id)) {
+                ordered.push(targetById.get(id));
+                return;
+            }
+            const sourceEntry = sourceById.get(id);
+            if (sourceEntry) ordered.push(deepClone(sourceEntry));
+        });
+
+        targetList.splice(0, targetList.length, ...ordered, ...extras);
+    };
+    const getCampaignEntityList = (state, key) => {
+        if (!state.campaign || typeof state.campaign !== 'object') state.campaign = sanitizeCampaign(null);
+        if (!Array.isArray(state.campaign[key])) state.campaign[key] = [];
+        return state.campaign[key];
+    };
+    const applyCampaignEntityScopeFromSource = (targetState, sourceState, key, scopeId) => {
+        if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) return;
+        const targetList = getCampaignEntityList(targetState, key);
+        const sourceList = getCampaignEntityList(sourceState, key);
+        applyEntityScopeFromSourceList(targetList, sourceList, scopeId);
+    };
+    const applyCampaignEntityOrderScopeFromSource = (targetState, sourceState, key) => {
+        const targetList = getCampaignEntityList(targetState, key);
+        const sourceList = getCampaignEntityList(sourceState, key);
+        applyEntityOrderScopeFromSourceList(targetList, sourceList);
+    };
+    const applyCaseEventEntityScopeFromSource = (targetState, sourceState, caseId, scopeId) => {
+        if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) return;
+        const cleanCaseId = sanitizeCaseId(caseId, 'case_primary');
+        const targetCase = ensureCaseForScope(targetState, sourceState, cleanCaseId);
+        if (!targetCase) return;
+        if (!Array.isArray(targetCase.events)) targetCase.events = [];
+        const sourceCase = getCaseById(sourceState, cleanCaseId);
+        const sourceEvents = Array.isArray(sourceCase && sourceCase.events) ? sourceCase.events : [];
+        applyEntityScopeFromSourceList(targetCase.events, sourceEvents, scopeId);
+    };
+    const applyCaseEventOrderScopeFromSource = (targetState, sourceState, caseId) => {
+        const cleanCaseId = sanitizeCaseId(caseId, 'case_primary');
+        const targetCase = ensureCaseForScope(targetState, sourceState, cleanCaseId);
+        if (!targetCase) return;
+        if (!Array.isArray(targetCase.events)) targetCase.events = [];
+        const sourceCase = getCaseById(sourceState, cleanCaseId);
+        const sourceEvents = Array.isArray(sourceCase && sourceCase.events) ? sourceCase.events : [];
+        applyEntityOrderScopeFromSourceList(targetCase.events, sourceEvents);
+    };
+
+    const parseStoredDirtyScopes = () => {
+        try {
+            const raw = localStorage.getItem(DIRTY_SCOPES_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            const cleaned = parsed.filter((entry) => typeof entry === 'string' && /^[a-z0-9_.-]+$/i.test(entry.trim()));
+            if (!cleaned.length) return [];
+            return normalizeScopeList(cleaned);
+        } catch (err) {
+            console.warn('RTF_STORE: Failed to parse dirty scopes cache', err);
+            return [];
+        }
+    };
+
     const scopesOverlap = (leftScope, rightScope) => {
         const left = normalizeScopeToken(leftScope);
         const right = normalizeScopeToken(rightScope);
@@ -490,18 +657,18 @@
         const map = new Map();
         map.set('campaign.rep', clean.campaign.rep);
         map.set('campaign.heat', clean.campaign.heat);
-        map.set('campaign.players', clean.campaign.players);
-        map.set('campaign.npcs', clean.campaign.npcs);
-        map.set('campaign.locations', clean.campaign.locations);
-        map.set('campaign.requisitions', clean.campaign.requisitions);
-        map.set('campaign.encounters', clean.campaign.encounters);
+        addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.players, clean.campaign.players);
+        addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.npcs, clean.campaign.npcs);
+        addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.locations, clean.campaign.locations);
+        addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.requisitions, clean.campaign.requisitions);
+        addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.encounters, clean.campaign.encounters);
         map.set('campaign.case', clean.campaign.case);
         map.set(SYNC_SCOPE_CASES_META, buildCasesMetaSnapshot(clean));
         map.set('hq', clean.hq);
         (clean.cases.items || []).forEach((entry) => {
             if (!entry || !entry.id) return;
             map.set(`cases.${entry.id}.board`, stripBoardNodeLocalFields(entry.board));
-            map.set(`cases.${entry.id}.events`, sanitizeEventList(entry.events));
+            addEntityScopesToSnapshot(map, buildCaseEventsScopePrefix(entry.id), sanitizeEventList(entry.events));
         });
         return map;
     };
@@ -614,6 +781,21 @@
             return;
         }
 
+        const campaignOrderScopeMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)\.__order$/);
+        if (campaignOrderScopeMatch) {
+            const key = campaignOrderScopeMatch[1];
+            applyCampaignEntityOrderScopeFromSource(targetState, sourceState, key);
+            return;
+        }
+
+        const campaignEntityScopeMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)\.([a-z0-9_-]+)$/);
+        if (campaignEntityScopeMatch) {
+            const key = campaignEntityScopeMatch[1];
+            const scopeId = campaignEntityScopeMatch[2];
+            if (scopeId !== ENTITY_SCOPE_ORDER_TOKEN) applyCampaignEntityScopeFromSource(targetState, sourceState, key, scopeId);
+            return;
+        }
+
         if (scope.startsWith('campaign.')) {
             const key = scope.slice('campaign.'.length);
             if (Object.prototype.hasOwnProperty.call(sourceState.campaign, key)) {
@@ -636,6 +818,21 @@
 
         if (scope === SYNC_SCOPE_CASES_META) {
             applyCasesMetaFromSource(targetState, sourceState);
+            return;
+        }
+
+        const caseEventOrderScopeMatch = scope.match(/^cases\.([a-z0-9_-]+)\.events\.__order$/);
+        if (caseEventOrderScopeMatch) {
+            const caseId = sanitizeCaseId(caseEventOrderScopeMatch[1], 'case_primary');
+            applyCaseEventOrderScopeFromSource(targetState, sourceState, caseId);
+            return;
+        }
+
+        const caseEventEntityScopeMatch = scope.match(/^cases\.([a-z0-9_-]+)\.events\.([a-z0-9_-]+)$/);
+        if (caseEventEntityScopeMatch) {
+            const caseId = sanitizeCaseId(caseEventEntityScopeMatch[1], 'case_primary');
+            const scopeId = caseEventEntityScopeMatch[2];
+            if (scopeId !== ENTITY_SCOPE_ORDER_TOKEN) applyCaseEventEntityScopeFromSource(targetState, sourceState, caseId, scopeId);
             return;
         }
 
@@ -895,7 +1092,7 @@
                 userId: '',
                 supabaseLoadPromise: null,
                 lastCloudStateSig: '',
-                localDirtyScopes: new Set(),
+                localDirtyScopes: new Set(parseStoredDirtyScopes()),
                 lastSyncedState: sanitizeState(this.state),
                 lastKnownRemoteRevision: 0,
                 pendingConflict: null,
@@ -945,7 +1142,7 @@
             }
 
             this.load();
-            this.emitSyncStatus();
+            this.updateSyncStatus({});
 
             if (this.sync.config.enabled && this.sync.config.autoConnect) {
                 this.connectSync().catch((err) => {
@@ -1079,7 +1276,7 @@
             cases.items.push(entry);
             cases.activeCaseId = id;
             this.syncActiveCaseLegacyState();
-            this.save({ scope: [SYNC_SCOPE_CASES_META, `cases.${id}.board`, `cases.${id}.events`] });
+            this.save({ scope: [SYNC_SCOPE_CASES_META, `cases.${id}.board`, buildCaseEventOrderScope(id)] });
             return id;
         }
 
@@ -1144,7 +1341,11 @@
                 this.state = sanitizeState(this.state);
                 this.ensureCampaignEntityIds(false);
                 this.syncActiveCaseLegacyState();
-                if (this.ingestPreloadedData()) this.save({ scope: 'campaign' });
+                if (this.ingestPreloadedData()) {
+                    // Preloaded seed data should persist locally but not be treated as unsynced user edits.
+                    this.save({ scope: 'campaign', skipCloud: true });
+                    this.clearLocalDirtyScopes('campaign');
+                }
                 this.sync.lastSyncedState = sanitizeState(this.state);
                 this.sync.lastKnownRemoteRevision = toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0);
             } catch (e) {
@@ -1218,10 +1419,13 @@
             const opts = options && typeof options === 'object' ? options : {};
             const skipCloud = !!opts.skipCloud;
             const skipEvent = !!opts.skipEvent;
-            const scopes = normalizeScopeList(opts.scope || SYNC_SCOPE_GLOBAL);
+            let scopes = normalizeScopeList(opts.scope || SYNC_SCOPE_GLOBAL);
 
             try {
-                this.ensureCampaignEntityIds(false);
+                const idRepair = this.ensureCampaignEntityIds(false);
+                if (idRepair && Array.isArray(idRepair.scopes) && idRepair.scopes.length) {
+                    scopes = normalizeScopeList([...scopes, ...idRepair.scopes]);
+                }
                 this.syncActiveCaseLegacyState();
                 const now = Date.now();
                 this.state.meta.updated = now;
@@ -1481,6 +1685,21 @@
             return normalizeScopeList(scopes);
         }
 
+        persistDirtyScopes() {
+            try {
+                const list = this.sync.localDirtyScopes
+                    ? Array.from(this.sync.localDirtyScopes.values())
+                    : [];
+                if (!list.length) {
+                    localStorage.removeItem(DIRTY_SCOPES_KEY);
+                    return;
+                }
+                localStorage.setItem(DIRTY_SCOPES_KEY, JSON.stringify(normalizeScopeList(list)));
+            } catch (err) {
+                console.warn('RTF_STORE: Failed to persist dirty scopes cache', err);
+            }
+        }
+
         markLocalDirtyScopes(scopes, timestamp = Date.now()) {
             if (!this.sync.localDirtyScopes) this.sync.localDirtyScopes = new Set();
             if (!this.state.meta || typeof this.state.meta !== 'object') {
@@ -1494,6 +1713,7 @@
                 this.sync.localDirtyScopes.add(scope);
                 this.state.meta.scopeUpdated[scope] = timestamp;
             });
+            this.persistDirtyScopes();
             return list;
         }
 
@@ -1501,11 +1721,13 @@
             if (!this.sync.localDirtyScopes) this.sync.localDirtyScopes = new Set();
             if (scopes === null || scopes === undefined) {
                 this.sync.localDirtyScopes.clear();
+                this.persistDirtyScopes();
                 return;
             }
             normalizeScopeList(scopes).forEach((scope) => {
                 this.sync.localDirtyScopes.delete(scope);
             });
+            this.persistDirtyScopes();
         }
 
         clearExpiredSoftLocks(now = Date.now()) {
@@ -1900,13 +2122,13 @@
                 this.fetchNormalizedSingle(tables.core),
                 this.fetchNormalizedSingle(tables.hq),
                 this.fetchNormalizedList(tables.caseState, 'case_id,case_name,is_active,sort_order,payload,revision,updated_at,updated_by,updated_by_name', { column: 'sort_order', ascending: true }),
-                this.fetchNormalizedList(tables.caseBoards, 'case_id,payload,revision,updated_at,updated_by,updated_by_name'),
-                this.fetchNormalizedList(tables.caseEvents, 'case_id,event_id,payload,revision,updated_at,updated_by,updated_by_name'),
-                this.fetchNormalizedList(tables.players, 'player_id,payload,revision,updated_at,updated_by,updated_by_name'),
-                this.fetchNormalizedList(tables.npcs, 'npc_id,payload,revision,updated_at,updated_by,updated_by_name'),
-                this.fetchNormalizedList(tables.locations, 'location_id,payload,revision,updated_at,updated_by,updated_by_name'),
-                this.fetchNormalizedList(tables.requisitions, 'requisition_id,payload,revision,updated_at,updated_by,updated_by_name'),
-                this.fetchNormalizedList(tables.encounters, 'encounter_id,payload,revision,updated_at,updated_by,updated_by_name')
+                this.fetchNormalizedList(tables.caseBoards, 'case_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'case_id', ascending: true }),
+                this.fetchNormalizedList(tables.caseEvents, 'case_id,event_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'event_id', ascending: true }),
+                this.fetchNormalizedList(tables.players, 'player_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'player_id', ascending: true }),
+                this.fetchNormalizedList(tables.npcs, 'npc_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'npc_id', ascending: true }),
+                this.fetchNormalizedList(tables.locations, 'location_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'location_id', ascending: true }),
+                this.fetchNormalizedList(tables.requisitions, 'requisition_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'requisition_id', ascending: true }),
+                this.fetchNormalizedList(tables.encounters, 'encounter_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'encounter_id', ascending: true })
             ]);
 
             const failing = tasks.find((entry) => !entry.ok);
@@ -2323,8 +2545,9 @@
                     message: 'Connected to cloud sync.'
                 });
 
-                const isInitialPull = !this.sync.lastPullAt;
-                const pull = await this.pullFromCloud({ force: isInitialPull, silent: true });
+                const hasLocalDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
+                const shouldForceInitialPull = !this.sync.lastPullAt && !hasLocalDirty;
+                const pull = await this.pullFromCloud({ force: shouldForceInitialPull, silent: true });
                 if (!pull.ok && pull.reason !== 'conflict') {
                     throw new Error(pull.error || 'Initial cloud pull failed.');
                 }
@@ -2651,8 +2874,22 @@
                 writeCaseState: writeAll,
                 writeAllCaseBoards: writeAll,
                 writeAllCaseEvents: writeAll,
+                playerIds: new Set(),
+                npcIds: new Set(),
+                locationIds: new Set(),
+                requisitionIds: new Set(),
+                encounterIds: new Set(),
                 caseBoards: new Set(),
-                caseEvents: new Set()
+                caseEvents: new Set(),
+                caseEventIds: new Map()
+            };
+
+            const campaignEntityPlanConfig = {
+                players: { writeKey: 'writePlayers', idSet: plan.playerIds },
+                npcs: { writeKey: 'writeNPCs', idSet: plan.npcIds },
+                locations: { writeKey: 'writeLocations', idSet: plan.locationIds },
+                requisitions: { writeKey: 'writeRequisitions', idSet: plan.requisitionIds },
+                encounters: { writeKey: 'writeEncounters', idSet: plan.encounterIds }
             };
 
             const markCampaignAll = () => {
@@ -2663,6 +2900,17 @@
                 plan.writeRequisitions = true;
                 plan.writeEncounters = true;
             };
+            const addScopedEntityId = (set, scopeIdToken) => {
+                const id = normalizeEntityScopeId(scopeIdToken);
+                if (!id || id === ENTITY_SCOPE_ORDER_TOKEN) return;
+                set.add(id);
+            };
+            const addCaseEventScopeId = (caseId, scopeIdToken) => {
+                const id = normalizeEntityScopeId(scopeIdToken);
+                if (!id || id === ENTITY_SCOPE_ORDER_TOKEN) return;
+                if (!plan.caseEventIds.has(caseId)) plan.caseEventIds.set(caseId, new Set());
+                plan.caseEventIds.get(caseId).add(id);
+            };
 
             scopeList.forEach((scope) => {
                 if (scope === SYNC_SCOPE_GLOBAL) return;
@@ -2672,11 +2920,18 @@
                         return;
                     }
                     if (scope === 'campaign.heat' || scope === 'campaign.rep' || scope === 'campaign.case') plan.writeCore = true;
-                    if (scope === 'campaign.players') plan.writePlayers = true;
-                    if (scope === 'campaign.npcs') plan.writeNPCs = true;
-                    if (scope === 'campaign.locations') plan.writeLocations = true;
-                    if (scope === 'campaign.requisitions') plan.writeRequisitions = true;
-                    if (scope === 'campaign.encounters') plan.writeEncounters = true;
+                    const campaignEntityMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
+                    if (campaignEntityMatch) {
+                        const key = campaignEntityMatch[1];
+                        const scopeId = campaignEntityMatch[2] || '';
+                        const cfg = campaignEntityPlanConfig[key];
+                        if (!cfg) return;
+                        if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) {
+                            plan[cfg.writeKey] = true;
+                            return;
+                        }
+                        addScopedEntityId(cfg.idSet, scopeId);
+                    }
                     return;
                 }
                 if (scope === 'hq') {
@@ -2685,6 +2940,17 @@
                 }
                 if (scope === 'cases' || scope === SYNC_SCOPE_CASES_META) {
                     plan.writeCaseState = true;
+                    return;
+                }
+                const caseEventScopeMatch = scope.match(/^cases\.([a-z0-9_-]+)\.events\.([a-z0-9_-]+)$/);
+                if (caseEventScopeMatch) {
+                    const caseId = sanitizeCaseId(caseEventScopeMatch[1], 'case_primary');
+                    const scopeId = caseEventScopeMatch[2];
+                    if (scopeId === ENTITY_SCOPE_ORDER_TOKEN) {
+                        plan.caseEvents.add(caseId);
+                        return;
+                    }
+                    addCaseEventScopeId(caseId, scopeId);
                     return;
                 }
                 const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name)$/);
@@ -2705,11 +2971,23 @@
                 }
             });
 
+            if (plan.writePlayers) plan.playerIds.clear();
+            if (plan.writeNPCs) plan.npcIds.clear();
+            if (plan.writeLocations) plan.locationIds.clear();
+            if (plan.writeRequisitions) plan.requisitionIds.clear();
+            if (plan.writeEncounters) plan.encounterIds.clear();
+
             if (plan.writeAllCaseBoards) {
                 caseIds.forEach((id) => plan.caseBoards.add(id));
             }
             if (plan.writeAllCaseEvents) {
                 caseIds.forEach((id) => plan.caseEvents.add(id));
+                plan.caseEventIds.clear();
+            }
+            if (plan.caseEvents.size && plan.caseEventIds.size) {
+                plan.caseEvents.forEach((caseId) => {
+                    plan.caseEventIds.delete(caseId);
+                });
             }
             if (plan.writeCaseState) {
                 caseIds.forEach((id) => {
@@ -2767,6 +3045,16 @@
                 .map((row) => toTrimmedString(row && row[idColumn], '', 80))
                 .filter(Boolean);
             const toDelete = existingIds.filter((id) => !localIds.has(id));
+
+            if (rows.length) {
+                const upsert = await this.sync.client
+                    .from(tableName)
+                    .upsert(rows, { onConflict: `campaign_id,${idColumn}` });
+                if (upsert.error) {
+                    return { ok: false, error: upsert.error.message || `Failed writing ${tableName}.` };
+                }
+            }
+
             if (toDelete.length) {
                 const del = await this.sync.client
                     .from(tableName)
@@ -2777,6 +3065,87 @@
                     return { ok: false, error: del.error.message || `Failed deleting from ${tableName}.` };
                 }
             }
+            return { ok: true };
+        }
+
+        buildScopedEntityRowMap(sourceItems, fallbackPrefix = 'entity') {
+            const list = Array.isArray(sourceItems) ? sourceItems : [];
+            const byScopeId = new Map();
+            list.forEach((item, idx) => {
+                if (!item || typeof item !== 'object') return;
+                const fallback = buildEntityId(fallbackPrefix, idx);
+                const id = toTrimmedString(item.id, fallback, 80);
+                const scopeId = normalizeEntityScopeId(id);
+                if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) return;
+                if (byScopeId.has(scopeId)) return;
+                byScopeId.set(scopeId, {
+                    id,
+                    payload: { ...item, id }
+                });
+            });
+            return byScopeId;
+        }
+
+        async resolveDeleteIdsByScope(tableName, idColumn, scopeIds, filters = []) {
+            const campaignId = this.sync.config.campaignId;
+            const desiredScopeIds = Array.isArray(scopeIds) ? scopeIds : [];
+            if (!desiredScopeIds.length) return { ok: true, ids: [] };
+
+            let query = this.sync.client
+                .from(tableName)
+                .select(idColumn)
+                .eq('campaign_id', campaignId);
+
+            const filterList = Array.isArray(filters) ? filters : [];
+            filterList.forEach((entry) => {
+                if (!entry || !entry.column) return;
+                query = query.eq(entry.column, entry.value);
+            });
+
+            const existing = await query;
+            if (existing.error) {
+                return {
+                    ok: false,
+                    error: existing.error.message || `Failed reading ${tableName}.`
+                };
+            }
+
+            const desiredSet = new Set(desiredScopeIds);
+            const deleteIds = new Set();
+            (Array.isArray(existing.data) ? existing.data : []).forEach((row) => {
+                const id = toTrimmedString(row && row[idColumn], '', 80);
+                const scopeId = normalizeEntityScopeId(id);
+                if (!scopeId || !desiredSet.has(scopeId)) return;
+                deleteIds.add(id);
+            });
+            return { ok: true, ids: Array.from(deleteIds.values()) };
+        }
+
+        async syncEntityRowsByScopeIds(tableName, idColumn, sourceItems, scopeIds, writeMeta) {
+            const campaignId = this.sync.config.campaignId;
+            const requestedScopeIds = Array.from(scopeIds || [])
+                .map((scopeId) => normalizeEntityScopeId(scopeId))
+                .filter((scopeId) => !!scopeId && scopeId !== ENTITY_SCOPE_ORDER_TOKEN);
+            if (!requestedScopeIds.length) return { ok: true };
+
+            const fallbackPrefix = idColumn.replace(/_id$/i, '');
+            const byScopeId = this.buildScopedEntityRowMap(sourceItems, fallbackPrefix);
+            const rows = [];
+            const missingScopeIds = [];
+
+            requestedScopeIds.forEach((scopeId) => {
+                const row = byScopeId.get(scopeId);
+                if (!row) {
+                    missingScopeIds.push(scopeId);
+                    return;
+                }
+                rows.push({
+                    campaign_id: campaignId,
+                    [idColumn]: row.id,
+                    payload: row.payload,
+                    ...writeMeta
+                });
+            });
 
             if (rows.length) {
                 const upsert = await this.sync.client
@@ -2784,6 +3153,21 @@
                     .upsert(rows, { onConflict: `campaign_id,${idColumn}` });
                 if (upsert.error) {
                     return { ok: false, error: upsert.error.message || `Failed writing ${tableName}.` };
+                }
+            }
+
+            if (missingScopeIds.length) {
+                const deleteLookup = await this.resolveDeleteIdsByScope(tableName, idColumn, missingScopeIds);
+                if (!deleteLookup.ok) return deleteLookup;
+                if (deleteLookup.ids.length) {
+                    const del = await this.sync.client
+                        .from(tableName)
+                        .delete()
+                        .eq('campaign_id', campaignId)
+                        .in(idColumn, deleteLookup.ids);
+                    if (del.error) {
+                        return { ok: false, error: del.error.message || `Failed deleting from ${tableName}.` };
+                    }
                 }
             }
             return { ok: true };
@@ -2833,6 +3217,14 @@
                 .map((row) => sanitizeCaseId(row && row.case_id, ''))
                 .filter(Boolean);
             const toDelete = existingCaseIds.filter((id) => !localCaseIds.has(id));
+
+            const upsert = await this.sync.client
+                .from(tables.caseState)
+                .upsert(rows, { onConflict: 'campaign_id,case_id' });
+            if (upsert.error) {
+                return { ok: false, error: upsert.error.message || 'Failed writing case state.' };
+            }
+
             if (toDelete.length) {
                 const [delEvents, delBoards, delCases] = await Promise.all([
                     this.sync.client.from(tables.caseEvents).delete().eq('campaign_id', campaignId).in('case_id', toDelete),
@@ -2842,13 +3234,6 @@
                 if (delEvents.error) return { ok: false, error: delEvents.error.message || 'Failed pruning case events.' };
                 if (delBoards.error) return { ok: false, error: delBoards.error.message || 'Failed pruning case boards.' };
                 if (delCases.error) return { ok: false, error: delCases.error.message || 'Failed pruning case state.' };
-            }
-
-            const upsert = await this.sync.client
-                .from(tables.caseState)
-                .upsert(rows, { onConflict: 'campaign_id,case_id' });
-            if (upsert.error) {
-                return { ok: false, error: upsert.error.message || 'Failed writing case state.' };
             }
             return { ok: true };
         }
@@ -2925,6 +3310,16 @@
                     .map((row) => toTrimmedString(row && row.event_id, '', 80))
                     .filter(Boolean);
                 const toDelete = existingIds.filter((id) => !localIds.has(id));
+
+                if (normalizedRows.length) {
+                    const upsert = await this.sync.client
+                        .from(tables.caseEvents)
+                        .upsert(normalizedRows, { onConflict: 'campaign_id,case_id,event_id' });
+                    if (upsert.error) {
+                        return { ok: false, error: upsert.error.message || `Failed writing events for ${caseId}.` };
+                    }
+                }
+
                 if (toDelete.length) {
                     const del = await this.sync.client
                         .from(tables.caseEvents)
@@ -2936,13 +3331,80 @@
                         return { ok: false, error: del.error.message || `Failed deleting events for ${caseId}.` };
                     }
                 }
+            }
 
-                if (normalizedRows.length) {
+            return { ok: true };
+        }
+
+        async syncCaseEventRowsByScopeIds(state, caseEventScopeMap, writeMeta) {
+            const tables = this.getNormalizedTables();
+            const campaignId = this.sync.config.campaignId;
+            const cases = Array.isArray(state && state.cases && state.cases.items) ? state.cases.items : [];
+            const byCaseId = new Map();
+            cases.forEach((entry) => {
+                if (!entry || !entry.id) return;
+                byCaseId.set(entry.id, entry);
+            });
+
+            const entries = caseEventScopeMap instanceof Map
+                ? Array.from(caseEventScopeMap.entries())
+                : [];
+
+            for (const [rawCaseId, rawScopeIdSet] of entries) {
+                const caseId = sanitizeCaseId(rawCaseId, 'case_primary');
+                const requestedScopeIds = Array.from(rawScopeIdSet || [])
+                    .map((scopeId) => normalizeEntityScopeId(scopeId))
+                    .filter((scopeId) => !!scopeId && scopeId !== ENTITY_SCOPE_ORDER_TOKEN);
+                if (!requestedScopeIds.length) continue;
+
+                const caseEntry = byCaseId.get(caseId);
+                const events = Array.isArray(caseEntry && caseEntry.events) ? caseEntry.events : [];
+                const byScopeId = this.buildScopedEntityRowMap(events, 'event');
+                const rows = [];
+                const missingScopeIds = [];
+
+                requestedScopeIds.forEach((scopeId) => {
+                    const row = byScopeId.get(scopeId);
+                    if (!row) {
+                        missingScopeIds.push(scopeId);
+                        return;
+                    }
+                    rows.push({
+                        campaign_id: campaignId,
+                        case_id: caseId,
+                        event_id: row.id,
+                        payload: { ...row.payload, caseId },
+                        ...writeMeta
+                    });
+                });
+
+                if (rows.length) {
                     const upsert = await this.sync.client
                         .from(tables.caseEvents)
-                        .upsert(normalizedRows, { onConflict: 'campaign_id,case_id,event_id' });
+                        .upsert(rows, { onConflict: 'campaign_id,case_id,event_id' });
                     if (upsert.error) {
                         return { ok: false, error: upsert.error.message || `Failed writing events for ${caseId}.` };
+                    }
+                }
+
+                if (missingScopeIds.length) {
+                    const deleteLookup = await this.resolveDeleteIdsByScope(
+                        tables.caseEvents,
+                        'event_id',
+                        missingScopeIds,
+                        [{ column: 'case_id', value: caseId }]
+                    );
+                    if (!deleteLookup.ok) return deleteLookup;
+                    if (deleteLookup.ids.length) {
+                        const del = await this.sync.client
+                            .from(tables.caseEvents)
+                            .delete()
+                            .eq('campaign_id', campaignId)
+                            .eq('case_id', caseId)
+                            .in('event_id', deleteLookup.ids);
+                        if (del.error) {
+                            return { ok: false, error: del.error.message || `Failed deleting events for ${caseId}.` };
+                        }
                     }
                 }
             }
@@ -2999,21 +3461,36 @@
             if (plan.writePlayers) {
                 const result = await this.replaceEntityCollection(tables.players, 'player_id', cleanState.campaign.players, writeMeta);
                 if (!result.ok) return result;
+            } else if (plan.playerIds.size) {
+                const result = await this.syncEntityRowsByScopeIds(tables.players, 'player_id', cleanState.campaign.players, plan.playerIds, writeMeta);
+                if (!result.ok) return result;
             }
             if (plan.writeNPCs) {
                 const result = await this.replaceEntityCollection(tables.npcs, 'npc_id', cleanState.campaign.npcs, writeMeta);
+                if (!result.ok) return result;
+            } else if (plan.npcIds.size) {
+                const result = await this.syncEntityRowsByScopeIds(tables.npcs, 'npc_id', cleanState.campaign.npcs, plan.npcIds, writeMeta);
                 if (!result.ok) return result;
             }
             if (plan.writeLocations) {
                 const result = await this.replaceEntityCollection(tables.locations, 'location_id', cleanState.campaign.locations, writeMeta);
                 if (!result.ok) return result;
+            } else if (plan.locationIds.size) {
+                const result = await this.syncEntityRowsByScopeIds(tables.locations, 'location_id', cleanState.campaign.locations, plan.locationIds, writeMeta);
+                if (!result.ok) return result;
             }
             if (plan.writeRequisitions) {
                 const result = await this.replaceEntityCollection(tables.requisitions, 'requisition_id', cleanState.campaign.requisitions, writeMeta);
                 if (!result.ok) return result;
+            } else if (plan.requisitionIds.size) {
+                const result = await this.syncEntityRowsByScopeIds(tables.requisitions, 'requisition_id', cleanState.campaign.requisitions, plan.requisitionIds, writeMeta);
+                if (!result.ok) return result;
             }
             if (plan.writeEncounters) {
                 const result = await this.replaceEntityCollection(tables.encounters, 'encounter_id', cleanState.campaign.encounters, writeMeta);
+                if (!result.ok) return result;
+            } else if (plan.encounterIds.size) {
+                const result = await this.syncEntityRowsByScopeIds(tables.encounters, 'encounter_id', cleanState.campaign.encounters, plan.encounterIds, writeMeta);
                 if (!result.ok) return result;
             }
 
@@ -3026,6 +3503,10 @@
             const eventIds = plan.writeAllCaseEvents ? caseIds : Array.from(plan.caseEvents.values());
             if (eventIds.length) {
                 const eventResult = await this.syncCaseEventsRows(cleanState, eventIds, writeMeta);
+                if (!eventResult.ok) return eventResult;
+            }
+            if (plan.caseEventIds.size) {
+                const eventResult = await this.syncCaseEventRowsByScopeIds(cleanState, plan.caseEventIds, writeMeta);
                 if (!eventResult.ok) return eventResult;
             }
 
@@ -3575,8 +4056,9 @@
                 ? Math.max(0, Math.min(999999, Math.round(rawHp)))
                 : toTrimmedString(rawHp, '10', 40);
 
+            const playerId = toTrimmedString(source.id || generatedId, generatedId, 80);
             this.state.campaign.players.push({
-                id: toTrimmedString(source.id || generatedId, generatedId, 80),
+                id: playerId,
                 name: toTrimmedString(source.name || 'New Agent', 'New Agent', 160),
                 ac: Math.max(0, Math.min(999, Math.round(toNumber(source.ac, 10)))),
                 hp: safeHp,
@@ -3587,81 +4069,130 @@
                 projectName: toTrimmedString(source.projectName, '', 240),
                 projectReward: toTrimmedString(source.projectReward, '', 240)
             });
-            this.save({ scope: 'campaign.players' });
+            const scope = buildPlayerEntityScope(playerId);
+            this.save({ scope: scope || 'campaign.players' });
         }
 
         addNPC(npc) {
             const source = npc && typeof npc === 'object' ? { ...npc } : {};
+            const fallbackId = buildEntityId('npc');
+            source.id = toTrimmedString(source.id, fallbackId, 80);
             if (Object.prototype.hasOwnProperty.call(source, 'imageUrl')) {
                 source.imageUrl = toImageUrl(source.imageUrl);
             }
             this.state.campaign.npcs.push(source);
-            this.save({ scope: 'campaign.npcs' });
+            const scope = buildNPCEntityScope(source.id);
+            this.save({ scope: scope || 'campaign.npcs' });
         }
 
         ensurePlayerIds(persist = true) {
-            if (!this.state.campaign || !Array.isArray(this.state.campaign.players)) return;
+            if (!this.state.campaign || !Array.isArray(this.state.campaign.players)) {
+                return { mutated: false, scopes: [] };
+            }
             let mutated = false;
+            const touchedScopes = new Set();
+            const seenIds = new Set();
+            const seenScopeIds = new Set();
             this.state.campaign.players.forEach((p, idx) => {
-                if (!p.id) {
-                    p.id = 'player_' + Date.now().toString(36) + '_' + idx + Math.random().toString(36).slice(2, 5);
-                    mutated = true;
+                if (!p || typeof p !== 'object') return;
+
+                let candidate = toTrimmedString(p.id, '', 80).trim();
+                let scopeId = normalizeEntityScopeId(candidate);
+                if (!candidate || !scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN || seenIds.has(candidate) || seenScopeIds.has(scopeId)) {
+                    let bump = 0;
+                    do {
+                        candidate = buildEntityId('player', idx, bump);
+                        scopeId = normalizeEntityScopeId(candidate);
+                        bump += 1;
+                    } while (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN || seenIds.has(candidate) || seenScopeIds.has(scopeId));
                 }
+
+                if (p.id !== candidate) {
+                    p.id = candidate;
+                    mutated = true;
+                    const scope = buildPlayerEntityScope(candidate);
+                    if (scope) touchedScopes.add(scope);
+                }
+
+                seenIds.add(candidate);
+                seenScopeIds.add(scopeId);
             });
 
             if (mutated && persist) {
                 try {
-                    this.save({ scope: 'campaign.players' });
+                    const scopes = Array.from(touchedScopes.values());
+                    this.save({ scope: scopes.length ? scopes : 'campaign.players' });
                 } catch (err) {
                     console.warn('RTF_STORE: Failed to persist player IDs', err);
                 }
             }
+            return { mutated, scopes: Array.from(touchedScopes.values()) };
         }
 
         ensureCampaignEntityIds(persist = true) {
-            this.ensurePlayerIds(false);
-            if (!this.state.campaign || typeof this.state.campaign !== 'object') return;
+            const playerIdResult = this.ensurePlayerIds(false);
+            if (!this.state.campaign || typeof this.state.campaign !== 'object') {
+                return { mutated: false, scopes: [] };
+            }
 
-            let mutated = false;
-            const ensureListIds = (list, prefix) => {
+            let mutated = !!(playerIdResult && playerIdResult.mutated);
+            const touchedScopes = new Set(playerIdResult && Array.isArray(playerIdResult.scopes) ? playerIdResult.scopes : []);
+            const ensureListIds = (list, prefix, scopeBuilder = null) => {
                 if (!Array.isArray(list)) return;
                 const seen = new Set();
+                const seenScopeIds = new Set();
 
                 list.forEach((entry, idx) => {
                     if (!entry || typeof entry !== 'object') return;
 
                     let candidate = toTrimmedString(entry.id, '', 80).trim();
-                    if (candidate && !seen.has(candidate)) {
+                    let scopeId = normalizeEntityScopeId(candidate);
+                    if (candidate && scopeId && scopeId !== ENTITY_SCOPE_ORDER_TOKEN && !seen.has(candidate) && !seenScopeIds.has(scopeId)) {
                         if (entry.id !== candidate) {
                             entry.id = candidate;
                             mutated = true;
+                            if (typeof scopeBuilder === 'function') {
+                                const scope = scopeBuilder(candidate);
+                                if (scope) touchedScopes.add(scope);
+                            }
                         }
                         seen.add(candidate);
+                        seenScopeIds.add(scopeId);
                         return;
                     }
 
                     let bump = 0;
                     do {
                         candidate = buildEntityId(prefix, idx, bump);
+                        scopeId = normalizeEntityScopeId(candidate);
                         bump += 1;
-                    } while (seen.has(candidate));
+                    } while (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN || seen.has(candidate) || seenScopeIds.has(scopeId));
 
                     entry.id = candidate;
                     seen.add(candidate);
+                    seenScopeIds.add(scopeId);
                     mutated = true;
+                    if (typeof scopeBuilder === 'function') {
+                        const scope = scopeBuilder(candidate);
+                        if (scope) touchedScopes.add(scope);
+                    }
                 });
             };
 
-            ensureListIds(this.state.campaign.npcs, 'npc');
-            ensureListIds(this.state.campaign.locations, 'loc');
+            ensureListIds(this.state.campaign.npcs, 'npc', buildNPCEntityScope);
+            ensureListIds(this.state.campaign.locations, 'loc', buildLocationEntityScope);
+            ensureListIds(this.state.campaign.requisitions, 'req', buildRequisitionEntityScope);
+            ensureListIds(this.state.campaign.encounters, 'enc', buildEncounterEntityScope);
 
             if (mutated && persist) {
                 try {
-                    this.save({ scope: ['campaign.npcs', 'campaign.locations'] });
+                    const scopes = Array.from(touchedScopes.values());
+                    this.save({ scope: scopes.length ? scopes : ['campaign.players', 'campaign.npcs', 'campaign.locations', 'campaign.requisitions', 'campaign.encounters'] });
                 } catch (err) {
                     console.warn('RTF_STORE: Failed to persist campaign entity IDs', err);
                 }
             }
+            return { mutated, scopes: Array.from(touchedScopes.values()) };
         }
 
         getPlayers() {
@@ -3699,7 +4230,8 @@
                 created: toTrimmedString(source.created || new Date().toISOString(), new Date().toISOString(), 80)
             };
             this.getRequisitions().push(sanitized);
-            this.save({ scope: 'campaign.requisitions' });
+            const scope = buildRequisitionEntityScope(sanitized.id);
+            this.save({ scope: scope || 'campaign.requisitions' });
             return sanitized.id;
         }
 
@@ -3728,7 +4260,8 @@
                 });
                 if (!patch) return;
                 list[idx] = { ...list[idx], ...patch };
-                this.save({ scope: 'campaign.requisitions' });
+                const scope = buildRequisitionEntityScope(id);
+                this.save({ scope: scope || 'campaign.requisitions' });
             }
         }
 
@@ -3737,7 +4270,8 @@
             const idx = list.findIndex(r => r.id === id);
             if (idx >= 0) {
                 list.splice(idx, 1);
-                this.save({ scope: 'campaign.requisitions' });
+                const scope = buildRequisitionEntityScope(id);
+                this.save({ scope: scope || 'campaign.requisitions' });
             }
         }
 
@@ -3768,7 +4302,8 @@
             if (!entry) return '';
             entry.events.push({ ...safeEvent, caseId: entry.id });
             this.syncActiveCaseLegacyState();
-            this.save({ scope: `cases.${entry.id}.events` });
+            const scope = buildCaseEventEntityScope(entry.id, safeEvent.id);
+            this.save({ scope: scope || `cases.${entry.id}.events` });
             return safeEvent.id;
         }
 
@@ -3795,7 +4330,9 @@
                 this.syncActiveCaseLegacyState();
                 const activeCase = this.getCaseEntry(caseId);
                 const scopeId = activeCase && activeCase.id ? activeCase.id : this.getActiveCaseId();
-                this.save({ scope: `cases.${scopeId}.events` });
+                const eventId = toTrimmedString(list[idx].id || id, toTrimmedString(id, '', 80), 80);
+                const scope = buildCaseEventEntityScope(scopeId, eventId);
+                this.save({ scope: scope || `cases.${scopeId}.events` });
             }
         }
 
@@ -3803,11 +4340,14 @@
             const list = this.getEvents(caseId);
             const idx = list.findIndex(e => e.id === id);
             if (idx >= 0) {
+                const deleted = list[idx];
+                const eventId = toTrimmedString(deleted && deleted.id ? deleted.id : id, toTrimmedString(id, '', 80), 80);
                 list.splice(idx, 1);
                 this.syncActiveCaseLegacyState();
                 const activeCase = this.getCaseEntry(caseId);
                 const scopeId = activeCase && activeCase.id ? activeCase.id : this.getActiveCaseId();
-                this.save({ scope: `cases.${scopeId}.events` });
+                const scope = buildCaseEventEntityScope(scopeId, eventId);
+                this.save({ scope: scope || `cases.${scopeId}.events` });
             }
         }
 
@@ -3834,7 +4374,8 @@
                 created: toTrimmedString(source.created || new Date().toISOString(), new Date().toISOString(), 80)
             };
             this.getEncounters().push(safeEncounter);
-            this.save({ scope: 'campaign.encounters' });
+            const scope = buildEncounterEntityScope(safeEncounter.id);
+            this.save({ scope: scope || 'campaign.encounters' });
             return safeEncounter.id;
         }
 
@@ -3859,7 +4400,8 @@
                 });
                 if (!patch) return;
                 list[idx] = { ...list[idx], ...patch };
-                this.save({ scope: 'campaign.encounters' });
+                const scope = buildEncounterEntityScope(id);
+                this.save({ scope: scope || 'campaign.encounters' });
             }
         }
 
@@ -3868,7 +4410,8 @@
             const idx = list.findIndex(e => e.id === id);
             if (idx >= 0) {
                 list.splice(idx, 1);
-                this.save({ scope: 'campaign.encounters' });
+                const scope = buildEncounterEntityScope(id);
+                this.save({ scope: scope || 'campaign.encounters' });
             }
         }
 

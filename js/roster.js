@@ -92,6 +92,19 @@ let editingPreloadedImageOnly = false;
 let pendingLinkNPCId = '';
 const TRUST_LABELS = ['Hostile', 'Wary', 'Neutral', 'Trusted', 'Loyal'];
 const STIGMA_LABELS = ['Clean', 'Rumored', 'Noticed', 'Marked', 'Burned'];
+const NPC_SCOPE_PREFIX = 'campaign.npcs';
+
+function normalizeNPCScopeId(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return '';
+    return raw.replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+}
+
+function buildNPCScope(npcId) {
+    const id = normalizeNPCScopeId(npcId);
+    if (!id || id === '__order') return NPC_SCOPE_PREFIX;
+    return `${NPC_SCOPE_PREFIX}.${id}`;
+}
 
 function clampTrackLevel(value, fallback) {
     const parsed = Number.parseInt(value, 10);
@@ -141,8 +154,8 @@ function getCampaign() {
     return window.RTF_STORE.state.campaign;
 }
 
-function save() {
-    if (window.RTF_STORE) window.RTF_STORE.save({ scope: 'campaign.npcs' });
+function save(scope = NPC_SCOPE_PREFIX) {
+    if (window.RTF_STORE) window.RTF_STORE.save({ scope });
     render();
 }
 
@@ -323,6 +336,7 @@ function addNPC() {
     if (!c) return;
     if (!Array.isArray(c.npcs)) c.npcs = [];
 
+    let scopeToSave = NPC_SCOPE_PREFIX;
     if (editingNPCId) {
         const { npc: target, index } = findNPCById(editingNPCId);
         if (!target) {
@@ -332,6 +346,8 @@ function addNPC() {
             setFormMode(false);
             return;
         }
+        const targetId = String(target.id || editingNPCId || '').trim();
+        scopeToSave = buildNPCScope(targetId);
         if (isPreloadedNPC(target) || editingPreloadedImageOnly) {
             c.npcs[index] = {
                 ...target,
@@ -353,8 +369,9 @@ function addNPC() {
             };
         }
     } else {
+        const newId = createNPCId();
         c.npcs.push({
-            id: createNPCId(),
+            id: newId,
             name,
             guild,
             wants,
@@ -365,9 +382,10 @@ function addNPC() {
             stigma,
             __rtfSource: 'custom'
         });
+        scopeToSave = buildNPCScope(newId);
     }
 
-    save();
+    save(scopeToSave);
     cancelNPCEdit();
 }
 
@@ -403,7 +421,7 @@ function deleteNPC(npcId) {
     if (editingNPCId === id) {
         cancelNPCEdit();
     }
-    save();
+    save(buildNPCScope(id));
 }
 
 function updateNPCTrack(npcId, field, delta) {
@@ -417,7 +435,7 @@ function updateNPCTrack(npcId, field, delta) {
         ...npc,
         [field]: clampTrackLevel(current + Number(delta || 0), current)
     };
-    save();
+    save(buildNPCScope(npcId));
 }
 
 function render() {
@@ -444,15 +462,18 @@ function render() {
 
     const list = (c.npcs || []).filter((npc) => npc && typeof npc === 'object');
     let mutatedIds = false;
+    const touchedScopes = new Set();
     list.forEach((npc) => {
         if (!npc.id) {
             npc.id = createNPCId();
             mutatedIds = true;
+            touchedScopes.add(buildNPCScope(npc.id));
         }
     });
     if (mutatedIds && window.RTF_STORE) {
         setTimeout(() => {
-            window.RTF_STORE.save({ scope: 'campaign.npcs' });
+            const scopes = Array.from(touchedScopes.values());
+            window.RTF_STORE.save({ scope: scopes });
         }, 0);
     }
 

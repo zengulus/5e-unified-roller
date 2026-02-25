@@ -7,6 +7,19 @@ const escapeHtml = (str = '') => String(str)
 const delegatedHandlerEvents = ['click', 'change', 'input'];
 const delegatedHandlerCache = new Map();
 let delegatedHandlersBound = false;
+const PLAYER_SCOPE_PREFIX = 'campaign.players';
+
+const normalizePlayerScopeId = (value) => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return '';
+    return raw.replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+};
+
+const buildPlayerScope = (playerId) => {
+    const id = normalizePlayerScopeId(playerId);
+    if (!id || id === '__order') return PLAYER_SCOPE_PREFIX;
+    return `${PLAYER_SCOPE_PREFIX}.${id}`;
+};
 
 const getDelegatedHandlerFn = (code) => {
     if (!delegatedHandlerCache.has(code)) {
@@ -148,7 +161,7 @@ const updatePlayer = (idx, field, val) => {
         if (!players[idx] || typeof players[idx] !== 'object') return;
 
         players[idx][field] = sanitizePlayerUpdateValue(field, val);
-        window.RTF_STORE.save({ scope: 'campaign.players' });
+        window.RTF_STORE.save({ scope: buildPlayerScope(players[idx].id) });
         // render(); // Optional: re-render if needed, but input handles display
     }
 };
@@ -158,8 +171,9 @@ const deletePlayer = (idx) => {
         if (window.RTF_STORE) {
             const players = window.RTF_STORE.getPlayers();
             if (!Array.isArray(players) || !Number.isInteger(idx) || idx < 0 || idx >= players.length) return;
+            const playerId = players[idx] && players[idx].id;
             players.splice(idx, 1);
-            window.RTF_STORE.save({ scope: 'campaign.players' });
+            window.RTF_STORE.save({ scope: buildPlayerScope(playerId) });
             render();
         }
     }

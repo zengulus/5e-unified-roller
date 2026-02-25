@@ -24,6 +24,19 @@ const escapeJsString = (value = '') => String(value)
 const delegatedHandlerEvents = ['click', 'change', 'input'];
 const delegatedHandlerCache = new Map();
 let delegatedHandlersBound = false;
+const PLAYER_SCOPE_PREFIX = 'campaign.players';
+
+function normalizePlayerScopeId(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return '';
+    return raw.replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+}
+
+function buildPlayerScope(playerId) {
+    const id = normalizePlayerScopeId(playerId);
+    if (!id || id === '__order') return PLAYER_SCOPE_PREFIX;
+    return `${PLAYER_SCOPE_PREFIX}.${id}`;
+}
 
 function getDelegatedHandlerFn(code) {
     if (!delegatedHandlerCache.has(code)) {
@@ -139,7 +152,7 @@ function modHeat(amt) {
 function addPlayer() {
     const c = getCampaign();
     if (!c || !Array.isArray(c.players)) return;
-    c.players.push({
+    const player = {
         id: 'player_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5),
         name: "New Recruit",
         dp: 2,
@@ -150,8 +163,9 @@ function addPlayer() {
         hp: 10,
         pp: 10,
         dc: 10
-    });
-    save('campaign.players');
+    };
+    c.players.push(player);
+    save(buildPlayerScope(player.id));
 }
 
 function modDP(idx, amt) {
@@ -160,7 +174,7 @@ function modDP(idx, amt) {
     const p = campaign.players[idx];
     if (!p) return;
     p.dp = Math.max(0, Math.min(4, (Number(p.dp) || 0) + amt));
-    save('campaign.players');
+    save(buildPlayerScope(p.id));
 }
 
 function grantWeeklyDP() {
@@ -170,7 +184,10 @@ function grantWeeklyDP() {
         if (!p) return;
         p.dp = Math.max(0, Math.min(4, (Number(p.dp) || 0) + 2));
     });
-    save('campaign.players');
+    const scopes = campaign.players
+        .filter((p) => p && typeof p === 'object')
+        .map((p) => buildPlayerScope(p.id));
+    save(scopes.length ? scopes : PLAYER_SCOPE_PREFIX);
 }
 
 function modClock(idx, amt) {
@@ -179,15 +196,18 @@ function modClock(idx, amt) {
     const p = campaign.players[idx];
     if (!p) return;
     p.projectClock = Math.max(0, Math.min(4, (Number(p.projectClock) || 0) + amt));
-    save('campaign.players');
+    save(buildPlayerScope(p.id));
 }
 
 function deletePlayer(idx) {
     if (!confirm('Delete?')) return;
     const campaign = getCampaign();
     if (!campaign || !Array.isArray(campaign.players)) return;
+    const player = campaign.players[idx];
+    if (!player) return;
+    const playerId = player.id;
     campaign.players.splice(idx, 1);
-    save('campaign.players');
+    save(buildPlayerScope(playerId));
 }
 
 function renderClockPie(value, total = 4, extraClass = '') {
@@ -214,7 +234,7 @@ function updatePlayer(idx, field, val) {
     if (!campaign.players[idx]) return;
     if (!['name', 'projectName', 'projectReward'].includes(field)) return;
     campaign.players[idx][field] = val;
-    save('campaign.players');
+    save(buildPlayerScope(campaign.players[idx].id));
 }
 
 

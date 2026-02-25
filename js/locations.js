@@ -43,6 +43,19 @@ let delegatedHandlersBound = false;
 let pendingLinkLocationId = '';
 const TRUST_LABELS = ['Hostile', 'Wary', 'Neutral', 'Trusted', 'Loyal'];
 const STIGMA_LABELS = ['Clean', 'Rumored', 'Noticed', 'Marked', 'Burned'];
+const LOCATION_SCOPE_PREFIX = 'campaign.locations';
+
+function normalizeLocationScopeId(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return '';
+    return raw.replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+}
+
+function buildLocationScope(locationId) {
+    const id = normalizeLocationScopeId(locationId);
+    if (!id || id === '__order') return LOCATION_SCOPE_PREFIX;
+    return `${LOCATION_SCOPE_PREFIX}.${id}`;
+}
 
 function clampTrackLevel(value, fallback) {
     const parsed = Number.parseInt(value, 10);
@@ -101,8 +114,8 @@ function getCampaign() {
     return window.RTF_STORE.state.campaign;
 }
 
-function save() {
-    if (window.RTF_STORE) window.RTF_STORE.save({ scope: 'campaign.locations' });
+function save(scope = LOCATION_SCOPE_PREFIX) {
+    if (window.RTF_STORE) window.RTF_STORE.save({ scope });
     render();
 }
 
@@ -211,8 +224,9 @@ function addLocation() {
     const c = getCampaign();
     if (!c) return;
     if (!c.locations) c.locations = [];
+    const newId = createLocationId();
     c.locations.push({
-        id: createLocationId(),
+        id: newId,
         name,
         district,
         desc,
@@ -223,7 +237,7 @@ function addLocation() {
         trust,
         stigma
     });
-    save();
+    save(buildLocationScope(newId));
 
     // Reset Form
     document.getElementById('locName').value = '';
@@ -257,7 +271,7 @@ function updateLocationImage(locationId, value) {
         ...c.locations[idx],
         imageUrl
     };
-    save();
+    save(buildLocationScope(id));
 }
 
 function updateLocationField(locationId, field, value) {
@@ -273,7 +287,7 @@ function updateLocationField(locationId, field, value) {
         ...c.locations[idx],
         [field]: String(value || '').trim()
     };
-    save();
+    save(buildLocationScope(id));
 }
 
 function updateLocationTrack(locationId, field, delta) {
@@ -290,7 +304,7 @@ function updateLocationTrack(locationId, field, delta) {
         ...c.locations[idx],
         [field]: next
     };
-    save();
+    save(buildLocationScope(id));
 }
 
 function deleteLocation(locationId) {
@@ -301,7 +315,7 @@ function deleteLocation(locationId) {
         const idx = c.locations.findIndex((entry) => String(entry && entry.id || '') === id);
         if (idx < 0) return;
         c.locations.splice(idx, 1);
-        save();
+        save(buildLocationScope(id));
     }
 }
 
@@ -319,15 +333,18 @@ function render() {
 
     const list = (c.locations || []).filter((loc) => loc && typeof loc === 'object');
     let mutatedIds = false;
+    const touchedScopes = new Set();
     list.forEach((loc) => {
         if (!loc.id) {
             loc.id = createLocationId();
             mutatedIds = true;
+            touchedScopes.add(buildLocationScope(loc.id));
         }
     });
     if (mutatedIds && window.RTF_STORE) {
         setTimeout(() => {
-            window.RTF_STORE.save({ scope: 'campaign.locations' });
+            const scopes = Array.from(touchedScopes.values());
+            window.RTF_STORE.save({ scope: scopes.length ? scopes : LOCATION_SCOPE_PREFIX });
         }, 0);
     }
 

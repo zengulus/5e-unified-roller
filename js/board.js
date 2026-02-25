@@ -856,9 +856,16 @@ function pruneBoardTimelineNoise() {
             if (!isBoardEvent) continue;
             if (kind === 'clue-discovered') continue;
 
+            const rawEventId = String(evt.id || '').trim();
+            const normalizedEventId = rawEventId.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 80);
             events.splice(i, 1);
             removed += 1;
-            if (resolvedCaseId) touchedScopes.add(`cases.${resolvedCaseId}.events`);
+            if (!resolvedCaseId) continue;
+            touchedScopes.add(
+                normalizedEventId
+                    ? `cases.${resolvedCaseId}.events.${normalizedEventId}`
+                    : `cases.${resolvedCaseId}.events`
+            );
         }
     });
 
@@ -3517,22 +3524,32 @@ function persistLinkedNodeImageUrl(nodeEl, imageUrl = '') {
     if (meta.sourceType === 'npc') {
         const campaign = store.state && store.state.campaign ? store.state.campaign : null;
         const list = campaign && Array.isArray(campaign.npcs) ? campaign.npcs : [];
-        const target = list.find((entry) => String(entry && entry.id || '') === String(meta.npcId || ''));
+        const rawNpcId = String(meta.npcId || '').trim();
+        const target = list.find((entry) => String(entry && entry.id || '') === rawNpcId);
         if (!target) return;
         if (clean) target.imageUrl = clean;
         else delete target.imageUrl;
-        if (typeof store.save === 'function') store.save({ scope: 'campaign.npcs' });
+        if (typeof store.save === 'function') {
+            const normalizedId = rawNpcId.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+            const scope = normalizedId ? `campaign.npcs.${normalizedId}` : 'campaign.npcs';
+            store.save({ scope });
+        }
         return;
     }
 
     if (meta.sourceType === 'location') {
         const campaign = store.state && store.state.campaign ? store.state.campaign : null;
         const list = campaign && Array.isArray(campaign.locations) ? campaign.locations : [];
-        const target = list.find((entry) => String(entry && entry.id || '') === String(meta.locationId || ''));
+        const rawLocationId = String(meta.locationId || '').trim();
+        const target = list.find((entry) => String(entry && entry.id || '') === rawLocationId);
         if (!target) return;
         if (clean) target.imageUrl = clean;
         else delete target.imageUrl;
-        if (typeof store.save === 'function') store.save({ scope: 'campaign.locations' });
+        if (typeof store.save === 'function') {
+            const normalizedId = rawLocationId.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+            const scope = normalizedId ? `campaign.locations.${normalizedId}` : 'campaign.locations';
+            store.save({ scope });
+        }
         return;
     }
 
