@@ -61,17 +61,34 @@
 
 .roster-npc-content {
     min-width: 0;
-}
-
-.roster-npc-summary {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    display: flex;
+    flex-direction: column;
     gap: 10px;
-    align-items: start;
 }
 
 .roster-npc-identity {
     min-width: 0;
+}
+
+.roster-npc-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.roster-npc-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+    gap: 12px;
+    align-items: start;
+}
+
+.roster-npc-column {
+    display: grid;
+    gap: 8px;
+    align-content: start;
 }
 
 .roster-npc-name {
@@ -104,6 +121,10 @@
     font-size: 0.9rem;
     min-width: 0;
     overflow-wrap: anywhere;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .roster-npc-meta-label {
@@ -113,8 +134,10 @@
 }
 
 .roster-npc-meta-wants,
-.roster-npc-meta-leverage {
-    min-height: 48px;
+.roster-npc-meta-leverage,
+.roster-npc-meta-trust,
+.roster-npc-meta-stigma {
+    min-height: 58px;
 }
 
 .roster-track-row {
@@ -139,13 +162,28 @@
     font-size: 0.8rem;
 }
 
+.roster-npc-column-tracks .roster-track-row {
+    width: 100%;
+    justify-content: space-between;
+}
+
+.roster-npc-column-tracks .roster-track-value {
+    flex: 1;
+    min-width: 0;
+}
+
 .roster-npc-notes {
-    margin-top: 10px;
     font-size: 0.9rem;
     color: #aaa;
     font-style: italic;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
-    padding-top: 5px;
+    padding-top: 8px;
+}
+
+.roster-npc-notes .roster-npc-meta-label {
+    display: block;
+    margin-bottom: 3px;
+    font-style: normal;
 }
 
 .roster-npc-lock-icon {
@@ -242,7 +280,13 @@
         grid-template-columns: 1fr;
     }
 
-    .roster-npc-summary {
+    .roster-npc-title {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .roster-npc-main {
         grid-template-columns: 1fr;
     }
 
