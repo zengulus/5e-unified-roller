@@ -368,8 +368,9 @@ function render() {
         const rowClass = imageMarkup ? 'has-image' : 'no-image';
         return `
         <div class="locations-row ${rowClass}" data-location-id="${escapeHtml(locationId)}">
-            ${imageMarkup}
             <div class="locations-content">
+                ${imageMarkup}
+
                 <div class="locations-summary">
                     <div class="locations-desc-block">
                         <div class="locations-desc-label">Name</div>
@@ -422,11 +423,13 @@ function render() {
                         <button class="btn locations-track-btn" data-onclick="updateLocationTrack('${locationIdArg}', 'stigma', 1)">+</button>
                     </div>
                 </div>
-            </div>
 
-            <button class="btn locations-board-btn" data-onclick="openLocationInBoard('${locationIdArg}')" title="Open on board">🧩</button>
-            <button class="btn locations-link-btn" data-onclick="copyLocationLink('${locationIdArg}')" title="Copy deep link">🔗</button>
-            <button class="btn locations-delete-btn" data-onclick="deleteLocation('${locationIdArg}')" title="Delete Location">&times;</button>
+                <div class="locations-actions">
+                    <button class="btn locations-board-btn" data-onclick="openLocationInBoard('${locationIdArg}')" title="Open on board">🧩</button>
+                    <button class="btn locations-link-btn" data-onclick="copyLocationLink('${locationIdArg}')" title="Copy deep link">🔗</button>
+                    <button class="btn locations-delete-btn" data-onclick="deleteLocation('${locationIdArg}')" title="Delete Location">&times;</button>
+                </div>
+            </div>
         </div>
     `;
     }).join('');

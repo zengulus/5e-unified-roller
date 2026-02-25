@@ -37,24 +37,25 @@
 
 .locations-row {
     position: relative;
-    display: grid;
-    grid-template-columns: 260px minmax(0, 1fr);
-    gap: 10px;
+    display: block;
     align-items: start;
     padding: 15px;
-    padding-right: 104px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     background: rgba(0, 0, 0, 0.1);
     margin-bottom: 5px;
     border-radius: 4px;
+    overflow: hidden;
 }
 
 .locations-row.no-image {
-    grid-template-columns: minmax(0, 1fr);
+    display: block;
 }
 
 .locations-content {
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .locations-summary {
@@ -77,15 +78,26 @@
 
 .locations-image {
     width: 100%;
+    height: clamp(240px, 40vh, 420px);
+    max-width: none;
+    background: #000;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .locations-image img {
     width: 100%;
-    max-height: 190px;
-    object-fit: cover;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    border-radius: 0;
+    border: 0;
     display: block;
+    background: #000;
 }
 
 .locations-district {
@@ -127,6 +139,9 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
+    justify-content: space-between;
+    box-sizing: border-box;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 999px;
     padding: 4px 8px;
@@ -141,49 +156,57 @@
 }
 
 .locations-track-value {
-    min-width: 72px;
+    flex: 1;
+    min-width: 0;
+    text-align: center;
     font-size: 0.8rem;
 }
 
 .locations-track-btn {
+    flex: 0 0 30px;
+    min-width: 30px;
     padding: 2px 8px;
     line-height: 1.2;
 }
 
-.locations-delete-btn {
-    position: absolute;
-    right: 10px;
-    top: 10px;
-    padding: 4px 8px;
-    color: var(--danger);
-    border: none;
-    background: transparent;
-    font-size: 1.2rem;
-    cursor: pointer;
+.locations-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 .locations-link-btn {
-    position: absolute;
-    right: 42px;
-    top: 10px;
-    padding: 4px 8px;
     color: var(--accent-secondary);
-    border: none;
-    background: transparent;
-    font-size: 0.95rem;
-    cursor: pointer;
 }
 
 .locations-board-btn {
-    position: absolute;
-    right: 74px;
-    top: 10px;
-    padding: 4px 8px;
     color: var(--accent-secondary);
-    border: none;
-    background: transparent;
-    font-size: 0.95rem;
+}
+
+.locations-delete-btn {
+    color: var(--danger);
+    font-size: 1.2rem;
+}
+
+.locations-board-btn,
+.locations-link-btn,
+.locations-delete-btn {
+    position: static;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.18);
     cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    font-size: 0.95rem;
 }
 
 .locations-linked-focus {
@@ -207,17 +230,19 @@
     }
 
     .locations-row {
-        grid-template-columns: 1fr;
-        padding-right: 15px;
-        gap: 8px;
+        display: block;
     }
 
     .locations-row.no-image {
-        grid-template-columns: 1fr;
+        display: block;
     }
 
     .locations-summary {
         grid-template-columns: 1fr;
+    }
+
+    .locations-image {
+        height: clamp(220px, 55vw, 360px);
     }
 
     .locations-track {
@@ -225,11 +250,7 @@
         justify-content: space-between;
     }
 
-    .locations-board-btn,
-    .locations-link-btn,
-    .locations-delete-btn {
-        position: static;
-        justify-self: flex-end;
-        margin-top: 4px;
+    .locations-actions {
+        justify-content: flex-end;
     }
 }
