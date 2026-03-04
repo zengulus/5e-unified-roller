@@ -214,7 +214,7 @@ begin
     return;
   end if;
 
-  -- Core (rep, heat, case template)
+  -- Core (rep, heat, cognitive risk, case template)
   insert into public.rtf_campaign_core (
     campaign_id,
     payload,
@@ -230,6 +230,7 @@ begin
       jsonb_build_object(
         'rep', coalesce(s.state #> '{campaign,rep}', '{}'::jsonb),
         'heat', coalesce(s.state #> '{campaign,heat}', '0'::jsonb),
+        'cognitiveRisk', coalesce(s.state #> '{campaign,cognitiveRisk}', '0'::jsonb),
         'case', coalesce(s.state #> '{campaign,case}', '{}'::jsonb)
       )
     ) as payload,

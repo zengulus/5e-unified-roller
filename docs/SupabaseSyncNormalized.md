@@ -12,7 +12,7 @@ This is an optional high-concurrency schema for teams that want better simultane
 
 Use one row per independently edited object:
 
-- `rtf_campaign_core`: one row per campaign (rep, heat, case template/meta).
+- `rtf_campaign_core`: one row per campaign (rep, heat, cognitive risk, case template/meta).
 - `rtf_campaign_hq`: one row per campaign (HQ payload).
 - `rtf_case_state`: one row per case (name/order/active flag).
 - `rtf_case_boards`: one row per case board.
@@ -31,7 +31,7 @@ Each row keeps:
 
 ## Scope-to-table mapping
 
-- `campaign.heat`, `campaign.rep`, `campaign.case` -> `rtf_campaign_core`
+- `campaign.heat`, `campaign.cognitiveRisk`, `campaign.rep`, `campaign.case` -> `rtf_campaign_core`
 - `campaign.players` -> `rtf_campaign_players`
 - `campaign.npcs` -> `rtf_campaign_npcs`
 - `campaign.locations` -> `rtf_campaign_locations`

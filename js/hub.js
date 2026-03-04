@@ -25,6 +25,9 @@ const delegatedHandlerEvents = ['click', 'change', 'input'];
 const delegatedHandlerCache = new Map();
 let delegatedHandlersBound = false;
 const PLAYER_SCOPE_PREFIX = 'campaign.players';
+const SHARED_TRACK_MIN = 0;
+const SHARED_TRACK_MAX = 6;
+let systemDetailToggleBound = false;
 
 function normalizePlayerScopeId(value) {
     const raw = String(value || '').trim().toLowerCase();
@@ -83,6 +86,39 @@ function bindDelegatedDataHandlers() {
 }
 
 bindDelegatedDataHandlers();
+
+function clampSharedTrack(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return SHARED_TRACK_MIN;
+    return Math.max(SHARED_TRACK_MIN, Math.min(SHARED_TRACK_MAX, parsed));
+}
+
+function getHeatWarning(heat) {
+    if (heat >= 6) return "CRITICAL: Hard Constraint mandated.";
+    if (heat >= 3) return "WARNING: Complication Scene triggered.";
+    return "";
+}
+
+function getCognitiveRiskWarning(risk) {
+    if (risk >= 6) return "NARRATIVE COLLAPSE: Official records and witness accounts destabilize.";
+    if (risk >= 5) return "SEVERE DISCONTINUITY: A major prior-case detail has collapsed.";
+    if (risk >= 4) return "IDENTITY DRIFT: Bureaucratic checks degrade and records start failing.";
+    if (risk >= 3) return "MEMORY FRACTURES: Temporary personal-memory loss is in play.";
+    if (risk >= 2) return "MINOR SLIPPAGE: Notes, names, and report copies begin to conflict.";
+    return "";
+}
+
+function bindSystemDetailToggle() {
+    if (systemDetailToggleBound) return;
+    systemDetailToggleBound = true;
+    const title = document.getElementById('hubPageTitle');
+    if (!title) return;
+    title.addEventListener('click', (event) => {
+        if (!event.altKey) return;
+        event.preventDefault();
+        document.body.classList.toggle('hub-system-details-visible');
+    });
+}
 
 // Shortcut to Store Campaign Data
 function getCampaign() {
@@ -144,8 +180,15 @@ function modRep(g, amt) {
 function modHeat(amt) {
     const c = getCampaign();
     if (!c) return;
-    c.heat = Math.max(0, Math.min(6, (c.heat || 0) + amt));
+    c.heat = clampSharedTrack((Number(c.heat) || 0) + Number(amt || 0));
     save('campaign.heat');
+}
+
+function modCognitiveRisk(amt) {
+    const c = getCampaign();
+    if (!c) return;
+    c.cognitiveRisk = clampSharedTrack((Number(c.cognitiveRisk) || 0) + Number(amt || 0));
+    save('campaign.cognitiveRisk');
 }
 
 // --- PLAYER LOGIC ---
@@ -271,15 +314,18 @@ function render() {
         `;
     }).join('');
 
-    const heatRaw = Number(c.heat);
-    const safeHeat = Number.isFinite(heatRaw) ? Math.max(0, Math.min(6, heatRaw)) : 0;
+    const safeHeat = clampSharedTrack(c.heat);
     document.getElementById('heatVal').innerText = safeHeat;
-    document.getElementById('heatFill').style.width = ((safeHeat / 6) * 100) + '%';
+    document.getElementById('heatFill').style.width = ((safeHeat / SHARED_TRACK_MAX) * 100) + '%';
+    document.getElementById('heatWarning').innerText = getHeatWarning(safeHeat);
 
-    let warn = "";
-    if (safeHeat >= 6) warn = "CRITICAL: Hard Constraint mandated.";
-    else if (safeHeat >= 3) warn = "WARNING: Complication Scene triggered.";
-    document.getElementById('heatWarning').innerText = warn;
+    const safeCognitiveRisk = clampSharedTrack(c.cognitiveRisk);
+    const cognitiveRiskValEl = document.getElementById('cognitiveRiskVal');
+    const cognitiveRiskFillEl = document.getElementById('cognitiveRiskFill');
+    const cognitiveRiskWarningEl = document.getElementById('cognitiveRiskWarning');
+    if (cognitiveRiskValEl) cognitiveRiskValEl.innerText = safeCognitiveRisk;
+    if (cognitiveRiskFillEl) cognitiveRiskFillEl.style.width = ((safeCognitiveRisk / SHARED_TRACK_MAX) * 100) + '%';
+    if (cognitiveRiskWarningEl) cognitiveRiskWarningEl.innerText = getCognitiveRiskWarning(safeCognitiveRisk);
 
     // Player List
     const rewardOptions = projectRewards.map((reward) => `<option value="${escapeHtml(reward)}"></option>`).join('');
@@ -324,6 +370,7 @@ function render() {
 
 // Initial render on load
 window.addEventListener('load', () => {
+    bindSystemDetailToggle();
     // Check if store loaded
     if (window.RTF_STORE) {
         render();
@@ -331,3 +378,5 @@ window.addEventListener('load', () => {
         setTimeout(render, 100); // Simple retry
     }
 });
+
+bindSystemDetailToggle();

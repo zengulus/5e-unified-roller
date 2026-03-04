@@ -150,6 +150,10 @@ h2 {
     padding-bottom: 8px;
 }
 
+.hub-page-title {
+    user-select: none;
+}
+
 input[type="text"],
 input[type="url"],
 input[type="search"],
@@ -244,6 +248,37 @@ canvas#vector-cloud {
     margin-top: 8px;
     font-weight: bold;
     min-height: 1rem;
+}
+
+.hub-status-cogrisk-wrap {
+    margin-top: 14px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border);
+}
+
+.hub-cogrisk-val {
+    color: #7ec8ff;
+}
+
+.hub-cogrisk-fill {
+    background: linear-gradient(90deg, #2f6f95, #6cc8ff);
+    box-shadow: 0 0 10px rgba(108, 200, 255, 0.75);
+}
+
+.hub-cogrisk-warning {
+    color: #9ccfff;
+}
+
+.hub-status-system-text {
+    display: none;
+    margin-top: 8px;
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: color-mix(in srgb, var(--text) 78%, #9fb8cf 22%);
+}
+
+body.hub-system-details-visible .hub-status-system-text {
+    display: block;
 }
 
 .hub-roster-actions {

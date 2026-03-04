@@ -19,7 +19,7 @@
         <header class="hero-header">
             <div>
                 <p class="hero-eyebrow">Ravnica Task Force</p>
-                <h1>Campaign Hub</h1>
+                <h1 id="hubPageTitle" class="hub-page-title" title="Alt+Click to toggle Heat/Cognitive Risk system summaries.">Campaign Hub</h1>
                 <p class="hero-subtitle">A campaign-level dashboard for managing the strategic layer of the game, tuned for Ravnica's urban grind.</p>
             </div>
             <div class="hero-actions">
@@ -74,6 +74,28 @@
                     </div>
                 </div>
                 <p id="heatWarning" class="hub-heat-warning">
+                </p>
+                <p class="hub-status-system-text hub-status-heat-system-text">
+                    Heat tracks public and institutional pressure: 0-2 low profile, 3-5 escalating complications, 6 hard constraints in play.
+                </p>
+            </div>
+            <div class="hub-status-heat-wrap hub-status-cogrisk-wrap">
+                <div class="hub-status-heat-head">
+                    <span class="mini-label">Cognitive Risk (0-6)</span>
+                    <div>
+                        <button class="btn" data-onclick="modCognitiveRisk(-1)">-</button>
+                        <span id="cognitiveRiskVal" class="hub-heat-val hub-cogrisk-val">0</span>
+                        <button class="btn" data-onclick="modCognitiveRisk(1)">+</button>
+                    </div>
+                </div>
+                <div id="cognitiveRiskMeter" class="hub-heat-meter hub-cogrisk-meter">
+                    <div id="cognitiveRiskFill" class="hub-heat-fill hub-cogrisk-fill">
+                    </div>
+                </div>
+                <p id="cognitiveRiskWarning" class="hub-heat-warning hub-cogrisk-warning">
+                </p>
+                <p class="hub-status-system-text hub-status-cogrisk-system-text">
+                    Cognitive Risk tracks antimemetic and void-history exposure: routine incidents are +1, major exposure is +2, 2+ introduces slippage, 4+ degrades records, 6 collapses stable documentation; reduce it with Ledger truth, source avoidance, and successful containment.
                 </p>
             </div>
         </div>

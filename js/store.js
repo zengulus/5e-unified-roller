@@ -98,6 +98,7 @@
         campaign: {
             rep: buildRepMapFromGuilds(resolveDefaultGuildList()),
             heat: 0,
+            cognitiveRisk: 0,
             players: [],
             npcs: [],
             locations: [],
@@ -278,6 +279,7 @@
         return {
             rep: sanitizeRep(source.rep),
             heat: toNumber(source.heat, 0),
+            cognitiveRisk: toNumber(source.cognitiveRisk, 0),
             players: Array.isArray(source.players) ? source.players : [],
             npcs: Array.isArray(source.npcs) ? source.npcs : [],
             locations: Array.isArray(source.locations) ? source.locations : [],
@@ -657,6 +659,7 @@
         const map = new Map();
         map.set('campaign.rep', clean.campaign.rep);
         map.set('campaign.heat', clean.campaign.heat);
+        map.set('campaign.cognitiveRisk', clean.campaign.cognitiveRisk);
         addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.players, clean.campaign.players);
         addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.npcs, clean.campaign.npcs);
         addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.locations, clean.campaign.locations);
@@ -1460,6 +1463,7 @@
                     if (hubData && typeof hubData === 'object') {
                         if (Object.prototype.hasOwnProperty.call(hubData, 'rep')) this.state.campaign.rep = hubData.rep;
                         if (Object.prototype.hasOwnProperty.call(hubData, 'heat')) this.state.campaign.heat = hubData.heat;
+                        if (Object.prototype.hasOwnProperty.call(hubData, 'cognitiveRisk')) this.state.campaign.cognitiveRisk = hubData.cognitiveRisk;
                         if (Object.prototype.hasOwnProperty.call(hubData, 'players')) this.state.campaign.players = hubData.players;
                         if (Object.prototype.hasOwnProperty.call(hubData, 'case')) this.state.campaign.case = hubData.case;
                         migrated = true;
@@ -2026,6 +2030,7 @@
                 const payload = core.payload;
                 if (Object.prototype.hasOwnProperty.call(payload, 'rep')) base.campaign.rep = sanitizeRep(payload.rep);
                 if (Object.prototype.hasOwnProperty.call(payload, 'heat')) base.campaign.heat = toNumber(payload.heat, 0);
+                if (Object.prototype.hasOwnProperty.call(payload, 'cognitiveRisk')) base.campaign.cognitiveRisk = toNumber(payload.cognitiveRisk, 0);
                 if (Object.prototype.hasOwnProperty.call(payload, 'case')) base.campaign.case = sanitizeCase(payload.case);
             }
 
@@ -2945,7 +2950,7 @@
                         markCampaignAll();
                         return;
                     }
-                    if (scope === 'campaign.heat' || scope === 'campaign.rep' || scope === 'campaign.case') plan.writeCore = true;
+                    if (scope === 'campaign.heat' || scope === 'campaign.cognitiveRisk' || scope === 'campaign.rep' || scope === 'campaign.case') plan.writeCore = true;
                     const campaignEntityMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
                     if (campaignEntityMatch) {
                         const key = campaignEntityMatch[1];
@@ -3456,6 +3461,7 @@
                 const corePayload = {
                     rep: cleanState.campaign.rep,
                     heat: cleanState.campaign.heat,
+                    cognitiveRisk: cleanState.campaign.cognitiveRisk,
                     case: cleanState.campaign.case
                 };
                 const coreUpsert = await this.sync.client
