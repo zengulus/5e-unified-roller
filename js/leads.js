@@ -239,6 +239,45 @@
         return list.filter((entry) => !blockedIds.has(String(entry && entry.id || '')));
     }
 
+    function getLeadTargetDisplayOptions(type, leadId = '') {
+        const options = getLeadTargetOptions(type, leadId);
+        const seenLabels = new Map();
+        return options.map((entry) => {
+            const baseLabel = String(entry && entry.label || entry && entry.id || '').trim();
+            const safeLabel = baseLabel || String(entry && entry.id || '').trim();
+            const count = (seenLabels.get(safeLabel) || 0) + 1;
+            seenLabels.set(safeLabel, count);
+            return {
+                ...(entry || {}),
+                displayLabel: count === 1 ? safeLabel : `${safeLabel} (${count})`
+            };
+        });
+    }
+
+    function resolveLeadTargetInputToId(type, value, leadId = '') {
+        const cleanType = normalizeLeadType(type);
+        const raw = String(value || '').trim();
+        if (!isLinkableLeadType(cleanType)) return '';
+        if (!raw) return '';
+        const options = getLeadTargetDisplayOptions(cleanType, leadId);
+        const byDisplay = options.find((entry) => String(entry && entry.displayLabel || '').trim() === raw);
+        if (byDisplay && byDisplay.id) return String(byDisplay.id);
+        const byLabel = options.find((entry) => String(entry && entry.label || '').trim() === raw);
+        if (byLabel && byLabel.id) return String(byLabel.id);
+        const byId = options.find((entry) => String(entry && entry.id || '').trim() === raw);
+        if (byId && byId.id) return String(byId.id);
+        return '';
+    }
+
+    function getLeadTargetDisplayValue(type, targetId, leadId = '') {
+        const cleanType = normalizeLeadType(type);
+        const cleanId = normalizeTargetId(targetId);
+        if (!isLinkableLeadType(cleanType) || !cleanId) return '';
+        const options = getLeadTargetDisplayOptions(cleanType, leadId);
+        const match = options.find((entry) => String(entry && entry.id || '') === cleanId);
+        return String(match && match.displayLabel || '').trim();
+    }
+
     function isValidLeadTarget(type, targetId, leadId = '') {
         const cleanType = normalizeLeadType(type);
         const cleanId = normalizeTargetId(targetId);
@@ -248,10 +287,9 @@
     }
 
     function buildLeadTargetDatalist(type, leadId = '') {
-        return getLeadTargetOptions(type, leadId).map((entry) => {
-            const id = String(entry && entry.id || '');
-            const label = String(entry && entry.label || id);
-            return `<option value="${escapeHtml(id)}" label="${escapeHtml(label)}"></option>`;
+        return getLeadTargetDisplayOptions(type, leadId).map((entry) => {
+            const display = String(entry && entry.displayLabel || '');
+            return `<option value="${escapeHtml(display)}"></option>`;
         }).join('');
     }
 
@@ -281,6 +319,11 @@
         targetEl.setAttribute('list', 'leadTargetOptions');
         targetEl.placeholder = getLeadTargetPlaceholder(type, options.length);
         datalistEl.innerHTML = buildLeadTargetDatalist(type);
+        const resolved = resolveLeadTargetInputToId(type, targetEl.value || '');
+        if (resolved) {
+            const display = getLeadTargetDisplayValue(type, resolved);
+            if (display) targetEl.value = display;
+        }
     }
 
     function buildLeadTargetEditor(leadId, type, value) {
@@ -291,7 +334,7 @@
         const options = getLeadTargetOptions(cleanType, leadId);
         const listId = `leadTargetOptions_${String(leadId || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'lead'}`;
         return `
-            <input type="text" value="${escapeHtml(normalizeTargetId(value))}" list="${listId}" placeholder="${escapeHtml(getLeadTargetPlaceholder(cleanType, options.length))}"
+            <input type="text" value="${escapeHtml(getLeadTargetDisplayValue(cleanType, value, leadId))}" list="${listId}" placeholder="${escapeHtml(getLeadTargetPlaceholder(cleanType, options.length))}"
                 data-onchange="updateLeadField('${escapeJsString(String(leadId || ''))}', 'targetId', this.value)">
             <datalist id="${listId}">
                 ${buildLeadTargetDatalist(cleanType, leadId)}
@@ -450,7 +493,8 @@
         refreshLeadTargetIndex();
         const type = normalizeLeadType(document.getElementById('leadType').value);
         const title = String(document.getElementById('leadTitle').value || '').trim();
-        let targetId = normalizeTargetId(document.getElementById('leadTargetId').value || '');
+        const targetInput = String(document.getElementById('leadTargetId').value || '');
+        let targetId = resolveLeadTargetInputToId(type, targetInput);
         const question = String(document.getElementById('leadQuestion').value || '').trim();
         const nextStep = String(document.getElementById('leadNextStep').value || '').trim();
         if (!title || !question || !nextStep) {
@@ -459,7 +503,7 @@
         }
         if (!isLinkableLeadType(type)) {
             targetId = '';
-        } else if (targetId && !isValidLeadTarget(type, targetId)) {
+        } else if (targetInput.trim() && !targetId) {
             alert('Select a valid target from the filterable list.');
             return;
         }
@@ -504,10 +548,11 @@
         if (field === 'targetId') {
             const leadType = normalizeLeadType(list[idx].type);
             const currentTarget = normalizeTargetId(list[idx].targetId || '');
-            const nextTarget = normalizeTargetId(value);
+            const nextTargetInput = String(value || '');
+            const nextTarget = resolveLeadTargetInputToId(leadType, nextTargetInput, id);
             if (!isLinkableLeadType(leadType)) {
                 list[idx].targetId = '';
-            } else if (nextTarget && !isValidLeadTarget(leadType, nextTarget, id) && nextTarget !== currentTarget) {
+            } else if (nextTargetInput.trim() && !nextTarget && nextTarget !== currentTarget) {
                 alert('Select a valid target from the filterable list.');
                 renderLeadQueue();
                 return;

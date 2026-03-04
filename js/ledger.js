@@ -251,6 +251,45 @@
         return scoped.length ? scoped : list;
     }
 
+    function getSourceDisplayOptions(sourceType, caseId = '') {
+        const options = getSourceOptionsForType(sourceType, caseId);
+        const seenLabels = new Map();
+        return options.map((entry) => {
+            const baseLabel = String(entry && entry.label || entry && entry.id || '').trim();
+            const safeLabel = baseLabel || String(entry && entry.id || '').trim();
+            const count = (seenLabels.get(safeLabel) || 0) + 1;
+            seenLabels.set(safeLabel, count);
+            return {
+                ...(entry || {}),
+                displayLabel: count === 1 ? safeLabel : `${safeLabel} (${count})`
+            };
+        });
+    }
+
+    function resolveSourceInputToId(sourceType, value, caseId = '') {
+        const cleanType = normalizeSourceType(sourceType);
+        const raw = String(value || '').trim();
+        if (!isLinkedSourceType(cleanType)) return '';
+        if (!raw) return '';
+        const options = getSourceDisplayOptions(cleanType, caseId);
+        const byDisplay = options.find((entry) => String(entry && entry.displayLabel || '').trim() === raw);
+        if (byDisplay && byDisplay.id) return String(byDisplay.id);
+        const byLabel = options.find((entry) => String(entry && entry.label || '').trim() === raw);
+        if (byLabel && byLabel.id) return String(byLabel.id);
+        const byId = options.find((entry) => String(entry && entry.id || '').trim() === raw);
+        if (byId && byId.id) return String(byId.id);
+        return '';
+    }
+
+    function getSourceDisplayValue(sourceType, sourceId, caseId = '') {
+        const cleanType = normalizeSourceType(sourceType);
+        const cleanId = normalizeSourceId(sourceId);
+        if (!isLinkedSourceType(cleanType) || !cleanId) return '';
+        const options = getSourceDisplayOptions(cleanType, caseId);
+        const match = options.find((entry) => String(entry && entry.id || '') === cleanId);
+        return String(match && match.displayLabel || '').trim();
+    }
+
     function getSourcePickerPlaceholder(sourceType, optionsCount) {
         const cleanType = normalizeSourceType(sourceType);
         if (!isLinkedSourceType(cleanType)) return 'No linked record required';
@@ -269,11 +308,10 @@
     }
 
     function buildSourceDatalistOptions(sourceType, caseId = '') {
-        const options = getSourceOptionsForType(sourceType, caseId);
+        const options = getSourceDisplayOptions(sourceType, caseId);
         return options.map((entry) => {
-            const id = String(entry && entry.id || '');
-            const label = String(entry && entry.label || id);
-            return `<option value="${escapeHtml(id)}" label="${escapeHtml(label)}"></option>`;
+            const display = String(entry && entry.displayLabel || '');
+            return `<option value="${escapeHtml(display)}"></option>`;
         }).join('');
     }
 
@@ -334,8 +372,11 @@
         sourceIdEl.setAttribute('list', 'ledgerSourceOptions');
         sourceIdEl.placeholder = getSourcePickerPlaceholder(sourceType, options.length);
         datalistEl.innerHTML = buildSourceDatalistOptions(sourceType, caseId);
-
-        if (!isValidLinkedSourceId(sourceType, sourceIdEl.value, caseId)) {
+        const resolved = resolveSourceInputToId(sourceType, sourceIdEl.value || '', caseId);
+        if (resolved) {
+            const display = getSourceDisplayValue(sourceType, resolved, caseId);
+            if (display) sourceIdEl.value = display;
+        } else if (sourceIdEl.value && !isValidLinkedSourceId(sourceType, sourceIdEl.value, caseId)) {
             sourceIdEl.value = '';
         }
     }
@@ -480,6 +521,7 @@
         const sourceType = normalizeSourceType(entry.sourceType);
         const sourceLabel = SOURCE_LABELS[sourceType] || sourceType;
         const sourceId = normalizeSourceId(entry.sourceId);
+        const sourceDisplay = getSourceDisplayValue(sourceType, sourceId, entry.caseId) || '';
         const caseName = getCaseName(entry.caseId);
         const tags = String(entry.tags || '').trim();
 
@@ -503,7 +545,7 @@
                     <div class="ledger-pill-row">
                         <span class="ledger-pill">${escapeHtml(sourceLabel)}</span>
                         <span class="ledger-pill">Case: ${escapeHtml(caseName)}</span>
-                        ${sourceId ? `<span class="ledger-pill">Link: ${escapeHtml(sourceId)}</span>` : ''}
+                        ${sourceDisplay ? `<span class="ledger-pill">Link: ${escapeHtml(sourceDisplay)}</span>` : ''}
                         ${tags ? `<span class="ledger-pill">Tags: ${escapeHtml(tags)}</span>` : ''}
                     </div>
                 </div>
@@ -596,11 +638,12 @@
 
         const caseId = String((document.getElementById('ledgerCase') || {}).value || '');
         const sourceType = normalizeSourceType(String((document.getElementById('ledgerSourceType') || {}).value || 'case'), 'case');
-        let sourceId = normalizeSourceId((document.getElementById('ledgerSourceId') || {}).value || '');
+        const sourceInput = String((document.getElementById('ledgerSourceId') || {}).value || '');
+        let sourceId = resolveSourceInputToId(sourceType, sourceInput, caseId);
 
         if (!isLinkedSourceType(sourceType)) {
             sourceId = '';
-        } else if (sourceId && !isValidLinkedSourceId(sourceType, sourceId, caseId)) {
+        } else if (sourceInput.trim() && !sourceId) {
             alert('Select a valid linked record from the filterable list.');
             return;
         }
