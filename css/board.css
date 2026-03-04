@@ -103,6 +103,30 @@ body.board-embedded-my-story canvas#vector-cloud {
     display: none;
 }
 
+.board-shortcut-alert {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 210;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(12, 14, 18, 0.92);
+    color: #f5f7fb;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.board-shortcut-alert.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
 body.mobile-board .toolbar-scroll-wrapper {
     touch-action: pan-x;
 }

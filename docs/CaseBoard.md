@@ -15,6 +15,7 @@ Modular clue board with physics nodes, quick-reference popups, and case-scoped l
 ## Navigation
 - **Pan vs Edit** – The hero `🖐️ Pan` button toggles camera panning mode so you can reposition the view without dragging nodes.
 - **Zoom & Focus** – Scroll to zoom anywhere on the infinite canvas. Double-click a node to temporarily isolate its direct connections and reduce visual noise during briefings.
+- **Keyboard Shortcuts** – `+` zooms in, `-` zooms out, and `P` toggles pan mode. Shortcuts are ignored while typing in editable fields, and each action shows a brief on-screen alert.
 
 ## Case Context
 - **Active Case Source** – Board reads the currently active case from Tools Hub (`tools.html` -> `Active Case Context` panel).

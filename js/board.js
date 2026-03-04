@@ -59,6 +59,7 @@ const coarsePointerQuery = (typeof window.matchMedia === 'function')
     : null;
 let mobileMode = false;
 let mobileHandlersBound = false;
+let keyboardShortcutAlertTimer = null;
 
 const touchState = {
     dragTouchId: null,
@@ -134,6 +135,13 @@ const GROUP_NODE_MIN_WIDTH = 220;
 const GROUP_NODE_MIN_HEIGHT = 150;
 const GROUP_NODE_MAX_WIDTH = 2200;
 const GROUP_NODE_MAX_HEIGHT = 1600;
+const KEYBOARD_ZOOM_STEP = 1.14;
+const SHORTCUT_ALERT_VISIBLE_MS = 1400;
+const SHORTCUT_KEYS = Object.freeze({
+    pan: 'P',
+    zoomIn: '+',
+    zoomOut: '-'
+});
 
 function getDelegatedHandlerFn(code) {
     if (!delegatedHandlerCache.has(code)) {
@@ -216,6 +224,39 @@ function isEditableTouchTarget(target) {
 function isTouchUIArea(target) {
     if (!target || typeof target.closest !== 'function') return false;
     return !!target.closest('.toolbar-scroll-wrapper, .popup-menu, .hero-header, #toolbar-toggle, .context-menu, .string-label');
+}
+
+function isTypingElement(target) {
+    if (!(target instanceof Element)) return false;
+    if (target.isContentEditable) return true;
+    if (typeof target.closest !== 'function') return false;
+    return !!target.closest('input, textarea, select, [contenteditable="true"], .label-input');
+}
+
+function isTypingContextTarget(target) {
+    if (isTypingElement(target)) return true;
+    return isTypingElement(document.activeElement);
+}
+
+function showShortcutAlert(message) {
+    if (!message) return;
+    let alertEl = document.getElementById('board-shortcut-alert');
+    if (!alertEl) {
+        alertEl = document.createElement('div');
+        alertEl.id = 'board-shortcut-alert';
+        alertEl.className = 'board-shortcut-alert';
+        alertEl.setAttribute('role', 'status');
+        alertEl.setAttribute('aria-live', 'polite');
+        document.body.appendChild(alertEl);
+    }
+    alertEl.textContent = message;
+    alertEl.classList.add('is-visible');
+    if (keyboardShortcutAlertTimer) {
+        clearTimeout(keyboardShortcutAlertTimer);
+    }
+    keyboardShortcutAlertTimer = setTimeout(() => {
+        alertEl.classList.remove('is-visible');
+    }, SHORTCUT_ALERT_VISIBLE_MS);
 }
 
 function normalizeCaseName(name) {
@@ -1294,6 +1335,8 @@ window.addEventListener('load', async () => {
     bindMobileHandlers();
     pruneBoardTimelineNoise();
     resizeCanvas();
+    const panBtn = document.getElementById('btn-pan');
+    if (panBtn) panBtn.title = `Shortcut: ${SHORTCUT_KEYS.pan}`;
     initToolbars();
     loadBoard();
     applyBoardCrossLinkFromUrl();
@@ -3084,6 +3127,45 @@ function screenToWorld(x, y) {
     return { x: (x - view.x) / view.scale, y: (y - view.y) / view.scale };
 }
 
+function zoomViewAtClientPoint(clientX, clientY, factor) {
+    if (!Number.isFinite(factor) || factor <= 0) return false;
+    const wx = (clientX - view.x) / view.scale;
+    const wy = (clientY - view.y) / view.scale;
+    const nextScale = Math.max(CONFIG.VIEW_SCALE_MIN, Math.min(view.scale * factor, CONFIG.VIEW_SCALE_MAX));
+    if (!Number.isFinite(nextScale)) return false;
+    view.scale = nextScale;
+    view.x = clientX - wx * view.scale;
+    view.y = clientY - wy * view.scale;
+    updateViewCSS();
+    return true;
+}
+
+function handleBoardShortcutKeydown(event) {
+    if (!event || event.defaultPrevented) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (isTypingContextTarget(event.target)) return;
+    if (event.repeat) return;
+
+    const key = String(event.key || '');
+    const lower = key.toLowerCase();
+    const isZoomIn = key === '+' || key === '=' || event.code === 'NumpadAdd';
+    const isZoomOut = key === '-' || key === '_' || event.code === 'NumpadSubtract';
+
+    if (isZoomIn || isZoomOut) {
+        event.preventDefault();
+        const zoomFactor = isZoomIn ? KEYBOARD_ZOOM_STEP : (1 / KEYBOARD_ZOOM_STEP);
+        zoomViewAtClientPoint(window.innerWidth * 0.5, window.innerHeight * 0.5, zoomFactor);
+        showShortcutAlert(`${isZoomIn ? 'Zoom In' : 'Zoom Out'} (${isZoomIn ? SHORTCUT_KEYS.zoomIn : SHORTCUT_KEYS.zoomOut}) - ${Math.round(view.scale * 100)}%`);
+        return;
+    }
+
+    if (lower === 'p') {
+        event.preventDefault();
+        togglePanMode();
+        showShortcutAlert(`Pan Mode ${panMode ? 'ON' : 'OFF'} (${SHORTCUT_KEYS.pan})`);
+    }
+}
+
 function updateViewCSS() {
     const t = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
     if (groupContainer) groupContainer.style.transform = t;
@@ -3107,6 +3189,7 @@ function togglePanMode() {
         btn.innerText = panMode ? "🖐️ Pan: ON" : "🖐️ Pan: OFF";
         btn.style.background = panMode ? "var(--gold)" : "";
         btn.style.color = panMode ? "#000" : "";
+        btn.title = `Shortcut: ${SHORTCUT_KEYS.pan}`;
         document.body.style.cursor = panMode ? "grab" : "default";
     }
 }
@@ -3137,6 +3220,7 @@ document.addEventListener('mousedown', (e) => {
 
 document.addEventListener('keydown', (e) => {
     syncPortPreviewState(e.altKey);
+    handleBoardShortcutKeydown(e);
 });
 
 document.addEventListener('keyup', (e) => {
