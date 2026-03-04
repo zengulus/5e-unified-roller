@@ -378,6 +378,78 @@ function getNoteVariantFromMeta(meta) {
     return 'freeform';
 }
 
+function cleanupLegacyNoteBreaks(html = '') {
+    let clean = String(html || '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
+    clean = clean.replace(/^(?:\s|<br\s*\/?>)+/i, '');
+    clean = clean.replace(/(?:\s|<br\s*\/?>)+$/i, '');
+    return clean;
+}
+
+function normalizeLegacyLeadNoteBody(html = '') {
+    let clean = String(html || '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Target ID\s*:?\s*<\/strong>\s*(?:<br\s*\/?>\s*)?[^<\s]+(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Target ID\s*:?\s*<\/strong>(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?Target ID\s*:?\s*[^\s<]+(?=(?:<br\s*\/?>|$))/gi, '');
+    return cleanupLegacyNoteBreaks(clean);
+}
+
+function normalizeLegacyLedgerNoteBody(html = '') {
+    let clean = String(html || '');
+    clean = clean.replace(/(<strong>\s*Source\s*:?\s*<\/strong>\s*(?:<br\s*\/?>\s*)?)([a-z0-9_-]+)\s*:[^<\s]+/gi, '$1$2');
+    clean = clean.replace(/(Source\s*:?\s*)([a-z0-9_-]+)\s*:[^\s<]+/gi, '$1$2');
+    return cleanupLegacyNoteBreaks(clean);
+}
+
+function normalizeLegacyEventNodeBody(html = '') {
+    let clean = String(html || '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Certainty\s*:?\s*<\/strong>\s*[^<]*(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Reliability\s*:?\s*<\/strong>\s*[^<]*(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?Certainty\s*:?\s*[^<\s]+%?(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?Reliability\s*:?\s*[^\s<]+(?=(?:<br\s*\/?>|$))/gi, '');
+    return cleanupLegacyNoteBreaks(clean);
+}
+
+function normalizeNoteNodeContent(content = {}) {
+    const source = content && typeof content === 'object' ? content : {};
+    const normalized = { ...source };
+    const metaSource = source.meta && typeof source.meta === 'object' ? { ...source.meta } : {};
+    let title = String(source.title || 'Note');
+    let body = String(source.body || '');
+    let sourceType = String(metaSource.sourceType || '').trim().toLowerCase();
+
+    if (!sourceType) {
+        if (/^lead\s*:/i.test(title)) sourceType = 'lead';
+        else if (/^ledger\s*:/i.test(title)) sourceType = 'ledger';
+    }
+
+    if (sourceType === 'lead') {
+        title = title.replace(/^lead\s*:\s*/i, '').trim() || 'Untitled Lead';
+        body = normalizeLegacyLeadNoteBody(body);
+    } else if (sourceType === 'ledger') {
+        title = title.replace(/^ledger\s*:\s*/i, '').trim() || 'Ledger Entry';
+        body = normalizeLegacyLedgerNoteBody(body);
+    }
+
+    if (sourceType) metaSource.sourceType = sourceType;
+
+    normalized.title = title;
+    normalized.body = body;
+    normalized.meta = metaSource;
+    return normalized;
+}
+
+function normalizeEventNodeContent(content = {}) {
+    const source = content && typeof content === 'object' ? content : {};
+    const normalized = { ...source };
+    const metaSource = source.meta && typeof source.meta === 'object' ? { ...source.meta } : {};
+    delete metaSource.certainty;
+    delete metaSource.reliability;
+    normalized.body = normalizeLegacyEventNodeBody(source.body || '');
+    normalized.meta = metaSource;
+    return normalized;
+}
+
 function applyNoteVariantClass(nodeEl, meta) {
     if (!nodeEl || !nodeEl.classList || !nodeEl.classList.contains('type-note')) return;
     const variant = getNoteVariantFromMeta(meta);
@@ -3300,7 +3372,13 @@ function updateNodeImageMeta(nodeEl, imageUrl = '') {
 
 function createNode(type, x, y, id = null, content = {}) {
     const nodeId = id || 'node_' + Date.now();
-    let safeMeta = sanitizeNodeMeta(content.meta);
+    const nodeType = String(type || '').toLowerCase();
+    const safeContent = (nodeType === 'note')
+        ? normalizeNoteNodeContent(content)
+        : (nodeType === 'event')
+            ? normalizeEventNodeContent(content)
+            : (content && typeof content === 'object' ? { ...content } : {});
+    let safeMeta = sanitizeNodeMeta(safeContent.meta);
     let groupSize = null;
     if (isGroupNodeType(type)) {
         groupSize = getGroupNodeSizeFromMeta(safeMeta);
@@ -3310,7 +3388,7 @@ function createNode(type, x, y, id = null, content = {}) {
             groupH: groupSize.height
         };
     }
-    const requestedImageUrl = sanitizeImageUrl(content.imageUrl || (safeMeta && safeMeta.imageUrl) || '');
+    const requestedImageUrl = sanitizeImageUrl(safeContent.imageUrl || (safeMeta && safeMeta.imageUrl) || '');
     if (requestedImageUrl) {
         safeMeta = { ...(safeMeta || {}), imageUrl: requestedImageUrl };
     } else if (safeMeta && Object.prototype.hasOwnProperty.call(safeMeta, 'imageUrl')) {
@@ -3331,7 +3409,7 @@ function createNode(type, x, y, id = null, content = {}) {
     nodeEl.innerHTML = `
         <div class="port top" data-port="top"></div><div class="port bottom" data-port="bottom"></div>
         <div class="port left" data-port="left"></div><div class="port right" data-port="right"></div>
-        ${createNodeMarkup(type, content)}
+        ${createNodeMarkup(type, safeContent)}
     `;
 
     nodeEl.querySelectorAll('.port[data-port]').forEach((portEl) => {
@@ -3391,7 +3469,7 @@ function createNode(type, x, y, id = null, content = {}) {
         type,
         x: x - 75,
         y: y - 40,
-        title: content.title || type.toUpperCase(),
+        title: safeContent.title || type.toUpperCase(),
         meta: finalMeta
     });
 
