@@ -136,7 +136,6 @@
     const CERTAINTY_DEFAULT = 50;
     const IMPACT_SEVERITY_OPTIONS = ['low', 'moderate', 'high', 'critical'];
     const IMPACT_SCOPE_OPTIONS = ['local', 'district', 'guildwide', 'citywide'];
-    const ENTITY_IMPACT_TYPES = ['npc', 'location', 'requisition', 'event'];
     const IMPACT_SEVERITY_LABELS = {
         low: 'Low',
         moderate: 'Moderate',
@@ -149,13 +148,6 @@
         guildwide: 'Guildwide',
         citywide: 'Citywide'
     };
-    const IMPACT_TYPE_LABELS = {
-        npc: 'NPC',
-        location: 'Location',
-        requisition: 'Requisition',
-        event: 'Event'
-    };
-    let draftEntityImpacts = [];
     const createDefaultLeadVoter = () => `Player-${Math.floor(1000 + Math.random() * 9000)}`;
     const getStoredLeadVoter = () => String(localStorage.getItem(LEAD_VOTER_NAME_KEY) || '').trim().slice(0, 60);
     const getOrCreateLeadVoter = () => {
@@ -179,49 +171,8 @@
         const clean = String(value || '').trim().toLowerCase();
         return IMPACT_SCOPE_OPTIONS.includes(clean) ? clean : fallback;
     };
-    const sanitizeImpactType = (value, fallback = 'event') => {
-        const clean = String(value || '').trim().toLowerCase();
-        return ENTITY_IMPACT_TYPES.includes(clean) ? clean : fallback;
-    };
-    const toDomSafeId = (value = '') => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const isoToLocalDateTimeValue = (isoValue = '') => {
-        const iso = String(isoValue || '').trim();
-        if (!iso) return '';
-        const parsed = new Date(iso);
-        if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return '';
-        const pad = (n) => String(n).padStart(2, '0');
-        return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
-    };
-    const localDateTimeValueToIso = (localValue = '') => {
-        const raw = String(localValue || '').trim();
-        if (!raw) return '';
-        const parsed = new Date(raw);
-        if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return '';
-        return parsed.toISOString();
-    };
-    const parseEntityImpacts = (value) => {
-        if (!Array.isArray(value)) return [];
-        return value
-            .map((entry) => {
-                if (!entry || typeof entry !== 'object') return null;
-                const type = sanitizeImpactType(entry.type, 'event');
-                const id = String(entry.id || '').trim();
-                const note = String(entry.note || '').trim().slice(0, 400);
-                if (!id) return null;
-                return { type, id, note };
-            })
-            .filter(Boolean);
-    };
     const getImpactSeverityLabel = (value) => IMPACT_SEVERITY_LABELS[sanitizeImpactSeverity(value, 'moderate')] || 'Moderate';
     const getImpactScopeLabel = (value) => IMPACT_SCOPE_LABELS[sanitizeImpactScope(value, 'local')] || 'Local';
-    const getImpactTypeLabel = (value) => IMPACT_TYPE_LABELS[sanitizeImpactType(value, 'event')] || 'Event';
-    const isEventOverdue = (evt) => {
-        const source = evt && typeof evt === 'object' ? evt : {};
-        if (source.resolved) return false;
-        const dueTs = Date.parse(String(source.dueAt || '').trim());
-        if (!Number.isFinite(dueTs)) return false;
-        return dueTs < Date.now();
-    };
     const hasHighImpact = (evt) => {
         const severity = sanitizeImpactSeverity(evt && evt.impactSeverity, 'moderate');
         return severity === 'high' || severity === 'critical';
@@ -666,7 +617,7 @@
     function clearTimelineLinkParamsFromUrl() {
         if (!window.history || typeof window.history.replaceState !== 'function') return;
         const url = new URL(window.location.href);
-        const keys = ['search', 'focus', 'source', 'id', 'overdue'];
+        const keys = ['search', 'focus', 'source', 'id'];
         let changed = false;
         keys.forEach((key) => {
             if (!url.searchParams.has(key)) return;
@@ -681,17 +632,11 @@
         const search = String(params.get('search') || '').trim();
         const focus = String(params.get('focus') || '').trim();
         const id = String(params.get('id') || '').trim();
-        const overdue = String(params.get('overdue') || '').trim().toLowerCase();
         const effectiveSearch = search || id;
-        const overdueEnabled = overdue === '1' || overdue === 'true' || overdue === 'yes';
-        if (!effectiveSearch && !focus && !overdueEnabled) return;
+        if (!effectiveSearch && !focus) return;
 
         const searchInput = document.getElementById('eventSearch');
         if (searchInput && effectiveSearch) searchInput.value = effectiveSearch;
-        if (overdueEnabled) {
-            const overdueButton = document.getElementById('eventOverdueOnly');
-            if (overdueButton) setButtonPressed(overdueButton, true);
-        }
         pendingDeepLinkFocus = focus;
         clearTimelineLinkParamsFromUrl();
     }
@@ -709,269 +654,28 @@
         window.location.assign(buildBoardLinkForEvent(cleanId));
     }
 
-    function getImpactEntitiesByType(type) {
-        const store = getStore();
-        if (!store) return [];
-        const cleanType = sanitizeImpactType(type, 'event');
-        if (cleanType === 'npc') {
-            const list = typeof store.getNPCs === 'function' ? store.getNPCs() : (store.state && store.state.campaign && store.state.campaign.npcs) || [];
-            return (Array.isArray(list) ? list : []).map((entry) => ({
-                id: String(entry && entry.id || '').trim(),
-                label: String(entry && entry.name || 'NPC').trim()
-            })).filter((entry) => entry.id);
-        }
-        if (cleanType === 'location') {
-            const list = typeof store.getLocations === 'function' ? store.getLocations() : (store.state && store.state.campaign && store.state.campaign.locations) || [];
-            return (Array.isArray(list) ? list : []).map((entry) => ({
-                id: String(entry && entry.id || '').trim(),
-                label: String(entry && entry.name || 'Location').trim()
-            })).filter((entry) => entry.id);
-        }
-        if (cleanType === 'requisition') {
-            const list = typeof store.getRequisitions === 'function' ? store.getRequisitions() : (store.state && store.state.campaign && store.state.campaign.requisitions) || [];
-            return (Array.isArray(list) ? list : []).map((entry) => ({
-                id: String(entry && entry.id || '').trim(),
-                label: String(entry && entry.item || 'Requisition').trim()
-            })).filter((entry) => entry.id);
-        }
-        const events = getTimelineEvents(store);
-        return (Array.isArray(events) ? events : []).map((entry) => ({
-            id: String(entry && entry.id || '').trim(),
-            label: String(entry && entry.title || 'Event').trim()
-        })).filter((entry) => entry.id);
-    }
-
-    function getImpactEntityLabel(type, id) {
-        const cleanType = sanitizeImpactType(type, 'event');
-        const cleanId = String(id || '').trim();
-        if (!cleanId) return '';
-        const match = getImpactEntitiesByType(cleanType).find((entry) => String(entry.id || '') === cleanId);
-        if (match && match.label) return match.label;
-        return cleanId;
-    }
-
-    function buildImpactTypeOptions(selected = 'event') {
-        const cleanSelected = sanitizeImpactType(selected, 'event');
-        return ENTITY_IMPACT_TYPES.map((type) => {
-            const label = type === 'npc'
-                ? 'NPC'
-                : (type === 'location'
-                    ? 'Location'
-                    : (type === 'requisition' ? 'Requisition' : 'Timeline Event'));
-            return `<option value="${type}" ${type === cleanSelected ? 'selected' : ''}>${label}</option>`;
-        }).join('');
-    }
-
-    function buildImpactEntityOptions(type, selectedId = '') {
-        const cleanSelected = String(selectedId || '').trim();
-        const list = getImpactEntitiesByType(type);
-        const rows = list.map((entry) => {
-            const id = String(entry.id || '').trim();
-            const label = String(entry.label || id || '').trim();
-            return `<option value="${escapeHtml(id)}" ${id === cleanSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
-        });
-        return `<option value="">Select</option>${rows.join('')}`;
-    }
-
-    function updateDraftImpactIdOptions() {
-        const typeEl = document.getElementById('eventImpactType');
-        const idEl = document.getElementById('eventImpactId');
-        if (!typeEl || !idEl) return;
-        const currentId = String(idEl.value || '').trim();
-        idEl.innerHTML = buildImpactEntityOptions(typeEl.value, currentId);
-    }
-
-    function renderDraftImpactQuickRow() {
-        const row = document.getElementById('eventImpactQuickRow');
-        if (!row) return;
-        const chips = [];
-        ENTITY_IMPACT_TYPES.forEach((type) => {
-            getImpactEntitiesByType(type).slice(0, 3).forEach((entry) => {
-                const jsType = escapeJsString(type);
-                const jsId = escapeJsString(entry.id);
-                const label = `${getImpactTypeLabel(type)}: ${entry.label}`;
-                chips.push(`<button class="btn impact-quick-btn" type="button" data-onclick="addDraftEntityImpactQuick('${jsType}', '${jsId}')">${escapeHtml(label)}</button>`);
-            });
-        });
-        row.innerHTML = chips.length ? chips.join('') : '<span class="impact-empty">No linked entities found yet.</span>';
-    }
-
-    function renderDraftEntityImpacts() {
-        const listEl = document.getElementById('eventImpactList');
-        if (!listEl) return;
-        if (!draftEntityImpacts.length) {
-            listEl.innerHTML = '<span class="impact-empty">No impacted entities added.</span>';
-            return;
-        }
-        listEl.innerHTML = draftEntityImpacts.map((entry, idx) => {
-            const safeType = getImpactTypeLabel(entry.type);
-            const safeId = getImpactEntityLabel(entry.type, entry.id);
-            const safeNote = String(entry.note || '');
-            return `
-                <span class="impact-chip">
-                    <strong>${escapeHtml(safeType)}</strong>: ${escapeHtml(safeId)}${safeNote ? ` — ${escapeHtml(safeNote)}` : ''}
-                    <button class="impact-chip-remove" type="button" data-onclick="removeDraftEntityImpact(${idx})">&times;</button>
-                </span>
-            `;
-        }).join('');
-    }
-
-    function addDraftEntityImpactQuick(type, id) {
-        const cleanType = sanitizeImpactType(type, 'event');
-        const cleanId = String(id || '').trim();
-        if (!cleanId) return;
-        const duplicate = draftEntityImpacts.some((entry) => entry.type === cleanType && entry.id === cleanId);
-        if (duplicate) return;
-        draftEntityImpacts.push({ type: cleanType, id: cleanId, note: '' });
-        renderDraftEntityImpacts();
-    }
-
-    function addDraftEntityImpact() {
-        const typeEl = document.getElementById('eventImpactType');
-        const idEl = document.getElementById('eventImpactId');
-        const noteEl = document.getElementById('eventImpactNote');
-        if (!typeEl || !idEl || !noteEl) return;
-        const type = sanitizeImpactType(typeEl.value, 'event');
-        const id = String(idEl.value || '').trim();
-        const note = String(noteEl.value || '').trim().slice(0, 400);
-        if (!id) {
-            alert('Select an impacted entity first.');
-            return;
-        }
-        if (draftEntityImpacts.some((entry) => entry.type === type && entry.id === id)) {
-            return;
-        }
-        draftEntityImpacts.push({ type, id, note });
-        noteEl.value = '';
-        renderDraftEntityImpacts();
-    }
-
-    function removeDraftEntityImpact(index) {
-        const idx = Number(index);
-        if (!Number.isInteger(idx) || idx < 0 || idx >= draftEntityImpacts.length) return;
-        draftEntityImpacts.splice(idx, 1);
-        renderDraftEntityImpacts();
-    }
-
-    function clearDraftEntityImpacts() {
-        draftEntityImpacts = [];
-        renderDraftEntityImpacts();
-    }
-
-    function buildImpactEditorMarkup(evt) {
-        const evtId = String(evt && evt.id || '').trim();
-        if (!evtId) return '';
-        const jsEvtId = escapeJsString(evtId);
-        const domEvtId = toDomSafeId(evtId);
-        const impacts = parseEntityImpacts(evt && evt.entityImpacts);
-        const impactTypeId = `impact_type_${domEvtId}`;
-        const impactIdId = `impact_id_${domEvtId}`;
-        const impactNoteId = `impact_note_${domEvtId}`;
-        const listMarkup = impacts.length
-            ? impacts.map((entry, idx) => `
-                <span class="impact-chip">
-                    <strong>${escapeHtml(getImpactTypeLabel(entry.type))}</strong>: ${escapeHtml(getImpactEntityLabel(entry.type, entry.id))}
-                    ${entry.note ? ` — ${escapeHtml(entry.note)}` : ''}
-                    <button class="impact-chip-remove" type="button" data-onclick="removeEventImpact('${jsEvtId}', ${idx})">&times;</button>
-                </span>
-            `).join('')
-            : '<span class="impact-empty">No impacted entities.</span>';
-        return `
-            <div class="impact-editor event-impact-editor">
-                <label>Impacted Entities</label>
-                <div class="impact-editor-row">
-                    <select id="${impactTypeId}" data-onchange="updateEventImpactTypeSelector('${jsEvtId}')">
-                        ${buildImpactTypeOptions('event')}
-                    </select>
-                    <select id="${impactIdId}">
-                        ${buildImpactEntityOptions('event', '')}
-                    </select>
-                    <input type="text" id="${impactNoteId}" placeholder="Impact note (optional)">
-                    <button class="btn" type="button" data-onclick="addEventImpact('${jsEvtId}')">Add</button>
-                </div>
-                <div class="impact-chip-row">${listMarkup}</div>
-            </div>
-        `;
-    }
-
-    function addEventImpact(eventId) {
-        const store = getStore();
-        if (!store) return;
-        const cleanId = String(eventId || '').trim();
-        if (!cleanId) return;
-        const domEvtId = toDomSafeId(cleanId);
-        const typeEl = document.getElementById(`impact_type_${domEvtId}`);
-        const idEl = document.getElementById(`impact_id_${domEvtId}`);
-        const noteEl = document.getElementById(`impact_note_${domEvtId}`);
-        if (!typeEl || !idEl || !noteEl) return;
-        const type = sanitizeImpactType(typeEl.value, 'event');
-        const id = String(idEl.value || '').trim();
-        const note = String(noteEl.value || '').trim().slice(0, 400);
-        if (!id) return;
-
-        const target = (getTimelineEvents(store) || []).find((entry) => String(entry && entry.id || '') === cleanId);
-        if (!target) return;
-        const impacts = parseEntityImpacts(target.entityImpacts);
-        if (impacts.some((entry) => entry.type === type && entry.id === id)) return;
-        impacts.push({ type, id, note });
-        updateTimelineEventInStore(store, cleanId, { entityImpacts: impacts });
-        renderTimeline();
-    }
-
-    function removeEventImpact(eventId, index) {
-        const store = getStore();
-        if (!store) return;
-        const cleanId = String(eventId || '').trim();
-        const idx = Number(index);
-        if (!cleanId || !Number.isInteger(idx)) return;
-        const target = (getTimelineEvents(store) || []).find((entry) => String(entry && entry.id || '') === cleanId);
-        if (!target) return;
-        const impacts = parseEntityImpacts(target.entityImpacts);
-        if (idx < 0 || idx >= impacts.length) return;
-        impacts.splice(idx, 1);
-        updateTimelineEventInStore(store, cleanId, { entityImpacts: impacts });
-        renderTimeline();
-    }
-
-    function updateEventImpactTypeSelector(eventId) {
-        const cleanId = String(eventId || '').trim();
-        if (!cleanId) return;
-        const domEvtId = toDomSafeId(cleanId);
-        const typeEl = document.getElementById(`impact_type_${domEvtId}`);
-        const idEl = document.getElementById(`impact_id_${domEvtId}`);
-        if (!typeEl || !idEl) return;
-        idEl.innerHTML = buildImpactEntityOptions(typeEl.value, '');
-    }
-
     function toggleEventForm() {
         const form = document.getElementById('eventForm');
         if (!form) return;
         form.style.display = form.style.display === 'block' ? 'none' : 'block';
         if (form.style.display === 'block') {
-            updateDraftImpactIdOptions();
-            renderDraftImpactQuickRow();
-            renderDraftEntityImpacts();
             document.getElementById('eventTitle').focus();
         }
     }
 
     function resetForm() {
-        ['eventTitle', 'eventFocus', 'eventTags', 'eventImageUrl', 'eventHighlights', 'eventFallout', 'eventFollow', 'eventImpactNote'].forEach(id => {
+        ['eventTitle', 'eventFocus', 'eventTags', 'eventImageUrl', 'eventHighlights', 'eventFallout', 'eventFollow'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });
         const heat = document.getElementById('eventHeat');
         if (heat) heat.value = '';
-        const dueAt = document.getElementById('eventDueAt');
-        if (dueAt) dueAt.value = '';
         const certainty = document.getElementById('eventCertainty');
         if (certainty) certainty.value = String(CERTAINTY_DEFAULT);
         const severity = document.getElementById('eventImpactSeverity');
         if (severity) severity.value = 'moderate';
         const scope = document.getElementById('eventImpactScope');
         if (scope) scope.value = 'local';
-        clearDraftEntityImpacts();
-        updateDraftImpactIdOptions();
     }
 
     function addTimelineEvent() {
@@ -992,12 +696,10 @@
             id: 'event_' + Date.now(),
             title,
             focus: document.getElementById('eventFocus').value,
-            dueAt: localDateTimeValueToIso(document.getElementById('eventDueAt').value),
             heatDelta: document.getElementById('eventHeat').value,
             impactSeverity: sanitizeImpactSeverity(document.getElementById('eventImpactSeverity').value, 'moderate'),
             impactScope: sanitizeImpactScope(document.getElementById('eventImpactScope').value, 'local'),
             certainty: clampCertainty(document.getElementById('eventCertainty').value, CERTAINTY_DEFAULT),
-            entityImpacts: parseEntityImpacts(draftEntityImpacts),
             tags: document.getElementById('eventTags').value,
             imageUrl,
             highlights: document.getElementById('eventHighlights').value,
@@ -1096,7 +798,7 @@
 
     function queueLeadFromEvent(eventId) {
         if (isCampaignMetaView()) {
-            alert('Lead Queue is case-scoped. Use Mission Timeline for lead triage.');
+            alert('Lead Queue is case-scoped. Use Case Timeline for lead triage.');
             return;
         }
         const lead = addLeadFromEvent(eventId);
@@ -1386,9 +1088,6 @@
             }
             nextValue = clean;
         }
-        if (field === 'dueAt') {
-            nextValue = localDateTimeValueToIso(value);
-        }
         if (field === 'certainty') {
             nextValue = clampCertainty(value, CERTAINTY_DEFAULT);
         }
@@ -1472,10 +1171,8 @@
             source: String(sourceEvent.source || 'case-timeline-copy').trim() || 'case-timeline-copy',
             kind: 'copied-from-case',
             resolved: Boolean(sourceEvent.resolved),
-            dueAt: String(sourceEvent.dueAt || '').trim(),
             impactSeverity: String(sourceEvent.impactSeverity || '').trim(),
             impactScope: String(sourceEvent.impactScope || '').trim(),
-            entityImpacts: parseEntityImpacts(sourceEvent.entityImpacts),
             certainty: clampCertainty(sourceEvent.certainty, CERTAINTY_DEFAULT),
             originCaseId: sourceCaseId,
             originCaseName: sourceCaseName,
@@ -1503,20 +1200,6 @@
         return cleaned.replace(/\s*\n+\s*/g, ' ');
     }
 
-    function renderEventImpactBadges(evt) {
-        const impacts = parseEntityImpacts(evt && evt.entityImpacts);
-        if (!impacts.length) return '';
-        return `
-            <div class="event-impact-badge-row">
-                ${impacts.map((entry) => `
-                    <span class="event-impact-badge">
-                        <strong>${escapeHtml(getImpactTypeLabel(entry.type))}</strong>: ${escapeHtml(getImpactEntityLabel(entry.type, entry.id))}
-                    </span>
-                `).join('')}
-            </div>
-        `;
-    }
-
     function buildEventCard(evt) {
         const evtId = escapeJsString(evt.id || '');
         const heat = parseInt(evt.heatDelta, 10);
@@ -1528,9 +1211,6 @@
         const severity = sanitizeImpactSeverity(evt.impactSeverity, 'moderate');
         const scope = sanitizeImpactScope(evt.impactScope, 'local');
         const certainty = clampCertainty(evt.certainty, CERTAINTY_DEFAULT);
-        const dueAtLocalValue = isoToLocalDateTimeValue(evt.dueAt);
-        const dueAtLabel = dueAtLocalValue ? new Date(localDateTimeValueToIso(dueAtLocalValue)).toLocaleString() : '';
-        const dueText = dueAtLabel ? `<span class="tag-pill ${isEventOverdue(evt) ? 'tag-pill-overdue' : 'tag-pill-due'}">Due ${escapeHtml(dueAtLabel)}</span>` : '';
         const severityText = `<span class="tag-pill tag-pill-severity severity-${severity}">${escapeHtml(getImpactSeverityLabel(severity))}</span>`;
         const scopeText = `<span class="tag-pill tag-pill-scope">${escapeHtml(getImpactScopeLabel(scope))}</span>`;
         const certaintyText = `<span class="tag-pill tag-pill-certainty">Certainty ${certainty}%</span>`;
@@ -1546,13 +1226,10 @@
         const procedureShieldButton = showProcedureShield
             ? `<button class="btn btn-procedure ${freeShieldAvailable ? 'is-free' : ''}" data-onclick="spendProcedureShield('${evtId}')">${freeShieldAvailable ? 'Shield -1 (Free)' : 'Shield -1'}</button>`
             : '';
-        const overdueClass = isEventOverdue(evt) ? ' event-overdue' : '';
         const highImpactClass = (!resolved && hasHighImpact(evt)) ? ' event-high-impact' : '';
         const attribution = (evt.lastChangedBy || evt.lastChangedAt)
             ? `Updated ${evt.lastChangedAt ? new Date(evt.lastChangedAt).toLocaleString() : '—'}${evt.lastChangedBy ? ` by ${escapeHtml(evt.lastChangedBy)}` : ''}`
             : '';
-        const impactBadges = renderEventImpactBadges(evt);
-        const impactEditorMarkup = buildImpactEditorMarkup(evt);
         const leadActionButton = isCampaignMetaView()
             ? ''
             : `<button class="btn" data-onclick="queueLeadFromEvent('${evtId}')">Lead Queue</button>`;
@@ -1561,7 +1238,7 @@
             : `<button class="btn" data-onclick="copyEventToCampaignTimeline('${evtId}')">Copy to Campaign Timeline</button>`;
 
         return `
-        <div class="event-card${imageMarkup ? ' has-image' : ''}${overdueClass}${highImpactClass}">
+        <div class="event-card${imageMarkup ? ' has-image' : ''}${highImpactClass}">
             <div class="event-card-content">
                 <div class="event-head">
                     <h3><input type="text" value="${escapeHtml(evt.title || '')}" placeholder="Title"
@@ -1580,11 +1257,6 @@
                         <label>Heat Δ</label>
                         <input type="number" value="${escapeHtml(evt.heatDelta || '')}" placeholder="0"
                             data-onchange="updateEventField('${evtId}', 'heatDelta', this.value)">
-                    </div>
-                    <div>
-                        <label>Deadline</label>
-                        <input type="datetime-local" value="${escapeHtml(dueAtLocalValue)}"
-                            data-onchange="updateEventField('${evtId}', 'dueAt', this.value)">
                     </div>
                     <div>
                         <label>Severity</label>
@@ -1614,9 +1286,7 @@
                             data-onchange="updateEventField('${evtId}', 'imageUrl', this.value)">
                     </div>
                 </div>
-                <div class="event-pill-row">${heatText} ${dueText} ${severityText} ${scopeText} ${certaintyText} ${focusDisplay} ${renderTagPills(evt.tags)}</div>
-                ${impactBadges}
-                ${impactEditorMarkup}
+                <div class="event-pill-row">${heatText} ${severityText} ${scopeText} ${certaintyText} ${focusDisplay} ${renderTagPills(evt.tags)}</div>
                 <div class="event-body">
                     <textarea placeholder="Highlights" data-onchange="updateEventField('${evtId}', 'highlights', this.value)">${escapeHtml(evt.highlights || '')}</textarea>
                     <textarea placeholder="Fallout" data-onchange="updateEventField('${evtId}', 'fallout', this.value)">${escapeHtml(evt.fallout || '')}</textarea>
@@ -1665,15 +1335,11 @@
         const focusFilter = document.getElementById('eventFocusFilter').value;
         const sort = document.getElementById('eventSort').value;
         const impactOnly = isButtonPressed('eventImpactOnly');
-        const overdueOnly = isButtonPressed('eventOverdueOnly');
         const hideResolved = isButtonPressed('eventHideResolved');
 
         const filtered = events.filter(evt => {
             if (manager && manager.isPending(evt.id)) return false;
-            const impactText = parseEntityImpacts(evt.entityImpacts)
-                .map((entry) => `${entry.type || ''} ${entry.id || ''} ${entry.note || ''}`)
-                .join(' ');
-            const text = `${evt.id || ''} ${evt.title || ''} ${evt.focus || ''} ${evt.highlights || ''} ${evt.fallout || ''} ${evt.followUp || ''} ${evt.tags || ''} ${evt.dueAt || ''} ${evt.impactSeverity || ''} ${evt.impactScope || ''} ${evt.certainty || ''} ${impactText}`.toLowerCase();
+            const text = `${evt.id || ''} ${evt.title || ''} ${evt.focus || ''} ${evt.highlights || ''} ${evt.fallout || ''} ${evt.followUp || ''} ${evt.tags || ''} ${evt.impactSeverity || ''} ${evt.impactScope || ''} ${evt.certainty || ''}`.toLowerCase();
             const matchesSearch = search ? text.includes(search) : true;
             const matchesFocus = focusFilter ? evt.focus === focusFilter : true;
             const heat = parseInt(evt.heatDelta, 10);
@@ -1681,11 +1347,9 @@
                 ? (!isNaN(heat) && heat !== 0)
                     || (evt.fallout && evt.fallout.trim())
                     || hasHighImpact(evt)
-                    || parseEntityImpacts(evt.entityImpacts).length > 0
                 : true;
-            const matchesOverdue = overdueOnly ? isEventOverdue(evt) : true;
             const matchesResolved = hideResolved ? !evt.resolved : true;
-            return matchesSearch && matchesFocus && matchesImpact && matchesOverdue && matchesResolved;
+            return matchesSearch && matchesFocus && matchesImpact && matchesResolved;
         });
 
         filtered.sort((a, b) => {
@@ -1709,7 +1373,6 @@
                 focusFilter,
                 sort,
                 impactOnly,
-                overdueOnly,
                 hideResolved
             }
         };
@@ -1725,7 +1388,6 @@
         lines.push(`- Focus: ${filters.focusFilter || 'All'}`);
         lines.push(`- Sort: ${filters.sort}`);
         lines.push(`- Impact only: ${filters.impactOnly ? 'Yes' : 'No'}`);
-        lines.push(`- Overdue only: ${filters.overdueOnly ? 'Yes' : 'No'}`);
         lines.push(`- Hide resolved: ${filters.hideResolved ? 'Yes' : 'No'}`);
         lines.push('');
 
@@ -1734,24 +1396,16 @@
             const focus = normalizeRecapText(evt.focus);
             const heat = parseInt(evt.heatDelta, 10);
             const heatDisplay = Number.isNaN(heat) ? '—' : `${heat > 0 ? '+' : ''}${heat}`;
-            const dueTs = Date.parse(String(evt.dueAt || '').trim());
-            const dueDisplay = normalizeRecapText(Number.isFinite(dueTs) ? new Date(dueTs).toLocaleString() : '');
             const severity = getImpactSeverityLabel(evt.impactSeverity);
             const scope = getImpactScopeLabel(evt.impactScope);
             const certainty = `${clampCertainty(evt.certainty, CERTAINTY_DEFAULT)}%`;
-            const impacts = parseEntityImpacts(evt.entityImpacts);
-            const impactDisplay = impacts.length
-                ? impacts.map((entry) => `${getImpactTypeLabel(entry.type)}:${getImpactEntityLabel(entry.type, entry.id)}${entry.note ? ` (${entry.note})` : ''}`).join(' | ')
-                : '—';
             lines.push(`### ${title}`);
             lines.push(`- Focus: ${focus}`);
             lines.push(`- Heat Δ: ${heatDisplay}`);
-            lines.push(`- Due: ${dueDisplay}`);
             lines.push(`- Severity: ${severity}`);
             lines.push(`- Scope: ${scope}`);
             lines.push(`- Certainty: ${certainty}`);
-            lines.push(`- Impacted Entities: ${impactDisplay}`);
-            lines.push(`- Status: ${evt.resolved ? 'Resolved' : 'Pending'}${isEventOverdue(evt) ? ' (Overdue)' : ''}`);
+            lines.push(`- Status: ${evt.resolved ? 'Resolved' : 'Pending'}`);
             lines.push(`- Image: ${normalizeRecapText(evt.imageUrl)}`);
             lines.push(`- Highlights: ${normalizeRecapText(evt.highlights)}`);
             lines.push(`- Fallout: ${normalizeRecapText(evt.fallout)}`);
@@ -1837,13 +1491,6 @@
     window.setHeatAutoSync = setHeatAutoSync;
     window.exportTimelineRecap = exportTimelineRecap;
     window.openTimelineEventInBoard = openTimelineEventInBoard;
-    window.updateDraftImpactIdOptions = updateDraftImpactIdOptions;
-    window.addDraftEntityImpactQuick = addDraftEntityImpactQuick;
-    window.addDraftEntityImpact = addDraftEntityImpact;
-    window.removeDraftEntityImpact = removeDraftEntityImpact;
-    window.addEventImpact = addEventImpact;
-    window.removeEventImpact = removeEventImpact;
-    window.updateEventImpactTypeSelector = updateEventImpactTypeSelector;
     window.spendProcedureShield = spendProcedureShield;
     window.addLeadFromEvent = addLeadFromEvent;
     window.queueLeadFromEvent = queueLeadFromEvent;

@@ -39,7 +39,7 @@ Case-scoped investigation queue for unresolved questions and next actions. It se
 - Use voter names consistently across devices so vote summaries remain readable.
 
 ## Cross-Links
-- [Mission Timeline](MissionTimeline.md) (`timeline.html`) – Creates and revisits leads from event cards.
+- [Case Timeline](MissionTimeline.md) (`timeline.html`) – Creates and revisits leads from event cards.
 - [Case Board](CaseBoard.md) (`board.html`) – Resolves `nodeId` and `linkType` deep links for lead context jumps.
 
 ## Related Project

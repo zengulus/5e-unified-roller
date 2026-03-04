@@ -128,7 +128,8 @@ function chooseLLMSnapshotMode(defaultMode = 'full') {
     return null;
 }
 
-function handleExportLLMSnapshot() {
+function exportLLMSnapshotByTarget(target = 'campaign') {
+    const cleanTarget = String(target || '').trim().toLowerCase() === 'case' ? 'case' : 'campaign';
     if (!window.RTF_STORE) {
         alert("Store not loaded.");
         return;
@@ -137,9 +138,21 @@ function handleExportLLMSnapshot() {
         alert('This build does not support LLM snapshot export yet.');
         return;
     }
-    const mode = chooseLLMSnapshotMode('full');
+    const mode = chooseLLMSnapshotMode(cleanTarget === 'case' ? 'compact' : 'full');
     if (!mode) return;
-    window.RTF_STORE.exportLLMSnapshot({ mode });
+    window.RTF_STORE.exportLLMSnapshot({ mode, target: cleanTarget });
+}
+
+function handleExportCaseLLMSnapshot() {
+    exportLLMSnapshotByTarget('case');
+}
+
+function handleExportCampaignLLMSnapshot() {
+    exportLLMSnapshotByTarget('campaign');
+}
+
+function handleExportLLMSnapshot() {
+    exportLLMSnapshotByTarget('campaign');
 }
 
 function handleImport() {
@@ -636,11 +649,7 @@ function renderCampaignOverview() {
     const campaign = store.state.campaign;
     const heat = Number(campaign.heat) || 0;
     const cognitiveRisk = Number(campaign.cognitiveRisk) || 0;
-    const totalEvents = Array.isArray(campaign.events) ? campaign.events.length : 0;
     const activeEvents = (typeof store.getEvents === 'function' ? store.getEvents(activeCaseId) : campaign.events) || [];
-    const activeBoard = typeof store.getBoard === 'function' ? store.getBoard(activeCaseId) : (store.state.board || null);
-    const activeBoardNodes = Array.isArray(activeBoard && activeBoard.nodes) ? activeBoard.nodes.length : 0;
-    const activeBoardLinks = Array.isArray(activeBoard && activeBoard.connections) ? activeBoard.connections.length : 0;
 
     const scopedCases = Array.isArray(activeScope && activeScope.caseOrder) ? activeScope.caseOrder : [];
     const scopedStatus = activeScope && activeScope.caseStatus && typeof activeScope.caseStatus === 'object' ? activeScope.caseStatus : {};
@@ -649,20 +658,17 @@ function renderCampaignOverview() {
     const nextCaseId = findNextPlannedScopeCaseId(activeScope, activeCaseId);
     const nextCaseLabel = caseLookup.get(String(nextCaseId || '')) || nextCaseId || 'No planned case queued';
     const nowCaseLabel = activeCase && activeCase.name ? activeCase.name : (activeCaseId || '—');
-    const nowTs = Date.now();
     const blockers = (Array.isArray(activeEvents) ? activeEvents : []).filter((evt) => {
         if (!evt || evt.resolved) return false;
-        const dueAt = Date.parse(String(evt.dueAt || '').trim());
-        const overdue = Number.isFinite(dueAt) && dueAt < nowTs;
         const severity = String(evt.impactSeverity || '').trim().toLowerCase();
         const severe = severity === 'high' || severity === 'critical';
-        return overdue || severe;
+        return severe;
     });
-    const blockedLabel = blockers.length
+    const rawBlockedLabel = blockers.length
         ? (String(blockers[0].title || blockers[0].focus || '').trim() || `${blockers.length} unresolved blocker(s)`)
         : 'No blockers';
-
-    metaEl.textContent = `${cases.length} cases | ${context && Array.isArray(context.scopes) ? context.scopes.length : 0} scopes`;
+    const blockedLabel = rawBlockedLabel.length > 64 ? `${rawBlockedLabel.slice(0, 61)}...` : rawBlockedLabel;
+    metaEl.textContent = `${cases.length} case${cases.length === 1 ? '' : 's'} across ${context && Array.isArray(context.scopes) ? context.scopes.length : 0} scope${context && Array.isArray(context.scopes) && context.scopes.length === 1 ? '' : 's'}`;
     workflowGridEl.innerHTML = [
         ['Now', nowCaseLabel],
         ['Next', nextCaseLabel],
@@ -683,10 +689,7 @@ function renderCampaignOverview() {
         ['Scoped Cases', String(scopedCases.length)],
         ['Scoped Resolved', String(resolvedCount)],
         ['Scope Board Refs', String(boardRefCount)],
-        ['Case Events', String(Array.isArray(activeEvents) ? activeEvents.length : 0)],
-        ['Campaign Events', String(totalEvents)],
-        ['Board Nodes', String(activeBoardNodes)],
-        ['Board Links', String(activeBoardLinks)]
+        ['Case Events', String(Array.isArray(activeEvents) ? activeEvents.length : 0)]
     ];
     gridEl.innerHTML = kpis.map(([label, value]) => `
         <div class="campaign-overview-kpi">
@@ -756,7 +759,7 @@ function renderCampaignContext() {
     const activeScopeName = activeScope && activeScope.name ? activeScope.name : '—';
     const activeCaseName = caseLookup.get(String(activeCaseId || '')) || activeCaseId || '—';
     const boardRefCount = Array.isArray(activeScope && activeScope.boardRefs) ? activeScope.boardRefs.length : 0;
-    scopeMetaEl.textContent = `${scopes.length} scope${scopes.length === 1 ? '' : 's'} | Active Scope: ${activeScopeName} | Cases: ${caseOrder.length} | Board Refs: ${boardRefCount} | Active Case (derived): ${activeCaseName}`;
+    scopeMetaEl.textContent = `Active Scope: ${activeScopeName} · Cases: ${caseOrder.length} · Board Refs: ${boardRefCount} · Active Case: ${activeCaseName}`;
 
     if (scopeCreateBtn) scopeCreateBtn.disabled = false;
     if (scopeRenameBtn) scopeRenameBtn.disabled = !activeScope;

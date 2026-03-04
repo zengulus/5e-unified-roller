@@ -147,7 +147,8 @@ function chooseLLMSnapshotMode(defaultMode = 'full') {
     return null;
 }
 
-function exportLLMSnapshot() {
+function exportLLMSnapshotByTarget(target = 'campaign') {
+    const cleanTarget = String(target || '').trim().toLowerCase() === 'case' ? 'case' : 'campaign';
     if (!window.RTF_STORE) {
         alert('Store not loaded.');
         return;
@@ -156,9 +157,21 @@ function exportLLMSnapshot() {
         alert('This build does not support LLM snapshot export yet.');
         return;
     }
-    const mode = chooseLLMSnapshotMode('full');
+    const mode = chooseLLMSnapshotMode(cleanTarget === 'case' ? 'compact' : 'full');
     if (!mode) return;
-    window.RTF_STORE.exportLLMSnapshot({ mode });
+    window.RTF_STORE.exportLLMSnapshot({ mode, target: cleanTarget });
+}
+
+function exportCaseLLMSnapshot() {
+    exportLLMSnapshotByTarget('case');
+}
+
+function exportCampaignLLMSnapshot() {
+    exportLLMSnapshotByTarget('campaign');
+}
+
+function exportLLMSnapshot() {
+    exportLLMSnapshotByTarget('campaign');
 }
 
 function importData() {
@@ -193,12 +206,7 @@ function renderNarrativePressure() {
     const summaryEl = document.getElementById('hubNarrativePressureSummary');
     if (!summaryEl || !window.RTF_STORE) return;
     const events = getAllCaseEvents();
-    const now = Date.now();
-    const overdueCount = events.filter((evt) => {
-        if (!evt || evt.resolved) return false;
-        const dueTs = Date.parse(String(evt.dueAt || '').trim());
-        return Number.isFinite(dueTs) && dueTs < now;
-    }).length;
+    const unresolvedCount = events.filter((evt) => evt && !evt.resolved).length;
     const highImpactCount = events.filter((evt) => {
         if (!evt || evt.resolved) return false;
         const severity = String(evt.impactSeverity || '').trim().toLowerCase();
@@ -215,7 +223,7 @@ function renderNarrativePressure() {
     }).length;
 
     summaryEl.innerHTML = `
-        <div>Overdue unresolved deadlines: <strong>${overdueCount}</strong></div>
+        <div>Unresolved timeline events: <strong>${unresolvedCount}</strong></div>
         <div>High-impact unresolved events: <strong>${highImpactCount}</strong></div>
         <div>Ledger pinned facts / review queue: <strong>${stableCount} / ${reviewQueueCount}</strong></div>
     `;

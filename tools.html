@@ -8,7 +8,7 @@
     <title>Campaign Hub (Tools)</title>
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260305d">
-    <link rel="stylesheet" href="css/tools.css">
+    <link rel="stylesheet" href="css/tools.css?v=20260305e">
     <link rel="stylesheet" href="css/tools-page.css">
 </head>
 
@@ -26,7 +26,8 @@
                 <div class="hero-action-bar primary">
                     <button class="hero-btn ghost" data-onclick="handleImport()">📥 Import</button>
                     <button class="hero-btn ghost" data-onclick="handleExport()">📤 Export</button>
-                    <button class="hero-btn ghost" data-onclick="handleExportLLMSnapshot()">🤖 LLM Snapshot</button>
+                    <button class="hero-btn ghost" data-onclick="handleExportCaseLLMSnapshot()">🤖 Case Snapshot</button>
+                    <button class="hero-btn ghost" data-onclick="handleExportCampaignLLMSnapshot()">🤖 Campaign Snapshot</button>
                 </div>
                 <div class="hero-action-bar secondary">
                     <button class="hero-btn ghost" id="btn-secret-mode" data-onclick="toggleSecretMode()">🧩 GM Mode</button>
@@ -47,29 +48,38 @@
                 Campaign Scope is the primary context. Active case is derived from the selected scope sequence.
             </p>
             <div class="campaign-scope-wrap">
-                <div class="case-switcher-row">
-                    <select id="campaign-scope-select" data-onchange="selectCampaignScope(this.value)" aria-label="Select Campaign Scope"></select>
-                    <button class="sync-btn" id="campaign-scope-rename-btn" data-onclick="renameCampaignScope()">Rename Scope</button>
-                    <button class="sync-btn" id="campaign-scope-delete-btn" data-onclick="deleteCampaignScope()">Delete Scope</button>
+                <div class="context-block">
+                    <h3 class="context-block-title">Scope</h3>
+                    <div class="case-switcher-row">
+                        <select id="campaign-scope-select" data-onchange="selectCampaignScope(this.value)" aria-label="Select Campaign Scope"></select>
+                        <button class="sync-btn" id="campaign-scope-rename-btn" data-onclick="renameCampaignScope()">Rename Scope</button>
+                        <button class="sync-btn" id="campaign-scope-delete-btn" data-onclick="deleteCampaignScope()">Delete Scope</button>
+                    </div>
+                    <div class="case-switcher-row">
+                        <input id="campaign-scope-name" type="text" placeholder="New campaign scope name">
+                        <button class="sync-btn primary" id="campaign-scope-create-btn" data-onclick="createCampaignScopeFromInput()">Create Scope</button>
+                    </div>
+                    <div class="campaign-scope-meta" id="campaign-scope-meta">Scope tools initializing...</div>
                 </div>
-                <div class="case-switcher-row">
-                    <input id="campaign-scope-name" type="text" placeholder="New campaign scope name">
-                    <button class="sync-btn primary" id="campaign-scope-create-btn" data-onclick="createCampaignScopeFromInput()">Create Scope</button>
+
+                <div class="context-block">
+                    <h3 class="context-block-title">Case Sequence</h3>
+                    <div class="case-switcher-row">
+                        <select id="campaign-scope-case-add" aria-label="Add Case to Active Scope"></select>
+                        <button class="sync-btn" id="campaign-scope-add-case-btn" data-onclick="addCaseToActiveScope()">Add Case to Scope</button>
+                        <button class="sync-btn" id="campaign-case-delete-btn" data-onclick="deleteActiveCase()">Delete Active Case</button>
+                    </div>
+                    <div id="campaign-sequence-list" class="campaign-sequence-list">Case sequence loading...</div>
                 </div>
-                <div class="campaign-scope-meta" id="campaign-scope-meta">Scope tools initializing...</div>
-                <div class="case-switcher-row">
-                    <select id="campaign-scope-case-add" aria-label="Add Case to Active Scope"></select>
-                    <button class="sync-btn" id="campaign-scope-add-case-btn" data-onclick="addCaseToActiveScope()">Add Case to Scope</button>
-                    <button class="sync-btn" id="campaign-case-delete-btn" data-onclick="deleteActiveCase()">Delete Active Case</button>
-                </div>
-                <div id="campaign-sequence-list" class="campaign-sequence-list">Case sequence loading...</div>
-                <div class="scope-board-refs-panel">
+
+                <div class="context-block scope-board-refs-panel">
                     <div class="scope-board-refs-head">
                         <h3 class="scope-board-refs-title">Scope Board References</h3>
                         <button class="sync-btn" data-onclick="addActiveCaseBoardRef()">Add Active Case Ref</button>
                     </div>
                     <div id="scope-board-ref-list" class="scope-board-ref-list">Scope board references loading...</div>
                 </div>
+
                 <div id="campaign-scope-status" class="case-switcher-status">Campaign scope tools initializing...</div>
             </div>
             <details class="campaign-advanced">
@@ -95,21 +105,32 @@
                 <h2 class="sync-title">Campaign Pulse</h2>
                 <div class="case-switcher-meta" id="campaign-overview-meta">Waiting for store...</div>
             </div>
-            <div class="campaign-workflow-grid" id="campaign-workflow-grid">Campaign workflow loading...</div>
-            <div class="campaign-workflow-actions">
-                <button class="sync-btn primary" data-onclick="startNextScopeCase()">Start Next Case</button>
-                <button class="sync-btn" data-onclick="markResolvedAndAdvanceScopeCase()">Mark Resolved + Advance</button>
-                <button class="sync-btn" data-onclick="openActiveScopeBoard()">Open Active Scope Board</button>
+            <div class="pulse-block">
+                <h3 class="context-block-title">Workflow</h3>
+                <div class="campaign-workflow-grid" id="campaign-workflow-grid">Campaign workflow loading...</div>
+                <div class="campaign-workflow-actions">
+                    <button class="sync-btn primary" data-onclick="startNextScopeCase()">Start Next Case</button>
+                    <button class="sync-btn" data-onclick="markResolvedAndAdvanceScopeCase()">Mark Resolved + Advance</button>
+                    <button class="sync-btn" data-onclick="openActiveScopeBoard()">Open Active Scope Board</button>
+                </div>
+                <div id="campaign-workflow-status" class="case-switcher-status">Workflow actions initializing...</div>
             </div>
-            <div id="campaign-workflow-status" class="case-switcher-status">Workflow actions initializing...</div>
-            <div class="campaign-overview-grid" id="campaign-overview-grid">Campaign overview loading...</div>
-            <div class="campaign-overview-actions">
-                <a class="sync-btn" href="hub.html">Open Strategic Hub</a>
-                <a class="sync-btn" href="campaign-timeline.html">Open Campaign Timeline</a>
-                <a class="sync-btn" href="campaign-board.html">Open Campaign Board</a>
-                <a class="sync-btn" href="timeline.html">Open Case Timeline</a>
-                <a class="sync-btn" href="board.html">Open Case Board</a>
-                <a class="sync-btn" href="ledger.html">Open Ledger</a>
+
+            <div class="pulse-block">
+                <h3 class="context-block-title">KPIs</h3>
+                <div class="campaign-overview-grid" id="campaign-overview-grid">Campaign overview loading...</div>
+            </div>
+
+            <div class="pulse-block">
+                <h3 class="context-block-title">Quick Links</h3>
+                <div class="campaign-overview-actions">
+                    <a class="sync-btn" href="hub.html">Open Strategic Hub</a>
+                    <a class="sync-btn" href="campaign-timeline.html">Open Campaign Timeline</a>
+                    <a class="sync-btn" href="campaign-board.html">Open Campaign Board</a>
+                    <a class="sync-btn" href="timeline.html">Open Case Timeline</a>
+                    <a class="sync-btn" href="board.html">Open Case Board</a>
+                    <a class="sync-btn" href="ledger.html">Open Ledger</a>
+                </div>
             </div>
         </section>
 

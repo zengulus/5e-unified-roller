@@ -1,18 +1,18 @@
 # Campaign Hub (`hub.html`)
 
-Between-sessions control room for heat, guild standing, and downtime logistics. It pulls from the same unified store as the campaign-facing tools (Campaign Board, Case Board, Campaign Timeline, Mission Timeline, Player Dashboard, Roster, Locations, Requisitions, Encounters, HQ) so NPC/Guild metadata stays aligned.
+Between-sessions control room for heat, guild standing, and downtime logistics. It pulls from the same unified store as the campaign-facing tools (Campaign Board, Case Board, Campaign Timeline, Case Timeline, Player Dashboard, Roster, Locations, Requisitions, Encounters, HQ) so NPC/Guild metadata stays aligned.
 
 ## Layout
 - **Case Prep Template** – The top card is a quick brief: title/logline, guilds in conflict, antagonist goal, legal & physical obstacles, and a set-piece outline. Use it as a one-page primer before the next mission.
 - **Global Status** – Grid of all configured guilds/factions (including optional independents like Guildless); click to cycle rep values from hostile to favored. A Heat meter with +/- buttons, a glowing fill, and warning copy keeps consequences front and center.
-- **Narrative Pressure Block** – Under Global Status: overdue unresolved deadline count, high-impact unresolved event count, and ledger pinned facts vs review queue totals.
-- **Narrative Quick Links** – One-click links to `timeline.html?overdue=1` and `ledger.html`.
+- **Narrative Pressure Block** – Under Global Status: unresolved event count, high-impact unresolved event count, and ledger pinned facts vs review queue totals.
+- **Narrative Quick Links** – One-click links to `timeline.html` and `ledger.html`.
 - **Player Roster** – Mirrors the Task Force Dashboard but focuses on downtime: each player row tracks DP, project clocks, project names, and project rewards. Buttons at the bottom grant the standard +2 DP for closing a case or reset the unified campaign store.
 
 ## Controls & Sync
 - **Portal/Dashboard Links** – Jump back to the Tools Hub or straight into the Player Dashboard to edit frontline stats.
 - **Import / Export** – Hub buttons call the same unified `RTF_STORE` import/export flow used by Tools Hub (full campaign snapshot).
-- **LLM Snapshot Export** – Hero button exports `rtf_llm_snapshot_v2` directly from Hub with a `full`/`compact` mode prompt.
+- **LLM Snapshot Export** – Hero buttons export `rtf_llm_snapshot_v2` as either case-scoped or campaign-scoped snapshots, each with a `full`/`compact` mode prompt.
 - **Accent/BG** – Hero controls ensure the strategic view matches whatever palette your table picked.
 
 ## Tips

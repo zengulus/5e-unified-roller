@@ -1972,12 +1972,6 @@ function buildEventNodePayload(evt) {
     const lines = [];
     if (source.focus) lines.push(`<strong>Focus:</strong> ${sanitizeText(source.focus)}`);
     if (!isNaN(heat) && heat !== 0) lines.push(`<strong>Heat:</strong> ${heat > 0 ? '+' : ''}${heat}`);
-    if (source.dueAt) {
-        const dueTs = Date.parse(String(source.dueAt));
-        if (Number.isFinite(dueTs)) {
-            lines.push(`<strong>Due:</strong> ${sanitizeText(new Date(dueTs).toLocaleString())}`);
-        }
-    }
     lines.push(`<strong>Impact:</strong> ${sanitizeText(severity)} / ${sanitizeText(scope)}`);
     if (source.highlights) lines.push(`<strong>Beats:</strong><br>${sanitizeMultiline(source.highlights)}`);
     if (source.fallout) lines.push(`<strong>Fallout:</strong><br>${sanitizeMultiline(source.fallout)}`);
@@ -1995,7 +1989,6 @@ function buildEventNodePayload(evt) {
                 heatDelta: !isNaN(heat) ? heat : '',
                 focus: source.focus || '',
                 caseId: source.caseId || '',
-                dueAt: source.dueAt || '',
                 impactSeverity: severity,
                 impactScope: scope
             }

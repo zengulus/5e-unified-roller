@@ -3,7 +3,7 @@
 Landing grid for the entire suite. Open it first to import/export the unified data store, tweak the accent palette, or hand players a jumping-off point.
 
 ## Layout
-- **Hero Header** – Import/Export plus **LLM Snapshot** buttons live up top along with the accent picker and background cycler. Alt+Shift+Click the title to expose DM-only cards (Hub, GM deck, Clue tools, etc.).
+- **Hero Header** – Import/Export plus **Case Snapshot** and **Campaign Snapshot** buttons live up top along with the accent picker and background cycler. Alt+Shift+Click the title to expose DM-only cards (Hub, GM deck, Clue tools, etc.).
 - **Campaign Scope Panel** – Primary context selector for campaign scopes. Includes scope create/rename/delete, per-scope case ordering, one-and-only-one active case enforcement, and scope board references.
 - **Active Case Overrides** – Optional advanced panel for direct active-case switching when you need to bypass scope-derived sequencing.
 - **Campaign Pulse** – Workflow actions (`Start Next Case`, `Mark Resolved + Advance`, `Open Active Scope Board`) plus KPI cards for scope health and campaign pressure.
@@ -16,15 +16,15 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - **Secret Panel** – DM-only cards are tagged with 🔒-red borders; once the secret mode is active they fade in with a light animation.
 
 ## Tips
-- Always import campaign data here first—the Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Mission Timeline, Encounters, and HQ pages all read from the same store, so one import primes the entire campaign stack.
+- Always import campaign data here first—the Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Case Timeline, Encounters, and HQ pages all read from the same store, so one import primes the entire campaign stack.
 - Treat campaign scope as the default selector, then use `campaign-timeline.html`/`campaign-board.html` for campaign-level tracking and `timeline.html`/`board.html` for case-level execution.
 - Set the active case (derived from scope sequence, or via optional override) before opening case-scoped tools so edits land in the intended investigation.
 - For multiplayer web deployments, set up Supabase once and use the Cloud Sync panel for realtime-ish shared campaign updates.
 - If you’re forking this repo, use the secret Customise panel to export fresh preload scripts for guilds/NPCs/locations, then drop them into `js/data-guilds.js`, `js/data-npcs.js`, and `js/data-locations.js`.
 - Use the accent picker before a session so all other pages inherit the same neon colorway.
 - Hide DM cards during open-table play so players only see approved utilities.
-- Import/export here touches the unified `RTF_STORE` stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Mission Timeline, Ledger, Encounters, HQ). Standalone utilities like the Character Sheet, Session Tracker, Narrative Engine, and Tournament Bracket keep their own local saves.
-- Use `🤖 LLM Snapshot` for `rtf_llm_snapshot_v2` export; choose `full` or `compact` at prompt time.
+- Import/export here touches the unified `RTF_STORE` stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Case Timeline, Ledger, Encounters, HQ). Standalone utilities like the Character Sheet, Session Tracker, Narrative Engine, and Tournament Bracket keep their own local saves.
+- Use `🤖 Case Snapshot` for active-case exports and `🤖 Campaign Snapshot` for full-campaign exports. Both support `full`/`compact` mode prompts.
 
 ## Related Project
 For a less setting-specific version of this toolset, see [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).

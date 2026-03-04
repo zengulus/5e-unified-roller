@@ -599,32 +599,6 @@
         };
     };
 
-    const sanitizeImpactEntityType = (value, fallback = 'other') => {
-        const token = normalizeEnumToken(value)
-            .replace(/[^a-z0-9_-]+/g, '')
-            .slice(0, 40);
-        return token || fallback;
-    };
-    const sanitizeEntityImpactEntry = (entry) => {
-        if (!entry || typeof entry !== 'object') return null;
-        const out = {
-            type: sanitizeImpactEntityType(entry.type, 'other'),
-            id: toTrimmedString(entry.id, '', 80).trim(),
-            note: toTrimmedString(entry.note, '', 400).trim()
-        };
-        if (!out.id) return null;
-        if (Object.prototype.hasOwnProperty.call(entry, 'missingRef')) {
-            out.missingRef = toBoolean(entry.missingRef);
-        }
-        return out;
-    };
-    const sanitizeEntityImpacts = (value) => (
-        Array.isArray(value)
-            ? value
-                .map((entry) => sanitizeEntityImpactEntry(entry))
-                .filter(Boolean)
-            : []
-    );
     const sanitizeLedgerUI = (value) => {
         const source = value && typeof value === 'object' ? value : {};
         const base = createDefaultLedgerState().ui;
@@ -669,11 +643,12 @@
     };
     const sanitizeEvent = (event, index = 0) => {
         const source = event && typeof event === 'object' ? event : {};
+        const { dueAt: _legacyDueAt, entityImpacts: _legacyEntityImpacts, ...sourceWithoutLegacyEventFields } = source;
         const fallbackId = buildEntityId('event', index);
         const createdAt = sanitizeAttributionAt(source.created, new Date().toISOString()) || new Date().toISOString();
         const changedAt = sanitizeAttributionAt(source.lastChangedAt, createdAt) || createdAt;
         return {
-            ...source,
+            ...sourceWithoutLegacyEventFields,
             id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
             title: toTrimmedString(source.title, '', 240),
             focus: toTrimmedString(source.focus, '', 240),
@@ -687,10 +662,8 @@
             kind: toTrimmedString(source.kind, '', 80),
             resolved: toBoolean(source.resolved),
             created: createdAt,
-            dueAt: sanitizeAttributionAt(source.dueAt, ''),
             impactSeverity: sanitizeImpactSeverity(source.impactSeverity, 'moderate'),
             impactScope: sanitizeImpactScope(source.impactScope, 'local'),
-            entityImpacts: sanitizeEntityImpacts(source.entityImpacts),
             certainty: clampPercent(source.certainty, 50),
             lastChangedBy: sanitizeAttributionBy(source.lastChangedBy, ''),
             lastChangedAt: changedAt,
@@ -5517,10 +5490,8 @@
                 kind: (v) => toTrimmedString(v, '', 80),
                 resolved: (v) => toBoolean(v),
                 created: (v) => sanitizeAttributionAt(v, list[idx].created || ''),
-                dueAt: (v) => sanitizeAttributionAt(v, ''),
                 impactSeverity: (v) => sanitizeImpactSeverity(v, list[idx].impactSeverity || 'moderate'),
                 impactScope: (v) => sanitizeImpactScope(v, list[idx].impactScope || 'local'),
-                entityImpacts: (v) => sanitizeEntityImpacts(v),
                 certainty: (v) => clampPercent(v, list[idx].certainty)
             });
             if (!patch) return;
@@ -5607,10 +5578,8 @@
                     kind: (v) => toTrimmedString(v, '', 80),
                     resolved: (v) => toBoolean(v),
                     created: (v) => sanitizeAttributionAt(v, list[idx].created || ''),
-                    dueAt: (v) => sanitizeAttributionAt(v, ''),
                     impactSeverity: (v) => sanitizeImpactSeverity(v, list[idx].impactSeverity || 'moderate'),
                     impactScope: (v) => sanitizeImpactScope(v, list[idx].impactScope || 'local'),
-                    entityImpacts: (v) => sanitizeEntityImpacts(v),
                     certainty: (v) => clampPercent(v, list[idx].certainty)
                 });
                 if (!patch) return;
@@ -5746,12 +5715,16 @@
         buildLLMSnapshot(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const mode = String(opts.mode || 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+            const target = String(opts.target || opts.scope || 'campaign').trim().toLowerCase() === 'case' ? 'case' : 'campaign';
             const includeGM = !!opts.includeGM;
             const includeSheets = !!opts.includeSheets;
             const state = sanitizeState(this.state);
             const campaign = state.campaign || sanitizeCampaign(null);
-            const activeCaseId = state.cases && state.cases.activeCaseId ? state.cases.activeCaseId : 'case_primary';
+            let activeCaseId = state.cases && state.cases.activeCaseId ? state.cases.activeCaseId : 'case_primary';
             const cases = Array.isArray(state.cases && state.cases.items) ? state.cases.items : [];
+            const activeCaseEntry = cases.find((entry) => sanitizeCaseId(entry && entry.id, '') === sanitizeCaseId(activeCaseId, 'case_primary')) || cases[0] || null;
+            if (activeCaseEntry && activeCaseEntry.id) activeCaseId = sanitizeCaseId(activeCaseEntry.id, activeCaseId);
+            const snapshotCases = (target === 'case' && activeCaseEntry) ? [activeCaseEntry] : cases;
             const nowIso = new Date().toISOString();
 
             const mapTheories = (board) => {
@@ -5775,46 +5748,10 @@
                 return mode === 'compact' ? theories.slice(0, 12) : theories;
             };
 
-            const knownNPCRefs = new Set((Array.isArray(campaign.npcs) ? campaign.npcs : []).map((entry) => toTrimmedString(entry && entry.id, '', 80).trim()).filter(Boolean));
-            const knownLocationRefs = new Set((Array.isArray(campaign.locations) ? campaign.locations : []).map((entry) => toTrimmedString(entry && entry.id, '', 80).trim()).filter(Boolean));
-            const knownRequisitionRefs = new Set((Array.isArray(campaign.requisitions) ? campaign.requisitions : []).map((entry) => toTrimmedString(entry && entry.id, '', 80).trim()).filter(Boolean));
-            const knownEventRefs = new Set();
-            cases.forEach((caseEntry) => {
-                const events = sanitizeEventList(caseEntry && caseEntry.events);
-                events.forEach((eventEntry) => {
-                    const eventId = toTrimmedString(eventEntry && eventEntry.id, '', 80).trim();
-                    if (eventId) knownEventRefs.add(eventId);
-                });
-            });
-            const normalizeSnapshotEntityImpacts = (impacts) => {
-                return sanitizeEntityImpacts(impacts).map((entry) => {
-                    const clean = {
-                        type: sanitizeImpactEntityType(entry.type, 'other'),
-                        id: toTrimmedString(entry.id, '', 80).trim(),
-                        note: toTrimmedString(entry.note, '', 400).trim()
-                    };
-                    const type = clean.type;
-                    const id = clean.id;
-                    const existingMissingRef = !!entry.missingRef;
-                    let missingRef = existingMissingRef;
-                    if (!missingRef && id) {
-                        if (type === 'npc') missingRef = !knownNPCRefs.has(id);
-                        if (type === 'location') missingRef = !knownLocationRefs.has(id);
-                        if (type === 'requisition') missingRef = !knownRequisitionRefs.has(id);
-                        if (type === 'event') missingRef = !knownEventRefs.has(id);
-                    }
-                    if (mode === 'full' && missingRef) clean.missingRef = true;
-                    return clean;
-                });
-            };
-
             const eventFromSnapshot = (eventEntry) => {
                 const event = sanitizeEvent(eventEntry, 0);
                 if (mode === 'full') {
-                    return {
-                        ...event,
-                        entityImpacts: normalizeSnapshotEntityImpacts(event.entityImpacts)
-                    };
+                    return event;
                 }
                 return {
                     id: event.id,
@@ -5823,10 +5760,8 @@
                     heatDelta: event.heatDelta,
                     focus: event.focus,
                     tags: event.tags,
-                    dueAt: event.dueAt,
                     impactSeverity: event.impactSeverity,
                     impactScope: event.impactScope,
-                    entityImpacts: normalizeSnapshotEntityImpacts(event.entityImpacts),
                     certainty: event.certainty,
                     lastChangedBy: event.lastChangedBy,
                     lastChangedAt: event.lastChangedAt,
@@ -5837,7 +5772,7 @@
                 };
             };
 
-            const caseItems = cases.map((caseEntry) => {
+            const caseItems = snapshotCases.map((caseEntry) => {
                 const entry = caseEntry && typeof caseEntry === 'object' ? caseEntry : {};
                 const board = sanitizeBoard(entry.board);
                 const events = sanitizeEventList(entry.events).map((event) => ({
@@ -5870,17 +5805,15 @@
                 caseName: entry.name
             })) : []);
             const openEvents = allEvents.filter((event) => !event.resolved);
-            const nowTs = Date.now();
-            const overdueEvents = openEvents.filter((event) => {
-                const dueTs = toTimestamp(event.dueAt, 0);
-                return !!dueTs && dueTs < nowTs;
-            });
             const highImpactOpen = openEvents.filter((event) => event.impactSeverity === 'high' || event.impactSeverity === 'critical');
             const lowCertHighImpact = highImpactOpen.filter((event) => clampPercent(event.certainty, 50) <= 45);
 
             const ledger = sanitizeLedgerState(campaign.ledger);
-            const stableFacts = this.getStableFacts();
-            const compactLedgerEntries = ledger.entries
+            const ledgerSourceEntries = target === 'case'
+                ? ledger.entries.filter((entry) => String(entry && entry.caseId || '') === activeCaseId)
+                : ledger.entries;
+            const stableFacts = target === 'case' ? this.getStableFacts(activeCaseId) : this.getStableFacts();
+            const compactLedgerEntries = ledgerSourceEntries
                 .filter((entry) => entry.status === 'stable' || entry.status === 'contested')
                 .map((entry) => ({
                     id: entry.id,
@@ -5894,7 +5827,7 @@
                     lastChangedBy: entry.lastChangedBy,
                     lastChangedAt: entry.lastChangedAt
                 }));
-            const ledgerEntries = mode === 'full' ? ledger.entries : compactLedgerEntries;
+            const ledgerEntries = mode === 'full' ? ledgerSourceEntries : compactLedgerEntries;
 
             const compactEntity = (list, mapper) => {
                 const source = Array.isArray(list) ? list : [];
@@ -5959,6 +5892,9 @@
 
             const leadStore = readJsonStorage(LEAD_STORAGE_KEY, {});
             const leadCases = leadStore && typeof leadStore === 'object' ? leadStore : {};
+            const filteredLeadCases = target === 'case'
+                ? (leadCases[activeCaseId] ? { [activeCaseId]: leadCases[activeCaseId] } : {})
+                : leadCases;
             const prepProcedureState = readJsonStorage(PREP_PROCEDURE_STATE_KEY, null) || {
                 prep: { filled: 0, total: 4 },
                 procedure: { filled: 0, total: 4 },
@@ -5974,7 +5910,6 @@
             if (!pressure.length) pressure.push('World pressure currently stable.');
 
             const immediateComplications = [];
-            if (overdueEvents.length) immediateComplications.push('Overdue unresolved events exist.');
             if (highImpactOpen.length) immediateComplications.push('High-impact unresolved events are active.');
             if (!immediateComplications.length) immediateComplications.push('No urgent complications flagged.');
 
@@ -6021,6 +5956,7 @@
                 generatedAt: nowIso,
                 source: {
                     mode,
+                    target,
                     activeCaseId,
                     appVersion: toTrimmedString(global.RTF_APP_VERSION || 'local-dev', 'local-dev', 80)
                 },
@@ -6040,7 +5976,7 @@
                     stableFacts
                 },
                 sidecar: {
-                    leadsByCase: leadCases,
+                    leadsByCase: filteredLeadCases,
                     prepProcedure: prepProcedureState,
                     clocks: mode === 'full' ? (Array.isArray(clocksState) ? clocksState : []) : (Array.isArray(clocksState) ? clocksState.slice(0, 25) : []),
                     timelineAutoHeatSync
@@ -6049,12 +5985,6 @@
                     worldPressure: pressure,
                     immediateComplications,
                     openThreads,
-                    overdue_now: overdueEvents.map((event) => ({
-                        id: event.id,
-                        title: event.title,
-                        caseId: event.caseId,
-                        dueAt: event.dueAt
-                    })),
                     high_impact_open: highImpactOpen.map((event) => ({
                         id: event.id,
                         title: event.title,
@@ -6097,12 +6027,13 @@
 
         exportLLMSnapshot(options = {}) {
             const snapshot = this.buildLLMSnapshot(options);
+            const target = snapshot && snapshot.source ? snapshot.source.target : 'campaign';
             const mode = snapshot && snapshot.source ? snapshot.source.mode : 'compact';
             const date = new Date().toISOString().slice(0, 10);
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(snapshot, null, 2));
             const downloadAnchorNode = document.createElement('a');
             downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", `rtf_llm_snapshot_v2_${mode}_${date}.json`);
+            downloadAnchorNode.setAttribute("download", `rtf_llm_snapshot_v2_${target}_${mode}_${date}.json`);
             document.body.appendChild(downloadAnchorNode);
             downloadAnchorNode.click();
             downloadAnchorNode.remove();

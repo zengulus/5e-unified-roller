@@ -1,13 +1,13 @@
-# Mission Timeline (`timeline.html`)
+# Case Timeline (`timeline.html`)
 
 Session chronicle for beats, fallout, and rolling heat. Designed for quick capture mid-play—no doc editor required.
 Case-scoped by design. For campaign-level logging, use [Campaign Timeline](CampaignTimeline.md) (`campaign-timeline.html`).
 
 ## Layout
-- **Event Form** – Toggle the log form to add operation title, focus/district, deadline, heat delta, severity/scope, certainty, impacted entities, tags, optional image URL, highlights, fallout, and follow-up notes. Events save directly into the active case timeline.
-- **Filter Bar** – Live search, focus filter, sort order (Newest, Oldest, Heat), and toggles for `Heat / Fallout only`, `Overdue only`, `Auto-sync Heat`, and `Hide Resolved`.
+- **Event Form** – Toggle the log form to add operation title, focus/district, heat delta, severity/scope, certainty, tags, optional image URL, highlights, fallout, and follow-up notes. Events save directly into the active case timeline.
+- **Filter Bar** – Live search, focus filter, sort order (Newest, Oldest, Heat), and toggles for `Heat / Fallout only`, `Auto-sync Heat`, and `Hide Resolved`.
 - **Filter Actions** – One-click jump to `leads.html` plus `Export Recap`, which downloads a filtered markdown summary (`mission-timeline-recap-YYYY-MM-DD.md`) and attempts clipboard copy.
-- **Timeline List** – Cards support inline edits for deadline, severity, scope, certainty, impacted entities, and status toggles. Cards add overdue/high-impact visual treatment. Per-event actions include `Lead Queue`, `Board`, and soft delete with undo timing.
+- **Timeline List** – Cards support inline edits for severity, scope, certainty, and status toggles. High-impact events are visually emphasized. Per-event actions include `Lead Queue`, `Copy to Campaign Timeline`, `Board`, and soft delete with undo timing.
 - **Procedure Shield Action** – Positive-heat events show `Shield -1` (or `Shield -1 (Free)` when available) to reduce event heat using Prep/Procedure resources.
 
 ## Usage Flow
@@ -23,9 +23,9 @@ Case-scoped by design. For campaign-level logging, use [Campaign Timeline](Campa
 ## Integrations
 - **Lead Queue** – `Lead Queue` on an event creates/focuses an event lead and opens `leads.html?leadId=<id>`.
 - **Case Board** – `Board` opens `board.html?linkType=timeline-event&id=<event_id>`. Board focuses an existing linked node or spawns one from store data.
-- **Ledger** – Timeline metadata (`dueAt`, `impactSeverity`, `impactScope`, `entityImpacts`, `certainty`) is available for Ledger source-linking and snapshot exports.
+- **Ledger** – Timeline metadata (`impactSeverity`, `impactScope`, `certainty`) is available for Ledger source-linking and snapshot exports.
 - **Prep & Procedure Clocks** – `Shield -1` reads `rtf_prep_procedure_state_v1`. If prep is full, one free shield is available per active case/session. Otherwise it spends 1 Procedure segment, updates Heat, and logs a shield event.
-- **Deep-Link Filters** – URL query params (`search`, `focus`, `id`, and `overdue=1`) prefill timeline filters and are then removed from the address bar.
+- **Deep-Link Filters** – URL query params (`search`, `focus`, and `id`) prefill timeline filters and are then removed from the address bar.
 
 ## Tips
 - **Auto-sync Heat** is enabled by default; disable it if your table wants manual Campaign Hub heat control.

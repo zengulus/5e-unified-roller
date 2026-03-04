@@ -9,7 +9,7 @@ Lightweight CRM for districts, safehouses, and notable fronts. Uses the same car
 - **Location Cards** – Each entry shows name, district, description, notes, image URL, and quick actions (open on board, copy deep link, delete). Image URL is editable in place; other fields are currently view-only after creation.
 
 ## Tips
-- Mirror district names from the Mission Timeline tags so cross-referencing is painless.
+- Mirror district names from the Case Timeline tags so cross-referencing is painless.
 - Store downtime hooks in the notes field ("Spend 1 DP here to reduce Heat") to remind players why a location matters.
 - Export from the Tools Hub before big arcs so you can maintain a historical log of neighborhoods the party has touched.
 
