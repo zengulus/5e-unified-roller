@@ -659,6 +659,12 @@ function getReliabilityLabel(value) {
     return RELIABILITY_LABELS[clean] || 'Unknown';
 }
 
+function getReliabilityPercent(value) {
+    const maxIdx = Math.max(1, RELIABILITY_ORDER.length - 1);
+    const idx = reliabilityToIndex(value);
+    return Math.round((idx / maxIdx) * 100);
+}
+
 function reliabilityToIndex(value) {
     const clean = normalizeReliability(value);
     const idx = RELIABILITY_ORDER.indexOf(clean);
@@ -736,8 +742,18 @@ function syncNodeNarrativeMetaDisplay(nodeEl) {
         pills.push(`<span class="node-meta-pill">Certainty ${certainty}%</span>`);
     }
     if (NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
-        const reliability = getReliabilityLabel(meta.reliability);
-        pills.push(`<span class="node-meta-pill">${sanitizeText(reliability)}</span>`);
+        const reliabilityKey = normalizeReliability(meta.reliability);
+        const reliabilityLabel = getReliabilityLabel(reliabilityKey);
+        const reliabilityPercent = getReliabilityPercent(reliabilityKey);
+        pills.push(`
+            <div class="node-meta-bar node-meta-reliability" data-reliability="${sanitizeText(reliabilityKey)}">
+                <span class="node-meta-bar-label">Reliability</span>
+                <span class="node-meta-bar-value">${sanitizeText(reliabilityLabel)}</span>
+                <div class="node-meta-track">
+                    <div class="node-meta-fill" style="width:${reliabilityPercent}%"></div>
+                </div>
+            </div>
+        `);
     }
     slot.innerHTML = pills.join('');
 }
@@ -1609,6 +1625,8 @@ function initFormattingToolbar() {
     const tb = document.createElement('div');
     tb.id = 'formatting-toolbar';
     tb.className = 'formatting-toolbar';
+    tb.dataset.targetNodeId = '';
+    tb.dataset.ignoreBlur = 'false';
 
     ['bold', 'italic', 'underline'].forEach(cmd => {
         const btn = document.createElement('div');
@@ -1627,7 +1645,113 @@ function initFormattingToolbar() {
         tb.appendChild(btn);
     });
 
+    const meta = document.createElement('div');
+    meta.className = 'formatting-meta-controls';
+    meta.innerHTML = `
+        <div class="formatting-meta-row" data-meta-row="confidence">
+            <div class="formatting-meta-label">Confidence <span data-meta-value="confidence">50%</span></div>
+            <input type="range" class="formatting-meta-slider" min="0" max="100" step="1" value="50" data-meta-slider="confidence">
+        </div>
+        <div class="formatting-meta-row" data-meta-row="reliability">
+            <div class="formatting-meta-label">Reliability <span data-meta-value="reliability">Unknown</span></div>
+            <input type="range" class="formatting-meta-slider" min="0" max="${RELIABILITY_ORDER.length - 1}" step="1" value="0" data-meta-slider="reliability">
+        </div>
+    `;
+    tb.appendChild(meta);
+
+    const applySliderChange = (kind, rawValue) => {
+        const targetId = String(tb.dataset.targetNodeId || '');
+        if (!targetId) return;
+        const nodeEl = document.getElementById(targetId);
+        if (!nodeEl) return;
+        const type = getNodeTypeFromEl(nodeEl);
+        if (kind === 'confidence') {
+            if (type !== 'theory') return;
+            const nextConfidence = clampPercent(rawValue, 50);
+            applyNarrativeMetaUpdate(nodeEl, { confidence: nextConfidence });
+            return;
+        }
+        if (kind === 'reliability') {
+            if (!NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) return;
+            const nextReliability = reliabilityFromIndex(rawValue);
+            applyNarrativeMetaUpdate(nodeEl, { reliability: nextReliability });
+        }
+    };
+
+    meta.querySelectorAll('[data-meta-slider]').forEach((input) => {
+        input.addEventListener('mousedown', (event) => {
+            event.stopPropagation();
+        });
+        input.addEventListener('focus', () => {
+            tb.dataset.ignoreBlur = 'true';
+        });
+        input.addEventListener('blur', () => {
+            setTimeout(() => {
+                tb.dataset.ignoreBlur = 'false';
+            }, 0);
+        });
+        input.addEventListener('input', () => {
+            const kind = String(input.dataset.metaSlider || '');
+            if (kind === 'confidence') {
+                const val = clampPercent(input.value, 50);
+                const valueEl = tb.querySelector('[data-meta-value="confidence"]');
+                if (valueEl) valueEl.textContent = `${val}%`;
+                applySliderChange(kind, val);
+                return;
+            }
+            if (kind === 'reliability') {
+                const reliability = reliabilityFromIndex(input.value);
+                const valueEl = tb.querySelector('[data-meta-value="reliability"]');
+                if (valueEl) valueEl.textContent = getReliabilityLabel(reliability);
+                applySliderChange(kind, input.value);
+            }
+        });
+    });
+
     document.body.appendChild(tb);
+}
+
+function syncFormattingToolbarMeta(nodeEl) {
+    const tb = document.getElementById('formatting-toolbar');
+    if (!tb) return;
+    const metaControls = tb.querySelector('.formatting-meta-controls');
+    const confidenceRow = tb.querySelector('[data-meta-row="confidence"]');
+    const reliabilityRow = tb.querySelector('[data-meta-row="reliability"]');
+    const confidenceSlider = tb.querySelector('[data-meta-slider="confidence"]');
+    const reliabilitySlider = tb.querySelector('[data-meta-slider="reliability"]');
+    const confidenceValue = tb.querySelector('[data-meta-value="confidence"]');
+    const reliabilityValue = tb.querySelector('[data-meta-value="reliability"]');
+    if (!nodeEl) {
+        tb.dataset.targetNodeId = '';
+        if (metaControls) metaControls.style.display = 'none';
+        if (confidenceRow) confidenceRow.style.display = 'none';
+        if (reliabilityRow) reliabilityRow.style.display = 'none';
+        return;
+    }
+
+    tb.dataset.targetNodeId = String(nodeEl.id || '');
+    const type = getNodeTypeFromEl(nodeEl);
+    const meta = NARRATIVE_META_NODE_TYPES.has(type)
+        ? (ensureNarrativeNodeMeta(nodeEl) || {})
+        : {};
+
+    const showConfidence = type === 'theory';
+    if (confidenceRow) confidenceRow.style.display = showConfidence ? '' : 'none';
+    if (showConfidence) {
+        const confidence = clampPercent(meta.confidence, 50);
+        if (confidenceSlider) confidenceSlider.value = String(confidence);
+        if (confidenceValue) confidenceValue.textContent = `${confidence}%`;
+    }
+
+    const showReliability = NARRATIVE_RELIABILITY_NODE_TYPES.has(type);
+    if (reliabilityRow) reliabilityRow.style.display = showReliability ? '' : 'none';
+    if (showReliability) {
+        const reliability = normalizeReliability(meta.reliability);
+        const reliabilityIdx = reliabilityToIndex(reliability);
+        if (reliabilitySlider) reliabilitySlider.value = String(reliabilityIdx);
+        if (reliabilityValue) reliabilityValue.textContent = getReliabilityLabel(reliability);
+    }
+    if (metaControls) metaControls.style.display = (showConfidence || showReliability) ? 'flex' : 'none';
 }
 
 function getBoardGuildNames() {
@@ -3916,16 +4040,13 @@ function showContextMenu(e, node) {
     const isLedgerNote = type === 'note' && String(meta.sourceType || '').trim().toLowerCase() === 'ledger';
     const supportsNarrativeMeta = NARRATIVE_META_NODE_TYPES.has(type);
     const supportsCertainty = NARRATIVE_CERTAINTY_NODE_TYPES.has(type);
-    const supportsReliability = NARRATIVE_RELIABILITY_NODE_TYPES.has(type);
     if (supportsNarrativeMeta) {
         ensureNarrativeNodeMeta(node);
         syncNodeNarrativeMetaDisplay(node);
     }
     const setImageItem = document.getElementById('menu-set-image');
     const setCertaintyItem = document.getElementById('menu-set-node-certainty');
-    const setReliabilityItem = document.getElementById('menu-set-node-reliability');
     const addLedgerItem = document.getElementById('menu-add-ledger');
-    const theoryConfidenceItem = document.getElementById('menu-set-theory-confidence');
     const theoryConfirmedItem = document.getElementById('menu-mark-theory-confirmed');
     const theoryDisprovenItem = document.getElementById('menu-mark-theory-disproven');
     const createLeadItem = document.getElementById('menu-create-lead');
@@ -3933,9 +4054,7 @@ function showContextMenu(e, node) {
         setImageItem.style.display = IMAGE_EDITABLE_NODE_TYPES.has(type) ? 'block' : 'none';
     }
     if (setCertaintyItem) setCertaintyItem.style.display = supportsCertainty ? 'block' : 'none';
-    if (setReliabilityItem) setReliabilityItem.style.display = supportsReliability ? 'block' : 'none';
     if (addLedgerItem) addLedgerItem.style.display = (type !== 'group' && !isLedgerNote) ? 'block' : 'none';
-    if (theoryConfidenceItem) theoryConfidenceItem.style.display = isTheory ? 'block' : 'none';
     if (theoryConfirmedItem) theoryConfirmedItem.style.display = isTheory ? 'block' : 'none';
     if (theoryDisprovenItem) theoryDisprovenItem.style.display = isTheory ? 'block' : 'none';
     if (createLeadItem) createLeadItem.style.display = 'block';
@@ -4025,95 +4144,6 @@ function getContextTargetNode() {
     return document.getElementById(id);
 }
 
-function promptSliderValue({ title, min = 0, max = 100, step = 1, value = 0, formatValue = null }) {
-    return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.className = 'board-slider-modal';
-        overlay.innerHTML = `
-            <div class="board-slider-panel" role="dialog" aria-modal="true" aria-label="${sanitizeText(title || 'Slider')}">
-                <h3>${sanitizeText(title || 'Set Value')}</h3>
-                <div class="board-slider-value" data-slider-value></div>
-                <input class="board-slider-input" type="range" min="${Number(min)}" max="${Number(max)}" step="${Number(step)}" value="${Number(value)}">
-                <div class="board-slider-actions">
-                    <button type="button" class="btn" data-slider-cancel>Cancel</button>
-                    <button type="button" class="btn btn-dp" data-slider-apply>Apply</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-        const input = overlay.querySelector('.board-slider-input');
-        const valueEl = overlay.querySelector('[data-slider-value]');
-        const panel = overlay.querySelector('.board-slider-panel');
-        const cancelBtn = overlay.querySelector('[data-slider-cancel]');
-        const applyBtn = overlay.querySelector('[data-slider-apply]');
-        let settled = false;
-
-        const cleanup = (result) => {
-            if (settled) return;
-            settled = true;
-            document.removeEventListener('keydown', onKeyDown, true);
-            if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
-            resolve(result);
-        };
-
-        const readValue = () => String(input && input.value !== undefined ? input.value : value);
-        const syncValue = () => {
-            const raw = readValue();
-            valueEl.textContent = typeof formatValue === 'function' ? String(formatValue(raw)) : raw;
-        };
-
-        const onKeyDown = (event) => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                cleanup(null);
-                return;
-            }
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                cleanup(readValue());
-            }
-        };
-
-        if (input) {
-            input.addEventListener('input', syncValue);
-            input.focus();
-        }
-        if (panel) panel.addEventListener('click', (event) => event.stopPropagation());
-        if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
-        if (applyBtn) applyBtn.addEventListener('click', () => cleanup(readValue()));
-        overlay.addEventListener('click', (event) => {
-            if (event.target === overlay) cleanup(null);
-        });
-        document.addEventListener('keydown', onKeyDown, true);
-        syncValue();
-    });
-}
-
-async function setTargetTheoryConfidence() {
-    const nodeEl = getContextTargetNode();
-    if (!nodeEl || !nodeEl.classList.contains('type-theory')) {
-        contextMenu.style.display = 'none';
-        return;
-    }
-    const meta = ensureTheoryNodeMeta(nodeEl) || {};
-    contextMenu.style.display = 'none';
-    const nextRaw = await promptSliderValue({
-        title: 'Theory Confidence',
-        min: 0,
-        max: 100,
-        step: 1,
-        value: clampPercent(meta.confidence, 50),
-        formatValue: (raw) => `${clampPercent(raw, 50)}%`
-    });
-    if (nextRaw === null) return;
-    const nextValue = clampPercent(nextRaw, clampPercent(meta.confidence, 50));
-    applyNarrativeMetaUpdate(nodeEl, {
-        sourceType: 'theory',
-        theoryStatus: normalizeTheoryStatus(meta.theoryStatus),
-        confidence: nextValue
-    });
-}
-
 function applyNarrativeMetaUpdate(nodeEl, updates = {}) {
     if (!nodeEl || !nodeEl.classList) return false;
     const type = getNodeTypeFromEl(nodeEl);
@@ -4171,33 +4201,6 @@ function setTargetNodeCertainty() {
     const nextValue = clampPercent(nextRaw, current);
     applyNarrativeMetaUpdate(nodeEl, { certainty: nextValue });
     contextMenu.style.display = 'none';
-}
-
-async function setTargetNodeReliability() {
-    const nodeEl = getContextTargetNode();
-    if (!nodeEl) {
-        contextMenu.style.display = 'none';
-        return;
-    }
-    const type = getNodeTypeFromEl(nodeEl);
-    if (!NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
-        contextMenu.style.display = 'none';
-        return;
-    }
-    const meta = ensureNarrativeNodeMeta(nodeEl) || {};
-    const current = reliabilityToIndex(meta.reliability);
-    contextMenu.style.display = 'none';
-    const nextRaw = await promptSliderValue({
-        title: 'Reliability',
-        min: 0,
-        max: RELIABILITY_ORDER.length - 1,
-        step: 1,
-        value: current,
-        formatValue: (raw) => getReliabilityLabel(reliabilityFromIndex(raw))
-    });
-    if (nextRaw === null) return;
-    const nextValue = reliabilityFromIndex(nextRaw);
-    applyNarrativeMetaUpdate(nodeEl, { reliability: nextValue });
 }
 
 function addTargetNodeToLedger() {
@@ -4492,6 +4495,7 @@ function editTargetNode() {
     // Show Formatting Toolbar
     const tb = document.getElementById('formatting-toolbar');
     if (tb) {
+        syncFormattingToolbarMeta(el);
         tb.style.display = 'flex';
         // Position to the right of the node
         const rect = el.getBoundingClientRect();
@@ -4512,23 +4516,50 @@ function editTargetNode() {
     t.addEventListener('keydown', handleKey);
     b.addEventListener('keydown', handleKey);
 
+    let closed = false;
+    let toolbarFocusOutHandler = null;
+    const finishEditing = () => {
+        if (closed) return;
+        closed = true;
+        t.contentEditable = b.contentEditable = false;
+        el.classList.remove('editing');
+        t.removeEventListener('keydown', handleKey);
+        b.removeEventListener('keydown', handleKey);
+        if (tb) {
+            if (toolbarFocusOutHandler) tb.removeEventListener('focusout', toolbarFocusOutHandler);
+            tb.style.display = 'none';
+            syncFormattingToolbarMeta(null);
+        }
+        updateNodeCache(el.id);
+        saveBoard();
+    };
+
     const end = () => {
         // slight delay to allow button clicks to register before blur hides everything
         setTimeout(() => {
-            if (document.activeElement !== t && document.activeElement !== b) {
-                t.contentEditable = b.contentEditable = false;
-                el.classList.remove('editing');
-
-                t.removeEventListener('keydown', handleKey);
-                b.removeEventListener('keydown', handleKey);
-
-                if (tb) tb.style.display = 'none';
-
-                updateNodeCache(el.id);
-                saveBoard();
+            if (closed) return;
+            const active = document.activeElement;
+            const isFocusedInToolbar = !!(tb && active && tb.contains(active));
+            if (tb && tb.dataset.ignoreBlur === 'true') return;
+            if (active !== t && active !== b && !isFocusedInToolbar) {
+                finishEditing();
             }
         }, 50);
     };
+
+    if (tb) {
+        toolbarFocusOutHandler = () => {
+            setTimeout(() => {
+                if (closed) return;
+                const active = document.activeElement;
+                if (active === t || active === b) return;
+                if (active && tb.contains(active)) return;
+                if (tb.dataset.ignoreBlur === 'true') return;
+                finishEditing();
+            }, 50);
+        };
+        tb.addEventListener('focusout', toolbarFocusOutHandler);
+    }
 
     t.onblur = end;
     b.onblur = end;
@@ -5230,7 +5261,5 @@ window.renderBoardRequisitions = renderBoardRequisitions;
 window.draftEncounterFromTargetNode = draftEncounterFromTargetNode;
 window.createLeadFromTargetNode = createLeadFromTargetNode;
 window.setTargetNodeCertainty = setTargetNodeCertainty;
-window.setTargetNodeReliability = setTargetNodeReliability;
 window.addTargetNodeToLedger = addTargetNodeToLedger;
-window.setTargetTheoryConfidence = setTargetTheoryConfidence;
 window.markTargetTheory = markTargetTheory;

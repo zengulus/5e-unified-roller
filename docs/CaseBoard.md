@@ -9,7 +9,7 @@ Modular clue board with physics nodes, quick-reference popups, and case-scoped l
 
 ## Building the Web
 - **Toolbar** – Drag People, Locations, Clues, and other custom node types straight onto the board. The `Notes` popover now offers `Freeform Note`, `Leads`, and `Ledger` options so you can drop structured note nodes without retyping.
-- **Editing Nodes** – Click the node body to edit text inline. Use the context menu (right-click) for actions like edit text, certainty/reliability updates (clue/theory/event), source image updates, ledger capture, delete, or "Center & Optimize" to zoom to the highlighted node cluster.
+- **Editing Nodes** – Right-click a node and choose `Edit Text` for inline title/body edits. The edit toolbar now includes sliders for Theory `confidence` and Clue/Theory `reliability` (4-step), while the context menu keeps operational actions like image updates, ledger capture, delete, and "Center & Optimize".
 - **Connections** – Drag from a node edge/port to another node to create a link, then use the connection label controls to set text, toggle arrowheads, or remove the link.
 
 ## Navigation
@@ -28,8 +28,8 @@ Modular clue board with physics nodes, quick-reference popups, and case-scoped l
 - **URL Hygiene** – After resolving a cross-link request, Board clears `nodeId` / `linkType` / `id` from the URL.
 
 ## Narrative Metadata + Ledger
-- **Certainty / Reliability** – Clue, Theory, and Event nodes support `certainty` and `reliability` fields in node meta; these are visible on node badges and included in saved board payloads.
-- **Theory Confidence Bridge** – Theory confidence updates keep certainty aligned for snapshot consumers.
+- **Certainty / Reliability / Confidence** – Clues expose `certainty`; Clues and Theories expose `reliability`; Theories expose `confidence`. Reliability renders as a bar badge and confidence uses the theory confidence bar, both tinted from the active accent.
+- **Theory Confidence Bridge** – Snapshot consumers can derive certainty from theory confidence when needed.
 - **Add to Ledger** – Context action creates `campaign.ledger` entries with source links (`eventId` or node id), certainty carryover, and case linkage.
 
 ## Tips
