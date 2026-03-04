@@ -17,6 +17,7 @@
         clue: 'Board Clue'
     };
     const LINKED_SOURCE_TYPES = new Set(['event', 'theory', 'clue']);
+    const LINKED_SOURCE_TYPE_LIST = ['event', 'theory', 'clue'];
     const SOURCE_LINK_INDEX = {
         event: [],
         theory: [],
@@ -121,6 +122,10 @@
         return String(value || '').trim();
     }
 
+    function isBoardNodeId(value) {
+        return /^node_[a-z0-9_-]+$/i.test(normalizeSourceId(value));
+    }
+
     function isLinkedSourceType(sourceType) {
         return LINKED_SOURCE_TYPES.has(normalizeSourceType(sourceType));
     }
@@ -137,6 +142,26 @@
         SOURCE_LINK_INDEX.event = [];
         SOURCE_LINK_INDEX.theory = [];
         SOURCE_LINK_INDEX.clue = [];
+    }
+
+    function getLedgerSelfNodeIds(entryId, caseId = '') {
+        const cleanEntryId = String(entryId || '').trim();
+        const cleanCaseId = String(caseId || '').trim();
+        const out = new Set();
+        if (!cleanEntryId) return out;
+        const store = getStore();
+        if (!store || typeof store.getBoard !== 'function') return out;
+        const board = store.getBoard(cleanCaseId || undefined);
+        const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
+        nodes.forEach((node) => {
+            const nodeId = normalizeSourceId(node && node.id || '');
+            if (!isBoardNodeId(nodeId)) return;
+            const meta = node && typeof node.meta === 'object' ? node.meta : {};
+            if (String(meta.sourceType || '').trim().toLowerCase() !== 'ledger') return;
+            if (String(meta.ledgerEntryId || '').trim() !== cleanEntryId) return;
+            out.add(nodeId);
+        });
+        return out;
     }
 
     function refreshSourceLinkIndex() {
@@ -171,21 +196,22 @@
                     const evtId = String(evt && evt.id || '').trim();
                     if (!evtId) return;
                     const evtTitle = String(evt && evt.title || evtId).trim() || evtId;
-                    pushOption('event', evtId, `${evtTitle} • ${caseName}`, caseId);
+                    LINKED_SOURCE_TYPE_LIST.forEach((type) => {
+                        pushOption(type, evtId, `[Timeline] ${evtTitle} • ${caseName}`, caseId);
+                    });
                 });
             }
             if (typeof store.getBoard === 'function') {
                 const board = store.getBoard(caseId);
                 const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
                 nodes.forEach((node) => {
-                    const rawType = String(node && node.type || '').trim().toLowerCase();
-                    const metaType = String(node && node.meta && node.meta.sourceType || '').trim().toLowerCase();
-                    const nodeType = rawType || metaType;
-                    if (nodeType !== 'theory' && nodeType !== 'clue') return;
                     const nodeId = String(node && node.id || '').trim();
-                    if (!nodeId) return;
+                    if (!isBoardNodeId(nodeId)) return;
                     const nodeTitle = String(node && node.title || nodeId).trim() || nodeId;
-                    pushOption(nodeType, nodeId, `${nodeTitle} • ${caseName}`, caseId);
+                    const nodeType = String(node && node.type || 'node').trim().toLowerCase();
+                    LINKED_SOURCE_TYPE_LIST.forEach((type) => {
+                        pushOption(type, nodeId, `[Board] ${nodeTitle} (${nodeType || 'node'}) • ${caseName}`, caseId);
+                    });
                 });
             }
         });
@@ -199,14 +225,17 @@
         });
     }
 
-    function getSourceOptionsForType(sourceType, caseId = '') {
+    function getSourceOptionsForType(sourceType, caseId = '', blockedIds = null) {
         const cleanType = normalizeSourceType(sourceType);
         if (!isLinkedSourceType(cleanType)) return [];
         const list = Array.isArray(SOURCE_LINK_INDEX[cleanType]) ? SOURCE_LINK_INDEX[cleanType] : [];
         const cleanCaseId = String(caseId || '').trim();
-        if (!cleanCaseId) return list;
-        const scoped = list.filter((entry) => entry && String(entry.caseId || '') === cleanCaseId);
-        return scoped.length ? scoped : list;
+        const scoped = cleanCaseId
+            ? list.filter((entry) => entry && String(entry.caseId || '') === cleanCaseId)
+            : list;
+        const base = cleanCaseId && scoped.length ? scoped : list;
+        if (!blockedIds || !blockedIds.size) return base;
+        return base.filter((entry) => !blockedIds.has(String(entry && entry.id || '')));
     }
 
     function getSourcePickerPlaceholder(sourceType, optionsCount) {
@@ -218,16 +247,16 @@
             : `No ${label} links available`;
     }
 
-    function isValidLinkedSourceId(sourceType, sourceId, caseId = '') {
+    function isValidLinkedSourceId(sourceType, sourceId, caseId = '', blockedIds = null) {
         const cleanType = normalizeSourceType(sourceType);
         const cleanId = normalizeSourceId(sourceId);
         if (!isLinkedSourceType(cleanType)) return !cleanId;
         if (!cleanId) return true;
-        return getSourceOptionsForType(cleanType, caseId).some((entry) => String(entry && entry.id || '') === cleanId);
+        return getSourceOptionsForType(cleanType, caseId, blockedIds).some((entry) => String(entry && entry.id || '') === cleanId);
     }
 
-    function buildSourceDatalistOptions(sourceType, caseId = '') {
-        const options = getSourceOptionsForType(sourceType, caseId);
+    function buildSourceDatalistOptions(sourceType, caseId = '', blockedIds = null) {
+        const options = getSourceOptionsForType(sourceType, caseId, blockedIds);
         return options.map((entry) => {
             const id = String(entry && entry.id || '');
             const label = String(entry && entry.label || id);
@@ -266,13 +295,14 @@
         }
         const caseId = String(entry && entry.caseId || '').trim();
         const sourceId = normalizeSourceId(entry && entry.sourceId || '');
-        const options = getSourceOptionsForType(cleanType, caseId);
+        const blockedIds = getLedgerSelfNodeIds(entry && entry.id, caseId);
+        const options = getSourceOptionsForType(cleanType, caseId, blockedIds);
         const listId = `ledgerSourceOptions_${sanitizeDomToken(String(entry && entry.id || escapedEntryId))}`;
         return `
             <input type="text" value="${escapeHtml(sourceId)}" list="${listId}" placeholder="${escapeHtml(getSourcePickerPlaceholder(cleanType, options.length))}"
                 data-onchange="updateLedgerField('${escapedEntryId}', 'sourceId', this.value)">
             <datalist id="${listId}">
-                ${buildSourceDatalistOptions(cleanType, caseId)}
+                ${buildSourceDatalistOptions(cleanType, caseId, blockedIds)}
             </datalist>
         `;
     }
@@ -403,7 +433,7 @@
         const entryId = escapeJsString(entry.id || '');
         const status = LEDGER_STATUSES.includes(entry.status) ? entry.status : 'stable';
         const sourceType = LEDGER_SOURCE_TYPES.includes(entry.sourceType) ? entry.sourceType : 'manual';
-        const sourceTimelineAction = sourceType === 'event' && entry.sourceId
+        const sourceTimelineAction = sourceType === 'event' && entry.sourceId && !isBoardNodeId(entry.sourceId)
             ? `<button class="btn" data-onclick="openLedgerSourceOnTimeline('${entryId}')">Timeline</button>`
             : '';
         const sourceBoardAction = ((sourceType === 'event' || sourceType === 'theory' || sourceType === 'clue') && entry.sourceId)
@@ -607,7 +637,8 @@
             } else {
                 const currentSourceId = normalizeSourceId(entry && entry.sourceId || '');
                 const caseId = String(entry && entry.caseId || '').trim();
-                if (currentSourceId && !isValidLinkedSourceId(nextSourceType, currentSourceId, caseId)) {
+                const blockedIds = getLedgerSelfNodeIds(entry && entry.id, caseId);
+                if (currentSourceId && !isValidLinkedSourceId(nextSourceType, currentSourceId, caseId, blockedIds)) {
                     patch.sourceId = '';
                 }
             }
@@ -618,11 +649,12 @@
         if (cleanField === 'sourceId') {
             const sourceType = normalizeSourceType(entry && entry.sourceType || 'manual');
             const caseId = String(entry && entry.caseId || '').trim();
+            const blockedIds = getLedgerSelfNodeIds(entry && entry.id, caseId);
             const currentSourceId = normalizeSourceId(entry && entry.sourceId || '');
             let nextSourceId = normalizeSourceId(value);
             if (!isLinkedSourceType(sourceType)) {
                 nextSourceId = '';
-            } else if (nextSourceId && !isValidLinkedSourceId(sourceType, nextSourceId, caseId) && nextSourceId !== currentSourceId) {
+            } else if (nextSourceId && !isValidLinkedSourceId(sourceType, nextSourceId, caseId, blockedIds) && nextSourceId !== currentSourceId) {
                 alert('Select a valid link from the filterable list.');
                 renderLedger();
                 return;
@@ -666,6 +698,11 @@
         const sourceType = String(entry.sourceType || '');
         const sourceId = String(entry.sourceId || '');
         const url = new URL('board.html', window.location.href);
+        if (isBoardNodeId(sourceId)) {
+            url.searchParams.set('nodeId', sourceId);
+            window.location.assign(url.toString());
+            return;
+        }
         if (sourceType === 'event') {
             url.searchParams.set('linkType', 'timeline-event');
             url.searchParams.set('id', sourceId);

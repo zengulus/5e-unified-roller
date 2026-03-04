@@ -130,6 +130,25 @@
         LEAD_TARGET_INDEX.clue = [];
     }
 
+    function getLeadSelfNodeIds(leadId, caseId = getActiveCaseId()) {
+        const cleanLeadId = String(leadId || '').trim();
+        const out = new Set();
+        if (!cleanLeadId) return out;
+        const store = getStore();
+        if (!store || typeof store.getBoard !== 'function') return out;
+        const board = store.getBoard(caseId);
+        const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
+        nodes.forEach((node) => {
+            const nodeId = normalizeTargetId(node && node.id || '');
+            if (!isBoardNodeId(nodeId)) return;
+            const meta = node && typeof node.meta === 'object' ? node.meta : {};
+            if (String(meta.sourceType || '').trim().toLowerCase() !== 'lead') return;
+            if (String(meta.leadId || '').trim() !== cleanLeadId) return;
+            out.add(nodeId);
+        });
+        return out;
+    }
+
     function refreshLeadTargetIndex() {
         clearLeadTargetIndex();
         const store = getStore();
@@ -191,14 +210,14 @@
             const board = store.getBoard(activeCaseId);
             const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
             nodes.forEach((node) => {
-                const rawType = String(node && node.type || '').trim().toLowerCase();
-                const metaType = String(node && node.meta && node.meta.sourceType || '').trim().toLowerCase();
-                const nodeType = rawType || metaType;
-                if (nodeType !== 'theory' && nodeType !== 'clue') return;
                 const id = normalizeTargetId(node && node.id || '');
-                if (!id) return;
+                if (!isBoardNodeId(id)) return;
                 const title = String(node && node.title || id).trim() || id;
-                pushOption(nodeType, id, title);
+                const nodeType = String(node && node.type || 'node').trim().toLowerCase();
+                const boardLabel = `[Board] ${title} (${nodeType || 'node'})`;
+                LEAD_LINKABLE_TYPES.forEach((type) => {
+                    pushOption(type, id, boardLabel);
+                });
             });
         }
 
@@ -211,22 +230,25 @@
         });
     }
 
-    function getLeadTargetOptions(type) {
+    function getLeadTargetOptions(type, leadId = '') {
         const cleanType = normalizeLeadType(type);
         if (!isLinkableLeadType(cleanType)) return [];
-        return Array.isArray(LEAD_TARGET_INDEX[cleanType]) ? LEAD_TARGET_INDEX[cleanType] : [];
+        const list = Array.isArray(LEAD_TARGET_INDEX[cleanType]) ? LEAD_TARGET_INDEX[cleanType] : [];
+        const blockedIds = getLeadSelfNodeIds(leadId);
+        if (!blockedIds.size) return list;
+        return list.filter((entry) => !blockedIds.has(String(entry && entry.id || '')));
     }
 
-    function isValidLeadTarget(type, targetId) {
+    function isValidLeadTarget(type, targetId, leadId = '') {
         const cleanType = normalizeLeadType(type);
         const cleanId = normalizeTargetId(targetId);
         if (!isLinkableLeadType(cleanType)) return !cleanId;
         if (!cleanId) return true;
-        return getLeadTargetOptions(cleanType).some((entry) => String(entry && entry.id || '') === cleanId);
+        return getLeadTargetOptions(cleanType, leadId).some((entry) => String(entry && entry.id || '') === cleanId);
     }
 
-    function buildLeadTargetDatalist(type) {
-        return getLeadTargetOptions(type).map((entry) => {
+    function buildLeadTargetDatalist(type, leadId = '') {
+        return getLeadTargetOptions(type, leadId).map((entry) => {
             const id = String(entry && entry.id || '');
             const label = String(entry && entry.label || id);
             return `<option value="${escapeHtml(id)}" label="${escapeHtml(label)}"></option>`;
@@ -266,13 +288,13 @@
         if (!isLinkableLeadType(cleanType)) {
             return '<input type="text" value="" disabled placeholder="No linked record for this type">';
         }
-        const options = getLeadTargetOptions(cleanType);
+        const options = getLeadTargetOptions(cleanType, leadId);
         const listId = `leadTargetOptions_${String(leadId || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'lead'}`;
         return `
             <input type="text" value="${escapeHtml(normalizeTargetId(value))}" list="${listId}" placeholder="${escapeHtml(getLeadTargetPlaceholder(cleanType, options.length))}"
                 data-onchange="updateLeadField('${escapeJsString(String(leadId || ''))}', 'targetId', this.value)">
             <datalist id="${listId}">
-                ${buildLeadTargetDatalist(cleanType)}
+                ${buildLeadTargetDatalist(cleanType, leadId)}
             </datalist>
         `;
     }
@@ -475,7 +497,7 @@
             const currentTarget = normalizeTargetId(list[idx].targetId || '');
             if (!isLinkableLeadType(nextType)) {
                 list[idx].targetId = '';
-            } else if (currentTarget && !isValidLeadTarget(nextType, currentTarget)) {
+            } else if (currentTarget && !isValidLeadTarget(nextType, currentTarget, id)) {
                 list[idx].targetId = '';
             }
         }
@@ -485,7 +507,7 @@
             const nextTarget = normalizeTargetId(value);
             if (!isLinkableLeadType(leadType)) {
                 list[idx].targetId = '';
-            } else if (nextTarget && !isValidLeadTarget(leadType, nextTarget) && nextTarget !== currentTarget) {
+            } else if (nextTarget && !isValidLeadTarget(leadType, nextTarget, id) && nextTarget !== currentTarget) {
                 alert('Select a valid target from the filterable list.');
                 renderLeadQueue();
                 return;

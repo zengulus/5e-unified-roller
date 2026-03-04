@@ -30,6 +30,7 @@ Case-scoped investigation queue for unresolved questions and next actions. It se
   - `targetId` shaped like `node_...` opens `board.html?nodeId=<targetId>`.
   - Lead type `npc`, `location`, `event`, or `requisition` maps to board cross-link query params (`linkType` + `id`) for deterministic node focus/spawn.
 - **Timeline Jump Rules** – Uses lead title/question/target link as timeline `search` query and adds `id` when available.
+- **Board Link Picker** – For linkable lead types, picker includes campaign records plus all current case board nodes (`node_...`). When editing an existing lead, its own spawned board note node is excluded.
 
 ## Tips
 - Treat each lead as a decision card: one clear question plus one executable next step.

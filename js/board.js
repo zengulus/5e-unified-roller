@@ -128,6 +128,7 @@ const LEAD_STORAGE_KEY = 'rtf_lead_queue_v1';
 const THEORY_RELATIONS = ['supports', 'contradicts', 'related'];
 const THEORY_STATUSES = new Set(['unproven', 'confirmed', 'disproven']);
 const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
+const RELIABILITY_ORDER = ['unknown', 'rumored', 'corroborated', 'verified'];
 const RELIABILITY_LABELS = {
     unknown: 'Unknown',
     rumored: 'Rumored',
@@ -156,7 +157,7 @@ const LEDGER_SOURCE_LABELS = {
     requisition: 'Manual'
 };
 const NARRATIVE_META_NODE_TYPES = new Set(['clue', 'theory', 'event']);
-const NARRATIVE_CERTAINTY_NODE_TYPES = new Set(['clue', 'theory']);
+const NARRATIVE_CERTAINTY_NODE_TYPES = new Set(['clue']);
 const NARRATIVE_RELIABILITY_NODE_TYPES = new Set(['clue', 'theory']);
 const TRUST_LEVEL_LABELS = ['Hostile', 'Wary', 'Neutral', 'Trusted', 'Loyal'];
 const STIGMA_LEVEL_LABELS = ['Clean', 'Rumored', 'Noticed', 'Marked', 'Burned'];
@@ -658,6 +659,18 @@ function getReliabilityLabel(value) {
     return RELIABILITY_LABELS[clean] || 'Unknown';
 }
 
+function reliabilityToIndex(value) {
+    const clean = normalizeReliability(value);
+    const idx = RELIABILITY_ORDER.indexOf(clean);
+    return idx >= 0 ? idx : 0;
+}
+
+function reliabilityFromIndex(value) {
+    const idx = Number.parseInt(value, 10);
+    const bounded = Number.isFinite(idx) ? Math.max(0, Math.min(RELIABILITY_ORDER.length - 1, idx)) : 0;
+    return RELIABILITY_ORDER[bounded] || RELIABILITY_ORDER[0];
+}
+
 function getBoardMutationStamp() {
     const store = window.RTF_STORE;
     if (store && typeof store.getMutationStamp === 'function') {
@@ -689,12 +702,14 @@ function ensureNarrativeNodeMeta(nodeEl) {
     if (!NARRATIVE_META_NODE_TYPES.has(type)) return null;
 
     const baseMeta = getNodeMeta(nodeEl) || {};
-    const certaintySeed = type === 'theory'
-        ? (baseMeta.certainty !== undefined ? baseMeta.certainty : baseMeta.confidence)
-        : baseMeta.certainty;
     const clean = { ...baseMeta };
-    if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
-        clean.certainty = clampPercent(certaintySeed, 50);
+    if (type === 'theory') {
+        clean.sourceType = String(clean.sourceType || 'theory');
+        clean.theoryStatus = normalizeTheoryStatus(clean.theoryStatus);
+        clean.confidence = clampPercent(baseMeta.confidence, 50);
+        delete clean.certainty;
+    } else if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
+        clean.certainty = clampPercent(baseMeta.certainty, 50);
     } else if (Object.prototype.hasOwnProperty.call(clean, 'certainty')) {
         delete clean.certainty;
     }
@@ -702,12 +717,6 @@ function ensureNarrativeNodeMeta(nodeEl) {
         clean.reliability = normalizeReliability(baseMeta.reliability);
     } else if (Object.prototype.hasOwnProperty.call(clean, 'reliability')) {
         delete clean.reliability;
-    }
-    if (type === 'theory') {
-        clean.sourceType = String(clean.sourceType || 'theory');
-        clean.theoryStatus = normalizeTheoryStatus(clean.theoryStatus);
-        clean.confidence = clampPercent(baseMeta.confidence !== undefined ? baseMeta.confidence : clean.certainty, clean.certainty);
-        clean.certainty = clampPercent(clean.certainty, clean.confidence);
     }
     setNodeMeta(nodeEl, clean);
     return clean;
@@ -723,7 +732,7 @@ function syncNodeNarrativeMetaDisplay(nodeEl) {
     if (!slot) return;
     const pills = [];
     if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
-        const certainty = clampPercent(meta.certainty, type === 'theory' ? meta.confidence : 50);
+        const certainty = clampPercent(meta.certainty, 50);
         pills.push(`<span class="node-meta-pill">Certainty ${certainty}%</span>`);
     }
     if (NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
@@ -3335,9 +3344,9 @@ function ensureTheoryNodeMeta(nodeEl) {
         sourceType: String(baseMeta.sourceType || 'theory'),
         theoryStatus: normalizeTheoryStatus(baseMeta.theoryStatus),
         confidence,
-        certainty: clampPercent(baseMeta.certainty !== undefined ? baseMeta.certainty : confidence, confidence),
         reliability: normalizeReliability(baseMeta.reliability)
     };
+    delete clean.certainty;
     setNodeMeta(nodeEl, clean);
     return clean;
 }
@@ -4016,26 +4025,93 @@ function getContextTargetNode() {
     return document.getElementById(id);
 }
 
-function setTargetTheoryConfidence() {
+function promptSliderValue({ title, min = 0, max = 100, step = 1, value = 0, formatValue = null }) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'board-slider-modal';
+        overlay.innerHTML = `
+            <div class="board-slider-panel" role="dialog" aria-modal="true" aria-label="${sanitizeText(title || 'Slider')}">
+                <h3>${sanitizeText(title || 'Set Value')}</h3>
+                <div class="board-slider-value" data-slider-value></div>
+                <input class="board-slider-input" type="range" min="${Number(min)}" max="${Number(max)}" step="${Number(step)}" value="${Number(value)}">
+                <div class="board-slider-actions">
+                    <button type="button" class="btn" data-slider-cancel>Cancel</button>
+                    <button type="button" class="btn btn-dp" data-slider-apply>Apply</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('.board-slider-input');
+        const valueEl = overlay.querySelector('[data-slider-value]');
+        const panel = overlay.querySelector('.board-slider-panel');
+        const cancelBtn = overlay.querySelector('[data-slider-cancel]');
+        const applyBtn = overlay.querySelector('[data-slider-apply]');
+        let settled = false;
+
+        const cleanup = (result) => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener('keydown', onKeyDown, true);
+            if (overlay.parentElement) overlay.parentElement.removeChild(overlay);
+            resolve(result);
+        };
+
+        const readValue = () => String(input && input.value !== undefined ? input.value : value);
+        const syncValue = () => {
+            const raw = readValue();
+            valueEl.textContent = typeof formatValue === 'function' ? String(formatValue(raw)) : raw;
+        };
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                cleanup(null);
+                return;
+            }
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                cleanup(readValue());
+            }
+        };
+
+        if (input) {
+            input.addEventListener('input', syncValue);
+            input.focus();
+        }
+        if (panel) panel.addEventListener('click', (event) => event.stopPropagation());
+        if (cancelBtn) cancelBtn.addEventListener('click', () => cleanup(null));
+        if (applyBtn) applyBtn.addEventListener('click', () => cleanup(readValue()));
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) cleanup(null);
+        });
+        document.addEventListener('keydown', onKeyDown, true);
+        syncValue();
+    });
+}
+
+async function setTargetTheoryConfidence() {
     const nodeEl = getContextTargetNode();
     if (!nodeEl || !nodeEl.classList.contains('type-theory')) {
         contextMenu.style.display = 'none';
         return;
     }
     const meta = ensureTheoryNodeMeta(nodeEl) || {};
-    const nextRaw = prompt('Set theory confidence (0-100):', String(clampPercent(meta.confidence, 50)));
-    if (nextRaw === null) {
-        contextMenu.style.display = 'none';
-        return;
-    }
-    const nextValue = clampPercent(nextRaw, 50);
+    contextMenu.style.display = 'none';
+    const nextRaw = await promptSliderValue({
+        title: 'Theory Confidence',
+        min: 0,
+        max: 100,
+        step: 1,
+        value: clampPercent(meta.confidence, 50),
+        formatValue: (raw) => `${clampPercent(raw, 50)}%`
+    });
+    if (nextRaw === null) return;
+    const nextValue = clampPercent(nextRaw, clampPercent(meta.confidence, 50));
     applyNarrativeMetaUpdate(nodeEl, {
         sourceType: 'theory',
         theoryStatus: normalizeTheoryStatus(meta.theoryStatus),
-        confidence: nextValue,
-        certainty: nextValue
+        confidence: nextValue
     });
-    contextMenu.style.display = 'none';
 }
 
 function applyNarrativeMetaUpdate(nodeEl, updates = {}) {
@@ -4048,8 +4124,10 @@ function applyNarrativeMetaUpdate(nodeEl, updates = {}) {
         ...base,
         ...patch
     };
-    if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
-        next.certainty = clampPercent(next.certainty, type === 'theory' ? next.confidence : 50);
+    if (type === 'theory') {
+        delete next.certainty;
+    } else if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
+        next.certainty = clampPercent(next.certainty, 50);
     } else {
         delete next.certainty;
     }
@@ -4061,8 +4139,7 @@ function applyNarrativeMetaUpdate(nodeEl, updates = {}) {
     if (type === 'theory') {
         next.sourceType = String(next.sourceType || 'theory');
         next.theoryStatus = normalizeTheoryStatus(next.theoryStatus);
-        next.confidence = clampPercent(next.confidence, next.certainty);
-        next.certainty = clampPercent(next.certainty, next.confidence);
+        next.confidence = clampPercent(next.confidence, 50);
     }
     setNodeMeta(nodeEl, stampNodeMeta(next));
     if (type === 'theory') syncTheoryNodeDisplay(nodeEl);
@@ -4085,21 +4162,18 @@ function setTargetNodeCertainty() {
         return;
     }
     const meta = ensureNarrativeNodeMeta(nodeEl) || {};
-    const current = clampPercent(meta.certainty, type === 'theory' ? meta.confidence : 50);
+    const current = clampPercent(meta.certainty, 50);
     const nextRaw = prompt('Set certainty (0-100):', String(current));
     if (nextRaw === null) {
         contextMenu.style.display = 'none';
         return;
     }
     const nextValue = clampPercent(nextRaw, current);
-    const patch = type === 'theory'
-        ? { certainty: nextValue, confidence: nextValue }
-        : { certainty: nextValue };
-    applyNarrativeMetaUpdate(nodeEl, patch);
+    applyNarrativeMetaUpdate(nodeEl, { certainty: nextValue });
     contextMenu.style.display = 'none';
 }
 
-function setTargetNodeReliability() {
+async function setTargetNodeReliability() {
     const nodeEl = getContextTargetNode();
     if (!nodeEl) {
         contextMenu.style.display = 'none';
@@ -4111,15 +4185,19 @@ function setTargetNodeReliability() {
         return;
     }
     const meta = ensureNarrativeNodeMeta(nodeEl) || {};
-    const current = normalizeReliability(meta.reliability);
-    const nextRaw = prompt('Set reliability (unknown|rumored|corroborated|verified):', current);
-    if (nextRaw === null) {
-        contextMenu.style.display = 'none';
-        return;
-    }
-    const nextValue = normalizeReliability(nextRaw);
-    applyNarrativeMetaUpdate(nodeEl, { reliability: nextValue });
+    const current = reliabilityToIndex(meta.reliability);
     contextMenu.style.display = 'none';
+    const nextRaw = await promptSliderValue({
+        title: 'Reliability',
+        min: 0,
+        max: RELIABILITY_ORDER.length - 1,
+        step: 1,
+        value: current,
+        formatValue: (raw) => getReliabilityLabel(reliabilityFromIndex(raw))
+    });
+    if (nextRaw === null) return;
+    const nextValue = reliabilityFromIndex(nextRaw);
+    applyNarrativeMetaUpdate(nodeEl, { reliability: nextValue });
 }
 
 function addTargetNodeToLedger() {
@@ -4271,7 +4349,6 @@ function markTargetTheory(status) {
     applyNarrativeMetaUpdate(nodeEl, {
         sourceType: 'theory',
         confidence: clampPercent(meta.confidence, 50),
-        certainty: clampPercent(meta.certainty, clampPercent(meta.confidence, 50)),
         theoryStatus: cleanStatus
     });
     logTheoryStatusEvent(nodeEl, cleanStatus);

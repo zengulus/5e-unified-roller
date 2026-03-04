@@ -18,6 +18,7 @@ Campaign truth register for separating what is stable from what is disputed or c
 - **Timeline Event** – `sourceType=event`, `sourceId=<event_id>` enables Timeline and Board jumps.
 - **Board Theory/Clue** – `sourceType=theory|clue`, `sourceId=<node_id>` enables Board node focus jump.
 - **Manual Provenance** – Use `sourceType=manual` when the evidence came from witness testimony, site observation, document review, or other non-linkable channels. Capture specifics in `notes`/`tags`.
+- **Board Link Picker** – Linked provenance pickers include timeline events and all current case board nodes (`node_...`). For existing entries, their own spawned ledger note node is excluded from selection.
 
 ## Integrations
 - **Case Board** – Context menu action `Add to Ledger` creates source-linked entries from clue/theory/event nodes.

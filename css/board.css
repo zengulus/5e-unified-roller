@@ -1252,6 +1252,50 @@ body.focus-active .header-overlay {
     color: #fff;
 }
 
+.board-slider-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 11, 18, 0.7);
+    backdrop-filter: blur(3px);
+}
+
+.board-slider-panel {
+    width: min(420px, calc(100vw - 30px));
+    background: rgba(18, 24, 36, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+    padding: 14px 16px 12px;
+}
+
+.board-slider-panel h3 {
+    margin: 0 0 10px;
+    font-size: 0.95rem;
+    color: #f1f6ff;
+}
+
+.board-slider-value {
+    margin-bottom: 10px;
+    font-size: 0.82rem;
+    color: #b6c8ea;
+}
+
+.board-slider-input {
+    width: 100%;
+    margin: 0;
+}
+
+.board-slider-actions {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 /* --- POPUP MENUS --- */
 #popup-layer {
     position: fixed;
