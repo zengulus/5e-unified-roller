@@ -1,48 +1,30 @@
 (function () {
-    const NAV_GROUPS = [
-        {
-            id: 'workflow',
-            title: 'Workflow',
-            items: [
-                { id: 'tools', label: 'Campaign Hub', href: 'tools.html', description: 'Campaign context hub for scope sequencing, import/export, cloud sync, and workflow actions.', keywords: 'scope pulse' },
-                { id: 'hub', label: 'Strategic Hub', href: 'hub.html', description: 'Campaign strategic dashboard for heat, faction standing, and downtime.', keywords: 'heat rep' },
-                { id: 'campaign-timeline', label: 'Camp Timeline', href: 'campaign-timeline.html', description: 'Campaign-level timeline for cross-case beats, blockers, and decisions.', keywords: 'meta timeline' },
-                { id: 'timeline', label: 'Mission Timeline', href: 'timeline.html', description: 'Case-scoped mission log for beats, fallout, deadlines, certainty, and heat.', keywords: 'case timeline' },
-                { id: 'campaign-board', label: 'Camp Board', href: 'campaign-board.html', description: 'Campaign meta-board for cross-case links, scope references, and arc mapping.', keywords: 'meta board' },
-                { id: 'board', label: 'Case Board', href: 'board.html', description: 'Case board linking clues, theories, NPCs, locations, events, and requisitions.', keywords: 'case board' },
-                { id: 'leads', label: 'Leads', href: 'leads.html', description: 'Lead triage queue with voting, status control, and concrete next steps.', keywords: 'queue investigation' },
-                { id: 'ledger', label: 'Ledger', href: 'ledger.html', description: 'Pinned immutable facts your table has locked in as true.', keywords: 'facts evidence' }
-            ]
-        },
-        {
-            id: 'campaign-data',
-            title: 'Campaign Data',
-            items: [
-                { id: 'dashboard', label: 'Dashboard', href: 'player-dashboard.html', description: 'Editable party grid for HP, AC, passives, and save DC at a glance.', keywords: 'players' },
-                { id: 'roster', label: 'Roster', href: 'roster.html', description: 'NPC roster with guild tags, wants, leverage notes, filters, and board jumps.', keywords: 'npc contacts' },
-                { id: 'locations', label: 'Locations', href: 'locations.html', description: 'Location database for districts, notes, filtering, and board linking.', keywords: 'places' },
-                { id: 'requisitions', label: 'Requisitions', href: 'requisitions.html', description: 'Shared requisition pipeline for requests, priority, approvals, and delivery.', keywords: 'gear assets' },
-                { id: 'hq', label: 'HQ', href: 'hq.html', description: 'HQ layout foundry with floor plans, downtime slots, and resource staging.', keywords: 'base map' },
-                { id: 'prep', label: 'Prep/Procedure', href: 'prep-procedure.html', description: 'Prep/procedure clocks with token spend and timeline logging actions.', keywords: 'clocks' },
-                { id: 'sheet', label: 'Sheet', href: 'index.html', description: 'Command-console character sheet with combat, inventory, spells, and roller history.', keywords: 'character' }
-            ]
-        },
-        {
-            id: 'gm-tools',
-            title: 'GM Tools',
-            items: [
-                { id: 'gm', label: 'GM Hub', href: 'gm.html', description: 'Session tracker for initiative, quick mobs, rollers, loot, and combat log.', keywords: 'initiative tracker' },
-                { id: 'dm-screen', label: 'DM Screen', href: 'dm-screen.html', description: 'Narrative engine for incident prompts, sensory texture, hazards, and fallout.', keywords: 'narrative engine' },
-                { id: 'encounters', label: 'Encounters', href: 'encounters.html', description: 'Modular encounter recipe cards with tier/location/objective planning.', keywords: 'combat planning' },
-                { id: 'clocks', label: 'Clocks', href: 'clocks.html', description: 'Standalone progress/danger clocks with segment control and PNG export.', keywords: 'segments progress' },
-                { id: 'clue', label: 'Clue', href: 'clue.html', description: 'Signal-vs-noise clue intersection generator by guild and modality.', keywords: 'generator' },
-                { id: 'tourney', label: 'Tourney', href: 'tourney.html', description: 'Double-elimination bracket manager with auto-advance and score updates.', keywords: 'bracket' }
-            ]
-        }
+    const PRIMARY_NAV_ITEMS = [
+        { id: 'sheet', label: 'Character Sheet', href: 'index.html', description: 'Command-console character sheet with combat, inventory, spells, and roller history.', keywords: 'character player sheet' },
+        { id: 'board', label: 'Investigation Board (Case Board)', href: 'board.html', description: 'Case board linking clues, theories, NPCs, locations, events, and requisitions.', keywords: 'case board evidence' },
+        { id: 'timeline', label: 'Mission Timeline (Case Timeline)', href: 'timeline.html', description: 'Case-scoped mission log for beats, fallout, deadlines, certainty, and heat.', keywords: 'timeline case mission' },
+        { id: 'leads', label: 'Lead Queue', href: 'leads.html', description: 'Lead triage queue with voting, status control, and concrete next steps.', keywords: 'leads investigation queue' },
+        { id: 'roster', label: 'NPC Roster', href: 'roster.html', description: 'NPC roster with guild tags, wants, leverage notes, filters, and board jumps.', keywords: 'npcs contacts' },
+        { id: 'locations', label: 'Locations Database', href: 'locations.html', description: 'Location database for districts, notes, filtering, and board linking.', keywords: 'locations places districts' },
+        { id: 'ledger', label: 'Campaign Ledger', href: 'ledger.html', description: 'Pinned immutable facts your table has locked in as true.', keywords: 'ledger facts evidence' },
+        { id: 'requisitions', label: 'Requisition Vault', href: 'requisitions.html', description: 'Shared requisition pipeline for requests, priority, approvals, and delivery.', keywords: 'gear logistics' },
+        { id: 'dashboard', label: 'Player Dashboard', href: 'player-dashboard.html', description: 'Editable party grid for HP, AC, passives, and save DC at a glance.', keywords: 'players dashboard' },
+        { id: 'prep', label: 'Prep & Procedure Clocks', href: 'prep-procedure.html', description: 'Prep/procedure clocks with token spend and timeline logging actions.', keywords: 'prep procedure clocks' },
+        { id: 'hq', label: 'HQ Layout Foundry', href: 'hq.html', description: 'HQ layout foundry with floor plans, downtime slots, and resource staging.', keywords: 'hq base map' },
+        { id: 'tools', label: 'Campaign Hub (Tools)', href: 'tools.html', description: 'Campaign context hub for scope sequencing, import/export, cloud sync, and workflow actions.', keywords: 'tools scope pulse' },
+        { id: 'hub', label: 'Campaign Strategic Hub', href: 'hub.html', description: 'Campaign strategic dashboard for heat, faction standing, and downtime.', keywords: 'campaign heat reputation' },
+        { id: 'campaign-timeline', label: 'Campaign Timeline (Meta)', href: 'campaign-timeline.html', description: 'Campaign-level timeline for cross-case beats, blockers, and decisions.', keywords: 'campaign meta timeline' },
+        { id: 'campaign-board', label: 'Campaign Board (Meta)', href: 'campaign-board.html', description: 'Campaign meta-board for cross-case links, scope references, and arc mapping.', keywords: 'campaign meta board' }
     ];
-    const QUICK_NAV_IDS = ['tools', 'campaign-timeline', 'campaign-board', 'timeline', 'board', 'leads'];
-    const ALL_NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
-    const NAV_ITEM_MAP = new Map(ALL_NAV_ITEMS.map((item) => [item.id, item]));
+    const GM_NAV_ITEMS = [
+        { id: 'gm', label: 'GM Session Hub', href: 'gm.html', description: 'Session tracker for initiative, quick mobs, rollers, loot, and combat log.', keywords: 'gm combat initiative' },
+        { id: 'dm-screen', label: 'Narrative Engine (DM Screen)', href: 'dm-screen.html', description: 'Narrative engine for incident prompts, sensory texture, hazards, and fallout.', keywords: 'dm narrative screen' },
+        { id: 'encounters', label: 'Encounter Recipes', href: 'encounters.html', description: 'Modular encounter recipe cards with tier/location/objective planning.', keywords: 'encounters combat planning' },
+        { id: 'clocks', label: 'Generic Clocks', href: 'clocks.html', description: 'Standalone progress/danger clocks with segment control and PNG export.', keywords: 'clocks progress' },
+        { id: 'clue', label: 'Clue Generator', href: 'clue.html', description: 'Signal-vs-noise clue intersection generator by guild and modality.', keywords: 'clue generator' },
+        { id: 'tourney', label: 'Tournament Bracket', href: 'tourney.html', description: 'Double-elimination bracket manager with auto-advance and score updates.', keywords: 'tournament bracket' }
+    ];
+    const ALL_NAV_ITEMS = PRIMARY_NAV_ITEMS.concat(GM_NAV_ITEMS);
 
     const header = document.querySelector('.hero-header');
     if (!header || header.dataset.playerNavReady === '1') return;
@@ -52,10 +34,6 @@
     const path = String(window.location.pathname || '').split('/').pop().toLowerCase();
     const inferredActive = (ALL_NAV_ITEMS.find((item) => item.href.toLowerCase() === path) || {}).id || '';
     const activeId = explicitActive || inferredActive;
-
-    function resolveNavItemById(id) {
-        return NAV_ITEM_MAP.get(id) || null;
-    }
 
     function isAddActionLabel(labelText) {
         const clean = String(labelText || '').trim().toLowerCase();
@@ -91,13 +69,16 @@
         return item.id === activeId || item.href.toLowerCase() === path;
     }
 
-    function buildNavLink(item, mode) {
+    function getNavItemsForMode(mode) {
+        return mode === 'gm' ? GM_NAV_ITEMS : PRIMARY_NAV_ITEMS;
+    }
+
+    function buildNavLink(item) {
         const link = document.createElement('a');
         link.href = item.href;
 
         const isActive = isNavItemActive(item);
-        const isQuick = mode === 'quick';
-        link.className = `hero-btn ghost hero-menu-nav-link${isQuick ? ' hero-menu-nav-link-quick' : ''}${isActive ? ' is-active' : ''}`;
+        link.className = `hero-btn ghost hero-menu-nav-link${isActive ? ' is-active' : ''}`;
         if (isActive) link.setAttribute('aria-current', 'page');
         if (item.description) link.title = `${item.label}: ${item.description}`;
         link.dataset.search = [item.label, item.description, item.keywords].filter(Boolean).join(' ').toLowerCase();
@@ -108,62 +89,6 @@
         link.appendChild(label);
 
         return link;
-    }
-
-    function buildNavSection(group) {
-        const section = document.createElement('details');
-        section.className = 'hero-menu-nav-section';
-        section.dataset.groupId = group.id;
-
-        const sectionHasActive = group.items.some((item) => isNavItemActive(item));
-        if (group.id === 'workflow' || sectionHasActive) section.open = true;
-
-        const summary = document.createElement('summary');
-        summary.className = 'hero-menu-nav-summary';
-
-        const sectionTitleEl = document.createElement('span');
-        sectionTitleEl.className = 'hero-menu-nav-summary-title';
-        sectionTitleEl.textContent = group.title;
-        summary.appendChild(sectionTitleEl);
-
-        const sectionCountEl = document.createElement('span');
-        sectionCountEl.className = 'hero-menu-nav-count';
-        sectionCountEl.textContent = String(group.items.length);
-        summary.appendChild(sectionCountEl);
-
-        section.appendChild(summary);
-
-        const nav = document.createElement('div');
-        nav.className = 'hero-menu-nav';
-        nav.setAttribute('aria-label', `${group.title} navigation menu`);
-
-        group.items.forEach((item) => {
-            nav.appendChild(buildNavLink(item, 'default'));
-        });
-
-        section.appendChild(nav);
-        return section;
-    }
-
-    function buildQuickNavSection() {
-        const section = document.createElement('section');
-        section.className = 'hero-menu-quick';
-
-        const title = document.createElement('div');
-        title.className = 'hero-menu-panel-title';
-        title.textContent = 'Quick Jump';
-        section.appendChild(title);
-
-        const nav = document.createElement('div');
-        nav.className = 'hero-menu-quick-grid';
-        QUICK_NAV_IDS.forEach((id) => {
-            const item = resolveNavItemById(id);
-            if (!item) return;
-            nav.appendChild(buildNavLink(item, 'quick'));
-        });
-        section.appendChild(nav);
-
-        return section;
     }
 
     function updateNavFilterState(panel, query) {
@@ -178,39 +103,46 @@
             if (visible) visibleLinkCount += 1;
         });
 
-        const quickSection = panel.querySelector('.hero-menu-quick');
-        if (quickSection) {
-            const quickVisibleCount = quickSection.querySelectorAll('.hero-menu-nav-link:not(.is-hidden)').length;
-            quickSection.classList.toggle('is-filter-hidden', quickVisibleCount === 0);
-        }
-
-        panel.querySelectorAll('.hero-menu-nav-section').forEach((section) => {
-            const visibleCount = section.querySelectorAll('.hero-menu-nav-link:not(.is-hidden)').length;
-            section.classList.toggle('is-filter-hidden', visibleCount === 0);
-            const countEl = section.querySelector('.hero-menu-nav-count');
-            if (countEl) countEl.textContent = String(visibleCount);
-            if (normalizedQuery && visibleCount > 0) section.open = true;
-        });
-
         const empty = panel.querySelector('.hero-menu-nav-empty');
         if (empty) empty.classList.toggle('is-visible', normalizedQuery.length > 0 && visibleLinkCount === 0);
     }
 
-    function resetNavFilter(panel) {
+    function clearNavFilter(panel) {
         const input = panel.querySelector('.hero-menu-search-input');
-        if (!input || !input.value) return;
+        if (!input) return;
         input.value = '';
         updateNavFilterState(panel, '');
     }
 
-    function buildNavPanel() {
+    function renderNavList(panel, mode) {
+        const list = panel.querySelector('.hero-menu-nav-list');
+        if (!list) return;
+
+        panel.dataset.navMode = mode;
+        list.textContent = '';
+        getNavItemsForMode(mode).forEach((item) => {
+            list.appendChild(buildNavLink(item));
+        });
+
+        const title = panel.querySelector('.hero-menu-panel-title');
+        if (title) title.textContent = mode === 'gm' ? '🧭 GM Navigation' : '🧭 Navigation';
+
+        const hint = panel.querySelector('.hero-menu-nav-hint');
+        if (hint) hint.textContent = mode === 'gm'
+            ? 'Left-click the compass for the main navigation list.'
+            : 'Right-click the compass for GM pages.';
+
+        const input = panel.querySelector('.hero-menu-search-input');
+        updateNavFilterState(panel, input ? input.value : '');
+    }
+
+    function buildNavPanel(defaultMode) {
         const panel = document.createElement('div');
         panel.className = 'hero-menu-panel hero-menu-nav-panel';
         panel.setAttribute('aria-hidden', 'true');
 
         const panelTitle = document.createElement('div');
         panelTitle.className = 'hero-menu-panel-title';
-        panelTitle.textContent = '🧭 Navigation';
         panel.appendChild(panelTitle);
 
         const searchWrap = document.createElement('label');
@@ -218,16 +150,20 @@
         const searchInput = document.createElement('input');
         searchInput.type = 'search';
         searchInput.className = 'hero-menu-search-input';
-        searchInput.placeholder = 'Search pages...';
+        searchInput.placeholder = 'Filter pages...';
         searchInput.setAttribute('aria-label', 'Filter navigation pages');
         searchInput.autocomplete = 'off';
         searchWrap.appendChild(searchInput);
         panel.appendChild(searchWrap);
 
-        panel.appendChild(buildQuickNavSection());
-        NAV_GROUPS.forEach((group) => {
-            panel.appendChild(buildNavSection(group));
-        });
+        const hint = document.createElement('div');
+        hint.className = 'hero-menu-nav-hint';
+        panel.appendChild(hint);
+
+        const list = document.createElement('nav');
+        list.className = 'hero-menu-nav-list';
+        list.setAttribute('aria-label', 'Navigation menu');
+        panel.appendChild(list);
 
         const emptyState = document.createElement('div');
         emptyState.className = 'hero-menu-nav-empty';
@@ -238,7 +174,8 @@
             updateNavFilterState(panel, searchInput.value);
         });
 
-        updateNavFilterState(panel, '');
+        renderNavList(panel, defaultMode);
+        clearNavFilter(panel);
         return panel;
     }
 
@@ -314,7 +251,8 @@
 
         controls.append(compassBtn, gearBtn);
 
-        const navPanel = buildNavPanel();
+        const defaultNavMode = GM_NAV_ITEMS.some((item) => isNavItemActive(item)) ? 'gm' : 'primary';
+        const navPanel = buildNavPanel(defaultNavMode);
         const navSearchInput = navPanel.querySelector('.hero-menu-search-input');
 
         const settingsPanel = document.createElement('div');
@@ -338,7 +276,7 @@
             settingsPanel.appendChild(bar);
         });
 
-        const setOpenState = (targetPanel) => {
+        const setOpenState = (targetPanel, navMode) => {
             const showNav = targetPanel === 'nav';
             const showSettings = targetPanel === 'settings';
             navPanel.classList.toggle('is-open', showNav);
@@ -347,36 +285,59 @@
             settingsPanel.setAttribute('aria-hidden', showSettings ? 'false' : 'true');
             compassBtn.setAttribute('aria-expanded', showNav ? 'true' : 'false');
             gearBtn.setAttribute('aria-expanded', showSettings ? 'true' : 'false');
-            if (showNav && navSearchInput) {
-                requestAnimationFrame(() => {
-                    try {
-                        navSearchInput.focus({ preventScroll: true });
-                    } catch (err) {
-                        navSearchInput.focus();
-                    }
-                });
+
+            if (showNav) {
+                renderNavList(navPanel, navMode === 'gm' ? 'gm' : 'primary');
+                if (navSearchInput) {
+                    requestAnimationFrame(() => {
+                        try {
+                            navSearchInput.focus({ preventScroll: true });
+                        } catch (err) {
+                            navSearchInput.focus();
+                        }
+                    });
+                }
+                return;
             }
-            if (!showNav) resetNavFilter(navPanel);
+
+            clearNavFilter(navPanel);
         };
 
-        const togglePanel = (targetPanel) => {
+        const toggleNavPanel = (mode) => {
             const navOpen = navPanel.classList.contains('is-open');
-            const settingsOpen = settingsPanel.classList.contains('is-open');
-            if ((targetPanel === 'nav' && navOpen) || (targetPanel === 'settings' && settingsOpen)) {
+            const currentMode = String(navPanel.dataset.navMode || 'primary');
+            const targetMode = mode === 'gm' ? 'gm' : 'primary';
+            if (navOpen && currentMode === targetMode) {
                 setOpenState('');
                 return;
             }
-            setOpenState(targetPanel);
+            setOpenState('nav', targetMode);
         };
 
         compassBtn.addEventListener('click', (event) => {
             event.stopPropagation();
-            togglePanel('nav');
+            toggleNavPanel('primary');
+        });
+
+        compassBtn.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleNavPanel('gm');
         });
 
         gearBtn.addEventListener('click', (event) => {
             event.stopPropagation();
-            togglePanel('settings');
+            const navOpen = navPanel.classList.contains('is-open');
+            const settingsOpen = settingsPanel.classList.contains('is-open');
+            if (settingsOpen) {
+                setOpenState('');
+                return;
+            }
+            if (navOpen) {
+                setOpenState('settings');
+                return;
+            }
+            setOpenState('settings');
         });
 
         document.addEventListener('click', (event) => {
