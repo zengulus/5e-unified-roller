@@ -84,7 +84,7 @@ function bindDelegatedDataHandlers() {
 function syncSecretModeUi() {
     const isSecret = document.body.classList.contains('secret-active');
     const titleEl = document.getElementById('pageTitle');
-    if (titleEl) titleEl.innerText = isSecret ? "Campaign Hub: GM Controls" : "Campaign Hub";
+    if (titleEl) titleEl.innerText = isSecret ? "Campaign Hub (Tools): GM Controls" : "Campaign Hub (Tools)";
     const secretBtn = document.getElementById('btn-secret-mode');
     if (secretBtn) {
         secretBtn.innerText = isSecret ? '🧩 GM Mode: ON' : '🧩 GM Mode: OFF';

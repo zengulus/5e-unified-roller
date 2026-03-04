@@ -1439,6 +1439,56 @@
         renderTimeline();
     }
 
+    function copyEventToCampaignTimeline(id) {
+        if (isCampaignMetaView()) {
+            alert('You are already on the Campaign Timeline.');
+            return;
+        }
+        const store = getStore();
+        if (!store || typeof store.addCampaignMetaEvent !== 'function') {
+            alert('Campaign Timeline copy is unavailable in this build.');
+            return;
+        }
+        const cleanId = String(id || '').trim();
+        if (!cleanId) return;
+        const sourceEvent = (getTimelineEvents(store) || []).find((evt) => evt && String(evt.id || '') === cleanId);
+        if (!sourceEvent) {
+            alert('Source event was not found.');
+            return;
+        }
+
+        const activeCase = typeof store.getActiveCase === 'function' ? store.getActiveCase() : null;
+        const sourceCaseId = getActiveCaseId();
+        const sourceCaseName = activeCase && activeCase.name ? String(activeCase.name).trim() : '';
+        const copiedId = store.addCampaignMetaEvent({
+            title: String(sourceEvent.title || '').trim(),
+            focus: String(sourceEvent.focus || '').trim(),
+            heatDelta: String(sourceEvent.heatDelta || '').trim(),
+            tags: String(sourceEvent.tags || '').trim(),
+            imageUrl: String(sourceEvent.imageUrl || '').trim(),
+            highlights: String(sourceEvent.highlights || '').trim(),
+            fallout: String(sourceEvent.fallout || '').trim(),
+            followUp: String(sourceEvent.followUp || '').trim(),
+            source: String(sourceEvent.source || 'case-timeline-copy').trim() || 'case-timeline-copy',
+            kind: 'copied-from-case',
+            resolved: Boolean(sourceEvent.resolved),
+            dueAt: String(sourceEvent.dueAt || '').trim(),
+            impactSeverity: String(sourceEvent.impactSeverity || '').trim(),
+            impactScope: String(sourceEvent.impactScope || '').trim(),
+            entityImpacts: parseEntityImpacts(sourceEvent.entityImpacts),
+            certainty: clampCertainty(sourceEvent.certainty, CERTAINTY_DEFAULT),
+            originCaseId: sourceCaseId,
+            originCaseName: sourceCaseName,
+            originEventId: cleanId,
+            created: new Date().toISOString()
+        });
+        if (!copiedId) {
+            alert('Could not copy this event to Campaign Timeline.');
+            return;
+        }
+        alert('Copied to Campaign Timeline.');
+    }
+
     function renderTagPills(tags) {
         if (!tags) return '';
         return tags.split(',').map(t => t.trim()).filter(Boolean)
@@ -1506,6 +1556,9 @@
         const leadActionButton = isCampaignMetaView()
             ? ''
             : `<button class="btn" data-onclick="queueLeadFromEvent('${evtId}')">Lead Queue</button>`;
+        const copyToCampaignButton = isCampaignMetaView()
+            ? ''
+            : `<button class="btn" data-onclick="copyEventToCampaignTimeline('${evtId}')">Copy to Campaign Timeline</button>`;
 
         return `
         <div class="event-card${imageMarkup ? ' has-image' : ''}${overdueClass}${highImpactClass}">
@@ -1574,6 +1627,7 @@
                     ${attribution ? `<small class="event-log-meta">${attribution}</small>` : ''}
                     ${procedureShieldButton}
                     ${leadActionButton}
+                    ${copyToCampaignButton}
                     <button class="btn" data-onclick="openTimelineEventInBoard('${evtId}')">Board</button>
                     <button class="btn btn-danger" data-onclick="deleteTimelineEvent('${evtId}')">Delete</button>
                 </div>
@@ -1779,6 +1833,7 @@
     window.renderTimeline = renderTimeline;
     window.updateEventField = updateEventField;
     window.deleteTimelineEvent = deleteTimelineEvent;
+    window.copyEventToCampaignTimeline = copyEventToCampaignTimeline;
     window.setHeatAutoSync = setHeatAutoSync;
     window.exportTimelineRecap = exportTimelineRecap;
     window.openTimelineEventInBoard = openTimelineEventInBoard;

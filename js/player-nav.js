@@ -1,8 +1,8 @@
 (function () {
     const PRIMARY_NAV_ITEMS = [
         { id: 'sheet', label: 'Character Sheet', href: 'index.html', description: 'Command-console character sheet with combat, inventory, spells, and roller history.', keywords: 'character player sheet' },
-        { id: 'board', label: 'Investigation Board (Case Board)', href: 'board.html', description: 'Case board linking clues, theories, NPCs, locations, events, and requisitions.', keywords: 'case board evidence' },
-        { id: 'timeline', label: 'Mission Timeline (Case Timeline)', href: 'timeline.html', description: 'Case-scoped mission log for beats, fallout, deadlines, certainty, and heat.', keywords: 'timeline case mission' },
+        { id: 'board', label: 'Case Board', href: 'board.html', description: 'Case board linking clues, theories, NPCs, locations, events, and requisitions.', keywords: 'case board evidence' },
+        { id: 'timeline', label: 'Case Timeline', href: 'timeline.html', description: 'Case-scoped mission log for beats, fallout, deadlines, certainty, and heat.', keywords: 'timeline case mission' },
         { id: 'leads', label: 'Lead Queue', href: 'leads.html', description: 'Lead triage queue with voting, status control, and concrete next steps.', keywords: 'leads investigation queue' },
         { id: 'roster', label: 'NPC Roster', href: 'roster.html', description: 'NPC roster with guild tags, wants, leverage notes, filters, and board jumps.', keywords: 'npcs contacts' },
         { id: 'locations', label: 'Locations Database', href: 'locations.html', description: 'Location database for districts, notes, filtering, and board linking.', keywords: 'locations places districts' },
@@ -13,8 +13,8 @@
         { id: 'hq', label: 'HQ Layout Foundry', href: 'hq.html', description: 'HQ layout foundry with floor plans, downtime slots, and resource staging.', keywords: 'hq base map' },
         { id: 'tools', label: 'Campaign Hub (Tools)', href: 'tools.html', description: 'Campaign context hub for scope sequencing, import/export, cloud sync, and workflow actions.', keywords: 'tools scope pulse' },
         { id: 'hub', label: 'Campaign Strategic Hub', href: 'hub.html', description: 'Campaign strategic dashboard for heat, faction standing, and downtime.', keywords: 'campaign heat reputation' },
-        { id: 'campaign-timeline', label: 'Campaign Timeline (Meta)', href: 'campaign-timeline.html', description: 'Campaign-level timeline for cross-case beats, blockers, and decisions.', keywords: 'campaign meta timeline' },
-        { id: 'campaign-board', label: 'Campaign Board (Meta)', href: 'campaign-board.html', description: 'Campaign meta-board for cross-case links, scope references, and arc mapping.', keywords: 'campaign meta board' }
+        { id: 'campaign-timeline', label: 'Campaign Timeline', href: 'campaign-timeline.html', description: 'Campaign-level timeline for cross-case beats, blockers, and decisions.', keywords: 'campaign meta timeline' },
+        { id: 'campaign-board', label: 'Campaign Board', href: 'campaign-board.html', description: 'Campaign meta-board for cross-case links, scope references, and arc mapping.', keywords: 'campaign meta board' }
     ];
     const GM_NAV_ITEMS = [
         { id: 'gm', label: 'GM Session Hub', href: 'gm.html', description: 'Session tracker for initiative, quick mobs, rollers, loot, and combat log.', keywords: 'gm combat initiative' },
