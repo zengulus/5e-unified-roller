@@ -100,8 +100,8 @@ function getHeatWarning(heat) {
 }
 
 function getCognitiveRiskWarning(risk) {
-    if (risk >= 6) return "NARRATIVE COLLAPSE: Official records and witness accounts destabilize.";
-    if (risk >= 5) return "SEVERE DISCONTINUITY: A major prior-case detail has collapsed.";
+    if (risk >= 6) return "NARRATIVE FAILURE: Official records and witness accounts destabilize.";
+    if (risk >= 5) return "SEVERE DISCONTINUITY: A major prior-case detail slipped out of sync.";
     if (risk >= 4) return "IDENTITY DRIFT: Bureaucratic checks degrade and records start failing.";
     if (risk >= 3) return "MEMORY FRACTURES: Temporary personal-memory loss is in play.";
     if (risk >= 2) return "MINOR SLIPPAGE: Notes, names, and report copies begin to conflict.";
@@ -209,7 +209,7 @@ function renderNarrativePressure() {
         : { entries: [] };
     const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
     const stableCount = entries.filter((entry) => String(entry && entry.status || '') === 'stable').length;
-    const contestedCount = entries.filter((entry) => {
+    const reviewQueueCount = entries.filter((entry) => {
         const status = String(entry && entry.status || '');
         return status === 'contested' || status === 'collapsed';
     }).length;
@@ -217,7 +217,7 @@ function renderNarrativePressure() {
     summaryEl.innerHTML = `
         <div>Overdue unresolved deadlines: <strong>${overdueCount}</strong></div>
         <div>High-impact unresolved events: <strong>${highImpactCount}</strong></div>
-        <div>Ledger stable vs contested/collapsed: <strong>${stableCount} / ${contestedCount}</strong></div>
+        <div>Ledger pinned facts / review queue: <strong>${stableCount} / ${reviewQueueCount}</strong></div>
     `;
 }
 

@@ -5,7 +5,7 @@ Between-sessions control room for heat, guild standing, and downtime logistics. 
 ## Layout
 - **Case Prep Template** – The top card is a quick brief: title/logline, guilds in conflict, antagonist goal, legal & physical obstacles, and a set-piece outline. Use it as a one-page primer before the next mission.
 - **Global Status** – Grid of all configured guilds/factions (including optional independents like Guildless); click to cycle rep values from hostile to favored. A Heat meter with +/- buttons, a glowing fill, and warning copy keeps consequences front and center.
-- **Narrative Pressure Block** – Under Global Status: overdue unresolved deadline count, high-impact unresolved event count, and ledger stable vs contested/collapsed totals.
+- **Narrative Pressure Block** – Under Global Status: overdue unresolved deadline count, high-impact unresolved event count, and ledger pinned facts vs review queue totals.
 - **Narrative Quick Links** – One-click links to `timeline.html?overdue=1` and `ledger.html`.
 - **Player Roster** – Mirrors the Task Force Dashboard but focuses on downtime: each player row tracks DP, project clocks, project names, and project rewards. Buttons at the bottom grant the standard +2 DP for closing a case or reset the unified campaign store.
 

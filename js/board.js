@@ -142,9 +142,9 @@ const LEAD_STATUS_LABELS = {
     'dead-end': 'Dead End'
 };
 const LEDGER_STATUS_LABELS = {
-    stable: 'Stable',
-    contested: 'Contested',
-    collapsed: 'Collapsed',
+    stable: 'Pinned Fact',
+    contested: 'Needs Review',
+    collapsed: 'Needs Review',
     resolved: 'Resolved'
 };
 const LEDGER_SOURCE_LABELS = {
@@ -4989,80 +4989,436 @@ function layoutCluster(clusterNodeIds, rootId, nodeMetrics, allConns) {
         idealPositions.set(id, { x: pos.x, y: pos.y });
     });
 
-    const COLLISION_PADDING = 42;
     const idList = cluster.slice();
-    const ITERATIONS = 120;
-    for (let iter = 0; iter < ITERATIONS; iter++) {
-        let moved = false;
+    const getMetric = (id) => nodeMetrics.get(id) || { w: 220, h: 140 };
+    const getCenter = (id) => {
+        const metric = getMetric(id);
+        const pos = positions.get(id) || { x: 0, y: 0 };
+        return {
+            x: pos.x + metric.w * 0.5,
+            y: pos.y + metric.h * 0.5
+        };
+    };
+    const getRect = (id, padding = 0) => {
+        const metric = getMetric(id);
+        const pos = positions.get(id) || { x: 0, y: 0 };
+        return {
+            left: pos.x - padding,
+            top: pos.y - padding,
+            right: pos.x + metric.w + padding,
+            bottom: pos.y + metric.h + padding
+        };
+    };
+    const pointInRect = (point, rect) => (
+        point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom
+    );
+    const cross = (a, b, c) => ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
+    const onSegment = (a, b, c, eps = 0.0001) => (
+        Math.min(a.x, c.x) - eps <= b.x && b.x <= Math.max(a.x, c.x) + eps
+        && Math.min(a.y, c.y) - eps <= b.y && b.y <= Math.max(a.y, c.y) + eps
+    );
+    const segmentsIntersect = (p1, p2, q1, q2) => {
+        const eps = 0.0001;
+        const d1 = cross(p1, p2, q1);
+        const d2 = cross(p1, p2, q2);
+        const d3 = cross(q1, q2, p1);
+        const d4 = cross(q1, q2, p2);
 
-        idList.forEach((id) => {
-            if (id === rootId) return;
-            const pos = positions.get(id);
-            const ideal = idealPositions.get(id);
-            if (!pos || !ideal) return;
-            pos.x += (ideal.x - pos.x) * 0.14;
-            pos.y += (ideal.y - pos.y) * 0.14;
+        if (((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps))
+            && ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps))) {
+            return true;
+        }
+
+        if (Math.abs(d1) <= eps && onSegment(p1, q1, p2, eps)) return true;
+        if (Math.abs(d2) <= eps && onSegment(p1, q2, p2, eps)) return true;
+        if (Math.abs(d3) <= eps && onSegment(q1, p1, q2, eps)) return true;
+        if (Math.abs(d4) <= eps && onSegment(q1, p2, q2, eps)) return true;
+        return false;
+    };
+    const segmentIntersectsRect = (a, b, rect) => {
+        if (pointInRect(a, rect) || pointInRect(b, rect)) return true;
+        const corners = [
+            { x: rect.left, y: rect.top },
+            { x: rect.right, y: rect.top },
+            { x: rect.right, y: rect.bottom },
+            { x: rect.left, y: rect.bottom }
+        ];
+        return segmentsIntersect(a, b, corners[0], corners[1])
+            || segmentsIntersect(a, b, corners[1], corners[2])
+            || segmentsIntersect(a, b, corners[2], corners[3])
+            || segmentsIntersect(a, b, corners[3], corners[0]);
+    };
+    const projectPointOnSegment = (point, a, b) => {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const denom = (dx * dx) + (dy * dy);
+        if (denom < 0.0001) return { x: a.x, y: a.y };
+        let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / denom;
+        t = Math.max(0, Math.min(1, t));
+        return {
+            x: a.x + (dx * t),
+            y: a.y + (dy * t)
+        };
+    };
+    const distancePointToSegment = (point, a, b) => {
+        const proj = projectPointOnSegment(point, a, b);
+        return Math.hypot(point.x - proj.x, point.y - proj.y);
+    };
+    const applyForce = (forces, id, fx, fy) => {
+        if (id === rootId) return;
+        const force = forces.get(id);
+        if (!force) return;
+        force.x += fx;
+        force.y += fy;
+    };
+
+    const edges = [];
+    const edgeKeys = new Set();
+    cluster.forEach((id) => {
+        const neighbors = adj.get(id) || [];
+        neighbors.forEach((nid) => {
+            const left = String(id);
+            const right = String(nid);
+            const key = left < right ? `${left}|${right}` : `${right}|${left}`;
+            if (edgeKeys.has(key)) return;
+            edgeKeys.add(key);
+            edges.push({ a: left < right ? id : nid, b: left < right ? nid : id });
         });
+    });
+
+    const averageNodeSpan = Math.max(120, Math.round(cluster.reduce((sum, id) => {
+        const metric = getMetric(id);
+        return sum + Math.max(metric.w, metric.h);
+    }, 0) / Math.max(1, cluster.length)));
+    const idealEdgeLength = Math.max(140, Math.min(260, Math.round((averageNodeSpan * 0.95) + 40)));
+
+    const crossingPairs = [];
+    for (let i = 0; i < edges.length; i++) {
+        for (let j = i + 1; j < edges.length; j++) {
+            const e1 = edges[i];
+            const e2 = edges[j];
+            if (e1.a === e2.a || e1.a === e2.b || e1.b === e2.a || e1.b === e2.b) continue;
+            crossingPairs.push([i, j]);
+        }
+    }
+    const EDGE_PAIR_BUDGET = 12000;
+    const pairStride = crossingPairs.length > EDGE_PAIR_BUDGET
+        ? Math.max(1, Math.ceil(crossingPairs.length / EDGE_PAIR_BUDGET))
+        : 1;
+
+    const ITERATIONS = 180;
+    const NODE_OVERLAP_PADDING = 26;
+    const NODE_EDGE_PADDING = 28;
+    for (let iter = 0; iter < ITERATIONS; iter++) {
+        const cooling = 1 - (iter / ITERATIONS);
+        const forceStep = 20 * (0.45 + cooling);
+        const springStrength = 0.032 * (0.55 + cooling * 0.45);
+        const idealPull = 0.02 * cooling;
+        const repulseBase = 65000;
+        const crossingPush = 24 * (0.5 + cooling);
+        const forces = new Map();
+        idList.forEach((id) => forces.set(id, { x: 0, y: 0 }));
 
         for (let i = 0; i < idList.length; i++) {
             const leftId = idList[i];
-            const leftPos = positions.get(leftId);
-            const leftMetric = nodeMetrics.get(leftId) || { w: 220, h: 140 };
-            if (!leftPos) continue;
+            const leftMetric = getMetric(leftId);
+            const leftCenter = getCenter(leftId);
 
             for (let j = i + 1; j < idList.length; j++) {
                 const rightId = idList[j];
-                const rightPos = positions.get(rightId);
-                const rightMetric = nodeMetrics.get(rightId) || { w: 220, h: 140 };
-                if (!rightPos) continue;
-
-                const leftCenterX = leftPos.x + leftMetric.w * 0.5;
-                const leftCenterY = leftPos.y + leftMetric.h * 0.5;
-                const rightCenterX = rightPos.x + rightMetric.w * 0.5;
-                const rightCenterY = rightPos.y + rightMetric.h * 0.5;
-                let dx = rightCenterX - leftCenterX;
-                let dy = rightCenterY - leftCenterY;
-                const overlapX = (leftMetric.w + rightMetric.w) * 0.5 + COLLISION_PADDING - Math.abs(dx);
-                const overlapY = (leftMetric.h + rightMetric.h) * 0.5 + COLLISION_PADDING - Math.abs(dy);
-                if (overlapX <= 0 || overlapY <= 0) continue;
-
-                let magnitude = Math.hypot(dx, dy);
-                if (magnitude < 0.0001) {
+                const rightMetric = getMetric(rightId);
+                const rightCenter = getCenter(rightId);
+                let dx = rightCenter.x - leftCenter.x;
+                let dy = rightCenter.y - leftCenter.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < 0.0001) {
                     const hash = Math.abs(hashString(`${leftId}:${rightId}`)) % 360;
                     const angle = (hash / 180) * Math.PI;
                     dx = Math.cos(angle);
                     dy = Math.sin(angle);
-                    magnitude = 1;
+                    dist = 1;
                 }
+                const ux = dx / dist;
+                const uy = dy / dist;
+                const preferred = ((leftMetric.w + rightMetric.w) * 0.5) + 46;
+                const overlap = preferred - dist;
 
-                const push = Math.min(overlapX, overlapY) * 0.55;
-                const ux = dx / magnitude;
-                const uy = dy / magnitude;
-                let leftFactor = 1;
-                let rightFactor = 1;
-
-                if (leftId === rootId) {
-                    leftFactor = 0;
-                    rightFactor = 2;
-                } else if (rightId === rootId) {
-                    leftFactor = 2;
-                    rightFactor = 0;
+                if (overlap > 0) {
+                    const push = overlap * 0.9;
+                    applyForce(forces, leftId, -ux * push, -uy * push);
+                    applyForce(forces, rightId, ux * push, uy * push);
+                } else {
+                    const push = Math.min(3.6, repulseBase / Math.max(1, dist * dist));
+                    applyForce(forces, leftId, -ux * push, -uy * push);
+                    applyForce(forces, rightId, ux * push, uy * push);
                 }
+            }
+        }
 
-                if (leftFactor > 0) {
-                    leftPos.x -= ux * push * leftFactor;
-                    leftPos.y -= uy * push * leftFactor;
+        edges.forEach((edge) => {
+            const centerA = getCenter(edge.a);
+            const centerB = getCenter(edge.b);
+            let dx = centerB.x - centerA.x;
+            let dy = centerB.y - centerA.y;
+            let dist = Math.hypot(dx, dy);
+            if (dist < 0.0001) {
+                dx = 1;
+                dy = 0;
+                dist = 1;
+            }
+            const ux = dx / dist;
+            const uy = dy / dist;
+            const delta = dist - idealEdgeLength;
+            const pull = delta * springStrength;
+            applyForce(forces, edge.a, ux * pull, uy * pull);
+            applyForce(forces, edge.b, -ux * pull, -uy * pull);
+        });
+
+        const crossingOffset = pairStride > 1 ? (iter % pairStride) : 0;
+        for (let idx = crossingOffset; idx < crossingPairs.length; idx += pairStride) {
+            const pair = crossingPairs[idx];
+            if (!pair) continue;
+            const edgeA = edges[pair[0]];
+            const edgeB = edges[pair[1]];
+            if (!edgeA || !edgeB) continue;
+            const a1 = getCenter(edgeA.a);
+            const a2 = getCenter(edgeA.b);
+            const b1 = getCenter(edgeB.a);
+            const b2 = getCenter(edgeB.b);
+            if (!segmentsIntersect(a1, a2, b1, b2)) continue;
+
+            const midA = { x: (a1.x + a2.x) * 0.5, y: (a1.y + a2.y) * 0.5 };
+            const midB = { x: (b1.x + b2.x) * 0.5, y: (b1.y + b2.y) * 0.5 };
+            [edgeA.a, edgeA.b].forEach((id) => {
+                const center = getCenter(id);
+                let dx = center.x - midB.x;
+                let dy = center.y - midB.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < 0.0001) {
+                    const hash = Math.abs(hashString(`${id}:cross-a:${iter}`)) % 360;
+                    const angle = (hash / 180) * Math.PI;
+                    dx = Math.cos(angle);
+                    dy = Math.sin(angle);
+                    dist = 1;
                 }
-                if (rightFactor > 0) {
-                    rightPos.x += ux * push * rightFactor;
-                    rightPos.y += uy * push * rightFactor;
+                applyForce(forces, id, (dx / dist) * crossingPush, (dy / dist) * crossingPush);
+            });
+            [edgeB.a, edgeB.b].forEach((id) => {
+                const center = getCenter(id);
+                let dx = center.x - midA.x;
+                let dy = center.y - midA.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < 0.0001) {
+                    const hash = Math.abs(hashString(`${id}:cross-b:${iter}`)) % 360;
+                    const angle = (hash / 180) * Math.PI;
+                    dx = Math.cos(angle);
+                    dy = Math.sin(angle);
+                    dist = 1;
+                }
+                applyForce(forces, id, (dx / dist) * crossingPush, (dy / dist) * crossingPush);
+            });
+        }
+
+        idList.forEach((id) => {
+            if (id === rootId) return;
+            const nodeCenter = getCenter(id);
+            const nodeRect = getRect(id, NODE_EDGE_PADDING);
+            edges.forEach((edge) => {
+                if (edge.a === id || edge.b === id) return;
+                const edgeA = getCenter(edge.a);
+                const edgeB = getCenter(edge.b);
+                const hitsNode = segmentIntersectsRect(edgeA, edgeB, nodeRect);
+                const edgeDist = distancePointToSegment(nodeCenter, edgeA, edgeB);
+                if (!hitsNode && edgeDist >= NODE_EDGE_PADDING) return;
+
+                const nearest = projectPointOnSegment(nodeCenter, edgeA, edgeB);
+                let dx = nodeCenter.x - nearest.x;
+                let dy = nodeCenter.y - nearest.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < 0.0001) {
+                    const hash = Math.abs(hashString(`${id}:edge:${edge.a}:${edge.b}`)) % 360;
+                    const angle = (hash / 180) * Math.PI;
+                    dx = Math.cos(angle);
+                    dy = Math.sin(angle);
+                    dist = 1;
+                }
+                const depth = hitsNode
+                    ? NODE_EDGE_PADDING + 10
+                    : Math.max(0, NODE_EDGE_PADDING - edgeDist);
+                const push = (depth * 0.85 * (0.6 + cooling * 0.4)) + (hitsNode ? 4 : 0);
+                const ux = dx / dist;
+                const uy = dy / dist;
+                applyForce(forces, id, ux * push, uy * push);
+                applyForce(forces, edge.a, -ux * push * 0.35, -uy * push * 0.35);
+                applyForce(forces, edge.b, -ux * push * 0.35, -uy * push * 0.35);
+            });
+        });
+
+        let moved = false;
+        idList.forEach((id) => {
+            if (id === rootId) return;
+            const pos = positions.get(id);
+            const ideal = idealPositions.get(id);
+            const force = forces.get(id);
+            if (!pos || !ideal || !force) return;
+
+            force.x += (ideal.x - pos.x) * idealPull;
+            force.y += (ideal.y - pos.y) * idealPull;
+
+            const stepX = Math.max(-forceStep, Math.min(forceStep, force.x));
+            const stepY = Math.max(-forceStep, Math.min(forceStep, force.y));
+            if (Math.abs(stepX) > 0.01 || Math.abs(stepY) > 0.01) moved = true;
+            pos.x += stepX;
+            pos.y += stepY;
+            pos.x *= 0.997;
+            pos.y *= 0.997;
+        });
+
+        for (let i = 0; i < idList.length; i++) {
+            const leftId = idList[i];
+            for (let j = i + 1; j < idList.length; j++) {
+                const rightId = idList[j];
+                const leftRect = getRect(leftId, NODE_OVERLAP_PADDING);
+                const rightRect = getRect(rightId, NODE_OVERLAP_PADDING);
+                const overlapX = Math.min(leftRect.right, rightRect.right) - Math.max(leftRect.left, rightRect.left);
+                const overlapY = Math.min(leftRect.bottom, rightRect.bottom) - Math.max(leftRect.top, rightRect.top);
+                if (overlapX <= 0 || overlapY <= 0) continue;
+
+                const leftCenter = getCenter(leftId);
+                const rightCenter = getCenter(rightId);
+                const dirX = rightCenter.x >= leftCenter.x ? 1 : -1;
+                const dirY = rightCenter.y >= leftCenter.y ? 1 : -1;
+                const pushX = overlapX * 0.52;
+                const pushY = overlapY * 0.52;
+
+                if (overlapX < overlapY) {
+                    if (leftId === rootId) {
+                        const rightPos = positions.get(rightId);
+                        if (rightPos) rightPos.x += dirX * pushX * 2;
+                    } else if (rightId === rootId) {
+                        const leftPos = positions.get(leftId);
+                        if (leftPos) leftPos.x -= dirX * pushX * 2;
+                    } else {
+                        const leftPos = positions.get(leftId);
+                        const rightPos = positions.get(rightId);
+                        if (leftPos) leftPos.x -= dirX * pushX;
+                        if (rightPos) rightPos.x += dirX * pushX;
+                    }
+                } else {
+                    if (leftId === rootId) {
+                        const rightPos = positions.get(rightId);
+                        if (rightPos) rightPos.y += dirY * pushY * 2;
+                    } else if (rightId === rootId) {
+                        const leftPos = positions.get(leftId);
+                        if (leftPos) leftPos.y -= dirY * pushY * 2;
+                    } else {
+                        const leftPos = positions.get(leftId);
+                        const rightPos = positions.get(rightId);
+                        if (leftPos) leftPos.y -= dirY * pushY;
+                        if (rightPos) rightPos.y += dirY * pushY;
+                    }
                 }
                 moved = true;
             }
         }
 
         positions.set(rootId, { x: 0, y: 0 });
-        if (!moved && iter > 10) break;
+        if (!moved && iter > 24) break;
+    }
+
+    const EDGE_TIGHTEN_PASSES = 20;
+    for (let pass = 0; pass < EDGE_TIGHTEN_PASSES; pass++) {
+        let changed = false;
+        let crossingChanged = false;
+        const maxLen = idealEdgeLength * 1.12;
+        const minLen = idealEdgeLength * 0.55;
+
+        edges.forEach((edge) => {
+            const centerA = getCenter(edge.a);
+            const centerB = getCenter(edge.b);
+            let dx = centerB.x - centerA.x;
+            let dy = centerB.y - centerA.y;
+            let dist = Math.hypot(dx, dy);
+            if (dist < 0.0001) {
+                dx = 1;
+                dy = 0;
+                dist = 1;
+            }
+            const ux = dx / dist;
+            const uy = dy / dist;
+
+            if (dist > maxLen) {
+                const pull = (dist - maxLen) * 0.42;
+                const leftPos = positions.get(edge.a);
+                const rightPos = positions.get(edge.b);
+                if (edge.a !== rootId && leftPos) {
+                    leftPos.x += ux * pull;
+                    leftPos.y += uy * pull;
+                }
+                if (edge.b !== rootId && rightPos) {
+                    rightPos.x -= ux * pull;
+                    rightPos.y -= uy * pull;
+                }
+                changed = true;
+            } else if (dist < minLen) {
+                const push = (minLen - dist) * 0.38;
+                const leftPos = positions.get(edge.a);
+                const rightPos = positions.get(edge.b);
+                if (edge.a !== rootId && leftPos) {
+                    leftPos.x -= ux * push;
+                    leftPos.y -= uy * push;
+                }
+                if (edge.b !== rootId && rightPos) {
+                    rightPos.x += ux * push;
+                    rightPos.y += uy * push;
+                }
+                changed = true;
+            }
+        });
+
+        crossingPairs.forEach((pair) => {
+            const edgeA = edges[pair[0]];
+            const edgeB = edges[pair[1]];
+            if (!edgeA || !edgeB) return;
+            const a1 = getCenter(edgeA.a);
+            const a2 = getCenter(edgeA.b);
+            const b1 = getCenter(edgeB.a);
+            const b2 = getCenter(edgeB.b);
+            if (!segmentsIntersect(a1, a2, b1, b2)) return;
+
+            const midA = { x: (a1.x + a2.x) * 0.5, y: (a1.y + a2.y) * 0.5 };
+            const midB = { x: (b1.x + b2.x) * 0.5, y: (b1.y + b2.y) * 0.5 };
+            const uncrossPush = 8;
+
+            [edgeA.a, edgeA.b].forEach((id) => {
+                if (id === rootId) return;
+                const pos = positions.get(id);
+                const center = getCenter(id);
+                if (!pos) return;
+                let dx = center.x - midB.x;
+                let dy = center.y - midB.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < 0.0001) dist = 1;
+                pos.x += (dx / dist) * uncrossPush;
+                pos.y += (dy / dist) * uncrossPush;
+            });
+            [edgeB.a, edgeB.b].forEach((id) => {
+                if (id === rootId) return;
+                const pos = positions.get(id);
+                const center = getCenter(id);
+                if (!pos) return;
+                let dx = center.x - midA.x;
+                let dy = center.y - midA.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < 0.0001) dist = 1;
+                pos.x += (dx / dist) * uncrossPush;
+                pos.y += (dy / dist) * uncrossPush;
+            });
+            crossingChanged = true;
+        });
+
+        positions.set(rootId, { x: 0, y: 0 });
+        if (!changed && !crossingChanged) break;
     }
 
     positions.forEach((pos, id) => {

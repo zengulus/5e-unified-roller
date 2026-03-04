@@ -1,26 +1,26 @@
 (function () {
     const PLAYER_NAV_ITEMS = [
-        { id: 'sheet', label: 'Sheet', href: 'index.html', description: 'Your character sheet, rolls, inventory, spells, and story notes.' },
-        { id: 'dashboard', label: 'Dashboard', href: 'player-dashboard.html', description: 'Party snapshot for HP, AC, passives, and quick table status.' },
-        { id: 'timeline', label: 'Timeline', href: 'timeline.html', description: 'Session beats, fallout, and forward hooks in chronological order.' },
-        { id: 'leads', label: 'Leads', href: 'leads.html', description: 'Track investigation threads, vote priority, and lock next steps.' },
-        { id: 'ledger', label: 'Ledger', href: 'ledger.html', description: 'Known truths vs contested claims with certainty tracking.' },
-        { id: 'board', label: 'Board', href: 'board.html', description: 'Visual case map linking clues, people, locations, and theories.' },
-        { id: 'roster', label: 'Roster', href: 'roster.html', description: 'NPC database with trust, leverage, and notes for scene prep.' },
-        { id: 'locations', label: 'Locations', href: 'locations.html', description: 'Location index with district context, hooks, and references.' },
-        { id: 'requisitions', label: 'Requisitions', href: 'requisitions.html', description: 'Shared gear requests, statuses, priorities, and approvals.' },
-        { id: 'prep', label: 'Prep/Procedure', href: 'prep-procedure.html', description: 'Prep and procedure clocks for pacing, pressure, and spend.' }
+        { id: 'sheet', label: 'Sheet', href: 'index.html', description: 'Command-console character sheet with combat, inventory, spells, and roller history.' },
+        { id: 'dashboard', label: 'Dashboard', href: 'player-dashboard.html', description: 'Editable party grid for HP, AC, passives, and save DC at a glance.' },
+        { id: 'timeline', label: 'Timeline', href: 'timeline.html', description: 'Case-scoped mission log for beats, fallout, deadlines, certainty, and heat.' },
+        { id: 'leads', label: 'Leads', href: 'leads.html', description: 'Lead triage queue with voting, status control, and concrete next steps.' },
+        { id: 'ledger', label: 'Ledger', href: 'ledger.html', description: 'Pinned immutable facts your table has locked in as true.' },
+        { id: 'board', label: 'Board', href: 'board.html', description: 'Case board linking clues, theories, NPCs, locations, events, and requisitions.' },
+        { id: 'hq', label: 'HQ', href: 'hq.html', description: 'HQ layout foundry with floor plans, downtime slots, and resource staging.' },
+        { id: 'roster', label: 'Roster', href: 'roster.html', description: 'NPC roster with guild tags, wants, leverage notes, filters, and board jumps.' },
+        { id: 'locations', label: 'Locations', href: 'locations.html', description: 'Location database for districts, notes, filtering, and board linking.' },
+        { id: 'requisitions', label: 'Requisitions', href: 'requisitions.html', description: 'Shared requisition pipeline for requests, priority, approvals, and delivery.' },
+        { id: 'prep', label: 'Prep/Procedure', href: 'prep-procedure.html', description: 'Prep/procedure clocks with token spend and timeline logging actions.' }
     ];
     const GM_NAV_ITEMS = [
-        { id: 'tools', label: 'Portal', href: 'tools.html', description: 'GM control hub for sync, import/export, and campaign utilities.' },
-        { id: 'gm', label: 'GM Hub', href: 'gm.html', description: 'Live GM console for initiative, quick rolls, and encounter control.' },
-        { id: 'dm-screen', label: 'DM Screen', href: 'dm-screen.html', description: 'Scene-forward reference panel for narration and table pacing.' },
-        { id: 'encounters', label: 'Encounters', href: 'encounters.html', description: 'Build and launch encounter recipes, hazards, and stat packages.' },
-        { id: 'clocks', label: 'Clocks', href: 'clocks.html', description: 'Create and run standalone progress or danger clocks.' },
-        { id: 'clue', label: 'Clue', href: 'clue.html', description: 'Generate clue intersections and mystery signal/noise prompts.' },
-        { id: 'hq', label: 'HQ', href: 'hq.html', description: 'Manage base facilities, projects, and operational support.' },
-        { id: 'hub', label: 'Hub', href: 'hub.html', description: 'Campaign status board for heat, pressure, and roster operations.' },
-        { id: 'tourney', label: 'Tourney', href: 'tourney.html', description: 'Bracket planner for duels, tournaments, and elimination arcs.' }
+        { id: 'tools', label: 'Portal (GM)', href: 'tools.html', description: 'GM-only tools hub for case switching, import/export, cloud sync, and utilities.' },
+        { id: 'gm', label: 'GM Hub', href: 'gm.html', description: 'Session tracker for initiative, quick mobs, rollers, loot, and combat log.' },
+        { id: 'dm-screen', label: 'DM Screen', href: 'dm-screen.html', description: 'Narrative engine for incident prompts, sensory texture, hazards, and fallout.' },
+        { id: 'encounters', label: 'Encounters', href: 'encounters.html', description: 'Modular encounter recipe cards with tier/location/objective planning.' },
+        { id: 'clocks', label: 'Clocks', href: 'clocks.html', description: 'Standalone progress/danger clocks with segment control and PNG export.' },
+        { id: 'clue', label: 'Clue', href: 'clue.html', description: 'Signal-vs-noise clue intersection generator by guild and modality.' },
+        { id: 'hub', label: 'Hub', href: 'hub.html', description: 'Campaign strategic dashboard for heat, faction standing, and downtime.' },
+        { id: 'tourney', label: 'Tourney', href: 'tourney.html', description: 'Double-elimination bracket manager with auto-advance and score updates.' }
     ];
     const header = document.querySelector('.hero-header');
     if (!header || header.dataset.playerNavReady === '1') return;

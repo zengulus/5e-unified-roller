@@ -9,7 +9,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - **Cloud Sync Panel (Secret Mode)** – Manual Supabase URL/key/campaign controls, export of `connect.json`, and admin pull/push actions. This panel is intentionally behind Alt+Shift secret mode.
 - **Customise Seed Panel (Secret Mode)** – Hidden fork helper that loads default/store guild + NPC + location data and exports fork-ready `data-guilds*.js`, `data-npcs*.js`, and `data-locations*.js` files.
 - **Card Grid** – Responsive cards link to every HTML tool (player sheet, dashboards, HQ, timeline, etc.). Icons and short blurbs help the table pick the right door quickly.
-- **Ledger Card** – Dedicated jump into `ledger.html` for stable truths, contested claims, and source-linked narrative facts.
+- **Ledger Card** – Dedicated jump into `ledger.html` for pinned immutable facts and source-linked narrative evidence.
 - **Secret Panel** – DM-only cards are tagged with 🔒-red borders; once the secret mode is active they fade in with a light animation.
 
 ## Tips
