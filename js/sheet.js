@@ -71,7 +71,7 @@ export const Sheet = {
 
     getDefaultChar() {
         let char = {
-            meta: { player: '', name: 'New Character', level: 1, casterType: 'none', webhook: '', discordActive: false, init: 0, speed: '', spellAttr: 'auto' },
+            meta: { player: '', name: 'New Character', level: 1, casterLevel: 1, casterType: 'none', webhook: '', discordActive: false, init: 0, speed: '', spellAttr: 'auto' },
             vitals: { curr: '', max: '', temp: '', hdDie: 'd8', hdCurr: 1, hdMax: 1, inspiration: 0, ds: { s1: false, s2: false, s3: false, f1: false, f2: false, f3: false } },
             ac: { mode: 'std', dexCap: '100', base: 10, bonus: 0, customStat1: 'dex', customStat2: 'none', bonuses: [] },
             stats: {

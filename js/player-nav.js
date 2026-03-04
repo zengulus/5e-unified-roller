@@ -141,6 +141,11 @@
         panelHeader.textContent = '⚙ Settings & Actions';
         settingsPanel.appendChild(panelHeader);
 
+        const characterSwitcher = document.querySelector('#card-settings .settings-character-switcher');
+        if (characterSwitcher) {
+            settingsPanel.appendChild(characterSwitcher);
+        }
+
         bars.forEach((bar) => {
             if (bar.querySelector('.quick-actions-header, #quickActionsHeader')) return;
             const hasControls = !!bar.querySelector('a, button, input, select, textarea');

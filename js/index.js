@@ -961,7 +961,7 @@ function ensureQuickActionsState() {
 function getDefaultChar() {
     let char = {
         meta: {
-            player: '', name: 'New Character', level: 1, casterType: 'none', webhook: '', discordActive: false, init: 0, speed: '', spellAttr: 'auto'
+            player: '', name: 'New Character', level: 1, casterLevel: 1, casterType: 'none', webhook: '', discordActive: false, init: 0, speed: '', spellAttr: 'auto'
         }
 
         ,
@@ -1488,6 +1488,10 @@ function sanitizeCharacterData(rawChar) {
     out.meta.player = sanitizeString(out.meta.player, '', 120);
     out.meta.name = sanitizeString(out.meta.name, 'New Character', 120);
     out.meta.level = Math.round(sanitizeNumber(out.meta.level, 1, 1, 20));
+    const sourceMetaHasCasterLevel = isPlainObject(source.meta) && Object.prototype.hasOwnProperty.call(source.meta, 'casterLevel');
+    out.meta.casterLevel = sourceMetaHasCasterLevel
+        ? Math.round(sanitizeNumber(out.meta.casterLevel, out.meta.level, 0, 20))
+        : out.meta.level;
     out.meta.casterType = ['none', 'full', 'half', 'third', 'pact'].includes(out.meta.casterType)
         ? out.meta.casterType
         : 'none';
@@ -1896,6 +1900,8 @@ function populateUI() {
     document.getElementById('playerName').value = data.meta.player || '';
     document.getElementById('charName').value = data.meta.name || '';
     document.getElementById('charLevel').value = data.meta.level || 1;
+    const casterLevelInput = document.getElementById('casterLevel');
+    if (casterLevelInput) casterLevelInput.value = getCasterLevel();
     document.getElementById('casterType').value = data.meta.casterType || 'none';
     document.getElementById('webhookUrl').value = data.meta.webhook || '';
     document.getElementById('sendToDiscord').checked = data.meta.discordActive || false;
@@ -2020,6 +2026,13 @@ function save() {
     data.vitals.hdCurr = parseInt(document.getElementById('hdCurr').value) || 0;
     data.vitals.hdMax = parseInt(document.getElementById('hdMax').value) || 0;
     data.meta.casterType = document.getElementById('casterType').value;
+    const casterLevelInput = document.getElementById('casterLevel');
+    data.meta.casterLevel = casterLevelInput
+        ? clampCasterLevel(casterLevelInput.value, data.meta.level || 1)
+        : clampCasterLevel(data.meta.casterLevel, data.meta.level || 1);
+    if (casterLevelInput && String(casterLevelInput.value) !== String(data.meta.casterLevel)) {
+        casterLevelInput.value = data.meta.casterLevel;
+    }
     const spellAttrSelect = document.getElementById('spellCastingAttr');
     data.meta.spellAttr = spellAttrSelect && spellcastingAttrOptions.includes(spellAttrSelect.value) ? spellAttrSelect.value : 'auto';
 
@@ -2432,6 +2445,39 @@ function updateSpellcastingAttr(value) {
     renderSpellbook();
 }
 
+function clampCasterLevel(value, fallbackLevel = 1) {
+    const fallback = Math.max(0, Math.min(20, parseInt(fallbackLevel, 10) || 1));
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.min(20, parsed));
+}
+
+function getCasterLevel() {
+    if (!data || !data.meta) return 1;
+    return clampCasterLevel(data.meta.casterLevel, data.meta.level || 1);
+}
+
+function updateCasterLevel(value) {
+    if (!data.meta) data.meta = {};
+    const nextLevel = clampCasterLevel(value, data.meta.level || 1);
+    data.meta.casterLevel = nextLevel;
+    const input = document.getElementById('casterLevel');
+    if (input && String(input.value) !== String(nextLevel)) input.value = nextLevel;
+    save();
+    renderSpellbook();
+}
+
+function updateCasterType(value) {
+    if (!data.meta) data.meta = {};
+    const allowed = ['none', 'full', 'half', 'third', 'pact'];
+    const nextType = allowed.includes(value) ? value : 'none';
+    data.meta.casterType = nextType;
+    const select = document.getElementById('casterType');
+    if (select && select.value !== nextType) select.value = nextType;
+    save();
+    renderSpellbook();
+}
+
 function setSpellbookShowHiddenFields(show) {
     if (!data.uiState) data.uiState = {};
     data.uiState.spellbookShowHiddenFields = !!show;
@@ -2446,7 +2492,15 @@ function syncSpellbookShowHiddenFieldsToggle() {
 }
 
 function updateLevel(val) {
-    data.meta.level = Math.min(20, Math.max(1, parseInt(val)));
+    const previousLevel = Math.min(20, Math.max(1, parseInt(data && data.meta ? data.meta.level : 1, 10) || 1));
+    const nextLevel = Math.min(20, Math.max(1, parseInt(val, 10) || 1));
+    const previousCasterLevel = getCasterLevel();
+    data.meta.level = nextLevel;
+    if (previousCasterLevel === previousLevel) {
+        data.meta.casterLevel = nextLevel;
+        const casterLevelInput = document.getElementById('casterLevel');
+        if (casterLevelInput) casterLevelInput.value = nextLevel;
+    }
     save();
     updateAll();
 }
@@ -2795,8 +2849,8 @@ function normalizeSpellSlots() {
     }
 }
 
-function getPactSpellSlotLevel(characterLevel) {
-    const lvl = Math.max(1, Math.min(20, parseInt(characterLevel, 10) || 1));
+function getPactSpellSlotLevel(casterLevel) {
+    const lvl = Math.max(1, Math.min(20, parseInt(casterLevel, 10) || 1));
     if (lvl >= 9) return 5;
     if (lvl >= 7) return 4;
     if (lvl >= 5) return 3;
@@ -2806,8 +2860,8 @@ function getPactSpellSlotLevel(characterLevel) {
 
 function getPactSpellSlotEntry() {
     normalizeSpellSlots();
-    const charLevel = data && data.meta ? data.meta.level : 1;
-    const expectedLevel = getPactSpellSlotLevel(charLevel);
+    const casterLevel = getCasterLevel();
+    const expectedLevel = getPactSpellSlotLevel(casterLevel);
     const expectedSlot = data.spells[expectedLevel - 1] || null;
     if (expectedSlot && expectedSlot.max > 0) {
         return {
@@ -3423,7 +3477,7 @@ function spellCastLevelOptionsMarkup(spellLevel, selectedCastLevel = 0) {
     if (baseLevel <= 0) return '<option value="0" selected>None</option>';
 
     if ((data.meta.casterType || 'none') === 'pact') {
-        const pactLevel = getPactSpellSlotLevel(data.meta.level);
+        const pactLevel = getPactSpellSlotLevel(getCasterLevel());
         const selected = parseInt(selectedCastLevel, 10) === pactLevel ? pactLevel : 0;
         return `<option value="0"${selected === 0 ? ' selected' : ''}>None</option><option value="${pactLevel}"${selected === pactLevel ? ' selected' : ''}>Slot L${pactLevel}</option>`;
     }
@@ -4117,7 +4171,11 @@ async function castSpell(idx) {
 function calcSpellSlots() {
     normalizeSpellSlots();
     const type = document.getElementById('casterType').value;
-    const lvl = parseInt(document.getElementById('charLevel').value) || 1;
+    const casterLevelInput = document.getElementById('casterLevel');
+    const casterLevel = clampCasterLevel(casterLevelInput ? casterLevelInput.value : 1, data && data.meta ? data.meta.level : 1);
+    if (casterLevelInput) casterLevelInput.value = casterLevel;
+    if (!data.meta) data.meta = {};
+    data.meta.casterLevel = casterLevel;
 
     if (type === 'none') {
         if (!confirm("Clear all spell slots?")) return;
@@ -4133,12 +4191,12 @@ function calcSpellSlots() {
     let effectiveLvl = 0;
     let tableToUse = spellSlotTable.full;
 
-    if (type === 'full') effectiveLvl = lvl;
-    else if (type === 'half') effectiveLvl = Math.floor(lvl / 2);
-    else if (type === 'third') effectiveLvl = Math.ceil(lvl / 3);
+    if (type === 'full') effectiveLvl = casterLevel;
+    else if (type === 'half') effectiveLvl = Math.floor(casterLevel / 2);
+    else if (type === 'third') effectiveLvl = Math.ceil(casterLevel / 3);
 
     else if (type === 'pact') {
-        effectiveLvl = lvl;
+        effectiveLvl = casterLevel;
         tableToUse = spellSlotTable.pact;
     }
 
@@ -4155,7 +4213,7 @@ function calcSpellSlots() {
         const slots = tableToUse[effectiveLvl - 1] || [];
 
         if (type === 'pact') {
-            const slotLvl = getPactSpellSlotLevel(lvl);
+            const slotLvl = getPactSpellSlotLevel(casterLevel);
             const slotCount = Math.max(0, parseInt(slots[0], 10) || 0);
             data.spells.forEach((slot, index) => {
                 slot.max = (index === slotLvl - 1) ? slotCount : 0;
@@ -5812,6 +5870,7 @@ function ccFinish() {
     data.meta.race = document.getElementById('ccRace').value;
     data.meta.subrace = document.getElementById('ccSubrace').value;
     data.meta.level = parseInt(document.getElementById('ccLevel').value) || 1;
+    data.meta.casterLevel = data.meta.level;
     data.meta.casterType = document.getElementById('ccCaster').value;
 
     // 2. Stats
@@ -5867,6 +5926,8 @@ function ccFinish() {
     // Refresh UI
     document.getElementById('charName').value = data.meta.name; // Though we didn't ask for name
     document.getElementById('charLevel').value = data.meta.level;
+    const casterLevelInput = document.getElementById('casterLevel');
+    if (casterLevelInput) casterLevelInput.value = data.meta.casterLevel;
     document.getElementById('casterType').value = data.meta.casterType;
 
     // Update inputs dependent on save

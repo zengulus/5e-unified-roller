@@ -427,13 +427,18 @@
                                 </div>
                                 <div class="field-group">
                                     <label>Caster Type</label>
-                                    <select id="casterType" data-onchange="save()">
+                                    <select id="casterType" data-onchange="updateCasterType(this.value)">
                                         <option value="none">None</option>
                                         <option value="full">Full Caster</option>
                                         <option value="half">Half (Pal/Rgr)</option>
                                         <option value="third">1/3 (AT/EK)</option>
                                         <option value="pact">Warlock</option>
                                     </select>
+                                </div>
+                                <div class="field-group">
+                                    <label>Caster Level</label>
+                                    <input type="number" id="casterLevel" min="0" max="20" value="1"
+                                        data-onchange="updateCasterLevel(this.value)">
                                 </div>
                             </div>
                             <div class="spell-sheet-metrics">
@@ -455,7 +460,7 @@
                             <div class="spell-sheet-panel-head">
                                 <h3>Spell Slots</h3>
                                 <button class="add-btn" type="button" data-onclick="calcSpellSlots()">Auto-Calc Slots
-                                    (From Level)</button>
+                                    (From Caster Level)</button>
                             </div>
                             <div id="spellSlotsList"></div>
                         </div>

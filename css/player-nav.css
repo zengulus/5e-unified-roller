@@ -71,6 +71,16 @@
     color: color-mix(in srgb, var(--accent-secondary) 58%, #d4dae6 42%);
 }
 
+.hero-actions.has-hero-menu .hero-menu-settings-panel .settings-character-switcher {
+    margin-bottom: 8px;
+}
+
+.hero-actions.has-hero-menu .hero-menu-settings-panel .settings-character-switcher .char-switcher-row {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
 .hero-actions.has-hero-menu .hero-menu-panel .hero-action-bar {
     width: 100%;
     justify-content: stretch;
