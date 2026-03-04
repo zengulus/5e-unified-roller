@@ -3,7 +3,7 @@
 Landing grid for the entire suite. Open it first to import/export the unified data store, tweak the accent palette, or hand players a jumping-off point.
 
 ## Layout
-- **Hero Header** – Import/Export buttons live up top along with the accent picker and background cycler. Alt+Shift+Click the title to expose DM-only cards (Hub, GM deck, Clue tools, etc.).
+- **Hero Header** – Import/Export plus **LLM Snapshot** buttons live up top along with the accent picker and background cycler. Alt+Shift+Click the title to expose DM-only cards (Hub, GM deck, Clue tools, etc.).
 - **Case Switcher** – `Active Case Context` panel sets the active investigation for case-scoped tools (Board + Timeline) and includes create/rename/delete controls.
 - **Cloud Connect Panel** – Player-facing import for `connect.json` plus a bundled-default shortcut so clients can join without manual key entry.
 - **Cloud Sync Panel (Secret Mode)** – Manual Supabase URL/key/campaign controls, export of `connect.json`, and admin pull/push actions. This panel is intentionally behind Alt+Shift secret mode.
@@ -20,6 +20,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - Use the accent picker before a session so all other pages inherit the same neon colorway.
 - Hide DM cards during open-table play so players only see approved utilities.
 - Import/export here touches the unified `RTF_STORE` stack (Hub, Board, Dashboard, Roster, Locations, Requisitions, Timeline, Ledger, Encounters, HQ). Standalone utilities like the Character Sheet, Session Tracker, Narrative Engine, and Tournament Bracket keep their own local saves.
+- Use `🤖 LLM Snapshot` for `rtf_llm_snapshot_v2` export; choose `full` or `compact` at prompt time.
 
 ## Related Project
 For a less setting-specific version of this toolset, see [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).

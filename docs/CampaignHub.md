@@ -12,6 +12,7 @@ Between-sessions control room for heat, guild standing, and downtime logistics. 
 ## Controls & Sync
 - **Portal/Dashboard Links** – Jump back to the Tools Hub or straight into the Player Dashboard to edit frontline stats.
 - **Import / Export** – Hub buttons call the same unified `RTF_STORE` import/export flow used by Tools Hub (full campaign snapshot).
+- **LLM Snapshot Export** – Hero button exports `rtf_llm_snapshot_v2` directly from Hub with a `full`/`compact` mode prompt.
 - **Accent/BG** – Hero controls ensure the strategic view matches whatever palette your table picked.
 
 ## Tips

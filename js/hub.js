@@ -135,6 +135,32 @@ function exportData() {
     if (window.RTF_STORE) window.RTF_STORE.export();
 }
 
+function chooseLLMSnapshotMode(defaultMode = 'full') {
+    const fallback = defaultMode === 'compact' ? 'compact' : 'full';
+    const raw = prompt('LLM snapshot mode? Enter "full" or "compact".', fallback);
+    if (raw === null) return null;
+    const mode = String(raw || '').trim().toLowerCase();
+    if (!mode) return fallback;
+    if (mode === 'full' || mode === 'f') return 'full';
+    if (mode === 'compact' || mode === 'c') return 'compact';
+    alert('Invalid mode. Use "full" or "compact".');
+    return null;
+}
+
+function exportLLMSnapshot() {
+    if (!window.RTF_STORE) {
+        alert('Store not loaded.');
+        return;
+    }
+    if (typeof window.RTF_STORE.exportLLMSnapshot !== 'function') {
+        alert('This build does not support LLM snapshot export yet.');
+        return;
+    }
+    const mode = chooseLLMSnapshotMode('full');
+    if (!mode) return;
+    window.RTF_STORE.exportLLMSnapshot({ mode });
+}
+
 function importData() {
     if (window.RTF_STORE) {
         window.RTF_STORE.import().then(success => {
