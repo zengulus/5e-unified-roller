@@ -3,7 +3,7 @@
     const delegatedHandlerCache = new Map();
     let delegatedHandlersBound = false;
     const LEDGER_STATUSES = ['stable', 'contested', 'collapsed', 'resolved'];
-    const LEDGER_SOURCE_TYPES = ['manual', 'event', 'theory', 'clue', 'npc', 'location', 'requisition'];
+    const LEDGER_SOURCE_TYPES = ['manual', 'event', 'theory', 'clue'];
     const STATUS_LABELS = {
         stable: 'Stable',
         contested: 'Contested',
@@ -12,12 +12,15 @@
     };
     const SOURCE_LABELS = {
         manual: 'Manual',
-        event: 'Event',
-        theory: 'Theory',
-        clue: 'Clue',
-        npc: 'NPC',
-        location: 'Location',
-        requisition: 'Requisition'
+        event: 'Timeline Event',
+        theory: 'Board Theory',
+        clue: 'Board Clue'
+    };
+    const LINKED_SOURCE_TYPES = new Set(['event', 'theory', 'clue']);
+    const SOURCE_LINK_INDEX = {
+        event: [],
+        theory: [],
+        clue: []
     };
     let filtersHydrated = false;
 
@@ -107,6 +110,171 @@
         return LEDGER_SOURCE_TYPES.map((type) =>
             `<option value="${type}" ${type === cleanSelected ? 'selected' : ''}>${escapeHtml(SOURCE_LABELS[type])}</option>`
         ).join('');
+    }
+
+    function normalizeSourceType(value) {
+        const clean = String(value || '').trim().toLowerCase();
+        return LEDGER_SOURCE_TYPES.includes(clean) ? clean : 'manual';
+    }
+
+    function normalizeSourceId(value) {
+        return String(value || '').trim();
+    }
+
+    function isLinkedSourceType(sourceType) {
+        return LINKED_SOURCE_TYPES.has(normalizeSourceType(sourceType));
+    }
+
+    function sanitizeDomToken(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 64) || 'entry';
+    }
+
+    function clearSourceLinkIndex() {
+        SOURCE_LINK_INDEX.event = [];
+        SOURCE_LINK_INDEX.theory = [];
+        SOURCE_LINK_INDEX.clue = [];
+    }
+
+    function refreshSourceLinkIndex() {
+        clearSourceLinkIndex();
+        const store = getStore();
+        if (!store) return;
+        const cases = getCases();
+        const seen = new Set();
+        const pushOption = (sourceType, sourceId, label, caseId) => {
+            const cleanType = normalizeSourceType(sourceType);
+            if (!isLinkedSourceType(cleanType)) return;
+            const cleanId = normalizeSourceId(sourceId);
+            if (!cleanId) return;
+            const cleanCaseId = String(caseId || '').trim();
+            const key = `${cleanType}:${cleanId}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            SOURCE_LINK_INDEX[cleanType].push({
+                id: cleanId,
+                label: String(label || cleanId).trim().slice(0, 240) || cleanId,
+                caseId: cleanCaseId
+            });
+        };
+
+        cases.forEach((caseEntry) => {
+            const caseId = String(caseEntry && caseEntry.id || '').trim();
+            if (!caseId) return;
+            const caseName = String(caseEntry && caseEntry.name || caseId).trim() || caseId;
+            if (typeof store.getEvents === 'function') {
+                const events = store.getEvents(caseId);
+                (Array.isArray(events) ? events : []).forEach((evt) => {
+                    const evtId = String(evt && evt.id || '').trim();
+                    if (!evtId) return;
+                    const evtTitle = String(evt && evt.title || evtId).trim() || evtId;
+                    pushOption('event', evtId, `${evtTitle} • ${caseName}`, caseId);
+                });
+            }
+            if (typeof store.getBoard === 'function') {
+                const board = store.getBoard(caseId);
+                const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
+                nodes.forEach((node) => {
+                    const rawType = String(node && node.type || '').trim().toLowerCase();
+                    const metaType = String(node && node.meta && node.meta.sourceType || '').trim().toLowerCase();
+                    const nodeType = rawType || metaType;
+                    if (nodeType !== 'theory' && nodeType !== 'clue') return;
+                    const nodeId = String(node && node.id || '').trim();
+                    if (!nodeId) return;
+                    const nodeTitle = String(node && node.title || nodeId).trim() || nodeId;
+                    pushOption(nodeType, nodeId, `${nodeTitle} • ${caseName}`, caseId);
+                });
+            }
+        });
+
+        ['event', 'theory', 'clue'].forEach((type) => {
+            SOURCE_LINK_INDEX[type].sort((a, b) => {
+                const labelDelta = String(a.label || '').localeCompare(String(b.label || ''));
+                if (labelDelta !== 0) return labelDelta;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            });
+        });
+    }
+
+    function getSourceOptionsForType(sourceType, caseId = '') {
+        const cleanType = normalizeSourceType(sourceType);
+        if (!isLinkedSourceType(cleanType)) return [];
+        const list = Array.isArray(SOURCE_LINK_INDEX[cleanType]) ? SOURCE_LINK_INDEX[cleanType] : [];
+        const cleanCaseId = String(caseId || '').trim();
+        if (!cleanCaseId) return list;
+        const scoped = list.filter((entry) => entry && String(entry.caseId || '') === cleanCaseId);
+        return scoped.length ? scoped : list;
+    }
+
+    function getSourcePickerPlaceholder(sourceType, optionsCount) {
+        const cleanType = normalizeSourceType(sourceType);
+        if (!isLinkedSourceType(cleanType)) return 'No link required for manual provenance';
+        const label = String(SOURCE_LABELS[cleanType] || cleanType).toLowerCase();
+        return optionsCount
+            ? `Filter ${label} links`
+            : `No ${label} links available`;
+    }
+
+    function isValidLinkedSourceId(sourceType, sourceId, caseId = '') {
+        const cleanType = normalizeSourceType(sourceType);
+        const cleanId = normalizeSourceId(sourceId);
+        if (!isLinkedSourceType(cleanType)) return !cleanId;
+        if (!cleanId) return true;
+        return getSourceOptionsForType(cleanType, caseId).some((entry) => String(entry && entry.id || '') === cleanId);
+    }
+
+    function buildSourceDatalistOptions(sourceType, caseId = '') {
+        const options = getSourceOptionsForType(sourceType, caseId);
+        return options.map((entry) => {
+            const id = String(entry && entry.id || '');
+            const label = String(entry && entry.label || id);
+            return `<option value="${escapeHtml(id)}" label="${escapeHtml(label)}"></option>`;
+        }).join('');
+    }
+
+    function refreshLedgerSourcePicker() {
+        refreshSourceLinkIndex();
+        const sourceTypeEl = document.getElementById('ledgerSourceType');
+        const caseEl = document.getElementById('ledgerCase');
+        const sourceIdEl = document.getElementById('ledgerSourceId');
+        const datalistEl = document.getElementById('ledgerSourceOptions');
+        if (!sourceTypeEl || !sourceIdEl || !datalistEl) return;
+        const sourceType = normalizeSourceType(sourceTypeEl.value);
+        const caseId = String(caseEl && caseEl.value || '').trim();
+        const options = getSourceOptionsForType(sourceType, caseId);
+        if (!isLinkedSourceType(sourceType)) {
+            sourceIdEl.value = '';
+            sourceIdEl.disabled = true;
+            sourceIdEl.placeholder = getSourcePickerPlaceholder(sourceType, 0);
+            sourceIdEl.removeAttribute('list');
+            datalistEl.innerHTML = '';
+            return;
+        }
+        sourceIdEl.disabled = false;
+        sourceIdEl.setAttribute('list', 'ledgerSourceOptions');
+        sourceIdEl.placeholder = getSourcePickerPlaceholder(sourceType, options.length);
+        datalistEl.innerHTML = buildSourceDatalistOptions(sourceType, caseId);
+    }
+
+    function buildEntrySourceIdEditor(entry, escapedEntryId, sourceType) {
+        const cleanType = normalizeSourceType(sourceType);
+        if (!isLinkedSourceType(cleanType)) {
+            return '<input type="text" value="" disabled placeholder="No link required for manual provenance">';
+        }
+        const caseId = String(entry && entry.caseId || '').trim();
+        const sourceId = normalizeSourceId(entry && entry.sourceId || '');
+        const options = getSourceOptionsForType(cleanType, caseId);
+        const listId = `ledgerSourceOptions_${sanitizeDomToken(String(entry && entry.id || escapedEntryId))}`;
+        return `
+            <input type="text" value="${escapeHtml(sourceId)}" list="${listId}" placeholder="${escapeHtml(getSourcePickerPlaceholder(cleanType, options.length))}"
+                data-onchange="updateLedgerField('${escapedEntryId}', 'sourceId', this.value)">
+            <datalist id="${listId}">
+                ${buildSourceDatalistOptions(cleanType, caseId)}
+            </datalist>
+        `;
     }
 
     function ensureCaseSelectOptions() {
@@ -238,7 +406,7 @@
         const sourceTimelineAction = sourceType === 'event' && entry.sourceId
             ? `<button class="btn" data-onclick="openLedgerSourceOnTimeline('${entryId}')">Timeline</button>`
             : '';
-        const sourceBoardAction = (sourceType !== 'manual' && entry.sourceId)
+        const sourceBoardAction = ((sourceType === 'event' || sourceType === 'theory' || sourceType === 'clue') && entry.sourceId)
             ? `<button class="btn" data-onclick="openLedgerSourceOnBoard('${entryId}')">Board</button>`
             : '';
         return `
@@ -263,14 +431,14 @@
                         </select>
                     </div>
                     <div class="ledger-field">
-                        <label>Source Type</label>
+                        <label>Where Heard</label>
                         <select data-onchange="updateLedgerField('${entryId}', 'sourceType', this.value)">
                             ${buildSourceOptions(sourceType)}
                         </select>
                     </div>
                     <div class="ledger-field">
-                        <label>Source ID</label>
-                        <input type="text" value="${escapeHtml(entry.sourceId || '')}" data-onchange="updateLedgerField('${entryId}', 'sourceId', this.value)">
+                        <label>Linked Record</label>
+                        ${buildEntrySourceIdEditor(entry, entryId, sourceType)}
                     </div>
                     <div class="ledger-field">
                         <label>Case</label>
@@ -356,6 +524,7 @@
 
         ensureCaseSelectOptions();
         hydrateUIFromLedgerState();
+        refreshLedgerSourcePicker();
         const filters = getFilterValues();
         const entries = readEntries();
         const filtered = getFilteredEntries(entries, filters);
@@ -383,11 +552,18 @@
             alert('Statement is required.');
             return;
         }
+        refreshSourceLinkIndex();
         ensureCaseSelectOptions();
         const caseId = String((document.getElementById('ledgerCase') || {}).value || '');
         const status = String((document.getElementById('ledgerStatus') || {}).value || 'stable');
-        const sourceType = String((document.getElementById('ledgerSourceType') || {}).value || 'manual');
-        const sourceId = String((document.getElementById('ledgerSourceId') || {}).value || '').trim();
+        const sourceType = normalizeSourceType(String((document.getElementById('ledgerSourceType') || {}).value || 'manual'));
+        let sourceId = normalizeSourceId((document.getElementById('ledgerSourceId') || {}).value || '');
+        if (!isLinkedSourceType(sourceType)) {
+            sourceId = '';
+        } else if (sourceId && !isValidLinkedSourceId(sourceType, sourceId, caseId)) {
+            alert('Select a valid link from the filterable list.');
+            return;
+        }
         const certainty = Number((document.getElementById('ledgerCertainty') || {}).value || 50);
         const tags = String((document.getElementById('ledgerTags') || {}).value || '');
         const notes = String((document.getElementById('ledgerNotes') || {}).value || '');
@@ -412,14 +588,49 @@
         if (tagsEl) tagsEl.value = '';
         const notesEl = document.getElementById('ledgerNotes');
         if (notesEl) notesEl.value = '';
+        refreshLedgerSourcePicker();
         renderLedger();
     }
 
     function updateLedgerField(id, field, value) {
         const store = getStore();
         if (!store || typeof store.updateLedgerEntry !== 'function') return;
+        refreshSourceLinkIndex();
         const cleanField = String(field || '').trim();
         if (!cleanField) return;
+        const entry = findEntryById(id);
+        if (cleanField === 'sourceType') {
+            const nextSourceType = normalizeSourceType(value);
+            const patch = { sourceType: nextSourceType };
+            if (!isLinkedSourceType(nextSourceType)) {
+                patch.sourceId = '';
+            } else {
+                const currentSourceId = normalizeSourceId(entry && entry.sourceId || '');
+                const caseId = String(entry && entry.caseId || '').trim();
+                if (currentSourceId && !isValidLinkedSourceId(nextSourceType, currentSourceId, caseId)) {
+                    patch.sourceId = '';
+                }
+            }
+            store.updateLedgerEntry(id, patch);
+            renderLedger();
+            return;
+        }
+        if (cleanField === 'sourceId') {
+            const sourceType = normalizeSourceType(entry && entry.sourceType || 'manual');
+            const caseId = String(entry && entry.caseId || '').trim();
+            const currentSourceId = normalizeSourceId(entry && entry.sourceId || '');
+            let nextSourceId = normalizeSourceId(value);
+            if (!isLinkedSourceType(sourceType)) {
+                nextSourceId = '';
+            } else if (nextSourceId && !isValidLinkedSourceId(sourceType, nextSourceId, caseId) && nextSourceId !== currentSourceId) {
+                alert('Select a valid link from the filterable list.');
+                renderLedger();
+                return;
+            }
+            store.updateLedgerEntry(id, { sourceId: nextSourceId });
+            renderLedger();
+            return;
+        }
         const patch = cleanField === 'certainty'
             ? { certainty: Number(value) }
             : { [cleanField]: value };
@@ -461,18 +672,12 @@
             window.location.assign(url.toString());
             return;
         }
-        if (sourceType === 'npc' || sourceType === 'location' || sourceType === 'requisition') {
-            url.searchParams.set('linkType', sourceType);
-            url.searchParams.set('id', sourceId);
-            window.location.assign(url.toString());
-            return;
-        }
         if (sourceType === 'theory' || sourceType === 'clue') {
             url.searchParams.set('nodeId', sourceId);
             window.location.assign(url.toString());
             return;
         }
-        alert('No board jump available for this source type.');
+        alert('No board jump is available for this provenance type.');
     }
 
     function getStableFactsText() {
@@ -529,6 +734,7 @@
 
     window.renderLedger = renderLedger;
     window.onLedgerFilterChange = onLedgerFilterChange;
+    window.refreshLedgerSourcePicker = refreshLedgerSourcePicker;
     window.createLedgerEntry = createLedgerEntry;
     window.updateLedgerField = updateLedgerField;
     window.deleteLedgerEntry = deleteLedgerEntry;

@@ -146,6 +146,15 @@ const LEDGER_STATUS_LABELS = {
     collapsed: 'Collapsed',
     resolved: 'Resolved'
 };
+const LEDGER_SOURCE_LABELS = {
+    manual: 'Manual',
+    event: 'Timeline Event',
+    theory: 'Board Theory',
+    clue: 'Board Clue',
+    npc: 'Manual',
+    location: 'Manual',
+    requisition: 'Manual'
+};
 const NARRATIVE_META_NODE_TYPES = new Set(['clue', 'theory', 'event']);
 const NARRATIVE_CERTAINTY_NODE_TYPES = new Set(['clue', 'theory']);
 const NARRATIVE_RELIABILITY_NODE_TYPES = new Set(['clue', 'theory']);
@@ -391,6 +400,9 @@ function normalizeLegacyLeadNoteBody(html = '') {
     clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Target ID\s*:?\s*<\/strong>\s*(?:<br\s*\/?>\s*)?[^<\s]+(?=(?:<br\s*\/?>|$))/gi, '');
     clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Target ID\s*:?\s*<\/strong>(?=(?:<br\s*\/?>|$))/gi, '');
     clean = clean.replace(/(?:<br\s*\/?>\s*)?Target ID\s*:?\s*[^\s<]+(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Linked Record\s*:?\s*<\/strong>\s*(?:<br\s*\/?>\s*)?[^<\s]+(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?<strong>\s*Linked Record\s*:?\s*<\/strong>(?=(?:<br\s*\/?>|$))/gi, '');
+    clean = clean.replace(/(?:<br\s*\/?>\s*)?Linked Record\s*:?\s*[^\s<]+(?=(?:<br\s*\/?>|$))/gi, '');
     return cleanupLegacyNoteBreaks(clean);
 }
 
@@ -1789,6 +1801,11 @@ function getLedgerStatusLabel(status) {
     return LEDGER_STATUS_LABELS[clean] || LEDGER_STATUS_LABELS.stable;
 }
 
+function getLedgerSourceLabel(sourceType) {
+    const clean = String(sourceType || '').trim().toLowerCase();
+    return LEDGER_SOURCE_LABELS[clean] || LEDGER_SOURCE_LABELS.manual;
+}
+
 function buildFreeformNoteNodePayload() {
     return {
         nodeType: 'note',
@@ -1839,7 +1856,7 @@ function buildLedgerNoteNodePayload(entry) {
     const statement = String(source.statement || '').trim();
     const notes = String(source.notes || '').trim();
     const status = String(source.status || 'stable').trim().toLowerCase();
-    const sourceType = String(source.sourceType || 'manual').trim();
+    const sourceType = String(source.sourceType || 'manual').trim().toLowerCase();
     const sourceId = String(source.sourceId || '').trim();
     const certainty = clampPercent(source.certainty, 50);
     const titleBase = statement || 'Ledger Entry';
@@ -1847,7 +1864,10 @@ function buildLedgerNoteNodePayload(entry) {
     lines.push(`<div><strong>Status</strong>: ${sanitizeText(getLedgerStatusLabel(status))} | <strong>Certainty</strong>: ${certainty}%</div>`);
     if (statement) lines.push(`<div><strong>Statement</strong><br>${sanitizeMultiline(statement)}</div>`);
     if (notes) lines.push(`<div><strong>Notes</strong><br>${sanitizeMultiline(notes)}</div>`);
-    if (sourceType) lines.push(`<div><strong>Source</strong>: ${sanitizeText(sourceType)}</div>`);
+    if (sourceType) lines.push(`<div><strong>Where Heard</strong>: ${sanitizeText(getLedgerSourceLabel(sourceType))}</div>`);
+    if (sourceId && (sourceType === 'event' || sourceType === 'theory' || sourceType === 'clue')) {
+        lines.push(`<div><strong>Linked Record</strong>: ${sanitizeText(sourceId)}</div>`);
+    }
 
     return {
         nodeType: 'note',
@@ -3882,7 +3902,9 @@ function showContextMenu(e, node) {
     contextMenu.dataset.target = node.id;
 
     const type = getNodeTypeFromEl(node);
+    const meta = getNodeMeta(node) || {};
     const isTheory = type === 'theory';
+    const isLedgerNote = type === 'note' && String(meta.sourceType || '').trim().toLowerCase() === 'ledger';
     const supportsNarrativeMeta = NARRATIVE_META_NODE_TYPES.has(type);
     const supportsCertainty = NARRATIVE_CERTAINTY_NODE_TYPES.has(type);
     const supportsReliability = NARRATIVE_RELIABILITY_NODE_TYPES.has(type);
@@ -3903,7 +3925,7 @@ function showContextMenu(e, node) {
     }
     if (setCertaintyItem) setCertaintyItem.style.display = supportsCertainty ? 'block' : 'none';
     if (setReliabilityItem) setReliabilityItem.style.display = supportsReliability ? 'block' : 'none';
-    if (addLedgerItem) addLedgerItem.style.display = type !== 'group' ? 'block' : 'none';
+    if (addLedgerItem) addLedgerItem.style.display = (type !== 'group' && !isLedgerNote) ? 'block' : 'none';
     if (theoryConfidenceItem) theoryConfidenceItem.style.display = isTheory ? 'block' : 'none';
     if (theoryConfirmedItem) theoryConfirmedItem.style.display = isTheory ? 'block' : 'none';
     if (theoryDisprovenItem) theoryDisprovenItem.style.display = isTheory ? 'block' : 'none';
@@ -4111,6 +4133,12 @@ function addTargetNodeToLedger() {
         contextMenu.style.display = 'none';
         return;
     }
+    const existingMeta = getNodeMeta(nodeEl) || {};
+    if (type === 'note' && String(existingMeta.sourceType || '').trim().toLowerCase() === 'ledger') {
+        contextMenu.style.display = 'none';
+        alert('This node already represents a ledger entry.');
+        return;
+    }
     const store = window.RTF_STORE;
     if (!store || typeof store.addLedgerEntry !== 'function') {
         alert('Ledger is not available in this build.');
@@ -4140,6 +4168,7 @@ function addTargetNodeToLedger() {
 
     let sourceType = 'manual';
     let sourceId = '';
+    let provenanceContext = '';
     const metaSourceType = String(meta.sourceType || '').trim().toLowerCase();
 
     if (type === 'theory') {
@@ -4154,25 +4183,28 @@ function addTargetNodeToLedger() {
         if (metaSourceType === 'timeline-event' && meta.eventId) {
             sourceId = String(meta.eventId || '').trim();
         }
-    } else if (metaSourceType === 'npc' && meta.npcId) {
-        sourceType = 'npc';
-        sourceId = String(meta.npcId || '').trim();
-    } else if (metaSourceType === 'location' && meta.locationId) {
-        sourceType = 'location';
-        sourceId = String(meta.locationId || '').trim();
-    } else if (metaSourceType === 'requisition' && meta.requisitionId) {
-        sourceType = 'requisition';
-        sourceId = String(meta.requisitionId || '').trim();
+    } else if (metaSourceType === 'npc') {
+        const npcLabel = String(meta.npcName || meta.npcId || 'Unknown NPC').trim();
+        provenanceContext = `Heard from NPC: ${npcLabel}`;
+    } else if (metaSourceType === 'location') {
+        const locationLabel = String(meta.locationName || meta.locationId || 'Unknown Location').trim();
+        provenanceContext = `Observed at location: ${locationLabel}`;
+    } else if (metaSourceType === 'requisition') {
+        const requisitionLabel = String(meta.requisitionId || meta.requisitionItem || 'Unknown Requisition').trim();
+        provenanceContext = `Recorded from requisition: ${requisitionLabel}`;
     } else if (metaSourceType === 'lead') {
         const leadType = String(meta.leadType || '').trim().toLowerCase();
         const leadTargetId = String(meta.leadTargetId || '').trim();
         if (leadTargetId) {
-            if (leadType === 'npc' || leadType === 'location' || leadType === 'requisition') {
-                sourceType = leadType;
-                sourceId = leadTargetId;
-            } else if (leadType === 'event') {
+            if (leadType === 'event') {
                 sourceType = 'event';
                 sourceId = leadTargetId;
+            } else if (leadType === 'npc') {
+                provenanceContext = `Lead witness target: NPC ${leadTargetId}`;
+            } else if (leadType === 'location') {
+                provenanceContext = `Lead site target: Location ${leadTargetId}`;
+            } else if (leadType === 'requisition') {
+                provenanceContext = `Lead record target: Requisition ${leadTargetId}`;
             }
         }
     }
@@ -4181,7 +4213,11 @@ function addTargetNodeToLedger() {
         meta.certainty !== undefined ? meta.certainty : (meta.confidence !== undefined ? meta.confidence : 50),
         50
     );
-    const notes = String(summary.bodyText || '').trim().slice(0, 600);
+    const noteParts = [];
+    if (provenanceContext) noteParts.push(provenanceContext);
+    const summaryNotes = String(summary.bodyText || '').trim();
+    if (summaryNotes) noteParts.push(summaryNotes);
+    const notes = noteParts.join('\n\n').slice(0, 600);
     const tagSeed = String(summary.type || type || 'board').toLowerCase();
     const entryId = store.addLedgerEntry({
         caseId,

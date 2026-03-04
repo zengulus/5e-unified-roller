@@ -3,10 +3,10 @@
 Case-scoped investigation queue for unresolved questions and next actions. It separates tactical lead triage from the raw timeline log.
 
 ## Layout
-- **Lead Form** – Create leads with type, title, optional target ID, question, next step, and voter name.
+- **Lead Form** – Create leads with type, title, optional target link (filterable picker), question, next step, and voter name.
 - **Lead Summary** – Shows lead count, open/blocked totals, and current voter identity.
 - **Lead List** – Sorts leads by status, then vote score, then most recently updated.
-- **Lead Cards** – Inline editing for question/next step/status/target ID plus vote buttons, timeline jump, board jump, and delete.
+- **Lead Cards** – Inline editing for question/next step/status/target link plus vote buttons, timeline jump, board jump, and delete.
 
 ## Lead Model
 - **Types** – `event`, `npc`, `location`, `clue`, `requisition`, `theory`, `other`.
@@ -29,12 +29,12 @@ Case-scoped investigation queue for unresolved questions and next actions. It se
 - **Board Jump Rules**:
   - `targetId` shaped like `node_...` opens `board.html?nodeId=<targetId>`.
   - Lead type `npc`, `location`, `event`, or `requisition` maps to board cross-link query params (`linkType` + `id`) for deterministic node focus/spawn.
-- **Timeline Jump Rules** – Uses lead title/question/target ID as timeline `search` query and adds `id` when available.
+- **Timeline Jump Rules** – Uses lead title/question/target link as timeline `search` query and adds `id` when available.
 
 ## Tips
 - Treat each lead as a decision card: one clear question plus one executable next step.
 - Reserve `blocked` for dependencies that can be cleared by another scene or team member.
-- Reuse IDs from source records (timeline event IDs, npc IDs, location IDs, requisition IDs, or board node IDs) so board/timeline jumps stay reliable.
+- Use the filterable target picker to choose source records (timeline events, NPCs, locations, requisitions, or board clue/theory nodes) so board/timeline jumps stay reliable.
 - Use voter names consistently across devices so vote summaries remain readable.
 
 ## Cross-Links

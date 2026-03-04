@@ -45,7 +45,7 @@
                 </div>
                 <div class="ledger-field">
                     <label>Case</label>
-                    <select id="ledgerCase"></select>
+                    <select id="ledgerCase" data-onchange="refreshLedgerSourcePicker()"></select>
                 </div>
                 <div class="ledger-field">
                     <label>Status</label>
@@ -57,20 +57,18 @@
                     </select>
                 </div>
                 <div class="ledger-field">
-                    <label>Source Type</label>
-                    <select id="ledgerSourceType">
+                    <label>Where Heard</label>
+                    <select id="ledgerSourceType" data-onchange="refreshLedgerSourcePicker()">
                         <option value="manual">Manual</option>
                         <option value="event">Event</option>
                         <option value="theory">Theory</option>
                         <option value="clue">Clue</option>
-                        <option value="npc">NPC</option>
-                        <option value="location">Location</option>
-                        <option value="requisition">Requisition</option>
                     </select>
                 </div>
                 <div class="ledger-field">
-                    <label>Source ID</label>
-                    <input id="ledgerSourceId" type="text" placeholder="event_..., node_..., npc_...">
+                    <label>Linked Record</label>
+                    <input id="ledgerSourceId" type="text" list="ledgerSourceOptions" placeholder="Filter and select a record">
+                    <datalist id="ledgerSourceOptions"></datalist>
                 </div>
                 <div class="ledger-field">
                     <label>Certainty (0-100)</label>
@@ -95,7 +93,7 @@
             <div class="ledger-filter-grid">
                 <div class="ledger-field">
                     <label>Search</label>
-                    <input id="ledgerSearch" type="text" placeholder="statement, tags, notes, source id"
+                    <input id="ledgerSearch" type="text" placeholder="statement, tags, notes, linked record"
                         data-oninput="onLedgerFilterChange()">
                 </div>
                 <div class="ledger-field">
@@ -113,16 +111,13 @@
                     </select>
                 </div>
                 <div class="ledger-field">
-                    <label>Source Filter</label>
+                    <label>Where Heard Filter</label>
                     <select id="ledgerFilterSource" data-onchange="onLedgerFilterChange()">
                         <option value="all">All</option>
                         <option value="manual">Manual</option>
                         <option value="event">Event</option>
                         <option value="theory">Theory</option>
                         <option value="clue">Clue</option>
-                        <option value="npc">NPC</option>
-                        <option value="location">Location</option>
-                        <option value="requisition">Requisition</option>
                     </select>
                 </div>
                 <div class="ledger-field">
@@ -158,10 +153,10 @@
     <script src="js/data-guilds.js"></script>
     <script src="js/data-setting.js"></script>
     <script src="js/data.js"></script>
-    <script src="js/store.js?v=20260222a"></script>
+    <script src="js/store.js?v=20260304b"></script>
     <script src="js/player-nav.js?v=20260224c"></script>
     <script src="js/vector-field.js"></script>
-    <script src="js/ledger.js?v=20260304b"></script>
+    <script src="js/ledger.js?v=20260304d"></script>
 </body>
 
 </html>

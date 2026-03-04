@@ -85,7 +85,7 @@ Target: `campaign.ledger`
 2. `caseId: string`
 3. `statement: string`
 4. `status: string` (`stable|contested|collapsed|resolved`)
-5. `sourceType: string` (`event|theory|clue|npc|location|manual`)
+5. `sourceType: string` (`event|theory|clue|manual`)
 6. `sourceId: string`
 7. `certainty: number` (0-100)
 8. `tags: string`

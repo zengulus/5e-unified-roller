@@ -169,7 +169,7 @@
     const IMPACT_SCOPES = new Set(['local', 'district', 'guildwide', 'citywide']);
     const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
     const LEDGER_STATUSES = new Set(['stable', 'contested', 'collapsed', 'resolved']);
-    const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'npc', 'location', 'requisition', 'manual']);
+    const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'manual']);
 
     const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -257,7 +257,10 @@
     };
     const sanitizeLedgerSourceType = (value, fallback = 'manual') => {
         const token = normalizeEnumToken(value);
-        return LEDGER_SOURCE_TYPES.has(token) ? token : fallback;
+        const normalized = (token === 'npc' || token === 'location' || token === 'requisition')
+            ? 'manual'
+            : token;
+        return LEDGER_SOURCE_TYPES.has(normalized) ? normalized : fallback;
     };
     const sanitizeAttributionBy = (value, fallback = '') => toTrimmedString(value, fallback, 120).trim();
     const sanitizeAttributionAt = (value, fallback = '') => toIsoString(value, fallback);

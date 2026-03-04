@@ -3,7 +3,7 @@
 Campaign truth register for separating what is stable from what is disputed or collapsed.
 
 ## Layout
-- **Add Ledger Entry** – Create entries with statement, case, status, source type/id, certainty, tags, and notes.
+- **Add Ledger Entry** – Create entries with statement, case, status, provenance type, filterable link picker, certainty, tags, and notes.
 - **Filter + Sort** – Search by statement/tags/notes/source and filter by case/status/source type.
 - **Entry Cards** – Inline edit and delete controls for every field, plus quick source jumps back to Timeline or Board when supported.
 - **Stable Truths Panel** – Aggregates stable facts with copy/export actions for prompt prep plus a contested/collapsed list for complication framing.
@@ -17,7 +17,7 @@ Campaign truth register for separating what is stable from what is disputed or c
 ## Source Linking
 - **Timeline Event** – `sourceType=event`, `sourceId=<event_id>` enables Timeline and Board jumps.
 - **Board Theory/Clue** – `sourceType=theory|clue`, `sourceId=<node_id>` enables Board node focus jump.
-- **NPC/Location/Requisition** – Uses board cross-link routing with entity ids.
+- **Manual Provenance** – Use `sourceType=manual` when the evidence came from witness testimony, site observation, document review, or other non-linkable channels. Capture specifics in `notes`/`tags`.
 
 ## Integrations
 - **Case Board** – Context menu action `Add to Ledger` creates source-linked entries from clue/theory/event nodes.

@@ -119,6 +119,15 @@
         cold: 0,
         'dead-end': -2
     };
+    const LEAD_LINKABLE_TYPES = new Set(['event', 'npc', 'location', 'requisition', 'theory', 'clue']);
+    const LEAD_TARGET_INDEX = {
+        event: [],
+        npc: [],
+        location: [],
+        requisition: [],
+        theory: [],
+        clue: []
+    };
     const PREP_PROCEDURE_STATE_KEY = 'rtf_prep_procedure_state_v1';
     const FREE_SHIELD_SESSION_PREFIX = 'rtf_procedure_free_shield_used_v1:';
     const CERTAINTY_DEFAULT = 50;
@@ -256,6 +265,154 @@
         return LEAD_STATUSES.includes(clean) ? clean : 'open';
     };
 
+    const normalizeTargetId = (value) => String(value || '').trim().slice(0, 120);
+    const isLinkableLeadType = (value) => LEAD_LINKABLE_TYPES.has(normalizeLeadType(value));
+    const clearLeadTargetIndex = () => {
+        LEAD_TARGET_INDEX.event = [];
+        LEAD_TARGET_INDEX.npc = [];
+        LEAD_TARGET_INDEX.location = [];
+        LEAD_TARGET_INDEX.requisition = [];
+        LEAD_TARGET_INDEX.theory = [];
+        LEAD_TARGET_INDEX.clue = [];
+    };
+    const refreshLeadTargetIndex = () => {
+        clearLeadTargetIndex();
+        const store = getStore();
+        if (!store) return;
+        const seen = new Set();
+        const pushOption = (type, id, label) => {
+            const cleanType = normalizeLeadType(type);
+            if (!isLinkableLeadType(cleanType)) return;
+            const cleanId = normalizeTargetId(id);
+            if (!cleanId) return;
+            const key = `${cleanType}:${cleanId}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            LEAD_TARGET_INDEX[cleanType].push({
+                id: cleanId,
+                label: String(label || cleanId).trim().slice(0, 240) || cleanId
+            });
+        };
+        if (typeof store.getNPCs === 'function') {
+            const npcs = store.getNPCs();
+            (Array.isArray(npcs) ? npcs : []).forEach((entry) => {
+                const id = normalizeTargetId(entry && entry.id || '');
+                if (!id) return;
+                const name = String(entry && entry.name || id).trim() || id;
+                pushOption('npc', id, name);
+            });
+        }
+        if (typeof store.getLocations === 'function') {
+            const locations = store.getLocations();
+            (Array.isArray(locations) ? locations : []).forEach((entry) => {
+                const id = normalizeTargetId(entry && entry.id || '');
+                if (!id) return;
+                const name = String(entry && entry.name || id).trim() || id;
+                pushOption('location', id, name);
+            });
+        }
+        if (typeof store.getRequisitions === 'function') {
+            const reqs = store.getRequisitions();
+            (Array.isArray(reqs) ? reqs : []).forEach((entry) => {
+                const id = normalizeTargetId(entry && entry.id || '');
+                if (!id) return;
+                const name = String(entry && (entry.item || entry.requester) || id).trim() || id;
+                pushOption('requisition', id, name);
+            });
+        }
+        const activeCaseId = getActiveCaseId();
+        if (typeof store.getEvents === 'function') {
+            const events = store.getEvents(activeCaseId);
+            (Array.isArray(events) ? events : []).forEach((entry) => {
+                const id = normalizeTargetId(entry && entry.id || '');
+                if (!id) return;
+                const title = String(entry && entry.title || id).trim() || id;
+                pushOption('event', id, title);
+            });
+        }
+        if (typeof store.getBoard === 'function') {
+            const board = store.getBoard(activeCaseId);
+            const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
+            nodes.forEach((node) => {
+                const rawType = String(node && node.type || '').trim().toLowerCase();
+                const metaType = String(node && node.meta && node.meta.sourceType || '').trim().toLowerCase();
+                const nodeType = rawType || metaType;
+                if (nodeType !== 'theory' && nodeType !== 'clue') return;
+                const id = normalizeTargetId(node && node.id || '');
+                if (!id) return;
+                const title = String(node && node.title || id).trim() || id;
+                pushOption(nodeType, id, title);
+            });
+        }
+        Object.keys(LEAD_TARGET_INDEX).forEach((key) => {
+            LEAD_TARGET_INDEX[key].sort((a, b) => {
+                const labelDelta = String(a.label || '').localeCompare(String(b.label || ''));
+                if (labelDelta !== 0) return labelDelta;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            });
+        });
+    };
+    const getLeadTargetOptions = (type) => {
+        const cleanType = normalizeLeadType(type);
+        if (!isLinkableLeadType(cleanType)) return [];
+        return Array.isArray(LEAD_TARGET_INDEX[cleanType]) ? LEAD_TARGET_INDEX[cleanType] : [];
+    };
+    const isValidLeadTarget = (type, targetId) => {
+        const cleanType = normalizeLeadType(type);
+        const cleanId = normalizeTargetId(targetId);
+        if (!isLinkableLeadType(cleanType)) return !cleanId;
+        if (!cleanId) return true;
+        return getLeadTargetOptions(cleanType).some((entry) => String(entry && entry.id || '') === cleanId);
+    };
+    const buildLeadTargetDatalist = (type) => (
+        getLeadTargetOptions(type).map((entry) => {
+            const id = String(entry && entry.id || '');
+            const label = String(entry && entry.label || id);
+            return `<option value="${escapeHtml(id)}" label="${escapeHtml(label)}"></option>`;
+        }).join('')
+    );
+    const getLeadTargetPlaceholder = (type, optionCount) => {
+        const cleanType = normalizeLeadType(type);
+        if (!isLinkableLeadType(cleanType)) return 'No linked record for this type';
+        return optionCount ? 'Filter and select a record' : 'No records available';
+    };
+    const refreshLeadTargetPicker = () => {
+        refreshLeadTargetIndex();
+        const typeEl = document.getElementById('leadType');
+        const targetEl = document.getElementById('leadTargetId');
+        const datalistEl = document.getElementById('leadTargetOptions');
+        if (!typeEl || !targetEl || !datalistEl) return;
+        const type = normalizeLeadType(typeEl.value);
+        const options = getLeadTargetOptions(type);
+        if (!isLinkableLeadType(type)) {
+            targetEl.value = '';
+            targetEl.disabled = true;
+            targetEl.removeAttribute('list');
+            targetEl.placeholder = getLeadTargetPlaceholder(type, 0);
+            datalistEl.innerHTML = '';
+            return;
+        }
+        targetEl.disabled = false;
+        targetEl.setAttribute('list', 'leadTargetOptions');
+        targetEl.placeholder = getLeadTargetPlaceholder(type, options.length);
+        datalistEl.innerHTML = buildLeadTargetDatalist(type);
+    };
+    const buildLeadTargetEditor = (leadId, type, value) => {
+        const cleanType = normalizeLeadType(type);
+        if (!isLinkableLeadType(cleanType)) {
+            return '<input type="text" value="" disabled placeholder="No linked record for this type">';
+        }
+        const options = getLeadTargetOptions(cleanType);
+        const listId = `leadTargetOptions_${String(leadId || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'lead'}`;
+        return `
+            <input type="text" value="${escapeHtml(normalizeTargetId(value))}" list="${listId}" placeholder="${escapeHtml(getLeadTargetPlaceholder(cleanType, options.length))}"
+                data-onchange="updateLeadField('${escapeJsString(String(leadId || ''))}', 'targetId', this.value)">
+            <datalist id="${listId}">
+                ${buildLeadTargetDatalist(cleanType)}
+            </datalist>
+        `;
+    };
+
     const normalizeLeadVotes = (votes) => {
         const source = votes && typeof votes === 'object' ? votes : {};
         const out = {};
@@ -277,7 +434,7 @@
         return {
             id: String(source.id || `lead_${idx + 1}`).trim() || createLeadId(),
             type: normalizeLeadType(source.type),
-            targetId: String(source.targetId || '').trim().slice(0, 120),
+            targetId: normalizeTargetId(source.targetId || ''),
             title: String(source.title || '').trim().slice(0, 180) || `Lead ${idx + 1}`,
             question: String(source.question || '').trim().slice(0, 500),
             nextStep: String(source.nextStep || '').trim().slice(0, 500),
@@ -761,13 +918,20 @@
     }
 
     function addLeadFromForm() {
+        refreshLeadTargetIndex();
         const type = normalizeLeadType(document.getElementById('leadType').value);
         const title = String(document.getElementById('leadTitle').value || '').trim();
-        const targetId = String(document.getElementById('leadTargetId').value || '').trim();
+        let targetId = normalizeTargetId(document.getElementById('leadTargetId').value || '');
         const question = String(document.getElementById('leadQuestion').value || '').trim();
         const nextStep = String(document.getElementById('leadNextStep').value || '').trim();
         if (!title || !question || !nextStep) {
             alert('Lead title, question, and next step are required.');
+            return;
+        }
+        if (!isLinkableLeadType(type)) {
+            targetId = '';
+        } else if (targetId && !isValidLeadTarget(type, targetId)) {
+            alert('Select a valid target from the filterable list.');
             return;
         }
         addLead({
@@ -783,6 +947,7 @@
         document.getElementById('leadTargetId').value = '';
         document.getElementById('leadQuestion').value = '';
         document.getElementById('leadNextStep').value = '';
+        refreshLeadTargetPicker();
     }
 
     function addLeadFromEvent(eventId) {
@@ -826,15 +991,39 @@
     function updateLeadField(leadId, field, value) {
         const id = String(leadId || '').trim();
         if (!id) return;
+        refreshLeadTargetIndex();
         const caseId = getActiveCaseId();
         const list = getCaseLeads(caseId);
         const idx = list.findIndex((lead) => lead.id === id);
         if (idx < 0) return;
 
-        if (field === 'title' || field === 'question' || field === 'nextStep' || field === 'targetId') {
+        if (field === 'title' || field === 'question' || field === 'nextStep') {
             list[idx][field] = String(value || '').trim();
         }
-        if (field === 'type') list[idx].type = normalizeLeadType(value);
+        if (field === 'type') {
+            const nextType = normalizeLeadType(value);
+            list[idx].type = nextType;
+            const currentTarget = normalizeTargetId(list[idx].targetId || '');
+            if (!isLinkableLeadType(nextType)) {
+                list[idx].targetId = '';
+            } else if (currentTarget && !isValidLeadTarget(nextType, currentTarget)) {
+                list[idx].targetId = '';
+            }
+        }
+        if (field === 'targetId') {
+            const leadType = normalizeLeadType(list[idx].type);
+            const currentTarget = normalizeTargetId(list[idx].targetId || '');
+            const nextTarget = normalizeTargetId(value);
+            if (!isLinkableLeadType(leadType)) {
+                list[idx].targetId = '';
+            } else if (nextTarget && !isValidLeadTarget(leadType, nextTarget) && nextTarget !== currentTarget) {
+                alert('Select a valid target from the filterable list.');
+                renderLeadQueue();
+                return;
+            } else {
+                list[idx].targetId = nextTarget;
+            }
+        }
         if (field === 'status') list[idx].status = normalizeLeadStatus(value);
         list[idx].updated = new Date().toISOString();
         saveCaseLeads(list, caseId);
@@ -902,7 +1091,7 @@
         if (!lead) return;
         const target = String(lead.targetId || '').trim();
         if (!target) {
-            alert('This lead has no target ID to open on board.');
+            alert('This lead has no linked record to open on board.');
             return;
         }
 
@@ -935,6 +1124,7 @@
         const summaryEl = document.getElementById('leadSummary');
         if (!listEl || !summaryEl) return;
 
+        refreshLeadTargetPicker();
         const voter = getCurrentLeadVoter();
         const leads = getCaseLeads(getActiveCaseId());
         const sorted = leads.slice().sort((a, b) => {
@@ -986,8 +1176,8 @@
                             </select>
                         </div>
                         <div>
-                            <label>Target ID</label>
-                            <input type="text" value="${escapeHtml(lead.targetId || '')}" data-onchange="updateLeadField('${leadId}', 'targetId', this.value)">
+                            <label>Linked Record</label>
+                            ${buildLeadTargetEditor(lead.id, lead.type, lead.targetId)}
                         </div>
                     </div>
                     <div class="lead-vote-row">
@@ -1483,6 +1673,7 @@
     window.addLeadFromEvent = addLeadFromEvent;
     window.queueLeadFromEvent = queueLeadFromEvent;
     window.addLeadFromForm = addLeadFromForm;
+    window.refreshLeadTargetPicker = refreshLeadTargetPicker;
     window.openLeadsPage = openLeadsPage;
     window.updateLeadField = updateLeadField;
     window.setLeadVote = setLeadVote;
