@@ -88,6 +88,13 @@
         label.textContent = item.label;
         link.appendChild(label);
 
+        if (item.description) {
+            const desc = document.createElement('span');
+            desc.className = 'hero-menu-nav-desc';
+            desc.textContent = item.description;
+            link.appendChild(desc);
+        }
+
         return link;
     }
 

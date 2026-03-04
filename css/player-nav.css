@@ -114,21 +114,38 @@
 .hero-actions.has-hero-menu .hero-menu-nav-link {
     width: 100%;
     justify-content: flex-start;
-    align-items: center;
-    flex-direction: row;
+    align-items: flex-start;
+    flex-direction: column;
     border-radius: 12px;
-    padding: 9px 11px;
-    min-height: 38px;
-    line-height: 1.2;
+    padding: 9px 11px 10px;
+    min-height: 46px;
+    line-height: 1.25;
+    gap: 2px;
 }
 
 .hero-actions.has-hero-menu .hero-menu-nav-label {
-    font-size: 0.84rem;
+    font-size: 0.83rem;
     font-weight: 700;
     letter-spacing: 0.01em;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-desc {
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: color-mix(in srgb, #d3dbec 76%, var(--accent-secondary) 24%);
+    text-wrap: pretty;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-link:hover .hero-menu-nav-desc {
+    color: color-mix(in srgb, #eaf0ff 82%, var(--accent-secondary) 18%);
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-link.is-active .hero-menu-nav-desc {
+    color: color-mix(in srgb, #f1f6ff 86%, var(--accent-secondary) 14%);
 }
 
 .hero-actions.has-hero-menu .hero-menu-nav-link.is-active {

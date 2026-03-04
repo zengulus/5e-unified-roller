@@ -7,7 +7,7 @@
     <link rel="manifest" href="manifest.json">
     <title>Ravnica Campaign Hub</title>
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
-    <link rel="stylesheet" href="css/player-nav.css?v=20260305c">
+    <link rel="stylesheet" href="css/player-nav.css?v=20260305d">
     <link rel="stylesheet" href="css/tools.css">
     <link rel="stylesheet" href="css/tools-page.css">
 </head>
@@ -60,6 +60,7 @@
                 <div class="case-switcher-row">
                     <select id="campaign-scope-case-add" aria-label="Add Case to Active Scope"></select>
                     <button class="sync-btn" id="campaign-scope-add-case-btn" data-onclick="addCaseToActiveScope()">Add Case to Scope</button>
+                    <button class="sync-btn" id="campaign-case-delete-btn" data-onclick="deleteActiveCase()">Delete Active Case</button>
                 </div>
                 <div id="campaign-sequence-list" class="campaign-sequence-list">Case sequence loading...</div>
                 <div class="scope-board-refs-panel">
@@ -222,7 +223,7 @@
     <script src="js/data-npcs.js"></script>
     <script src="js/data-locations.js"></script>
     <script src="js/store.js?v=20260305a"></script>
-    <script src="js/player-nav.js?v=20260305f"></script>
+    <script src="js/player-nav.js?v=20260305g"></script>
     <script src="js/vector-field.js"></script>
     <script src="js/tools.js"></script>
 </body>

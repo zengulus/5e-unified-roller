@@ -372,6 +372,7 @@ function renderCampaignScopeSequence(activeScope, activeCaseId, caseLookup) {
                         <button class="sync-btn" data-onclick="event.stopPropagation(); updateCampaignScopeCaseStatus('${safeCaseId}', 'planned');">Mark Planned</button>
                         <button class="sync-btn" data-onclick="event.stopPropagation(); updateCampaignScopeCaseStatus('${safeCaseId}', 'resolved');">Mark Resolved</button>
                         <button class="sync-btn" data-onclick="event.stopPropagation(); referenceCaseOnBoard('${safeCaseId}');">Board Ref + Open</button>
+                        <button class="sync-btn" data-onclick="event.stopPropagation(); deleteCampaignCaseById('${safeCaseId}');">Delete Case</button>
                         <button class="sync-btn" data-onclick="event.stopPropagation(); removeCaseFromActiveScope('${safeCaseId}');">Remove From Scope</button>
                     </div>
                 </details>
@@ -771,7 +772,10 @@ function renderCampaignContext() {
 function renderCaseSwitcher() {
     const selectEl = document.getElementById('active-case-select');
     const metaEl = document.getElementById('case-switcher-meta');
-    const deleteBtn = document.getElementById('case-delete-btn');
+    const deleteBtns = [
+        document.getElementById('case-delete-btn'),
+        document.getElementById('campaign-case-delete-btn')
+    ].filter(Boolean);
     const renameBtn = document.getElementById('case-rename-btn');
     const createBtn = document.getElementById('case-create-btn');
     if (!selectEl || !metaEl) return;
@@ -779,7 +783,7 @@ function renderCaseSwitcher() {
     if (!window.RTF_STORE || typeof window.RTF_STORE.getCases !== 'function') {
         selectEl.innerHTML = '';
         metaEl.textContent = 'Store unavailable';
-        if (deleteBtn) deleteBtn.disabled = true;
+        deleteBtns.forEach((btn) => { btn.disabled = true; });
         if (renameBtn) renameBtn.disabled = true;
         if (createBtn) createBtn.disabled = true;
         setCaseSwitcherStatus('Store not loaded yet.', true);
@@ -814,7 +818,7 @@ function renderCaseSwitcher() {
         ? context.activeScope.name
         : '—';
     metaEl.textContent = `${count} case${count === 1 ? '' : 's'} | Active: ${activeLabel} | Scope: ${activeScopeLabel}`;
-    if (deleteBtn) deleteBtn.disabled = count <= 1;
+    deleteBtns.forEach((btn) => { btn.disabled = count <= 1; });
     if (renameBtn) renameBtn.disabled = !count;
     if (createBtn) createBtn.disabled = false;
     setCaseSwitcherStatus(`Case context set to "${activeLabel}".`);
@@ -884,29 +888,45 @@ function renameActiveCase() {
 }
 
 function deleteActiveCase() {
+    const active = window.RTF_STORE && window.RTF_STORE.getActiveCase && window.RTF_STORE.getActiveCase();
+    const caseId = active && active.id ? active.id : '';
+    deleteCampaignCaseById(caseId);
+}
+
+function deleteCampaignCaseById(caseId) {
     if (!window.RTF_STORE || typeof window.RTF_STORE.deleteCase !== 'function') {
         setCaseSwitcherStatus('Case delete unavailable in this store version.', true);
         return;
     }
-    const active = window.RTF_STORE.getActiveCase && window.RTF_STORE.getActiveCase();
+    const targetId = String(caseId || '').trim();
+    if (!targetId) {
+        setCaseSwitcherStatus('No case selected to delete.', true);
+        return;
+    }
     const allCases = window.RTF_STORE.getCases && window.RTF_STORE.getCases();
-    if (!active || !active.id) {
-        setCaseSwitcherStatus('No active case to delete.', true);
+    const target = Array.isArray(allCases)
+        ? allCases.find((entry) => String(entry && entry.id || '') === targetId)
+        : null;
+    if (!target || !target.id) {
+        setCaseSwitcherStatus('That case could not be found.', true);
         return;
     }
     if (!Array.isArray(allCases) || allCases.length <= 1) {
         setCaseSwitcherStatus('At least one case must remain.', true);
         return;
     }
-    const ok = confirm(`Delete case "${active.name}"?\n\nThis removes that case's board and timeline events only.`);
+    const targetName = String(target.name || target.id || 'Unnamed Case').trim();
+    const ok = confirm(`Delete case "${targetName}"?\n\nThis removes that case's board and timeline events.`);
     if (!ok) return;
-    if (!window.RTF_STORE.deleteCase(active.id)) {
+    if (!window.RTF_STORE.deleteCase(target.id)) {
         setCaseSwitcherStatus('Case delete failed.', true);
         return;
     }
     renderCaseSwitcher();
     renderCampaignContext();
     renderCampaignOverview();
+    setCaseSwitcherStatus(`Deleted case "${targetName}".`);
+    setCampaignScopeStatus(`Deleted case "${targetName}".`);
 }
 
 function selectCampaignScope(scopeId) {
