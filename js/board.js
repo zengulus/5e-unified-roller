@@ -122,9 +122,10 @@ const CONNECTION_COLOR_PALETTE = [
 const IMAGE_EDITABLE_NODE_TYPES = new Set(['person', 'location', 'clue', 'event', 'requisition']);
 const EDGE_CONNECT_ZONE_PX = 18;
 const BOARD_LINK_FLASH_MS = 2200;
-const BOARD_CROSSLINK_TYPES = new Set(['npc', 'location', 'timeline-event', 'requisition']);
+const BOARD_CROSSLINK_TYPES = new Set(['npc', 'location', 'timeline-event', 'requisition', 'case']);
 const ENCOUNTER_DRAFT_STORAGE_PREFIX = 'rtf_encounter_draft_';
 const LEAD_STORAGE_KEY = 'rtf_lead_queue_v1';
+const BOARD_VIEW_SCOPE = String(window.RTF_VIEW_SCOPE || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
 const THEORY_RELATIONS = ['supports', 'contradicts', 'related'];
 const THEORY_STATUSES = new Set(['unproven', 'confirmed', 'disproven']);
 const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
@@ -152,6 +153,7 @@ const LEDGER_SOURCE_LABELS = {
     event: 'Timeline Event',
     theory: 'Board Theory',
     clue: 'Board Clue',
+    case: 'Campaign Case',
     npc: 'Manual',
     location: 'Manual',
     requisition: 'Manual'
@@ -314,6 +316,53 @@ function sanitizeImageUrl(url = '') {
     }
 
     return '';
+}
+
+function isCampaignBoardView() {
+    return BOARD_VIEW_SCOPE === 'campaign';
+}
+
+function getBoardScopeLabel() {
+    return isCampaignBoardView() ? 'Campaign' : 'Case';
+}
+
+function getBoardActiveCaseId(store = window.RTF_STORE) {
+    if (!store || typeof store.getActiveCaseId !== 'function') return 'case_primary';
+    return String(store.getActiveCaseId() || 'case_primary');
+}
+
+function getBoardTimelineEvents(store = window.RTF_STORE, caseId = null) {
+    if (!store) return [];
+    if (isCampaignBoardView() && typeof store.getCampaignMetaEvents === 'function') {
+        return store.getCampaignMetaEvents();
+    }
+    if (typeof store.getEvents === 'function') {
+        return store.getEvents(caseId);
+    }
+    const campaign = store.state && store.state.campaign ? store.state.campaign : null;
+    return Array.isArray(campaign && campaign.events) ? campaign.events : [];
+}
+
+function addBoardTimelineEvent(store, payload, caseId = null) {
+    if (!store) return '';
+    if (isCampaignBoardView() && typeof store.addCampaignMetaEvent === 'function') {
+        return store.addCampaignMetaEvent(payload);
+    }
+    if (typeof store.addEvent === 'function') {
+        return store.addEvent(payload, caseId || null);
+    }
+    return '';
+}
+
+function updateBoardTimelineEvent(store, eventId, updates, caseId = null) {
+    if (!store || !eventId) return;
+    if (isCampaignBoardView() && typeof store.updateCampaignMetaEvent === 'function') {
+        store.updateCampaignMetaEvent(eventId, updates);
+        return;
+    }
+    if (typeof store.updateEvent === 'function') {
+        store.updateEvent(eventId, updates, caseId || null);
+    }
 }
 
 function clampConnectionColorIndex(index) {
@@ -766,11 +815,10 @@ function persistLinkedNodeNarrativeMeta(nodeEl) {
     if (!meta) return;
     const store = window.RTF_STORE;
     if (String(meta.sourceType || '') !== 'timeline-event') return;
-    if (typeof store.updateEvent !== 'function') return;
     const eventId = String(meta.eventId || '').trim();
     if (!eventId) return;
     const caseId = String(meta.caseId || '').trim();
-    store.updateEvent(eventId, { certainty: clampPercent(meta.certainty, 50) }, caseId || null);
+    updateBoardTimelineEvent(store, eventId, { certainty: clampPercent(meta.certainty, 50) }, caseId || null);
 }
 
 function readLeadStorage() {
@@ -790,6 +838,7 @@ function writeLeadStorage(next) {
 }
 
 function getActiveLeadCaseId() {
+    if (isCampaignBoardView()) return 'campaign_meta';
     if (window.RTF_STORE && typeof window.RTF_STORE.getActiveCaseId === 'function') {
         return String(window.RTF_STORE.getActiveCaseId() || 'case_primary');
     }
@@ -889,17 +938,20 @@ function logBoardTimeline(entry, options = {}) {
     if (kind !== 'clue-discovered') return;
     const tags = Array.isArray(details.tags) ? details.tags : [];
 
+    const mergedOptions = isCampaignBoardView()
+        ? { ...options, scope: 'campaign' }
+        : options;
     logger.logMajorEvent({
-        title: details.title || 'Case Board Event',
+        title: details.title || `${getBoardScopeLabel()} Board Event`,
         focus: getCaseName(),
         heatDelta: details.heatDelta,
-        tags: ['auto', 'case-board', ...tags],
+        tags: ['auto', isCampaignBoardView() ? 'campaign-board' : 'case-board', ...tags],
         highlights: details.highlights || '',
         fallout: details.fallout || '',
         followUp: details.followUp || '',
         source: 'board',
         kind
-    }, options);
+    }, mergedOptions);
 }
 
 function getSourceDescriptor(meta) {
@@ -909,6 +961,7 @@ function getSourceDescriptor(meta) {
     if (type === 'location') return ' from locations database';
     if (type === 'timeline-event') return ' from mission timeline';
     if (type === 'requisition') return ' from requisitions';
+    if (type === 'case') return ' from campaign scope';
     if (type === 'guild') return ' from guild reference';
     return '';
 }
@@ -930,7 +983,7 @@ function logNodeConnectedToCase(summary, otherSummary) {
     const typeLabel = getNodeTypeLabel(summary.type);
     const otherTitle = otherSummary ? otherSummary.title : 'another node';
     logBoardTimeline({
-        title: `${typeLabel} Connected to Case`,
+        title: `${typeLabel} Connected to ${getBoardScopeLabel()}`,
         kind: 'node-linked',
         tags: ['node-link', summary.type],
         highlights: `${summary.title} linked with ${otherTitle}.`
@@ -939,10 +992,10 @@ function logNodeConnectedToCase(summary, otherSummary) {
     if (summary.type !== 'event') return;
 
     logBoardTimeline({
-        title: 'Timeline Event Linked to Case',
+        title: `Timeline Event Linked to ${getBoardScopeLabel()}`,
         kind: 'timeline-event-linked',
         tags: ['event-link'],
-        highlights: `${summary.title} linked to the active case graph.`
+        highlights: `${summary.title} linked to the active ${getBoardScopeLabel().toLowerCase()} graph.`
     }, { dedupeKey: `board:event-link:${summary.id}` });
 
     const heat = getHeatDeltaFromNode(summary);
@@ -1056,8 +1109,14 @@ function readStoreBoardPayload() {
     const hostPayload = readHostBoardPayload();
     if (hostPayload) return hostPayload;
     if (!window.RTF_STORE) return null;
+    if (isCampaignBoardView() && typeof window.RTF_STORE.getCampaignMetaBoard === 'function') {
+        return sanitizeBoardPayload(window.RTF_STORE.getCampaignMetaBoard());
+    }
     if (typeof window.RTF_STORE.getBoard === 'function') {
         return sanitizeBoardPayload(window.RTF_STORE.getBoard());
+    }
+    if (isCampaignBoardView() && window.RTF_STORE.state && window.RTF_STORE.state.campaignMeta && window.RTF_STORE.state.campaignMeta.board) {
+        return sanitizeBoardPayload(window.RTF_STORE.state.campaignMeta.board);
     }
     if (window.RTF_STORE.state && window.RTF_STORE.state.board) {
         return sanitizeBoardPayload(window.RTF_STORE.state.board);
@@ -1069,17 +1128,31 @@ function writeStoreBoardPayload(payload) {
     if (writeHostBoardPayload(payload)) return true;
     if (!window.RTF_STORE) return false;
     const clean = sanitizeBoardPayload(payload);
+    if (isCampaignBoardView() && typeof window.RTF_STORE.updateCampaignMetaBoard === 'function') {
+        window.RTF_STORE.updateCampaignMetaBoard(clean);
+        return true;
+    }
     if (typeof window.RTF_STORE.updateBoard === 'function') {
         window.RTF_STORE.updateBoard(clean);
         return true;
     }
     if (window.RTF_STORE.state) {
-        window.RTF_STORE.state.board = clean;
+        if (isCampaignBoardView()) {
+            if (!window.RTF_STORE.state.campaignMeta || typeof window.RTF_STORE.state.campaignMeta !== 'object') {
+                window.RTF_STORE.state.campaignMeta = { board: clean, events: [] };
+            } else {
+                window.RTF_STORE.state.campaignMeta.board = clean;
+            }
+        } else {
+            window.RTF_STORE.state.board = clean;
+        }
         if (typeof window.RTF_STORE.save === 'function') {
-            const activeCaseId = (typeof window.RTF_STORE.getActiveCaseId === 'function')
-                ? window.RTF_STORE.getActiveCaseId()
-                : 'case_primary';
-            window.RTF_STORE.save({ scope: `cases.${activeCaseId}.board` });
+            if (isCampaignBoardView()) {
+                window.RTF_STORE.save({ scope: 'campaign.meta.board' });
+            } else {
+                const activeCaseId = getBoardActiveCaseId(window.RTF_STORE);
+                window.RTF_STORE.save({ scope: `cases.${activeCaseId}.board` });
+            }
         }
         return true;
     }
@@ -1121,43 +1194,65 @@ function getPreferredBoardPayload() {
 function pruneBoardTimelineNoise() {
     if (isExternalBoardMode()) return;
     const store = window.RTF_STORE;
-    if (!store || typeof store.getEvents !== 'function') return;
-
-    const caseIds = (typeof store.getCases === 'function')
-        ? store.getCases().map((entry) => entry && entry.id).filter(Boolean)
-        : [null];
-    if (!caseIds.length) caseIds.push(null);
+    if (!store) return;
 
     let removed = 0;
     const touchedScopes = new Set();
-    caseIds.forEach((caseId) => {
-        const events = store.getEvents(caseId);
-        if (!Array.isArray(events) || !events.length) return;
-        const resolvedCaseId = caseId || (typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : 'case_primary');
+    const isBoardNoiseEvent = (evt) => {
+        if (!evt || typeof evt !== 'object') return false;
+        const source = String(evt.source || '').trim().toLowerCase();
+        const kind = String(evt.kind || '').trim();
+        const tags = String(evt.tags || '').toLowerCase();
+        const isBoardEvent = source === 'board' || tags.includes('case-board') || tags.includes('campaign-board');
+        if (!isBoardEvent) return false;
+        if (kind === 'clue-discovered') return false;
+        return true;
+    };
 
+    if (isCampaignBoardView()) {
+        const events = getBoardTimelineEvents(store);
+        if (!Array.isArray(events) || !events.length) return;
         for (let i = events.length - 1; i >= 0; i -= 1) {
             const evt = events[i];
-            if (!evt || typeof evt !== 'object') continue;
-            const source = String(evt.source || '').trim().toLowerCase();
-            const kind = String(evt.kind || '').trim();
-            const tags = String(evt.tags || '').toLowerCase();
-
-            const isBoardEvent = source === 'board' || tags.includes('case-board');
-            if (!isBoardEvent) continue;
-            if (kind === 'clue-discovered') continue;
-
+            if (!isBoardNoiseEvent(evt)) continue;
             const rawEventId = String(evt.id || '').trim();
             const normalizedEventId = rawEventId.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 80);
             events.splice(i, 1);
             removed += 1;
-            if (!resolvedCaseId) continue;
             touchedScopes.add(
                 normalizedEventId
-                    ? `cases.${resolvedCaseId}.events.${normalizedEventId}`
-                    : `cases.${resolvedCaseId}.events`
+                    ? `campaign.meta.events.${normalizedEventId}`
+                    : 'campaign.meta.events'
             );
         }
-    });
+    } else {
+        if (typeof store.getEvents !== 'function') return;
+        const caseIds = (typeof store.getCases === 'function')
+            ? store.getCases().map((entry) => entry && entry.id).filter(Boolean)
+            : [null];
+        if (!caseIds.length) caseIds.push(null);
+
+        caseIds.forEach((caseId) => {
+            const events = store.getEvents(caseId);
+            if (!Array.isArray(events) || !events.length) return;
+            const resolvedCaseId = caseId || getBoardActiveCaseId(store);
+
+            for (let i = events.length - 1; i >= 0; i -= 1) {
+                const evt = events[i];
+                if (!isBoardNoiseEvent(evt)) continue;
+                const rawEventId = String(evt.id || '').trim();
+                const normalizedEventId = rawEventId.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+                events.splice(i, 1);
+                removed += 1;
+                if (!resolvedCaseId) continue;
+                touchedScopes.add(
+                    normalizedEventId
+                        ? `cases.${resolvedCaseId}.events.${normalizedEventId}`
+                        : `cases.${resolvedCaseId}.events`
+                );
+            }
+        });
+    }
 
     if (removed && typeof store.save === 'function') {
         const scopes = touchedScopes.size ? Array.from(touchedScopes) : undefined;
@@ -1332,9 +1427,7 @@ function resolveCrossLinkPayload(request) {
     }
 
     if (request.linkType === 'timeline-event') {
-        const events = (typeof store.getEvents === 'function')
-            ? store.getEvents()
-            : (Array.isArray(campaign.events) ? campaign.events : []);
+        const events = getBoardTimelineEvents(store);
         const evt = events.find((entry) => String(entry && entry.id || '') === request.id);
         if (!evt) return null;
         const payload = buildEventNodePayload(evt);
@@ -1349,6 +1442,19 @@ function resolveCrossLinkPayload(request) {
         if (!req) return null;
         const payload = buildRequisitionNodePayload(req);
         return { ...payload, sourceType: 'requisition', sourceIdKey: 'requisitionId', sourceId: request.id };
+    }
+
+    if (request.linkType === 'case') {
+        const cases = store.state && store.state.cases && Array.isArray(store.state.cases.items)
+            ? store.state.cases.items
+            : [];
+        const caseEntry = cases.find((entry) => String(entry && entry.id || '') === request.id);
+        if (!caseEntry) return null;
+        const activeScope = (typeof store.getActiveCampaignScope === 'function')
+            ? store.getActiveCampaignScope()
+            : null;
+        const payload = buildCaseReferenceNodePayload(caseEntry, activeScope);
+        return { ...payload, sourceType: 'case', sourceIdKey: 'caseId', sourceId: request.id };
     }
 
     return null;
@@ -1924,6 +2030,46 @@ function buildRequisitionNodePayload(req) {
     };
 }
 
+function buildCaseReferenceNodePayload(caseEntry, scopeEntry = null) {
+    const source = caseEntry && typeof caseEntry === 'object' ? caseEntry : {};
+    const scope = scopeEntry && typeof scopeEntry === 'object' ? scopeEntry : null;
+    const caseId = String(source.id || '').trim();
+    const caseName = String(source.name || 'Case').trim() || 'Case';
+    const board = source.board && typeof source.board === 'object' ? source.board : {};
+    const caseEvents = Array.isArray(source.events) ? source.events : [];
+    const boardNodes = Array.isArray(board.nodes) ? board.nodes.length : 0;
+    const boardLinks = Array.isArray(board.connections) ? board.connections.length : 0;
+
+    const scopeName = scope ? String(scope.name || '').trim() : '';
+    const scopeCaseOrder = scope && Array.isArray(scope.caseOrder) ? scope.caseOrder : [];
+    const sequence = caseId ? (scopeCaseOrder.findIndex((id) => String(id || '') === caseId) + 1) : 0;
+    const statusMap = scope && scope.caseStatus && typeof scope.caseStatus === 'object' ? scope.caseStatus : {};
+    const status = caseId ? String(statusMap[caseId] || '').trim().toLowerCase() : '';
+
+    const lines = [];
+    if (scopeName) lines.push(`<strong>Scope:</strong> ${sanitizeText(scopeName)}`);
+    if (sequence > 0) lines.push(`<strong>Sequence:</strong> #${sequence}`);
+    if (status) lines.push(`<strong>Status:</strong> ${sanitizeText(status.charAt(0).toUpperCase() + status.slice(1))}`);
+    lines.push(`<strong>Timeline Events:</strong> ${caseEvents.length}`);
+    lines.push(`<strong>Board Graph:</strong> ${boardNodes} nodes / ${boardLinks} links`);
+
+    return {
+        nodeType: 'note',
+        nodeData: {
+            title: `Case Ref: ${caseName}`.slice(0, 180),
+            body: lines.join('<br>'),
+            meta: {
+                sourceType: 'case',
+                caseId,
+                caseName,
+                scopeId: scope ? String(scope.id || '').trim().slice(0, 120) : '',
+                scopeName: scopeName.slice(0, 160),
+                caseStatus: status.slice(0, 40)
+            }
+        }
+    };
+}
+
 function getLeadStatusLabel(status) {
     const clean = String(status || '').trim().toLowerCase();
     return LEAD_STATUS_LABELS[clean] || LEAD_STATUS_LABELS.open;
@@ -2040,12 +2186,11 @@ function getBoardLeadEntries() {
 function getBoardLedgerEntries() {
     const store = window.RTF_STORE;
     if (!store || typeof store.getLedgerEntries !== 'function') return [];
-    const activeCaseId = typeof store.getActiveCaseId === 'function'
-        ? String(store.getActiveCaseId() || 'case_primary')
-        : 'case_primary';
     const entries = store.getLedgerEntries();
     const list = Array.isArray(entries) ? entries.slice() : [];
     list.sort((left, right) => String(right.lastChangedAt || right.created || '').localeCompare(String(left.lastChangedAt || left.created || '')));
+    if (isCampaignBoardView()) return list.slice(0, 40);
+    const activeCaseId = getBoardActiveCaseId(store);
     const caseScoped = list.filter((entry) => String(entry && entry.caseId || 'case_primary') === activeCaseId);
     return (caseScoped.length ? caseScoped : list).slice(0, 40);
 }
@@ -2359,7 +2504,7 @@ function renderBoardEvents() {
     const searchTerm = (document.getElementById('event-search-board').value || '').toLowerCase();
     const focusFilterEl = document.getElementById('event-focus-board');
 
-    const events = (window.RTF_STORE.getEvents ? window.RTF_STORE.getEvents() : (window.RTF_STORE.state.campaign.events || [])).slice();
+    const events = (getBoardTimelineEvents(window.RTF_STORE) || []).slice();
     const focuses = Array.from(new Set(events.map(e => e.focus).filter(Boolean))).sort();
     if (focusFilterEl) {
         const previouslySelected = focusFilterEl.value;
@@ -3907,9 +4052,9 @@ function saveBoard() {
 
     if (!isHydratingBoard && lastSavedCaseName && caseName !== lastSavedCaseName) {
         logBoardTimeline({
-            title: 'Case File Renamed',
-            kind: 'case-rename',
-            tags: ['case-name'],
+            title: isCampaignBoardView() ? 'Campaign Board Renamed' : 'Case File Renamed',
+            kind: isCampaignBoardView() ? 'campaign-board-rename' : 'case-rename',
+            tags: [isCampaignBoardView() ? 'campaign-board-name' : 'case-name'],
             highlights: `"${lastSavedCaseName}" renamed to "${caseName}".`
         }, { dedupeKey: `board:case-rename:${lastSavedCaseName}->${caseName}` });
     }
@@ -3954,7 +4099,7 @@ function loadBoard(options = {}, payloadOverride = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const data = payloadOverride ? sanitizeBoardPayload(payloadOverride) : getPreferredBoardPayload();
     if (!data) return;
-    const caseName = normalizeCaseName(data.name || 'UNNAMED CASE');
+    const caseName = normalizeCaseName(data.name || (isCampaignBoardView() ? 'CAMPAIGN META BOARD' : 'UNNAMED CASE'));
     document.getElementById('caseName').innerText = caseName;
     lastSavedCaseName = caseName;
 
@@ -4017,9 +4162,11 @@ function clearBoard() {
             updateViewCSS();
             return;
         }
-        if (window.RTF_STORE && typeof window.RTF_STORE.clearBoard === 'function') {
+        if (window.RTF_STORE && isCampaignBoardView() && typeof window.RTF_STORE.clearCampaignMetaBoard === 'function') {
+            window.RTF_STORE.clearCampaignMetaBoard();
+        } else if (window.RTF_STORE && typeof window.RTF_STORE.clearBoard === 'function') {
             window.RTF_STORE.clearBoard();
-        } else if (!writeStoreBoardPayload({ name: "UNNAMED CASE", nodes: [], connections: [] })) {
+        } else if (!writeStoreBoardPayload({ name: isCampaignBoardView() ? "CAMPAIGN META BOARD" : "UNNAMED CASE", nodes: [], connections: [] })) {
             localStorage.removeItem(LEGACY_BOARD_KEY);
         }
         localStorage.removeItem(LEGACY_BOARD_KEY);
@@ -4057,7 +4204,7 @@ function showContextMenu(e, node) {
     if (addLedgerItem) addLedgerItem.style.display = (type !== 'group' && !isLedgerNote) ? 'block' : 'none';
     if (theoryConfirmedItem) theoryConfirmedItem.style.display = isTheory ? 'block' : 'none';
     if (theoryDisprovenItem) theoryDisprovenItem.style.display = isTheory ? 'block' : 'none';
-    if (createLeadItem) createLeadItem.style.display = 'block';
+    if (createLeadItem) createLeadItem.style.display = isCampaignBoardView() ? 'none' : 'block';
     const draftItem = document.getElementById('menu-draft-encounter');
     if (draftItem) {
         draftItem.style.display = e.shiftKey ? 'block' : 'none';
@@ -4320,12 +4467,13 @@ function addTargetNodeToLedger() {
 
 function logTheoryStatusEvent(nodeEl, status) {
     const store = window.RTF_STORE;
-    if (!store || typeof store.addEvent !== 'function' || !nodeEl) return;
+    if (!store || !nodeEl) return;
     const summary = getNodeSummary(nodeEl.id);
     const theoryTitle = summary ? summary.title : 'Theory';
     const statusLabel = getTheoryStatusLabel(status);
-    const highlights = `${theoryTitle} marked ${statusLabel.toLowerCase()} on the case board.`;
-    store.addEvent({
+    const boardDescriptor = isCampaignBoardView() ? 'campaign board' : 'case board';
+    const highlights = `${theoryTitle} marked ${statusLabel.toLowerCase()} on the ${boardDescriptor}.`;
+    addBoardTimelineEvent(store, {
         id: `event_theory_${status}_${Date.now().toString(36)}`,
         title: `Theory ${statusLabel}: ${theoryTitle}`,
         focus: getCaseName(),
@@ -4338,7 +4486,7 @@ function logTheoryStatusEvent(nodeEl, status) {
         kind: `theory-${status}`,
         resolved: status === 'disproven',
         created: new Date().toISOString()
-    });
+    }, getBoardActiveCaseId(store));
 }
 
 function markTargetTheory(status) {
@@ -4359,6 +4507,11 @@ function markTargetTheory(status) {
 }
 
 function createLeadFromTargetNode() {
+    if (isCampaignBoardView()) {
+        alert('Lead Queue is case-scoped. Open the case board to create leads.');
+        contextMenu.style.display = 'none';
+        return;
+    }
     const nodeEl = getContextTargetNode();
     if (!nodeEl) return;
     const summary = getNodeSummary(nodeEl.id);
@@ -4458,21 +4611,23 @@ function persistLinkedNodeImageUrl(nodeEl, imageUrl = '') {
         return;
     }
 
-    if (meta.sourceType === 'timeline-event' && typeof store.updateEvent === 'function') {
+    if (meta.sourceType === 'timeline-event') {
         const eventId = String(meta.eventId || '').trim();
         if (!eventId) return;
         let caseId = String(meta.caseId || '').trim();
         if (!caseId) {
-            const cases = store.state && store.state.cases && Array.isArray(store.state.cases.items)
-                ? store.state.cases.items
-                : [];
-            const ownerCase = cases.find((entry) => {
-                const events = entry && Array.isArray(entry.events) ? entry.events : [];
-                return events.some((evt) => String(evt && evt.id || '') === eventId);
-            });
-            caseId = ownerCase && ownerCase.id ? String(ownerCase.id) : '';
+            if (!isCampaignBoardView()) {
+                const cases = store.state && store.state.cases && Array.isArray(store.state.cases.items)
+                    ? store.state.cases.items
+                    : [];
+                const ownerCase = cases.find((entry) => {
+                    const events = entry && Array.isArray(entry.events) ? entry.events : [];
+                    return events.some((evt) => String(evt && evt.id || '') === eventId);
+                });
+                caseId = ownerCase && ownerCase.id ? String(ownerCase.id) : '';
+            }
         }
-        store.updateEvent(eventId, { imageUrl: clean }, caseId || null);
+        updateBoardTimelineEvent(store, eventId, { imageUrl: clean }, caseId || null);
         return;
     }
 

@@ -85,6 +85,9 @@
     bindDelegatedDataHandlers();
 
     const getStore = () => window.RTF_STORE;
+    const VIEW_SCOPE = String(window.RTF_VIEW_SCOPE || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+    const isCampaignMetaView = () => VIEW_SCOPE === 'campaign';
+    const getBoardPageHref = () => isCampaignMetaView() ? 'campaign-board.html' : 'board.html';
     const getDeleteManager = () => {
         if (deleteManager) return deleteManager;
         const api = window.RTF_SOFT_DELETE;
@@ -254,6 +257,57 @@
         if (!store || typeof store.getActiveCaseId !== 'function') return 'case_primary';
         return String(store.getActiveCaseId() || 'case_primary');
     };
+    const getTimelineScopeId = () => (isCampaignMetaView() ? 'campaign_meta' : getActiveCaseId());
+    const getTimelineEvents = (store = getStore()) => {
+        if (!store) return [];
+        if (isCampaignMetaView() && typeof store.getCampaignMetaEvents === 'function') {
+            return store.getCampaignMetaEvents();
+        }
+        if (typeof store.getEvents === 'function') {
+            return store.getEvents(getActiveCaseId());
+        }
+        return [];
+    };
+    const addTimelineEventToStore = (store, payload) => {
+        if (!store) return '';
+        if (isCampaignMetaView() && typeof store.addCampaignMetaEvent === 'function') {
+            return store.addCampaignMetaEvent(payload);
+        }
+        if (typeof store.addEvent === 'function') {
+            return store.addEvent(payload, getActiveCaseId());
+        }
+        return '';
+    };
+    const updateTimelineEventInStore = (store, id, updates) => {
+        if (!store) return;
+        if (isCampaignMetaView() && typeof store.updateCampaignMetaEvent === 'function') {
+            store.updateCampaignMetaEvent(id, updates);
+            return;
+        }
+        if (typeof store.updateEvent === 'function') {
+            store.updateEvent(id, updates, getActiveCaseId());
+        }
+    };
+    const deleteTimelineEventFromStore = (store, id) => {
+        if (!store) return;
+        if (isCampaignMetaView() && typeof store.deleteCampaignMetaEvent === 'function') {
+            store.deleteCampaignMetaEvent(id);
+            return;
+        }
+        if (typeof store.deleteEvent === 'function') {
+            store.deleteEvent(id, getActiveCaseId());
+        }
+    };
+    const getTimelineBoard = (store = getStore()) => {
+        if (!store) return null;
+        if (isCampaignMetaView() && typeof store.getCampaignMetaBoard === 'function') {
+            return store.getCampaignMetaBoard();
+        }
+        if (typeof store.getBoard === 'function') {
+            return store.getBoard(getActiveCaseId());
+        }
+        return null;
+    };
 
     const normalizeLeadType = (value) => {
         const clean = String(value || '').trim().toLowerCase();
@@ -275,13 +329,14 @@
         LEAD_TARGET_INDEX.theory = [];
         LEAD_TARGET_INDEX.clue = [];
     };
-    const getLeadSelfNodeIds = (leadId, caseId = getActiveCaseId()) => {
+    const getLeadSelfNodeIds = (leadId) => {
         const cleanLeadId = String(leadId || '').trim();
         const out = new Set();
         if (!cleanLeadId) return out;
         const store = getStore();
-        if (!store || typeof store.getBoard !== 'function') return out;
-        const board = store.getBoard(caseId);
+        if (!store) return out;
+        const board = getTimelineBoard(store);
+        if (!board) return out;
         const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
         nodes.forEach((node) => {
             const nodeId = normalizeTargetId(node && node.id || '');
@@ -338,30 +393,25 @@
                 pushOption('requisition', id, name);
             });
         }
-        const activeCaseId = getActiveCaseId();
-        if (typeof store.getEvents === 'function') {
-            const events = store.getEvents(activeCaseId);
-            (Array.isArray(events) ? events : []).forEach((entry) => {
-                const id = normalizeTargetId(entry && entry.id || '');
-                if (!id) return;
-                const title = String(entry && entry.title || id).trim() || id;
-                pushOption('event', id, title);
+        const events = getTimelineEvents(store);
+        (Array.isArray(events) ? events : []).forEach((entry) => {
+            const id = normalizeTargetId(entry && entry.id || '');
+            if (!id) return;
+            const title = String(entry && entry.title || id).trim() || id;
+            pushOption('event', id, title);
+        });
+        const board = getTimelineBoard(store);
+        const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
+        nodes.forEach((node) => {
+            const id = normalizeTargetId(node && node.id || '');
+            if (!isBoardNodeId(id)) return;
+            const title = String(node && node.title || id).trim() || id;
+            const nodeType = String(node && node.type || 'node').trim().toLowerCase();
+            const boardLabel = `[Board] ${title} (${nodeType || 'node'})`;
+            LEAD_LINKABLE_TYPES.forEach((type) => {
+                pushOption(type, id, boardLabel);
             });
-        }
-        if (typeof store.getBoard === 'function') {
-            const board = store.getBoard(activeCaseId);
-            const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
-            nodes.forEach((node) => {
-                const id = normalizeTargetId(node && node.id || '');
-                if (!isBoardNodeId(id)) return;
-                const title = String(node && node.title || id).trim() || id;
-                const nodeType = String(node && node.type || 'node').trim().toLowerCase();
-                const boardLabel = `[Board] ${title} (${nodeType || 'node'})`;
-                LEAD_LINKABLE_TYPES.forEach((type) => {
-                    pushOption(type, id, boardLabel);
-                });
-            });
-        }
+        });
         Object.keys(LEAD_TARGET_INDEX).forEach((key) => {
             LEAD_TARGET_INDEX[key].sort((a, b) => {
                 const labelDelta = String(a.label || '').localeCompare(String(b.label || ''));
@@ -522,13 +572,13 @@
         localStorage.setItem(LEAD_STORAGE_KEY, JSON.stringify(clean));
     };
 
-    const getCaseLeads = (caseId = getActiveCaseId()) => {
+    const getCaseLeads = (caseId = getTimelineScopeId()) => {
         const all = readLeadStorage();
         const list = Array.isArray(all[caseId]) ? all[caseId] : [];
         return list.map((entry, idx) => sanitizeLead(entry, idx));
     };
 
-    const saveCaseLeads = (leads, caseId = getActiveCaseId()) => {
+    const saveCaseLeads = (leads, caseId = getTimelineScopeId()) => {
         const all = readLeadStorage();
         const clean = Array.isArray(leads) ? leads.map((entry, idx) => sanitizeLead(entry, idx)) : [];
         all[caseId] = clean;
@@ -603,7 +653,7 @@
         localStorage.setItem(PREP_PROCEDURE_STATE_KEY, JSON.stringify(state));
     };
 
-    const getFreeShieldSessionKey = () => `${FREE_SHIELD_SESSION_PREFIX}${getActiveCaseId()}`;
+    const getFreeShieldSessionKey = () => `${FREE_SHIELD_SESSION_PREFIX}${getTimelineScopeId()}`;
 
     const hasFreeShieldAvailable = (procedureState = getProcedureState()) => {
         if (!procedureState || !procedureState.prep) return false;
@@ -647,7 +697,7 @@
     }
 
     function buildBoardLinkForEvent(id) {
-        const url = new URL('board.html', window.location.href);
+        const url = new URL(getBoardPageHref(), window.location.href);
         url.searchParams.set('linkType', 'timeline-event');
         url.searchParams.set('id', String(id || '').trim());
         return url.toString();
@@ -684,7 +734,7 @@
                 label: String(entry && entry.item || 'Requisition').trim()
             })).filter((entry) => entry.id);
         }
-        const events = typeof store.getEvents === 'function' ? store.getEvents() : [];
+        const events = getTimelineEvents(store);
         return (Array.isArray(events) ? events : []).map((entry) => ({
             id: String(entry && entry.id || '').trim(),
             label: String(entry && entry.title || 'Event').trim()
@@ -846,7 +896,7 @@
 
     function addEventImpact(eventId) {
         const store = getStore();
-        if (!store || typeof store.getEvents !== 'function' || typeof store.updateEvent !== 'function') return;
+        if (!store) return;
         const cleanId = String(eventId || '').trim();
         if (!cleanId) return;
         const domEvtId = toDomSafeId(cleanId);
@@ -859,27 +909,27 @@
         const note = String(noteEl.value || '').trim().slice(0, 400);
         if (!id) return;
 
-        const target = (store.getEvents() || []).find((entry) => String(entry && entry.id || '') === cleanId);
+        const target = (getTimelineEvents(store) || []).find((entry) => String(entry && entry.id || '') === cleanId);
         if (!target) return;
         const impacts = parseEntityImpacts(target.entityImpacts);
         if (impacts.some((entry) => entry.type === type && entry.id === id)) return;
         impacts.push({ type, id, note });
-        store.updateEvent(cleanId, { entityImpacts: impacts });
+        updateTimelineEventInStore(store, cleanId, { entityImpacts: impacts });
         renderTimeline();
     }
 
     function removeEventImpact(eventId, index) {
         const store = getStore();
-        if (!store || typeof store.getEvents !== 'function' || typeof store.updateEvent !== 'function') return;
+        if (!store) return;
         const cleanId = String(eventId || '').trim();
         const idx = Number(index);
         if (!cleanId || !Number.isInteger(idx)) return;
-        const target = (store.getEvents() || []).find((entry) => String(entry && entry.id || '') === cleanId);
+        const target = (getTimelineEvents(store) || []).find((entry) => String(entry && entry.id || '') === cleanId);
         if (!target) return;
         const impacts = parseEntityImpacts(target.entityImpacts);
         if (idx < 0 || idx >= impacts.length) return;
         impacts.splice(idx, 1);
-        store.updateEvent(cleanId, { entityImpacts: impacts });
+        updateTimelineEventInStore(store, cleanId, { entityImpacts: impacts });
         renderTimeline();
     }
 
@@ -956,7 +1006,7 @@
             resolved: false,
             created: new Date().toISOString()
         };
-        store.addEvent(data);
+        addTimelineEventToStore(store, data);
         applyHeatDelta(parseHeatDelta(data.heatDelta), store);
         resetForm();
         toggleEventForm();
@@ -964,7 +1014,7 @@
     }
 
     function addLead(leadLike) {
-        const caseId = getActiveCaseId();
+        const caseId = getTimelineScopeId();
         const existing = getCaseLeads(caseId);
         const lead = sanitizeLead({
             ...leadLike,
@@ -1015,7 +1065,7 @@
     function addLeadFromEvent(eventId) {
         const cleanId = String(eventId || '').trim();
         if (!cleanId) return;
-        const existing = getCaseLeads(getActiveCaseId()).find((lead) =>
+        const existing = getCaseLeads(getTimelineScopeId()).find((lead) =>
             lead && lead.type === 'event' &&
             String(lead.targetId || '') === cleanId &&
             lead.status !== 'resolved' &&
@@ -1023,8 +1073,8 @@
         );
         if (existing) return existing;
         const store = getStore();
-        if (!store || typeof store.getEvents !== 'function') return;
-        const evt = (store.getEvents() || []).find((entry) => String(entry && entry.id || '') === cleanId);
+        if (!store) return;
+        const evt = (getTimelineEvents(store) || []).find((entry) => String(entry && entry.id || '') === cleanId);
         if (!evt) return;
         return addLead({
             type: 'event',
@@ -1045,6 +1095,10 @@
     }
 
     function queueLeadFromEvent(eventId) {
+        if (isCampaignMetaView()) {
+            alert('Lead Queue is case-scoped. Use Mission Timeline for lead triage.');
+            return;
+        }
         const lead = addLeadFromEvent(eventId);
         if (!lead || !lead.id) return;
         openLeadsPage(lead.id);
@@ -1054,7 +1108,7 @@
         const id = String(leadId || '').trim();
         if (!id) return;
         refreshLeadTargetIndex();
-        const caseId = getActiveCaseId();
+        const caseId = getTimelineScopeId();
         const list = getCaseLeads(caseId);
         const idx = list.findIndex((lead) => lead.id === id);
         if (idx < 0) return;
@@ -1102,7 +1156,7 @@
             alert('Enter your voter name before voting.');
             return;
         }
-        const caseId = getActiveCaseId();
+        const caseId = getTimelineScopeId();
         const list = getCaseLeads(caseId);
         const idx = list.findIndex((lead) => lead.id === id);
         if (idx < 0) return;
@@ -1118,7 +1172,7 @@
         if (!id) return;
         const voter = getCurrentLeadVoter();
         if (!voter) return;
-        const caseId = getActiveCaseId();
+        const caseId = getTimelineScopeId();
         const list = getCaseLeads(caseId);
         const idx = list.findIndex((lead) => lead.id === id);
         if (idx < 0) return;
@@ -1132,7 +1186,7 @@
     function deleteLead(leadId) {
         const id = String(leadId || '').trim();
         if (!id) return;
-        const caseId = getActiveCaseId();
+        const caseId = getTimelineScopeId();
         const list = getCaseLeads(caseId);
         const idx = list.findIndex((lead) => lead.id === id);
         if (idx < 0) return;
@@ -1149,7 +1203,7 @@
     function openLeadOnBoard(leadId) {
         const id = String(leadId || '').trim();
         if (!id) return;
-        const list = getCaseLeads(getActiveCaseId());
+        const list = getCaseLeads(getTimelineScopeId());
         const lead = list.find((entry) => entry.id === id);
         if (!lead) return;
         const target = String(lead.targetId || '').trim();
@@ -1158,7 +1212,7 @@
             return;
         }
 
-        const url = new URL('board.html', window.location.href);
+        const url = new URL(getBoardPageHref(), window.location.href);
         if (isBoardNodeId(target)) {
             url.searchParams.set('nodeId', target);
             window.location.assign(url.toString());
@@ -1189,7 +1243,7 @@
 
         refreshLeadTargetPicker();
         const voter = getCurrentLeadVoter();
-        const leads = getCaseLeads(getActiveCaseId());
+        const leads = getCaseLeads(getTimelineScopeId());
         const sorted = leads.slice().sort((a, b) => {
             const statusDelta = getLeadStatusRank(a.status) - getLeadStatusRank(b.status);
             if (statusDelta !== 0) return statusDelta;
@@ -1263,8 +1317,8 @@
         const cleanId = String(eventId || '').trim();
         if (!cleanId) return;
         const store = getStore();
-        if (!store || typeof store.getEvents !== 'function') return;
-        const events = store.getEvents() || [];
+        if (!store) return;
+        const events = getTimelineEvents(store) || [];
         const evt = events.find((entry) => String(entry && entry.id || '') === cleanId);
         if (!evt) return;
 
@@ -1301,7 +1355,7 @@
         const mergedFollowUp = priorFollowUp ? `${priorFollowUp}\n${shieldLine}` : shieldLine;
         updateEventField(cleanId, 'followUp', mergedFollowUp);
 
-        store.addEvent({
+        addTimelineEventToStore(store, {
             id: `event_proc_shield_${Date.now()}`,
             title: 'Procedure Shield Activated',
             focus: evt.focus || 'Timeline',
@@ -1344,9 +1398,9 @@
         if (field === 'impactScope') {
             nextValue = sanitizeImpactScope(value, 'local');
         }
-        const existing = (store.getEvents ? store.getEvents() : []).find(evt => evt.id === id);
+        const existing = (getTimelineEvents(store) || []).find((evt) => evt && evt.id === id);
         const previousHeat = existing ? parseHeatDelta(existing.heatDelta) : 0;
-        store.updateEvent(id, { [field]: nextValue });
+        updateTimelineEventInStore(store, id, { [field]: nextValue });
         if (field === 'heatDelta') {
             const nextHeat = parseHeatDelta(nextValue);
             applyHeatDelta(nextHeat - previousHeat, store);
@@ -1357,14 +1411,14 @@
     function deleteTimelineEvent(id) {
         const store = getStore();
         if (!store) return;
-        const existing = (store.getEvents ? store.getEvents() : []).find(evt => evt.id === id);
+        const existing = (getTimelineEvents(store) || []).find((evt) => evt && evt.id === id);
         if (!existing) return;
         const previousHeat = existing ? parseHeatDelta(existing.heatDelta) : 0;
 
         const manager = getDeleteManager();
         if (!manager) {
             if (!confirm('Delete this logged event?')) return;
-            store.deleteEvent(id);
+            deleteTimelineEventFromStore(store, id);
             applyHeatDelta(-previousHeat, store);
             renderTimeline();
             return;
@@ -1374,7 +1428,7 @@
             id,
             label: `Event removed: ${existing.title || 'Untitled Event'}`,
             onFinalize: () => {
-                store.deleteEvent(id);
+                deleteTimelineEventFromStore(store, id);
                 applyHeatDelta(-previousHeat, store);
                 renderTimeline();
             },
@@ -1449,6 +1503,9 @@
             : '';
         const impactBadges = renderEventImpactBadges(evt);
         const impactEditorMarkup = buildImpactEditorMarkup(evt);
+        const leadActionButton = isCampaignMetaView()
+            ? ''
+            : `<button class="btn" data-onclick="queueLeadFromEvent('${evtId}')">Lead Queue</button>`;
 
         return `
         <div class="event-card${imageMarkup ? ' has-image' : ''}${overdueClass}${highImpactClass}">
@@ -1516,7 +1573,7 @@
                     <small class="event-log-meta">Logged ${evt.created ? new Date(evt.created).toLocaleString() : '—'}</small>
                     ${attribution ? `<small class="event-log-meta">${attribution}</small>` : ''}
                     ${procedureShieldButton}
-                    <button class="btn" data-onclick="queueLeadFromEvent('${evtId}')">Lead Queue</button>
+                    ${leadActionButton}
                     <button class="btn" data-onclick="openTimelineEventInBoard('${evtId}')">Board</button>
                     <button class="btn btn-danger" data-onclick="deleteTimelineEvent('${evtId}')">Delete</button>
                 </div>
@@ -1547,7 +1604,7 @@
         if (!store) {
             return { filtered: [], filters: null };
         }
-        const events = (store.getEvents() || []).slice();
+        const events = (getTimelineEvents(store) || []).slice();
         populateFocusFilter(events);
 
         const search = (document.getElementById('eventSearch').value || '').toLowerCase();

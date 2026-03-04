@@ -1,8 +1,10 @@
 # Supabase Sync (`RTF_STORE`)
 
-Optional cloud sync for the shared campaign stack (`hub`, `board`, `roster`, `locations`, `requisitions`, `timeline`, `encounters`, `hq`, `player-dashboard`).
+Optional cloud sync for the shared campaign stack (`hub`, `campaign-board`, `board`, `campaign-timeline`, `timeline`, `roster`, `locations`, `requisitions`, `ledger`, `encounters`, `hq`, `player-dashboard`).
 
 The Character Sheet (`index.html`) is intentionally separate and remains local per browser by default.
+
+Campaign-level meta board/timeline state (`campaign.meta.board`, `campaign.meta.events`) syncs through the same campaign payload path; no legacy table changes are required for that scope expansion.
 
 For higher-concurrency deployments, see the hybrid normalized model:
 - `docs/SupabaseSyncNormalized.md`
@@ -140,7 +142,7 @@ Accepted aliases are also supported:
 - Non-overlapping conflicts auto-merge by scope (for example board vs requisitions).
 - Reconciliation pulls run on an interval while connected to reduce drift during longer sessions.
 - Realtime presence advertises active peers and soft-lock scopes to reduce accidental overwrite collisions.
-- Campaign tools share one cloud row per `campaign_id`.
+- Campaign tools share one cloud row per `campaign_id` (including campaign meta board/timeline payloads).
 - Case Board node layout (`x/y` position) is local-only per client. Node content and links still sync.
 - Character sheets are not part of this sync path unless you add a separate sheet sync layer.
 

@@ -5,9 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="manifest.json">
-    <title>Ravnica DM Portal</title>
+    <title>Ravnica Campaign Hub</title>
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
-    <link rel="stylesheet" href="css/player-nav.css?v=20260305a">
+    <link rel="stylesheet" href="css/player-nav.css?v=20260305b">
     <link rel="stylesheet" href="css/tools.css">
     <link rel="stylesheet" href="css/tools-page.css">
 </head>
@@ -19,8 +19,8 @@
         <header class="hero-header">
             <div>
                 <p class="hero-eyebrow">Ravnica Task Force</p>
-                <h1 class="header-title" id="pageTitle" data-onclick="trySecretToggle(event)">Tools Hub</h1>
-                <p class="hero-subtitle">Central dispatch for character sheets, command dashboards, and scenario generators.</p>
+                <h1 class="header-title" id="pageTitle" data-onclick="trySecretToggle(event)">Campaign Hub</h1>
+                <p class="hero-subtitle">Campaign context, scope sequencing, and shared tool dispatch in one control surface.</p>
             </div>
             <div class="hero-actions">
                 <div class="hero-action-bar primary">
@@ -29,6 +29,7 @@
                     <button class="hero-btn ghost" data-onclick="handleExportLLMSnapshot()">🤖 LLM Snapshot</button>
                 </div>
                 <div class="hero-action-bar secondary">
+                    <button class="hero-btn ghost" id="btn-secret-mode" data-onclick="toggleSecretMode()">🧩 GM Mode</button>
                     <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
                     <button class="hero-btn ghost" id="btn-bg-style" data-onclick="cycleBgStyle()">🌌 BG: Field</button>
                 </div>
@@ -37,30 +38,84 @@
             </div>
         </header>
 
-        <section class="case-switcher card" id="case-switcher" aria-label="Case Switcher">
+        <section class="case-switcher card" id="case-switcher" aria-label="Campaign Context">
             <div class="case-switcher-head">
-                <h2 class="sync-title">Active Case Context</h2>
+                <h2 class="sync-title">Campaign Context</h2>
                 <div class="case-switcher-meta" id="case-switcher-meta">Waiting for store...</div>
             </div>
             <p class="sync-desc">
-                Board and Timeline are scoped to the selected case. NPC, location, requisition, and roster data remain shared across all cases.
+                Campaign Scope is the primary context. Active case is derived from the selected scope sequence.
             </p>
-            <div class="case-switcher-row">
-                <select id="active-case-select" data-onchange="selectActiveCase(this.value)" aria-label="Select Active Case"></select>
-                <button class="sync-btn" id="case-rename-btn" data-onclick="renameActiveCase()">Rename</button>
-                <button class="sync-btn" id="case-delete-btn" data-onclick="deleteActiveCase()">Delete</button>
+            <div class="campaign-scope-wrap">
+                <div class="case-switcher-row">
+                    <select id="campaign-scope-select" data-onchange="selectCampaignScope(this.value)" aria-label="Select Campaign Scope"></select>
+                    <button class="sync-btn" id="campaign-scope-rename-btn" data-onclick="renameCampaignScope()">Rename Scope</button>
+                    <button class="sync-btn" id="campaign-scope-delete-btn" data-onclick="deleteCampaignScope()">Delete Scope</button>
+                </div>
+                <div class="case-switcher-row">
+                    <input id="campaign-scope-name" type="text" placeholder="New campaign scope name">
+                    <button class="sync-btn primary" id="campaign-scope-create-btn" data-onclick="createCampaignScopeFromInput()">Create Scope</button>
+                </div>
+                <div class="campaign-scope-meta" id="campaign-scope-meta">Scope tools initializing...</div>
+                <div class="case-switcher-row">
+                    <select id="campaign-scope-case-add" aria-label="Add Case to Active Scope"></select>
+                    <button class="sync-btn" id="campaign-scope-add-case-btn" data-onclick="addCaseToActiveScope()">Add Case to Scope</button>
+                </div>
+                <div id="campaign-sequence-list" class="campaign-sequence-list">Case sequence loading...</div>
+                <div class="scope-board-refs-panel">
+                    <div class="scope-board-refs-head">
+                        <h3 class="scope-board-refs-title">Scope Board References</h3>
+                        <button class="sync-btn" data-onclick="addActiveCaseBoardRef()">Add Active Case Ref</button>
+                    </div>
+                    <div id="scope-board-ref-list" class="scope-board-ref-list">Scope board references loading...</div>
+                </div>
+                <div id="campaign-scope-status" class="case-switcher-status">Campaign scope tools initializing...</div>
             </div>
-            <div class="case-switcher-row">
-                <input id="new-case-name" type="text" placeholder="New case name">
-                <button class="sync-btn primary" id="case-create-btn" data-onclick="createCaseFromInput()">Create + Switch</button>
+            <details class="campaign-advanced">
+                <summary>Advanced: Direct Case Controls</summary>
+                <p class="sync-desc">
+                    Optional overrides for direct active-case control. Use this only when scope-derived context is not sufficient.
+                </p>
+                <div class="case-switcher-row">
+                    <select id="active-case-select" data-onchange="selectActiveCase(this.value)" aria-label="Select Active Case"></select>
+                    <button class="sync-btn" id="case-rename-btn" data-onclick="renameActiveCase()">Rename</button>
+                    <button class="sync-btn" id="case-delete-btn" data-onclick="deleteActiveCase()">Delete</button>
+                </div>
+                <div class="case-switcher-row">
+                    <input id="new-case-name" type="text" placeholder="New case name">
+                    <button class="sync-btn primary" id="case-create-btn" data-onclick="createCaseFromInput()">Create + Switch</button>
+                </div>
+                <div id="case-switcher-status" class="case-switcher-status">Case tools initializing...</div>
+            </details>
+        </section>
+
+        <section class="campaign-overview card" id="campaign-overview" aria-label="Campaign Overview">
+            <div class="case-switcher-head">
+                <h2 class="sync-title">Campaign Pulse</h2>
+                <div class="case-switcher-meta" id="campaign-overview-meta">Waiting for store...</div>
             </div>
-            <div id="case-switcher-status" class="case-switcher-status">Case tools initializing...</div>
+            <div class="campaign-workflow-grid" id="campaign-workflow-grid">Campaign workflow loading...</div>
+            <div class="campaign-workflow-actions">
+                <button class="sync-btn primary" data-onclick="startNextScopeCase()">Start Next Case</button>
+                <button class="sync-btn" data-onclick="markResolvedAndAdvanceScopeCase()">Mark Resolved + Advance</button>
+                <button class="sync-btn" data-onclick="openActiveScopeBoard()">Open Active Scope Board</button>
+            </div>
+            <div id="campaign-workflow-status" class="case-switcher-status">Workflow actions initializing...</div>
+            <div class="campaign-overview-grid" id="campaign-overview-grid">Campaign overview loading...</div>
+            <div class="campaign-overview-actions">
+                <a class="sync-btn" href="hub.html">Open Strategic Hub</a>
+                <a class="sync-btn" href="campaign-timeline.html">Open Campaign Timeline</a>
+                <a class="sync-btn" href="campaign-board.html">Open Campaign Board</a>
+                <a class="sync-btn" href="timeline.html">Open Case Timeline</a>
+                <a class="sync-btn" href="board.html">Open Case Board</a>
+                <a class="sync-btn" href="ledger.html">Open Ledger</a>
+            </div>
         </section>
 
         <section class="sync-panel card tools-hidden" id="sync-panel" aria-label="Cloud Sync">
             <h2 class="sync-title">Cloud Sync (Supabase)</h2>
             <p class="sync-desc">
-                Realtime sync for campaign tools (Hub, Board, Roster, Timeline, etc). Character sheets stay local per browser by default.
+                Realtime sync for campaign tools (Hub, Campaign Board, Case Board, Campaign Timeline, Mission Timeline, Roster, etc). Character sheets stay local per browser by default.
             </p>
             <div class="sync-grid">
                 <div class="sync-field">
@@ -185,6 +240,14 @@
                 </div>
             </a>
 
+            <a href="campaign-timeline.html">
+                <div class="card">
+                    <div class="icon">📡</div>
+                    <div class="title">Campaign Timeline</div>
+                    <div class="desc">Meta timeline for campaign-level beats and coordination logs.</div>
+                </div>
+            </a>
+
             <a href="timeline.html">
                 <div class="card">
                     <div class="icon">🕰️</div>
@@ -257,6 +320,14 @@
                 </div>
             </a>
 
+            <a href="campaign-board.html">
+                <div class="card">
+                    <div class="icon">🗺️</div>
+                    <div class="title">Campaign Board</div>
+                    <div class="desc">Meta-board for cross-case threads, scope refs, and campaign arcs.</div>
+                </div>
+            </a>
+
             <a href="board.html">
                 <div class="card">
                     <div class="icon">🕸️</div>
@@ -313,8 +384,8 @@
     <script src="js/data-guilds.js"></script>
     <script src="js/data-npcs.js"></script>
     <script src="js/data-locations.js"></script>
-    <script src="js/store.js?v=20260222a"></script>
-    <script src="js/player-nav.js?v=20260305c"></script>
+    <script src="js/store.js?v=20260305a"></script>
+    <script src="js/player-nav.js?v=20260305e"></script>
     <script src="js/vector-field.js"></script>
     <script src="js/tools.js"></script>
 </body>

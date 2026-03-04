@@ -99,7 +99,19 @@
         nodes: [],
         connections: []
     };
+    const DEFAULT_CAMPAIGN_META_BOARD_STATE = {
+        name: 'CAMPAIGN META BOARD',
+        nodes: [],
+        connections: []
+    };
+    const createDefaultCampaignMetaState = () => ({
+        board: { ...DEFAULT_CAMPAIGN_META_BOARD_STATE },
+        events: []
+    });
     const DEFAULT_CASE_NAME = 'Primary Case';
+    const DEFAULT_CAMPAIGN_SCOPE_NAME = 'Main Campaign';
+    const DEFAULT_CAMPAIGN_SCOPE_ID = 'scope_primary';
+    const CAMPAIGN_SCOPE_STATUSES = new Set(['planned', 'active', 'resolved']);
     const SYNC_SCOPE_GLOBAL = 'state';
     const SYNC_SCOPE_CASES_META = 'cases.meta';
     const SYNC_BACKEND_LEGACY = 'legacy';
@@ -133,6 +145,23 @@
                 }
             ]
         },
+        campaignContext: {
+            activeScopeId: DEFAULT_CAMPAIGN_SCOPE_ID,
+            scopes: [
+                {
+                    id: DEFAULT_CAMPAIGN_SCOPE_ID,
+                    name: DEFAULT_CAMPAIGN_SCOPE_NAME,
+                    description: '',
+                    activeCaseId: 'case_primary',
+                    caseOrder: ['case_primary'],
+                    caseStatus: {
+                        case_primary: 'active'
+                    },
+                    boardRefs: []
+                }
+            ]
+        },
+        campaignMeta: createDefaultCampaignMetaState(),
         hq: createDefaultHQState()
     };
 
@@ -362,6 +391,17 @@
             connections: Array.isArray(source.connections) ? source.connections : []
         };
     };
+    const sanitizeCampaignMeta = (meta) => {
+        const source = meta && typeof meta === 'object' ? meta : {};
+        const defaults = createDefaultCampaignMetaState();
+        return {
+            board: sanitizeBoard({
+                ...defaults.board,
+                ...(source.board && typeof source.board === 'object' ? source.board : {})
+            }),
+            events: sanitizeEventList(source.events)
+        };
+    };
 
     const sanitizeCaseId = (value, fallback = 'case') => {
         const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -377,6 +417,186 @@
     const sanitizeCaseName = (value, fallback = DEFAULT_CASE_NAME) => {
         const text = typeof value === 'string' ? value.trim() : '';
         return text || fallback;
+    };
+    const sanitizeCampaignScopeStatus = (value, fallback = 'planned') => {
+        const token = String(value || '').trim().toLowerCase();
+        if (CAMPAIGN_SCOPE_STATUSES.has(token)) return token;
+        return CAMPAIGN_SCOPE_STATUSES.has(fallback) ? fallback : 'planned';
+    };
+    const sanitizeScopeId = (value, fallback = DEFAULT_CAMPAIGN_SCOPE_ID) => {
+        const raw = sanitizeCaseId(value, fallback);
+        return raw.startsWith('scope_') ? raw : `scope_${raw}`;
+    };
+    const sanitizeScopeRefId = (value, fallback = 'scope-ref') => {
+        const raw = typeof value === 'string' ? value.trim() : '';
+        if (raw) return sanitizeCaseId(raw, fallback || 'scope-ref');
+        const fallbackRaw = typeof fallback === 'string' ? fallback.trim() : '';
+        if (!fallbackRaw) return '';
+        return sanitizeCaseId(fallbackRaw, 'scope-ref');
+    };
+    const sanitizeCaseIdOptional = (value) => {
+        const raw = typeof value === 'string' ? value.trim() : '';
+        if (!raw) return '';
+        return sanitizeCaseId(raw, 'case_primary');
+    };
+    const normalizeCampaignScopeCaseState = (scope, preferredActiveCaseId = '') => {
+        const source = scope && typeof scope === 'object' ? scope : {};
+        const orderRaw = Array.isArray(source.caseOrder) ? source.caseOrder : [];
+        const seen = new Set();
+        const caseOrder = [];
+        orderRaw.forEach((entry) => {
+            const caseId = sanitizeCaseIdOptional(entry);
+            if (!caseId || seen.has(caseId)) return;
+            seen.add(caseId);
+            caseOrder.push(caseId);
+        });
+
+        const statusSource = source.caseStatus && typeof source.caseStatus === 'object'
+            ? source.caseStatus
+            : {};
+        const activeCandidates = [];
+        const caseStatus = Object.create(null);
+        caseOrder.forEach((caseId) => {
+            const token = sanitizeCampaignScopeStatus(statusSource[caseId], 'planned');
+            if (token === 'active') activeCandidates.push(caseId);
+            caseStatus[caseId] = token === 'active' ? 'planned' : token;
+        });
+
+        const preferred = sanitizeCaseIdOptional(preferredActiveCaseId);
+        const explicitActive = sanitizeCaseIdOptional(source.activeCaseId);
+        let activeCaseId = '';
+        if (preferred && caseOrder.includes(preferred)) {
+            activeCaseId = preferred;
+        } else if (explicitActive && caseOrder.includes(explicitActive)) {
+            activeCaseId = explicitActive;
+        } else if (activeCandidates.length) {
+            activeCaseId = activeCandidates[0];
+        } else {
+            activeCaseId = caseOrder[0] || '';
+        }
+
+        if (activeCaseId) caseStatus[activeCaseId] = 'active';
+        return { caseOrder, caseStatus, activeCaseId };
+    };
+    const sanitizeCampaignContext = (context, casesState) => {
+        const source = context && typeof context === 'object' ? context : {};
+        const caseItems = (casesState && Array.isArray(casesState.items)) ? casesState.items : [];
+        const caseIds = caseItems
+            .map((entry) => sanitizeCaseIdOptional(entry && entry.id))
+            .filter(Boolean);
+        const caseNameById = new Map();
+        caseItems.forEach((entry) => {
+            const id = sanitizeCaseIdOptional(entry && entry.id);
+            if (!id) return;
+            caseNameById.set(id, sanitizeCaseName(entry && entry.name, DEFAULT_CASE_NAME));
+        });
+
+        const fallbackCaseId = sanitizeCaseIdOptional(casesState && casesState.activeCaseId)
+            || caseIds[0]
+            || 'case_primary';
+        const listRaw = Array.isArray(source.scopes) ? source.scopes : [];
+        const scopes = [];
+        const seenScopeIds = new Set();
+
+        listRaw.forEach((entry, idx) => {
+            const row = entry && typeof entry === 'object' ? entry : {};
+            let id = sanitizeScopeId(row.id, idx === 0 ? DEFAULT_CAMPAIGN_SCOPE_ID : `scope_${idx + 1}`);
+            if (seenScopeIds.has(id)) {
+                let suffix = 2;
+                while (seenScopeIds.has(`${id}_${suffix}`)) suffix += 1;
+                id = `${id}_${suffix}`;
+            }
+            seenScopeIds.add(id);
+
+            const caseOrderRaw = Array.isArray(row.caseOrder)
+                ? row.caseOrder
+                : (Array.isArray(row.cases) ? row.cases : []);
+            const seenCaseIds = new Set();
+            const caseOrder = [];
+            caseOrderRaw.forEach((caseIdEntry) => {
+                const caseId = sanitizeCaseIdOptional(caseIdEntry);
+                if (!caseId || seenCaseIds.has(caseId)) return;
+                if (!caseNameById.has(caseId)) return;
+                seenCaseIds.add(caseId);
+                caseOrder.push(caseId);
+            });
+            if (!caseOrder.length && fallbackCaseId) caseOrder.push(fallbackCaseId);
+            if (!caseOrder.length && caseIds.length) caseOrder.push(caseIds[0]);
+
+            const caseStatusSource = row.caseStatus && typeof row.caseStatus === 'object' ? row.caseStatus : {};
+            const requestedActiveCaseId = sanitizeCaseIdOptional(row.activeCaseId)
+                || caseOrder[0]
+                || fallbackCaseId;
+            const normalizedScopeCases = normalizeCampaignScopeCaseState({
+                caseOrder,
+                caseStatus: caseStatusSource,
+                activeCaseId: requestedActiveCaseId
+            }, requestedActiveCaseId);
+            const activeCaseId = normalizedScopeCases.activeCaseId || (caseOrder[0] || fallbackCaseId);
+
+            const boardRefsRaw = Array.isArray(row.boardRefs) ? row.boardRefs : [];
+            const boardRefs = [];
+            const seenRefIds = new Set();
+            boardRefsRaw.forEach((refEntry, refIdx) => {
+                const ref = refEntry && typeof refEntry === 'object' ? refEntry : {};
+                const caseId = sanitizeCaseIdOptional(ref.caseId);
+                if (!caseId || !caseNameById.has(caseId)) return;
+                let refId = sanitizeScopeRefId(ref.id, `scope_ref_${refIdx + 1}`);
+                if (seenRefIds.has(refId)) {
+                    let bump = 2;
+                    while (seenRefIds.has(`${refId}_${bump}`)) bump += 1;
+                    refId = `${refId}_${bump}`;
+                }
+                seenRefIds.add(refId);
+                boardRefs.push({
+                    id: refId,
+                    caseId,
+                    label: toTrimmedString(ref.label, caseNameById.get(caseId) || caseId, 120).trim()
+                        || caseNameById.get(caseId)
+                        || caseId,
+                    note: toTrimmedString(ref.note, '', 400).trim()
+                });
+            });
+
+            scopes.push({
+                id,
+                name: sanitizeCaseName(row.name, idx === 0 ? DEFAULT_CAMPAIGN_SCOPE_NAME : `Scope ${idx + 1}`),
+                description: toTrimmedString(row.description, '', 500).trim(),
+                activeCaseId,
+                caseOrder: normalizedScopeCases.caseOrder,
+                caseStatus: normalizedScopeCases.caseStatus,
+                boardRefs
+            });
+        });
+
+        if (!scopes.length) {
+            const caseOrder = caseIds.length ? caseIds.slice() : [fallbackCaseId];
+            const requestedActiveCaseId = caseOrder.includes(fallbackCaseId) ? fallbackCaseId : caseOrder[0];
+            const normalizedScopeCases = normalizeCampaignScopeCaseState({
+                caseOrder,
+                caseStatus: {},
+                activeCaseId: requestedActiveCaseId
+            }, requestedActiveCaseId);
+            scopes.push({
+                id: DEFAULT_CAMPAIGN_SCOPE_ID,
+                name: DEFAULT_CAMPAIGN_SCOPE_NAME,
+                description: '',
+                activeCaseId: normalizedScopeCases.activeCaseId,
+                caseOrder: normalizedScopeCases.caseOrder,
+                caseStatus: normalizedScopeCases.caseStatus,
+                boardRefs: []
+            });
+        }
+
+        const requestedActiveScopeId = sanitizeScopeId(source.activeScopeId, scopes[0].id);
+        const activeScopeId = scopes.some((entry) => entry.id === requestedActiveScopeId)
+            ? requestedActiveScopeId
+            : scopes[0].id;
+
+        return {
+            activeScopeId,
+            scopes
+        };
     };
 
     const sanitizeImpactEntityType = (value, fallback = 'other') => {
@@ -596,11 +816,14 @@
         const syncRevision = toNonNegativeInt(sourceMeta.syncRevision, 0);
         const scopeUpdated = sanitizeScopeUpdatedMap(sourceMeta.scopeUpdated);
 
+        const cleanCases = sanitizeCases(source.cases, source.campaign, source.board);
         return {
             meta: { ...defaultMeta, ...sourceMeta, version, created, updated, syncRevision, scopeUpdated },
             campaign: sanitizeCampaign(source.campaign),
             board: sanitizeBoard(source.board),
-            cases: sanitizeCases(source.cases, source.campaign, source.board),
+            cases: cleanCases,
+            campaignContext: sanitizeCampaignContext(source.campaignContext, cleanCases),
+            campaignMeta: sanitizeCampaignMeta(source.campaignMeta),
             hq: sanitizeHQ(source.hq)
         };
     };
@@ -656,9 +879,12 @@
     const buildLocationEntityScope = (locationId) => buildCampaignEntityScope('locations', locationId);
     const buildRequisitionEntityScope = (requisitionId) => buildCampaignEntityScope('requisitions', requisitionId);
     const buildEncounterEntityScope = (encounterId) => buildCampaignEntityScope('encounters', encounterId);
+    const CAMPAIGN_META_EVENTS_SCOPE_PREFIX = 'campaign.meta.events';
     const buildCaseEventsScopePrefix = (caseId) => `cases.${sanitizeCaseId(caseId, 'case_primary')}.events`;
     const buildCaseEventEntityScope = (caseId, eventId) => buildEntityScope(buildCaseEventsScopePrefix(caseId), eventId);
     const buildCaseEventOrderScope = (caseId) => buildEntityOrderScope(buildCaseEventsScopePrefix(caseId));
+    const buildCampaignMetaEventEntityScope = (eventId) => buildEntityScope(CAMPAIGN_META_EVENTS_SCOPE_PREFIX, eventId);
+    const buildCampaignMetaEventOrderScope = () => buildEntityOrderScope(CAMPAIGN_META_EVENTS_SCOPE_PREFIX);
     const findEntityIndexByScopeId = (list, scopeId) => {
         if (!Array.isArray(list) || !scopeId) return -1;
         return list.findIndex((entry) => normalizeEntityScopeId(entry && entry.id) === scopeId);
@@ -777,6 +1003,24 @@
         const sourceEvents = Array.isArray(sourceCase && sourceCase.events) ? sourceCase.events : [];
         applyEntityOrderScopeFromSourceList(targetCase.events, sourceEvents);
     };
+    const getCampaignMetaEventsList = (state) => {
+        if (!state.campaignMeta || typeof state.campaignMeta !== 'object') {
+            state.campaignMeta = sanitizeCampaignMeta(null);
+        }
+        if (!Array.isArray(state.campaignMeta.events)) state.campaignMeta.events = [];
+        return state.campaignMeta.events;
+    };
+    const applyCampaignMetaEventEntityScopeFromSource = (targetState, sourceState, scopeId) => {
+        if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) return;
+        const targetEvents = getCampaignMetaEventsList(targetState);
+        const sourceEvents = getCampaignMetaEventsList(sourceState);
+        applyEntityScopeFromSourceList(targetEvents, sourceEvents, scopeId);
+    };
+    const applyCampaignMetaEventOrderScopeFromSource = (targetState, sourceState) => {
+        const targetEvents = getCampaignMetaEventsList(targetState);
+        const sourceEvents = getCampaignMetaEventsList(sourceState);
+        applyEntityOrderScopeFromSourceList(targetEvents, sourceEvents);
+    };
 
     const parseStoredDirtyScopes = () => {
         try {
@@ -840,6 +1084,9 @@
         addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.encounters, clean.campaign.encounters);
         map.set('campaign.ledger', sanitizeLedgerState(clean.campaign.ledger));
         map.set('campaign.case', clean.campaign.case);
+        map.set('campaign.context', clean.campaignContext);
+        map.set('campaign.meta.board', stripBoardNodeLocalFields(clean.campaignMeta && clean.campaignMeta.board));
+        addEntityScopesToSnapshot(map, CAMPAIGN_META_EVENTS_SCOPE_PREFIX, sanitizeEventList(clean.campaignMeta && clean.campaignMeta.events));
         map.set(SYNC_SCOPE_CASES_META, buildCasesMetaSnapshot(clean));
         map.set('hq', clean.hq);
         (clean.cases.items || []).forEach((entry) => {
@@ -949,12 +1196,51 @@
             targetState.campaign = clean.campaign;
             targetState.cases = clean.cases;
             targetState.board = clean.board;
+            targetState.campaignContext = clean.campaignContext;
+            targetState.campaignMeta = clean.campaignMeta;
             targetState.hq = clean.hq;
             return;
         }
 
         if (scope === 'campaign') {
             targetState.campaign = deepClone(sourceState.campaign);
+            targetState.campaignContext = deepClone(sourceState.campaignContext);
+            targetState.campaignMeta = deepClone(sourceState.campaignMeta);
+            return;
+        }
+
+        if (scope === 'campaign.context') {
+            targetState.campaignContext = deepClone(sourceState.campaignContext);
+            return;
+        }
+
+        if (scope === 'campaign.meta') {
+            targetState.campaignMeta = sanitizeCampaignMeta(sourceState.campaignMeta);
+            return;
+        }
+
+        const campaignMetaEventOrderScopeMatch = scope.match(/^campaign\.meta\.events\.__order$/);
+        if (campaignMetaEventOrderScopeMatch) {
+            applyCampaignMetaEventOrderScopeFromSource(targetState, sourceState);
+            return;
+        }
+
+        const campaignMetaEventEntityScopeMatch = scope.match(/^campaign\.meta\.events\.([a-z0-9_-]+)$/);
+        if (campaignMetaEventEntityScopeMatch) {
+            const scopeId = campaignMetaEventEntityScopeMatch[1];
+            if (scopeId !== ENTITY_SCOPE_ORDER_TOKEN) applyCampaignMetaEventEntityScopeFromSource(targetState, sourceState, scopeId);
+            return;
+        }
+
+        if (scope === 'campaign.meta.board') {
+            if (!targetState.campaignMeta || typeof targetState.campaignMeta !== 'object') targetState.campaignMeta = sanitizeCampaignMeta(null);
+            targetState.campaignMeta.board = sanitizeCampaignMeta(sourceState.campaignMeta).board;
+            return;
+        }
+
+        if (scope === 'campaign.meta.events') {
+            if (!targetState.campaignMeta || typeof targetState.campaignMeta !== 'object') targetState.campaignMeta = sanitizeCampaignMeta(null);
+            targetState.campaignMeta.events = sanitizeCampaignMeta(sourceState.campaignMeta).events;
             return;
         }
 
@@ -1369,6 +1655,11 @@
             if (!this.state.campaign || typeof this.state.campaign !== 'object') {
                 this.state.campaign = sanitizeCampaign(null);
             }
+            if (!this.state.campaignMeta || typeof this.state.campaignMeta !== 'object') {
+                this.state.campaignMeta = sanitizeCampaignMeta(this.state.campaignMeta);
+            } else {
+                this.state.campaignMeta = sanitizeCampaignMeta(this.state.campaignMeta);
+            }
 
             const cases = this.state.cases;
             if (!cases || !Array.isArray(cases.items) || !cases.items.length) {
@@ -1378,8 +1669,34 @@
             if (!this.state.cases.items.some((entry) => entry && entry.id === this.state.cases.activeCaseId)) {
                 this.state.cases.activeCaseId = this.state.cases.items[0].id;
             }
+            if (!this.state.campaignContext || typeof this.state.campaignContext !== 'object') {
+                this.state.campaignContext = sanitizeCampaignContext(this.state.campaignContext, this.state.cases);
+            }
 
             return this.state.cases;
+        }
+
+        ensureCampaignMetaIntegrity() {
+            this.ensureCaseStateIntegrity();
+            this.state.campaignMeta = sanitizeCampaignMeta(this.state.campaignMeta);
+            return this.state.campaignMeta;
+        }
+
+        ensureCampaignContextIntegrity() {
+            const cases = this.ensureCaseStateIntegrity();
+            this.state.campaignContext = sanitizeCampaignContext(this.state.campaignContext, cases);
+            return this.state.campaignContext;
+        }
+
+        normalizeCampaignScopeCaseState(scope, preferredActiveCaseId = '') {
+            if (!scope || typeof scope !== 'object') {
+                return { caseOrder: [], caseStatus: {}, activeCaseId: '' };
+            }
+            const normalized = normalizeCampaignScopeCaseState(scope, preferredActiveCaseId);
+            scope.caseOrder = normalized.caseOrder;
+            scope.caseStatus = normalized.caseStatus;
+            scope.activeCaseId = normalized.activeCaseId;
+            return normalized;
         }
 
         getCaseEntry(caseId = null, options = {}) {
@@ -1434,6 +1751,405 @@
             return active ? deepClone({ id: active.id, name: active.name }) : null;
         }
 
+        getCampaignScopeEntry(scopeId = null, options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const strict = !!opts.strict;
+            const createIfMissing = !!opts.createIfMissing;
+            const context = this.ensureCampaignContextIntegrity();
+            const desiredId = sanitizeScopeId(scopeId || context.activeScopeId, context.activeScopeId);
+            let entry = context.scopes.find((item) => item && item.id === desiredId);
+
+            if (!entry && createIfMissing) {
+                const cases = this.ensureCaseStateIntegrity();
+                const caseOrder = cases.items.map((item) => item && item.id).filter(Boolean);
+                const activeCaseId = caseOrder.includes(cases.activeCaseId) ? cases.activeCaseId : (caseOrder[0] || 'case_primary');
+                entry = {
+                    id: desiredId,
+                    name: sanitizeCaseName(String(desiredId || '').replace(/[-_]+/g, ' '), DEFAULT_CAMPAIGN_SCOPE_NAME),
+                    description: '',
+                    activeCaseId,
+                    caseOrder,
+                    caseStatus: {},
+                    boardRefs: []
+                };
+                this.normalizeCampaignScopeCaseState(entry, activeCaseId);
+                context.scopes.push(entry);
+            }
+
+            if (!entry && strict) return null;
+            if (!entry) entry = context.scopes.find((item) => item && item.id === context.activeScopeId) || context.scopes[0];
+            return entry || null;
+        }
+
+        getCampaignScopes() {
+            const context = this.ensureCampaignContextIntegrity();
+            return context.scopes.map((entry) => ({
+                id: entry.id,
+                name: entry.name,
+                description: entry.description,
+                activeCaseId: entry.activeCaseId,
+                caseOrder: Array.isArray(entry.caseOrder) ? entry.caseOrder.slice() : [],
+                caseStatus: deepClone(entry.caseStatus && typeof entry.caseStatus === 'object' ? entry.caseStatus : {}),
+                boardRefs: Array.isArray(entry.boardRefs) ? deepClone(entry.boardRefs) : []
+            }));
+        }
+
+        getActiveCampaignScopeId() {
+            const context = this.ensureCampaignContextIntegrity();
+            return context.activeScopeId;
+        }
+
+        getActiveCampaignScope() {
+            const scope = this.getCampaignScopeEntry();
+            return scope ? deepClone(scope) : null;
+        }
+
+        setActiveCampaignScope(scopeId, options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const syncCase = opts.syncCase !== false;
+            const context = this.ensureCampaignContextIntegrity();
+            const targetId = sanitizeScopeId(scopeId, context.activeScopeId);
+            const target = context.scopes.find((entry) => entry && entry.id === targetId);
+            if (!target) return false;
+            this.normalizeCampaignScopeCaseState(target, target.activeCaseId);
+            const changed = context.activeScopeId !== targetId;
+            if (changed) context.activeScopeId = targetId;
+
+            let caseChanged = false;
+            if (syncCase) {
+                const cases = this.ensureCaseStateIntegrity();
+                const nextCaseId = sanitizeCaseIdOptional(target.activeCaseId) || sanitizeCaseIdOptional(target.caseOrder && target.caseOrder[0]);
+                if (nextCaseId && cases.items.some((entry) => entry && entry.id === nextCaseId) && cases.activeCaseId !== nextCaseId) {
+                    cases.activeCaseId = nextCaseId;
+                    caseChanged = true;
+                }
+            }
+
+            if (!changed && !caseChanged) return true;
+            this.syncActiveCaseLegacyState();
+            const scopes = ['campaign.context'];
+            if (caseChanged) scopes.push(SYNC_SCOPE_CASES_META);
+            this.save({ scope: scopes });
+            return true;
+        }
+
+        createCampaignScope(name = '', options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const syncCase = opts.syncCase !== false;
+            const context = this.ensureCampaignContextIntegrity();
+            const cases = this.ensureCaseStateIntegrity();
+            const cleanName = sanitizeCaseName(name, 'New Scope');
+            const baseId = sanitizeScopeId(cleanName, 'scope');
+            let id = baseId;
+            let suffix = 2;
+            while (context.scopes.some((entry) => entry && entry.id === id)) {
+                id = `${baseId}_${suffix}`;
+                suffix += 1;
+            }
+
+            const seen = new Set();
+            const orderSeed = Array.isArray(opts.caseOrder) ? opts.caseOrder : cases.items.map((entry) => entry && entry.id);
+            const caseOrder = [];
+            orderSeed.forEach((entry) => {
+                const caseId = sanitizeCaseIdOptional(entry);
+                if (!caseId || seen.has(caseId)) return;
+                if (!cases.items.some((item) => item && item.id === caseId)) return;
+                seen.add(caseId);
+                caseOrder.push(caseId);
+            });
+            if (!caseOrder.length) caseOrder.push(cases.activeCaseId);
+            const activeCaseId = sanitizeCaseIdOptional(opts.activeCaseId)
+                || (caseOrder.includes(cases.activeCaseId) ? cases.activeCaseId : caseOrder[0]);
+            const scopeEntry = {
+                id,
+                name: cleanName,
+                description: toTrimmedString(opts.description, '', 500).trim(),
+                activeCaseId,
+                caseOrder,
+                caseStatus: {},
+                boardRefs: []
+            };
+            this.normalizeCampaignScopeCaseState(scopeEntry, activeCaseId);
+            context.scopes.push(scopeEntry);
+            context.activeScopeId = id;
+
+            let caseChanged = false;
+            if (syncCase && activeCaseId && cases.activeCaseId !== activeCaseId) {
+                cases.activeCaseId = activeCaseId;
+                caseChanged = true;
+            }
+
+            this.syncActiveCaseLegacyState();
+            const scopes = ['campaign.context'];
+            if (caseChanged) scopes.push(SYNC_SCOPE_CASES_META);
+            this.save({ scope: scopes });
+            return id;
+        }
+
+        renameCampaignScope(scopeId, nextName) {
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return false;
+            const prevName = target.name;
+            const cleanName = sanitizeCaseName(nextName, prevName);
+            if (cleanName === prevName) return true;
+            target.name = cleanName;
+            this.save({ scope: 'campaign.context' });
+            return true;
+        }
+
+        deleteCampaignScope(scopeId, options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const syncCase = opts.syncCase !== false;
+            const context = this.ensureCampaignContextIntegrity();
+            if (context.scopes.length <= 1) return false;
+            const targetId = sanitizeScopeId(scopeId, context.activeScopeId);
+            const idx = context.scopes.findIndex((entry) => entry && entry.id === targetId);
+            if (idx < 0) return false;
+            const wasActive = context.activeScopeId === targetId;
+            context.scopes.splice(idx, 1);
+            if (!context.scopes.some((entry) => entry && entry.id === context.activeScopeId)) {
+                const fallback = context.scopes[Math.max(0, idx - 1)] || context.scopes[0];
+                context.activeScopeId = fallback ? fallback.id : DEFAULT_CAMPAIGN_SCOPE_ID;
+            }
+
+            let caseChanged = false;
+            if (wasActive && syncCase) {
+                const cases = this.ensureCaseStateIntegrity();
+                const nextScope = this.getCampaignScopeEntry(context.activeScopeId, { strict: true }) || context.scopes[0];
+                const nextCaseId = sanitizeCaseIdOptional(nextScope && nextScope.activeCaseId)
+                    || sanitizeCaseIdOptional(nextScope && Array.isArray(nextScope.caseOrder) ? nextScope.caseOrder[0] : '');
+                if (nextCaseId && cases.items.some((entry) => entry && entry.id === nextCaseId) && cases.activeCaseId !== nextCaseId) {
+                    cases.activeCaseId = nextCaseId;
+                    caseChanged = true;
+                }
+            }
+
+            this.syncActiveCaseLegacyState();
+            const scopes = ['campaign.context'];
+            if (caseChanged) scopes.push(SYNC_SCOPE_CASES_META);
+            this.save({ scope: scopes });
+            return true;
+        }
+
+        setCampaignScopeCaseOrder(scopeId, caseOrder = [], options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const syncCase = opts.syncCase !== false;
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return false;
+            const cases = this.ensureCaseStateIntegrity();
+            const seen = new Set();
+            const nextOrder = [];
+            (Array.isArray(caseOrder) ? caseOrder : []).forEach((entry) => {
+                const caseId = sanitizeCaseIdOptional(entry);
+                if (!caseId || seen.has(caseId)) return;
+                if (!cases.items.some((item) => item && item.id === caseId)) return;
+                seen.add(caseId);
+                nextOrder.push(caseId);
+            });
+            if (!nextOrder.length) return false;
+
+            target.caseOrder = nextOrder;
+            const prevStatus = target.caseStatus && typeof target.caseStatus === 'object' ? target.caseStatus : {};
+            const nextStatus = Object.create(null);
+            nextOrder.forEach((caseId) => {
+                nextStatus[caseId] = sanitizeCampaignScopeStatus(prevStatus[caseId], 'planned');
+            });
+            target.caseStatus = nextStatus;
+            this.normalizeCampaignScopeCaseState(target, target.activeCaseId);
+            if (Array.isArray(target.boardRefs)) {
+                target.boardRefs = target.boardRefs.filter((ref) => ref && nextOrder.includes(String(ref.caseId || '')));
+            }
+
+            let caseChanged = false;
+            const context = this.ensureCampaignContextIntegrity();
+            const liveScope = context.scopes.find((entry) => entry && entry.id === target.id) || target;
+            const liveActiveCaseId = sanitizeCaseIdOptional(liveScope && liveScope.activeCaseId);
+            if (syncCase && context.activeScopeId === target.id && liveActiveCaseId && cases.activeCaseId !== liveActiveCaseId) {
+                cases.activeCaseId = liveActiveCaseId;
+                caseChanged = true;
+            }
+
+            this.syncActiveCaseLegacyState();
+            const scopes = ['campaign.context'];
+            if (caseChanged) scopes.push(SYNC_SCOPE_CASES_META);
+            this.save({ scope: scopes });
+            return true;
+        }
+
+        moveCampaignScopeCase(scopeId, caseId, delta = 0, options = {}) {
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return false;
+            const order = Array.isArray(target.caseOrder) ? target.caseOrder.slice() : [];
+            const cleanCaseId = sanitizeCaseIdOptional(caseId);
+            const idx = order.findIndex((entry) => entry === cleanCaseId);
+            if (idx < 0) return false;
+            const nextIdx = Math.max(0, Math.min(order.length - 1, idx + Number(delta || 0)));
+            if (nextIdx === idx) return true;
+            const [moved] = order.splice(idx, 1);
+            order.splice(nextIdx, 0, moved);
+            return this.setCampaignScopeCaseOrder(target.id, order, options);
+        }
+
+        addCaseToCampaignScope(scopeId, caseId, options = {}) {
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return false;
+            const cleanCaseId = sanitizeCaseIdOptional(caseId);
+            if (!cleanCaseId) return false;
+            const cases = this.ensureCaseStateIntegrity();
+            if (!cases.items.some((entry) => entry && entry.id === cleanCaseId)) return false;
+            if (Array.isArray(target.caseOrder) && target.caseOrder.includes(cleanCaseId)) return true;
+            const nextOrder = Array.isArray(target.caseOrder) ? target.caseOrder.slice() : [];
+            nextOrder.push(cleanCaseId);
+            return this.setCampaignScopeCaseOrder(target.id, nextOrder, options);
+        }
+
+        removeCaseFromCampaignScope(scopeId, caseId, options = {}) {
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return false;
+            const cleanCaseId = sanitizeCaseIdOptional(caseId);
+            if (!cleanCaseId) return false;
+            const nextOrder = (Array.isArray(target.caseOrder) ? target.caseOrder : []).filter((entry) => entry !== cleanCaseId);
+            if (!nextOrder.length) return false;
+            return this.setCampaignScopeCaseOrder(target.id, nextOrder, options);
+        }
+
+        setCampaignScopeCaseStatus(scopeId, caseId, status) {
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return false;
+            const cleanCaseId = sanitizeCaseIdOptional(caseId);
+            if (!cleanCaseId) return false;
+            const cases = this.ensureCaseStateIntegrity();
+            if (!cases.items.some((entry) => entry && entry.id === cleanCaseId)) return false;
+            if (!Array.isArray(target.caseOrder)) target.caseOrder = [];
+            if (!target.caseOrder.includes(cleanCaseId)) {
+                target.caseOrder.push(cleanCaseId);
+            }
+            const prev = target.caseStatus && typeof target.caseStatus === 'object' ? target.caseStatus : {};
+            target.caseStatus = { ...prev };
+            target.caseStatus[cleanCaseId] = sanitizeCampaignScopeStatus(status, target.caseStatus[cleanCaseId] || 'planned');
+            let preferredActiveCaseId = target.activeCaseId;
+            if (target.caseStatus[cleanCaseId] === 'active') {
+                preferredActiveCaseId = cleanCaseId;
+            } else if (target.activeCaseId === cleanCaseId) {
+                const order = Array.isArray(target.caseOrder) ? target.caseOrder : [];
+                const firstPlanned = order.find((id) => {
+                    if (id === cleanCaseId) return false;
+                    return sanitizeCampaignScopeStatus(target.caseStatus[id], 'planned') !== 'resolved';
+                });
+                const firstOther = order.find((id) => id !== cleanCaseId);
+                preferredActiveCaseId = firstPlanned || firstOther || cleanCaseId;
+            }
+
+            this.normalizeCampaignScopeCaseState(target, preferredActiveCaseId);
+
+            let caseChanged = false;
+            const context = this.ensureCampaignContextIntegrity();
+            const liveScope = context.scopes.find((entry) => entry && entry.id === target.id) || target;
+            const liveActiveCaseId = sanitizeCaseIdOptional(liveScope && liveScope.activeCaseId);
+            if (context.activeScopeId === target.id && liveActiveCaseId && cases.activeCaseId !== liveActiveCaseId) {
+                cases.activeCaseId = liveActiveCaseId;
+                caseChanged = true;
+            }
+
+            this.syncActiveCaseLegacyState();
+            const scopes = ['campaign.context'];
+            if (caseChanged) scopes.push(SYNC_SCOPE_CASES_META);
+            this.save({ scope: scopes });
+            return true;
+        }
+
+        setCampaignScopeActiveCase(scopeId, caseId, options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const syncCase = opts.syncCase !== false;
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return false;
+            const cleanCaseId = sanitizeCaseIdOptional(caseId);
+            if (!cleanCaseId) return false;
+            const cases = this.ensureCaseStateIntegrity();
+            if (!cases.items.some((entry) => entry && entry.id === cleanCaseId)) return false;
+            if (!Array.isArray(target.caseOrder)) target.caseOrder = [];
+            if (!target.caseOrder.includes(cleanCaseId)) {
+                target.caseOrder.push(cleanCaseId);
+            }
+            const nextStatus = target.caseStatus && typeof target.caseStatus === 'object' ? target.caseStatus : {};
+            target.caseStatus = { ...nextStatus, [cleanCaseId]: 'active' };
+            this.normalizeCampaignScopeCaseState(target, cleanCaseId);
+
+            let caseChanged = false;
+            const context = this.ensureCampaignContextIntegrity();
+            const liveScope = context.scopes.find((entry) => entry && entry.id === target.id) || target;
+            const liveActiveCaseId = sanitizeCaseIdOptional(liveScope && liveScope.activeCaseId);
+            if (syncCase && context.activeScopeId === target.id) {
+                if (liveActiveCaseId && cases.items.some((entry) => entry && entry.id === liveActiveCaseId) && cases.activeCaseId !== liveActiveCaseId) {
+                    cases.activeCaseId = liveActiveCaseId;
+                    caseChanged = true;
+                }
+            }
+
+            this.syncActiveCaseLegacyState();
+            const scopes = ['campaign.context'];
+            if (caseChanged) scopes.push(SYNC_SCOPE_CASES_META);
+            this.save({ scope: scopes });
+            return true;
+        }
+
+        addCampaignScopeBoardRef(scopeId, caseId, details = {}) {
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target) return null;
+            const cleanCaseId = sanitizeCaseIdOptional(caseId);
+            if (!cleanCaseId) return null;
+            const cases = this.ensureCaseStateIntegrity();
+            const caseEntry = cases.items.find((entry) => entry && entry.id === cleanCaseId);
+            if (!caseEntry) return null;
+            if (!Array.isArray(target.boardRefs)) target.boardRefs = [];
+            const existing = target.boardRefs.find((entry) => entry && String(entry.caseId || '') === cleanCaseId);
+            if (existing) {
+                if (details && typeof details === 'object') {
+                    if (Object.prototype.hasOwnProperty.call(details, 'label')) {
+                        existing.label = toTrimmedString(details.label, existing.label || caseEntry.name || cleanCaseId, 120).trim()
+                            || existing.label
+                            || caseEntry.name
+                            || cleanCaseId;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(details, 'note')) {
+                        existing.note = toTrimmedString(details.note, existing.note || '', 400).trim();
+                    }
+                }
+                this.save({ scope: 'campaign.context' });
+                return deepClone(existing);
+            }
+
+            const idBase = sanitizeScopeRefId(details && details.id, `scope_ref_${target.boardRefs.length + 1}`);
+            let refId = idBase;
+            let bump = 2;
+            while (target.boardRefs.some((entry) => entry && entry.id === refId)) {
+                refId = `${idBase}_${bump}`;
+                bump += 1;
+            }
+
+            const record = {
+                id: refId,
+                caseId: cleanCaseId,
+                label: toTrimmedString(details && details.label, caseEntry.name || cleanCaseId, 120).trim() || caseEntry.name || cleanCaseId,
+                note: toTrimmedString(details && details.note, '', 400).trim()
+            };
+            target.boardRefs.push(record);
+            this.save({ scope: 'campaign.context' });
+            return deepClone(record);
+        }
+
+        removeCampaignScopeBoardRef(scopeId, refId) {
+            const target = this.getCampaignScopeEntry(scopeId, { strict: true });
+            if (!target || !Array.isArray(target.boardRefs)) return false;
+            const cleanRefId = sanitizeScopeRefId(refId, '');
+            if (!cleanRefId) return false;
+            const idx = target.boardRefs.findIndex((entry) => entry && String(entry.id || '') === cleanRefId);
+            if (idx < 0) return false;
+            target.boardRefs.splice(idx, 1);
+            this.save({ scope: 'campaign.context' });
+            return true;
+        }
+
         createCase(name = '') {
             const cases = this.ensureCaseStateIntegrity();
             const cleanName = sanitizeCaseName(name, 'New Case');
@@ -1453,8 +2169,17 @@
             };
             cases.items.push(entry);
             cases.activeCaseId = id;
+            const activeScope = this.getCampaignScopeEntry(null, { strict: true });
+            if (activeScope) {
+                if (!Array.isArray(activeScope.caseOrder)) activeScope.caseOrder = [];
+                if (!activeScope.caseOrder.includes(id)) activeScope.caseOrder.push(id);
+                activeScope.activeCaseId = id;
+                if (!activeScope.caseStatus || typeof activeScope.caseStatus !== 'object') activeScope.caseStatus = {};
+                activeScope.caseStatus[id] = 'planned';
+                this.normalizeCampaignScopeCaseState(activeScope, id);
+            }
             this.syncActiveCaseLegacyState();
-            this.save({ scope: [SYNC_SCOPE_CASES_META, `cases.${id}.board`, buildCaseEventOrderScope(id)] });
+            this.save({ scope: [SYNC_SCOPE_CASES_META, 'campaign.context', `cases.${id}.board`, buildCaseEventOrderScope(id)] });
             return id;
         }
 
@@ -1472,8 +2197,21 @@
                     target.board.name = cleanName;
                 }
             }
+            const context = this.ensureCampaignContextIntegrity();
+            context.scopes.forEach((scope) => {
+                if (!scope || typeof scope !== 'object') return;
+                if (Array.isArray(scope.boardRefs)) {
+                    scope.boardRefs.forEach((ref) => {
+                        if (!ref || String(ref.caseId || '') !== target.id) return;
+                        const currentLabel = String(ref.label || '').trim();
+                        if (!currentLabel || currentLabel === prevName) {
+                            ref.label = cleanName;
+                        }
+                    });
+                }
+            });
             this.syncActiveCaseLegacyState();
-            this.save({ scope: SYNC_SCOPE_CASES_META });
+            this.save({ scope: [SYNC_SCOPE_CASES_META, 'campaign.context'] });
             return true;
         }
 
@@ -1487,8 +2225,9 @@
             if (!cases.items.some((entry) => entry.id === cases.activeCaseId)) {
                 cases.activeCaseId = cases.items[Math.max(0, idx - 1)].id;
             }
+            this.ensureCampaignContextIntegrity();
             this.syncActiveCaseLegacyState();
-            this.save({ scope: SYNC_SCOPE_CASES_META });
+            this.save({ scope: [SYNC_SCOPE_CASES_META, 'campaign.context'] });
             return true;
         }
 
@@ -1499,8 +2238,17 @@
             if (!exists) return false;
             if (cases.activeCaseId === targetId) return true;
             cases.activeCaseId = targetId;
+            const activeScope = this.getCampaignScopeEntry(null, { strict: true });
+            if (activeScope) {
+                if (!Array.isArray(activeScope.caseOrder)) activeScope.caseOrder = [];
+                if (!activeScope.caseOrder.includes(targetId)) activeScope.caseOrder.push(targetId);
+                activeScope.activeCaseId = targetId;
+                if (!activeScope.caseStatus || typeof activeScope.caseStatus !== 'object') activeScope.caseStatus = {};
+                activeScope.caseStatus[targetId] = 'planned';
+                this.normalizeCampaignScopeCaseState(activeScope, targetId);
+            }
             this.syncActiveCaseLegacyState();
-            this.save({ scope: SYNC_SCOPE_CASES_META });
+            this.save({ scope: [SYNC_SCOPE_CASES_META, 'campaign.context'] });
             return true;
         }
 
@@ -1650,6 +2398,17 @@
             if (idx >= 0) this.stampRecordAttribution(entry.events[idx], stamp);
         }
 
+        stampCampaignMetaEventsByScope(scopeId, stamp) {
+            const meta = this.ensureCampaignMetaIntegrity();
+            const list = Array.isArray(meta && meta.events) ? meta.events : [];
+            if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) {
+                list.forEach((eventEntry) => this.stampRecordAttribution(eventEntry, stamp));
+                return;
+            }
+            const idx = findEntityIndexByScopeId(list, scopeId);
+            if (idx >= 0) this.stampRecordAttribution(list[idx], stamp);
+        }
+
         applyScopeAttribution(scopes) {
             const stamp = this.getMutationStamp();
             normalizeScopeList(scopes).forEach((scope) => {
@@ -1666,6 +2425,13 @@
                     const caseId = sanitizeCaseId(caseEventMatch[1], 'case_primary');
                     const scopeId = caseEventMatch[2] || '';
                     this.stampCaseEventsByScope(caseId, scopeId, stamp);
+                    return;
+                }
+
+                const campaignMetaEventMatch = scope.match(/^campaign\.meta\.events(?:\.([a-z0-9_-]+))?$/);
+                if (campaignMetaEventMatch) {
+                    const scopeId = campaignMetaEventMatch[1] || '';
+                    this.stampCampaignMetaEventsByScope(scopeId, stamp);
                 }
             });
         }
@@ -2276,6 +3042,8 @@
                 if (Object.prototype.hasOwnProperty.call(payload, 'cognitiveRisk')) base.campaign.cognitiveRisk = toNumber(payload.cognitiveRisk, 0);
                 if (Object.prototype.hasOwnProperty.call(payload, 'ledger')) base.campaign.ledger = sanitizeLedgerState(payload.ledger);
                 if (Object.prototype.hasOwnProperty.call(payload, 'case')) base.campaign.case = sanitizeCase(payload.case);
+                if (Object.prototype.hasOwnProperty.call(payload, 'context')) base.campaignContext = sanitizeCampaignContext(payload.context, base.cases);
+                if (Object.prototype.hasOwnProperty.call(payload, 'meta')) base.campaignMeta = sanitizeCampaignMeta(payload.meta);
             }
 
             if (hq && hq.payload && typeof hq.payload === 'object') {
@@ -3194,7 +3962,16 @@
                         markCampaignAll();
                         return;
                     }
-                    if (scope === 'campaign.heat' || scope === 'campaign.cognitiveRisk' || scope === 'campaign.rep' || scope === 'campaign.case' || scope === 'campaign.ledger') plan.writeCore = true;
+                    if (scope === 'campaign.heat'
+                        || scope === 'campaign.cognitiveRisk'
+                        || scope === 'campaign.rep'
+                        || scope === 'campaign.case'
+                        || scope === 'campaign.ledger'
+                        || scope === 'campaign.context'
+                        || scope === 'campaign.meta'
+                        || scope.startsWith('campaign.meta.')) {
+                        plan.writeCore = true;
+                    }
                     const campaignEntityMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
                     if (campaignEntityMatch) {
                         const key = campaignEntityMatch[1];
@@ -3707,7 +4484,9 @@
                     heat: cleanState.campaign.heat,
                     cognitiveRisk: cleanState.campaign.cognitiveRisk,
                     ledger: sanitizeLedgerState(cleanState.campaign.ledger),
-                    case: cleanState.campaign.case
+                    case: cleanState.campaign.case,
+                    context: cleanState.campaignContext,
+                    meta: sanitizeCampaignMeta(cleanState.campaignMeta)
                 };
                 const coreUpsert = await this.sync.client
                     .from(tables.core)
@@ -4487,11 +5266,17 @@
             ensureListIds(this.state.campaign.locations, 'loc', buildLocationEntityScope);
             ensureListIds(this.state.campaign.requisitions, 'req', buildRequisitionEntityScope);
             ensureListIds(this.state.campaign.encounters, 'enc', buildEncounterEntityScope);
+            this.state.campaignMeta = sanitizeCampaignMeta(this.state.campaignMeta);
+            ensureListIds(this.state.campaignMeta.events, 'event', buildCampaignMetaEventEntityScope);
 
             if (mutated && persist) {
                 try {
                     const scopes = Array.from(touchedScopes.values());
-                    this.save({ scope: scopes.length ? scopes : ['campaign.players', 'campaign.npcs', 'campaign.locations', 'campaign.requisitions', 'campaign.encounters'] });
+                    this.save({
+                        scope: scopes.length
+                            ? scopes
+                            : ['campaign.players', 'campaign.npcs', 'campaign.locations', 'campaign.requisitions', 'campaign.encounters', CAMPAIGN_META_EVENTS_SCOPE_PREFIX]
+                    });
                 } catch (err) {
                     console.warn('RTF_STORE: Failed to persist campaign entity IDs', err);
                 }
@@ -4691,6 +5476,94 @@
                 const scope = buildRequisitionEntityScope(id);
                 this.save({ scope: scope || 'campaign.requisitions' });
             }
+        }
+
+        // Campaign Meta Timeline + Board
+        getCampaignMetaEvents() {
+            const meta = this.ensureCampaignMetaIntegrity();
+            return meta.events;
+        }
+
+        addCampaignMetaEvent(evt) {
+            const source = evt && typeof evt === 'object' ? evt : {};
+            const events = this.getCampaignMetaEvents();
+            const stamp = this.getMutationStamp();
+            const safeEvent = sanitizeEvent({
+                ...source,
+                caseId: 'campaign_meta',
+                lastChangedBy: stamp.lastChangedBy,
+                lastChangedAt: stamp.lastChangedAt
+            }, events.length);
+            events.push(safeEvent);
+            const scope = buildCampaignMetaEventEntityScope(safeEvent.id);
+            this.save({ scope: scope || CAMPAIGN_META_EVENTS_SCOPE_PREFIX });
+            return safeEvent.id;
+        }
+
+        updateCampaignMetaEvent(id, updates) {
+            const list = this.getCampaignMetaEvents();
+            const idx = list.findIndex((entry) => entry && entry.id === id);
+            if (idx < 0) return;
+            const patch = sanitizePatch(updates, {
+                title: (v) => toTrimmedString(v, '', 240),
+                focus: (v) => toTrimmedString(v, '', 240),
+                heatDelta: (v) => toTrimmedString(v, '', 12),
+                tags: (v) => toTrimmedString(v, '', 2000),
+                imageUrl: (v) => toImageUrl(v),
+                highlights: (v) => toTrimmedString(v, '', 6000),
+                fallout: (v) => toTrimmedString(v, '', 6000),
+                followUp: (v) => toTrimmedString(v, '', 6000),
+                source: (v) => toTrimmedString(v, '', 80),
+                kind: (v) => toTrimmedString(v, '', 80),
+                resolved: (v) => toBoolean(v),
+                created: (v) => sanitizeAttributionAt(v, list[idx].created || ''),
+                dueAt: (v) => sanitizeAttributionAt(v, ''),
+                impactSeverity: (v) => sanitizeImpactSeverity(v, list[idx].impactSeverity || 'moderate'),
+                impactScope: (v) => sanitizeImpactScope(v, list[idx].impactScope || 'local'),
+                entityImpacts: (v) => sanitizeEntityImpacts(v),
+                certainty: (v) => clampPercent(v, list[idx].certainty)
+            });
+            if (!patch) return;
+            const stamp = this.getMutationStamp();
+            list[idx] = sanitizeEvent({
+                ...list[idx],
+                ...patch,
+                caseId: 'campaign_meta',
+                lastChangedBy: stamp.lastChangedBy,
+                lastChangedAt: stamp.lastChangedAt
+            }, idx);
+            const eventId = toTrimmedString(list[idx].id || id, toTrimmedString(id, '', 80), 80);
+            const scope = buildCampaignMetaEventEntityScope(eventId);
+            this.save({ scope: scope || CAMPAIGN_META_EVENTS_SCOPE_PREFIX });
+        }
+
+        deleteCampaignMetaEvent(id) {
+            const list = this.getCampaignMetaEvents();
+            const idx = list.findIndex((entry) => entry && entry.id === id);
+            if (idx < 0) return;
+            const deleted = list[idx];
+            const eventId = toTrimmedString(deleted && deleted.id ? deleted.id : id, toTrimmedString(id, '', 80), 80);
+            list.splice(idx, 1);
+            const scope = buildCampaignMetaEventEntityScope(eventId);
+            this.save({ scope: scope || CAMPAIGN_META_EVENTS_SCOPE_PREFIX });
+        }
+
+        getCampaignMetaBoard() {
+            const meta = this.ensureCampaignMetaIntegrity();
+            meta.board = sanitizeBoard(meta.board);
+            return meta.board;
+        }
+
+        updateCampaignMetaBoard(boardState) {
+            const meta = this.ensureCampaignMetaIntegrity();
+            meta.board = sanitizeBoard(boardState);
+            this.save({ scope: 'campaign.meta.board' });
+        }
+
+        clearCampaignMetaBoard() {
+            const meta = this.ensureCampaignMetaIntegrity();
+            meta.board = sanitizeBoard(DEFAULT_CAMPAIGN_META_BOARD_STATE);
+            this.save({ scope: 'campaign.meta.board' });
         }
 
         // Mission Events

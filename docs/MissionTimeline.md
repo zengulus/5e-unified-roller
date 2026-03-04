@@ -1,6 +1,7 @@
 # Mission Timeline (`timeline.html`)
 
 Session chronicle for beats, fallout, and rolling heat. Designed for quick capture mid-play—no doc editor required.
+Case-scoped by design. For campaign-level logging, use [Campaign Timeline](CampaignTimeline.md) (`campaign-timeline.html`).
 
 ## Layout
 - **Event Form** – Toggle the log form to add operation title, focus/district, deadline, heat delta, severity/scope, certainty, impacted entities, tags, optional image URL, highlights, fallout, and follow-up notes. Events save directly into the active case timeline.
@@ -16,15 +17,14 @@ Session chronicle for beats, fallout, and rolling heat. Designed for quick captu
 4. **Debrief** – Mark resolved items, annotate fallout/follow-up, then export a recap of the filtered view for session notes.
 
 ## Case Context
-- **Active Case Source** – Timeline reads the currently active case from Tools Hub (`tools.html` -> `Active Case Context` panel).
-- **Case CRUD Location** – Create, rename, switch, and delete cases in Tools Hub. Timeline then reads/writes event logs for that active case only.
+- **Active Case Source** – Timeline reads the currently active case from Tools Hub campaign scope sequencing (or optional active-case override).
+- **Case CRUD Location** – Create, rename, switch, and delete cases in Tools Hub. Timeline reads/writes event logs for the active case only.
 
 ## Integrations
 - **Lead Queue** – `Lead Queue` on an event creates/focuses an event lead and opens `leads.html?leadId=<id>`.
 - **Case Board** – `Board` opens `board.html?linkType=timeline-event&id=<event_id>`. Board focuses an existing linked node or spawns one from store data.
 - **Ledger** – Timeline metadata (`dueAt`, `impactSeverity`, `impactScope`, `entityImpacts`, `certainty`) is available for Ledger source-linking and snapshot exports.
 - **Prep & Procedure Clocks** – `Shield -1` reads `rtf_prep_procedure_state_v1`. If prep is full, one free shield is available per active case/session. Otherwise it spends 1 Procedure segment, updates Heat, and logs a shield event.
-- **Deep-Link Filters** – URL query params (`search`, `focus`, or `id`) prefill timeline filters and are then removed from the address bar.
 - **Deep-Link Filters** – URL query params (`search`, `focus`, `id`, and `overdue=1`) prefill timeline filters and are then removed from the address bar.
 
 ## Tips
@@ -36,6 +36,7 @@ Session chronicle for beats, fallout, and rolling heat. Designed for quick captu
 
 ## Cross-Links
 - [Case Board](CaseBoard.md) (`board.html`) – Pull timeline events into event nodes so beats, fallout, and Heat-driving moments stay tied to the active investigation graph.
+- [Campaign Timeline](CampaignTimeline.md) (`campaign-timeline.html`) – Campaign-level counterpart for cross-case beats and strategic updates.
 - [Lead Queue](Leads.md) (`leads.html`) – Prioritize open questions with status + voting, then jump back into Board or Timeline context.
 - [Prep & Procedure Clocks](PrepProcedureClocks.md) (`prep-procedure.html`) – Feeds shield resources used by timeline `Shield -1` actions.
 

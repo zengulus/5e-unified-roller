@@ -56,11 +56,18 @@
 
     function logMajorEvent(payload, options = {}) {
         const store = global.RTF_STORE;
-        if (!store || typeof store.addEvent !== 'function') {
+        if (!store) {
             return { ok: false, reason: 'store-unavailable' };
         }
 
         const opts = options && typeof options === 'object' ? options : {};
+        const scope = cleanText(opts.scope).toLowerCase();
+        const useCampaignScope = scope === 'campaign' || scope === 'campaign-meta' || scope === 'meta';
+        const canWriteCampaign = useCampaignScope && typeof store.addCampaignMetaEvent === 'function';
+        const canWriteCase = typeof store.addEvent === 'function';
+        if (!canWriteCampaign && !canWriteCase) {
+            return { ok: false, reason: 'store-unavailable' };
+        }
         const dedupeWindowMs = Number.isFinite(Number(opts.dedupeWindowMs))
             ? Number(opts.dedupeWindowMs)
             : 1800;
@@ -72,7 +79,8 @@
             return { ok: false, reason: 'deduped' };
         }
 
-        store.addEvent(eventData);
+        if (canWriteCampaign) store.addCampaignMetaEvent(eventData);
+        else store.addEvent(eventData);
         return { ok: true, id: eventData.id };
     }
 

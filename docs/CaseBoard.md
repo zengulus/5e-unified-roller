@@ -1,6 +1,7 @@
 # Case Board (`board.html`)
 
 Modular clue board with physics nodes, quick-reference popups, and case-scoped layouts/events.
+Case-scoped by design. For campaign-level graphing, use [Campaign Board](CampaignBoard.md) (`campaign-board.html`).
 
 ## Core Concepts
 - **Case File Meta** – The hero header exposes an editable case name that renders across exports and sessions. Portal, save, and clear buttons live in the same action bar along with pan-mode and background/accent controls.
@@ -18,14 +19,17 @@ Modular clue board with physics nodes, quick-reference popups, and case-scoped l
 - **Keyboard Shortcuts** – `+` zooms in, `-` zooms out, and `P` toggles pan mode. Shortcuts are ignored while typing in editable fields, and each action shows a brief on-screen alert.
 
 ## Case Context
-- **Active Case Source** – Board reads the currently active case from Tools Hub (`tools.html` -> `Active Case Context` panel).
-- **Case CRUD Location** – Create, rename, switch, and delete cases from Tools Hub. Board then loads/saves against that active case’s board/events scope.
+- **Active Case Source** – Board reads the currently active case from Tools Hub campaign scope sequencing (or optional active-case override).
+- **Case CRUD Location** – Create, rename, switch, and delete cases from Tools Hub. Board loads/saves against that active case’s board/events scope.
 
 ## Cross-Link Entry Points
 - **Direct Node Focus** – Opening `board.html?nodeId=<node_id>` centers and flashes an existing node.
 - **Store-Backed Links** – Opening `board.html?linkType=<npc|location|timeline-event|requisition>&id=<entity_id>` focuses an existing linked node or spawns one from campaign data.
 - **Lead Queue + Timeline Bridge** – Lead cards and timeline event actions use those URL params, so board jumps stay deterministic and case-scoped.
 - **URL Hygiene** – After resolving a cross-link request, Board clears `nodeId` / `linkType` / `id` from the URL.
+
+## Companion Surface
+- **Campaign Board** – `campaign-board.html` shares the same interaction model but reads/writes campaign-level meta board + timeline records.
 
 ## Narrative Metadata + Ledger
 - **Certainty / Reliability / Confidence** – Clues expose `certainty`; Clues and Theories expose `reliability`; Theories expose `confidence`. Reliability renders as a bar badge and confidence uses the theory confidence bar, both tinted from the active accent.

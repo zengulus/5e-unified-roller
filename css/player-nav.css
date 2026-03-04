@@ -42,8 +42,9 @@
     position: absolute;
     top: calc(100% + 10px);
     right: 0;
-    width: min(420px, calc(100vw - 24px));
+    width: min(440px, calc(100vw - 24px));
     max-width: calc(100vw - 24px);
+    max-height: min(72vh, 640px);
     padding: 10px;
     border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 12px;
@@ -52,6 +53,7 @@
     z-index: 260;
     box-sizing: border-box;
     overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .hero-actions.has-hero-menu .hero-menu-panel.is-open {
@@ -61,14 +63,114 @@
 .hero-actions.has-hero-menu .hero-menu-nav-panel {
     right: 0;
     left: auto;
+    display: grid;
+    gap: 8px;
 }
 
 .hero-actions.has-hero-menu .hero-menu-panel-title {
-    margin-bottom: 8px;
+    margin-bottom: 0;
     font-size: 0.73rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: color-mix(in srgb, var(--accent-secondary) 58%, #d4dae6 42%);
+}
+
+.hero-actions.has-hero-menu .hero-menu-search {
+    display: block;
+}
+
+.hero-actions.has-hero-menu .hero-menu-search-input {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: color-mix(in srgb, #08101b 84%, var(--accent-secondary) 16%);
+    color: #f4f7ff;
+    box-sizing: border-box;
+}
+
+.hero-actions.has-hero-menu .hero-menu-search-input::placeholder {
+    color: color-mix(in srgb, #b8c2d8 70%, var(--accent-secondary) 30%);
+}
+
+.hero-actions.has-hero-menu .hero-menu-search-input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--accent-secondary) 66%, rgba(255, 255, 255, 0.3));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-secondary) 26%, transparent);
+}
+
+.hero-actions.has-hero-menu .hero-menu-quick {
+    display: grid;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.hero-actions.has-hero-menu .hero-menu-quick-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-section {
+    display: grid;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--accent-secondary) 56%, #d4dae6 44%);
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-summary::-webkit-details-marker {
+    display: none;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-summary::after {
+    content: '▸';
+    font-size: 0.85rem;
+    opacity: 0.82;
+    transition: transform 0.2s ease;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-section[open] > .hero-menu-nav-summary::after {
+    transform: rotate(90deg);
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-summary-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-count {
+    min-width: 1.75rem;
+    text-align: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.67rem;
+    letter-spacing: 0.04em;
+    color: color-mix(in srgb, #e8edfa 82%, var(--accent-secondary) 18%);
+    background: color-mix(in srgb, #0e1728 76%, var(--accent-secondary) 24%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
 }
 
 .hero-actions.has-hero-menu .hero-menu-settings-panel .settings-character-switcher {
@@ -109,41 +211,29 @@
     text-align: left;
 }
 
-.hero-actions.has-hero-menu .hero-menu-nav {
-    display: grid;
-    gap: 8px;
-}
-
 .hero-actions.has-hero-menu .hero-menu-nav-link {
     width: 100%;
     justify-content: flex-start;
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-    border-radius: 14px;
-    padding: 10px 12px;
-    line-height: 1.25;
+    align-items: center;
+    flex-direction: row;
+    gap: 0;
+    border-radius: 12px;
+    padding: 9px 11px;
+    min-height: 38px;
+    line-height: 1.2;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-link-quick {
+    min-height: 40px;
 }
 
 .hero-actions.has-hero-menu .hero-menu-nav-label {
-    font-size: 0.9rem;
+    font-size: 0.84rem;
     font-weight: 700;
     letter-spacing: 0.01em;
-}
-
-.hero-actions.has-hero-menu .hero-menu-nav-desc {
-    font-size: 0.73rem;
-    font-weight: 500;
-    color: color-mix(in srgb, #d8deea 74%, var(--accent-secondary) 26%);
-    text-shadow: none;
-}
-
-.hero-actions.has-hero-menu .hero-menu-nav-link:hover .hero-menu-nav-desc {
-    color: color-mix(in srgb, #eef2ff 80%, var(--accent-secondary) 20%);
-}
-
-.hero-actions.has-hero-menu .hero-menu-nav-link.is-active .hero-menu-nav-desc {
-    color: color-mix(in srgb, #f4f8ff 84%, var(--accent-secondary) 16%);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .hero-actions.has-hero-menu .hero-menu-nav-link.is-active {
@@ -153,6 +243,30 @@
         linear-gradient(140deg,
             color-mix(in srgb, var(--accent) 64%, #0b1424 36%),
             color-mix(in srgb, var(--accent-secondary) 70%, #060c16 30%));
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-link.is-hidden {
+    display: none;
+}
+
+.hero-actions.has-hero-menu .hero-menu-quick.is-filter-hidden,
+.hero-actions.has-hero-menu .hero-menu-nav-section.is-filter-hidden {
+    display: none;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-empty {
+    display: none;
+    margin-top: 4px;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.18);
+    color: color-mix(in srgb, #d3dbec 78%, var(--accent-secondary) 22%);
+    font-size: 0.78rem;
+    text-align: center;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-empty.is-visible {
+    display: block;
 }
 
 .hero-add-row {
@@ -184,6 +298,11 @@
     .hero-actions.has-hero-menu .hero-menu-panel {
         width: min(360px, calc(100vw - 16px));
         max-width: calc(100vw - 16px);
+    }
+
+    .hero-actions.has-hero-menu .hero-menu-nav,
+    .hero-actions.has-hero-menu .hero-menu-quick-grid {
+        grid-template-columns: 1fr;
     }
 
     .hero-add-row {

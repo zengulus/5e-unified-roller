@@ -3,6 +3,7 @@ const delegatedHandlerEvents = ['click', 'change', 'input'];
 const delegatedHandlerCache = new Map();
 let delegatedHandlersBound = false;
 const AUTO_CONNECT_CANCEL_KEY = 'rtf_sync_autoconnect_cancelled';
+let campaignSequenceDragCaseId = '';
 
 function isAutoConnectCancelledPreference() {
     try {
@@ -80,17 +81,30 @@ function bindDelegatedDataHandlers() {
     });
 }
 
-// Secret Toggle Logic
-function trySecretToggle(e) {
-    // Alt + Shift + Click
-    if (e.altKey && e.shiftKey) {
-        document.body.classList.toggle('secret-active');
-        const isSecret = document.body.classList.contains('secret-active');
-
-        document.getElementById('pageTitle').innerText = isSecret ? "Forbidden DM Protocols" : "Tools Hub";
-
-        updateSyncPanelVisibility(latestSyncStatus);
+function syncSecretModeUi() {
+    const isSecret = document.body.classList.contains('secret-active');
+    const titleEl = document.getElementById('pageTitle');
+    if (titleEl) titleEl.innerText = isSecret ? "Campaign Hub: GM Controls" : "Campaign Hub";
+    const secretBtn = document.getElementById('btn-secret-mode');
+    if (secretBtn) {
+        secretBtn.innerText = isSecret ? '🧩 GM Mode: ON' : '🧩 GM Mode: OFF';
     }
+    updateSyncPanelVisibility(latestSyncStatus);
+}
+
+function toggleSecretMode(forceState) {
+    if (typeof forceState === 'boolean') {
+        document.body.classList.toggle('secret-active', forceState);
+    } else {
+        document.body.classList.toggle('secret-active');
+    }
+    syncSecretModeUi();
+}
+
+// Secret Toggle Logic (Alt+Shift+Click on title)
+function trySecretToggle(e) {
+    if (!e || !e.altKey || !e.shiftKey) return;
+    toggleSecretMode();
 }
 
 // Store Interaction
@@ -133,6 +147,8 @@ function handleImport() {
         window.RTF_STORE.import().then(success => {
             if (success) alert("Data imported successfully!");
             renderCaseSwitcher();
+            renderCampaignContext();
+            renderCampaignOverview();
         });
     } else {
         alert("Store not loaded.");
@@ -144,6 +160,612 @@ function setCaseSwitcherStatus(message, isError = false) {
     if (!el) return;
     el.textContent = message;
     el.classList.toggle('is-error', !!isError);
+}
+
+function setCampaignScopeStatus(message, isError = false) {
+    const el = document.getElementById('campaign-scope-status');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('is-error', !!isError);
+}
+
+function setCampaignWorkflowStatus(message, isError = false) {
+    const el = document.getElementById('campaign-workflow-status');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('is-error', !!isError);
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function buildCaseBoardReferenceLink(caseId) {
+    const url = new URL('board.html', window.location.href);
+    url.searchParams.set('linkType', 'case');
+    url.searchParams.set('id', String(caseId || '').trim());
+    return url.toString();
+}
+
+function openCaseReferenceInBoard(caseId) {
+    const id = String(caseId || '').trim();
+    if (!id) return;
+    window.location.assign(buildCaseBoardReferenceLink(id));
+}
+
+function readCampaignContextFromStore() {
+    const store = window.RTF_STORE;
+    if (!store) return null;
+    if (typeof store.getCampaignScopes === 'function'
+        && typeof store.getActiveCampaignScopeId === 'function'
+        && typeof store.getActiveCampaignScope === 'function') {
+        const scopes = store.getCampaignScopes();
+        const activeScopeId = store.getActiveCampaignScopeId();
+        const activeScope = store.getActiveCampaignScope();
+        return { scopes, activeScopeId, activeScope };
+    }
+    const rawContext = store.state && store.state.campaignContext;
+    const scopes = rawContext && Array.isArray(rawContext.scopes) ? rawContext.scopes.slice() : [];
+    const activeScopeId = rawContext && rawContext.activeScopeId ? String(rawContext.activeScopeId) : '';
+    const activeScope = scopes.find((entry) => String(entry && entry.id || '') === activeScopeId) || scopes[0] || null;
+    return { scopes, activeScopeId: activeScope ? String(activeScope.id || '') : '', activeScope };
+}
+
+function renderCampaignScopeCasePicker(activeScope, cases, caseLookup) {
+    const picker = document.getElementById('campaign-scope-case-add');
+    const addBtn = document.getElementById('campaign-scope-add-case-btn');
+    if (!picker) return;
+    const scoped = new Set(Array.isArray(activeScope && activeScope.caseOrder) ? activeScope.caseOrder.map((id) => String(id || '')) : []);
+    const available = (Array.isArray(cases) ? cases : []).filter((entry) => entry && !scoped.has(String(entry.id || '')));
+    picker.innerHTML = '';
+    if (!available.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'All cases already in scope';
+        picker.appendChild(option);
+        picker.disabled = true;
+        if (addBtn) addBtn.disabled = true;
+        return;
+    }
+    available.forEach((entry) => {
+        const option = document.createElement('option');
+        option.value = entry.id;
+        option.textContent = entry.name || caseLookup.get(entry.id) || entry.id;
+        picker.appendChild(option);
+    });
+    picker.disabled = false;
+    if (addBtn) addBtn.disabled = false;
+}
+
+function reorderCampaignScopeCaseBefore(sourceCaseId, targetCaseId) {
+    const sourceId = String(sourceCaseId || '').trim();
+    const targetId = String(targetCaseId || '').trim();
+    if (!sourceId || !targetId || sourceId === targetId) return false;
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getActiveCampaignScope !== 'function' || typeof store.setCampaignScopeCaseOrder !== 'function') {
+        setCampaignScopeStatus('Case reordering is unavailable in this build.', true);
+        return false;
+    }
+    const scope = store.getActiveCampaignScope();
+    const activeScopeId = typeof store.getActiveCampaignScopeId === 'function' ? store.getActiveCampaignScopeId() : '';
+    const order = Array.isArray(scope && scope.caseOrder) ? scope.caseOrder.slice() : [];
+    const fromIdx = order.findIndex((entry) => String(entry || '') === sourceId);
+    const targetIdx = order.findIndex((entry) => String(entry || '') === targetId);
+    if (fromIdx < 0 || targetIdx < 0) return false;
+    const [moved] = order.splice(fromIdx, 1);
+    const insertIdx = fromIdx < targetIdx ? targetIdx - 1 : targetIdx;
+    order.splice(insertIdx, 0, moved);
+    if (!activeScopeId || !store.setCampaignScopeCaseOrder(activeScopeId, order, { syncCase: false })) {
+        setCampaignScopeStatus('Could not reorder this case in the active scope.', true);
+        return false;
+    }
+    renderCampaignContext();
+    renderCampaignOverview();
+    setCampaignScopeStatus('Scope sequence reordered.');
+    return true;
+}
+
+function clearCampaignSequenceDragState() {
+    const listEl = document.getElementById('campaign-sequence-list');
+    if (listEl) {
+        listEl.querySelectorAll('.campaign-seq-row').forEach((row) => {
+            row.classList.remove('is-drag-over');
+            row.classList.remove('is-dragging');
+        });
+    }
+}
+
+function handleCampaignSequenceDragStart(event) {
+    const handle = event.currentTarget;
+    const caseId = String(handle && handle.dataset && handle.dataset.caseId || '').trim();
+    if (!caseId) return;
+    campaignSequenceDragCaseId = caseId;
+    const row = handle.closest('.campaign-seq-row');
+    if (row) row.classList.add('is-dragging');
+    if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', caseId);
+    }
+}
+
+function handleCampaignSequenceDragOver(event) {
+    if (!campaignSequenceDragCaseId) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    const row = event.currentTarget;
+    if (!(row instanceof Element)) return;
+    row.classList.add('is-drag-over');
+}
+
+function handleCampaignSequenceDragLeave(event) {
+    const row = event.currentTarget;
+    if (!(row instanceof Element)) return;
+    row.classList.remove('is-drag-over');
+}
+
+function handleCampaignSequenceDrop(event) {
+    event.preventDefault();
+    const row = event.currentTarget;
+    const targetCaseId = String(row && row.dataset && row.dataset.caseId || '').trim();
+    const fallbackId = event.dataTransfer ? String(event.dataTransfer.getData('text/plain') || '').trim() : '';
+    const sourceCaseId = campaignSequenceDragCaseId || fallbackId;
+    clearCampaignSequenceDragState();
+    campaignSequenceDragCaseId = '';
+    if (!sourceCaseId || !targetCaseId || sourceCaseId === targetCaseId) return;
+    reorderCampaignScopeCaseBefore(sourceCaseId, targetCaseId);
+}
+
+function handleCampaignSequenceDragEnd() {
+    clearCampaignSequenceDragState();
+    campaignSequenceDragCaseId = '';
+}
+
+function bindCampaignSequenceDragHandlers(listEl) {
+    if (!listEl) return;
+    const handles = listEl.querySelectorAll('.campaign-seq-drag');
+    handles.forEach((handle) => {
+        handle.addEventListener('dragstart', handleCampaignSequenceDragStart);
+        handle.addEventListener('dragend', handleCampaignSequenceDragEnd);
+    });
+    const rows = listEl.querySelectorAll('.campaign-seq-row');
+    rows.forEach((row) => {
+        row.addEventListener('dragover', handleCampaignSequenceDragOver);
+        row.addEventListener('dragleave', handleCampaignSequenceDragLeave);
+        row.addEventListener('drop', handleCampaignSequenceDrop);
+    });
+}
+
+function renderCampaignScopeSequence(activeScope, activeCaseId, caseLookup) {
+    const listEl = document.getElementById('campaign-sequence-list');
+    if (!listEl) return;
+    const scope = activeScope && typeof activeScope === 'object' ? activeScope : null;
+    const order = Array.isArray(scope && scope.caseOrder) ? scope.caseOrder : [];
+    const statusMap = scope && scope.caseStatus && typeof scope.caseStatus === 'object' ? scope.caseStatus : {};
+    if (!order.length) {
+        listEl.innerHTML = '<div class="campaign-seq-empty">No cases in this scope yet.</div>';
+        return;
+    }
+    const html = order.map((caseId, index) => {
+        const safeCaseId = escapeHtml(caseId);
+        const caseName = caseLookup.get(caseId) || caseId;
+        const isActiveCase = String(caseId) === String(activeCaseId);
+        const status = String(statusMap[caseId] || (isActiveCase ? 'active' : 'planned')).toLowerCase();
+        const rowClass = isActiveCase ? 'campaign-seq-row is-active' : 'campaign-seq-row';
+        return `
+            <div class="${rowClass}" data-case-id="${safeCaseId}" data-onclick="setCampaignScopeActiveCase('${safeCaseId}')">
+                <button class="campaign-seq-drag" type="button" draggable="true" data-case-id="${safeCaseId}" title="Drag to reorder" data-onclick="event.stopPropagation()">
+                    :: 
+                </button>
+                <div class="campaign-seq-main">
+                    <div class="campaign-seq-title">${escapeHtml(caseName)}</div>
+                    <div class="campaign-seq-meta">#${index + 1} · ${isActiveCase ? 'Now' : 'Queued'} · Scope status: ${escapeHtml(status)}</div>
+                </div>
+                <details class="campaign-seq-menu" data-onclick="event.stopPropagation()">
+                    <summary class="sync-btn campaign-seq-overflow">...</summary>
+                    <div class="campaign-seq-menu-pop">
+                        <button class="sync-btn" data-onclick="event.stopPropagation(); setCampaignScopeActiveCase('${safeCaseId}');">Set Active</button>
+                        <button class="sync-btn" data-onclick="event.stopPropagation(); updateCampaignScopeCaseStatus('${safeCaseId}', 'planned');">Mark Planned</button>
+                        <button class="sync-btn" data-onclick="event.stopPropagation(); updateCampaignScopeCaseStatus('${safeCaseId}', 'resolved');">Mark Resolved</button>
+                        <button class="sync-btn" data-onclick="event.stopPropagation(); referenceCaseOnBoard('${safeCaseId}');">Board Ref + Open</button>
+                        <button class="sync-btn" data-onclick="event.stopPropagation(); removeCaseFromActiveScope('${safeCaseId}');">Remove From Scope</button>
+                    </div>
+                </details>
+            </div>
+        `;
+    }).join('');
+    listEl.innerHTML = html;
+    bindCampaignSequenceDragHandlers(listEl);
+}
+
+function getActiveScopeBoardRef(refId) {
+    const cleanRefId = String(refId || '').trim();
+    if (!cleanRefId || !window.RTF_STORE || typeof window.RTF_STORE.getActiveCampaignScope !== 'function') return null;
+    const scope = window.RTF_STORE.getActiveCampaignScope();
+    const refs = Array.isArray(scope && scope.boardRefs) ? scope.boardRefs : [];
+    const ref = refs.find((entry) => String(entry && entry.id || '') === cleanRefId) || null;
+    if (!ref) return null;
+    const scopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    return { scopeId, scope, ref };
+}
+
+function renderCampaignScopeBoardReferences(activeScope, caseLookup) {
+    const listEl = document.getElementById('scope-board-ref-list');
+    if (!listEl) return;
+    const refs = Array.isArray(activeScope && activeScope.boardRefs) ? activeScope.boardRefs : [];
+    if (!refs.length) {
+        listEl.innerHTML = '<div class="campaign-seq-empty">No board references in this scope yet.</div>';
+        return;
+    }
+    listEl.innerHTML = refs.map((ref) => {
+        const safeRefId = escapeHtml(ref.id);
+        const caseId = String(ref && ref.caseId || '').trim();
+        const label = String(ref && ref.label || '').trim()
+            || caseLookup.get(caseId)
+            || caseId
+            || 'Unknown Case';
+        const note = String(ref && ref.note || '').trim();
+        return `
+            <div class="scope-board-ref-row">
+                <div class="scope-board-ref-main">
+                    <div class="scope-board-ref-title">${escapeHtml(label)}</div>
+                    <div class="scope-board-ref-note">${note ? escapeHtml(note) : 'No note yet.'}</div>
+                </div>
+                <div class="scope-board-ref-actions">
+                    <button class="sync-btn" data-onclick="focusScopeBoardRef('${safeRefId}')">Open / Focus</button>
+                    <button class="sync-btn" data-onclick="renameScopeBoardRefNote('${safeRefId}')">Rename Note</button>
+                    <button class="sync-btn" data-onclick="removeScopeBoardRef('${safeRefId}')">Remove</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function addActiveCaseBoardRef() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getActiveCampaignScopeId !== 'function' || typeof store.addCampaignScopeBoardRef !== 'function') {
+        setCampaignScopeStatus('Scope board references are unavailable in this build.', true);
+        return;
+    }
+    const scopeId = store.getActiveCampaignScopeId();
+    const activeCaseId = typeof store.getActiveCaseId === 'function' ? String(store.getActiveCaseId() || '') : '';
+    if (!scopeId || !activeCaseId) {
+        setCampaignScopeStatus('No active scope or case to reference.', true);
+        return;
+    }
+    const ref = store.addCampaignScopeBoardRef(scopeId, activeCaseId, {});
+    if (!ref) {
+        setCampaignScopeStatus('Could not add active case board reference.', true);
+        return;
+    }
+    renderCampaignContext();
+    renderCampaignOverview();
+    setCampaignScopeStatus('Active case added to scope board references.');
+}
+
+function focusScopeBoardRef(refId) {
+    const resolved = getActiveScopeBoardRef(refId);
+    if (!resolved || !resolved.ref) {
+        setCampaignScopeStatus('Board reference not found in this scope.', true);
+        return;
+    }
+    openCaseReferenceInBoard(resolved.ref.caseId);
+}
+
+function renameScopeBoardRefNote(refId) {
+    const resolved = getActiveScopeBoardRef(refId);
+    if (!resolved || !resolved.ref) {
+        setCampaignScopeStatus('Board reference not found in this scope.', true);
+        return;
+    }
+    if (!window.RTF_STORE || typeof window.RTF_STORE.addCampaignScopeBoardRef !== 'function') {
+        setCampaignScopeStatus('Board reference note editing is unavailable in this build.', true);
+        return;
+    }
+    const next = prompt('Rename board reference note:', resolved.ref.note || '');
+    if (next === null) return;
+    const trimmed = String(next || '').trim();
+    if (!window.RTF_STORE.addCampaignScopeBoardRef(resolved.scopeId, resolved.ref.caseId, {
+        label: resolved.ref.label || '',
+        note: trimmed
+    })) {
+        setCampaignScopeStatus('Could not update board reference note.', true);
+        return;
+    }
+    renderCampaignContext();
+    renderCampaignOverview();
+    setCampaignScopeStatus('Board reference note updated.');
+}
+
+function removeScopeBoardRef(refId) {
+    const resolved = getActiveScopeBoardRef(refId);
+    if (!resolved || !resolved.ref) {
+        setCampaignScopeStatus('Board reference not found in this scope.', true);
+        return;
+    }
+    if (!window.RTF_STORE || typeof window.RTF_STORE.removeCampaignScopeBoardRef !== 'function') {
+        setCampaignScopeStatus('Board reference removal is unavailable in this build.', true);
+        return;
+    }
+    const ok = confirm('Remove this scope board reference?');
+    if (!ok) return;
+    if (!window.RTF_STORE.removeCampaignScopeBoardRef(resolved.scopeId, resolved.ref.id)) {
+        setCampaignScopeStatus('Could not remove that board reference.', true);
+        return;
+    }
+    renderCampaignContext();
+    renderCampaignOverview();
+    setCampaignScopeStatus('Scope board reference removed.');
+}
+
+function findNextPlannedScopeCaseId(scope, activeCaseId) {
+    const order = Array.isArray(scope && scope.caseOrder) ? scope.caseOrder : [];
+    const statusMap = scope && scope.caseStatus && typeof scope.caseStatus === 'object' ? scope.caseStatus : {};
+    const activeId = String(activeCaseId || scope && scope.activeCaseId || '').trim();
+    const activeIdx = order.findIndex((id) => String(id || '') === activeId);
+    const inOrder = activeIdx >= 0
+        ? [...order.slice(activeIdx + 1), ...order.slice(0, activeIdx)]
+        : order.slice();
+    return inOrder.find((id) => String(statusMap[id] || '').toLowerCase() === 'planned') || '';
+}
+
+function startNextScopeCase() {
+    if (!window.RTF_STORE
+        || typeof window.RTF_STORE.getActiveCampaignScope !== 'function'
+        || typeof window.RTF_STORE.setCampaignScopeActiveCase !== 'function') {
+        setCampaignWorkflowStatus('Scope workflow actions are unavailable in this build.', true);
+        return;
+    }
+    const scope = window.RTF_STORE.getActiveCampaignScope();
+    const scopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    if (!scopeId || !scope) {
+        setCampaignWorkflowStatus('No active scope found.', true);
+        return;
+    }
+    const activeCaseId = typeof window.RTF_STORE.getActiveCaseId === 'function' ? window.RTF_STORE.getActiveCaseId() : '';
+    const nextCaseId = findNextPlannedScopeCaseId(scope, activeCaseId);
+    if (!nextCaseId) {
+        setCampaignWorkflowStatus('No planned case is queued after the current active case.', true);
+        return;
+    }
+    if (!window.RTF_STORE.setCampaignScopeActiveCase(scopeId, nextCaseId, { syncCase: true })) {
+        setCampaignWorkflowStatus('Could not start the next scoped case.', true);
+        return;
+    }
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+    const cases = typeof window.RTF_STORE.getCases === 'function' ? window.RTF_STORE.getCases() : [];
+    const nextName = cases.find((entry) => String(entry && entry.id || '') === String(nextCaseId))
+        || { name: nextCaseId };
+    setCampaignWorkflowStatus(`Started next case: ${nextName.name || nextCaseId}.`);
+}
+
+function markResolvedAndAdvanceScopeCase() {
+    if (!window.RTF_STORE
+        || typeof window.RTF_STORE.getActiveCampaignScope !== 'function'
+        || typeof window.RTF_STORE.setCampaignScopeCaseStatus !== 'function'
+        || typeof window.RTF_STORE.setCampaignScopeActiveCase !== 'function') {
+        setCampaignWorkflowStatus('Scope workflow actions are unavailable in this build.', true);
+        return;
+    }
+    const scope = window.RTF_STORE.getActiveCampaignScope();
+    const scopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    const activeCaseId = String(typeof window.RTF_STORE.getActiveCaseId === 'function' ? window.RTF_STORE.getActiveCaseId() : '').trim();
+    if (!scopeId || !activeCaseId) {
+        setCampaignWorkflowStatus('No active scope case to resolve.', true);
+        return;
+    }
+    const nextCaseId = findNextPlannedScopeCaseId(scope, activeCaseId);
+    if (!window.RTF_STORE.setCampaignScopeCaseStatus(scopeId, activeCaseId, 'resolved')) {
+        setCampaignWorkflowStatus('Could not mark the active case as resolved.', true);
+        return;
+    }
+    if (nextCaseId) {
+        window.RTF_STORE.setCampaignScopeActiveCase(scopeId, nextCaseId, { syncCase: true });
+    }
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+
+    const refreshedScope = typeof window.RTF_STORE.getActiveCampaignScope === 'function'
+        ? window.RTF_STORE.getActiveCampaignScope()
+        : null;
+    const refreshedActiveCaseId = String(refreshedScope && refreshedScope.activeCaseId || activeCaseId);
+    const cases = typeof window.RTF_STORE.getCases === 'function' ? window.RTF_STORE.getCases() : [];
+    const nameLookup = new Map(cases.map((entry) => [String(entry && entry.id || ''), String(entry && entry.name || entry && entry.id || '')]));
+    const resolvedName = nameLookup.get(activeCaseId) || activeCaseId;
+    const activeName = nameLookup.get(refreshedActiveCaseId) || refreshedActiveCaseId;
+    if (refreshedActiveCaseId === activeCaseId) {
+        setCampaignWorkflowStatus(`Resolved "${resolvedName}". No planned case was available to advance.`, true);
+    } else {
+        setCampaignWorkflowStatus(`Resolved "${resolvedName}" and advanced to "${activeName}".`);
+    }
+}
+
+function openActiveScopeBoard() {
+    if (!window.RTF_STORE) {
+        setCampaignWorkflowStatus('Store not loaded.', true);
+        return;
+    }
+    const scopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    const activeCaseId = String(typeof window.RTF_STORE.getActiveCaseId === 'function' ? window.RTF_STORE.getActiveCaseId() : '').trim();
+    if (!scopeId || !activeCaseId) {
+        setCampaignWorkflowStatus('No active scope case to open.', true);
+        return;
+    }
+    if (typeof window.RTF_STORE.addCampaignScopeBoardRef === 'function') {
+        window.RTF_STORE.addCampaignScopeBoardRef(scopeId, activeCaseId, {});
+    }
+    openCaseReferenceInBoard(activeCaseId);
+}
+
+function renderCampaignOverview() {
+    const metaEl = document.getElementById('campaign-overview-meta');
+    const gridEl = document.getElementById('campaign-overview-grid');
+    const workflowGridEl = document.getElementById('campaign-workflow-grid');
+    if (!metaEl || !gridEl || !workflowGridEl) return;
+    const store = window.RTF_STORE;
+    if (!store || !store.state || !store.state.campaign) {
+        metaEl.textContent = 'Store unavailable';
+        gridEl.textContent = 'Campaign overview unavailable until store loads.';
+        workflowGridEl.textContent = 'Campaign workflow unavailable until store loads.';
+        return;
+    }
+
+    const cases = typeof store.getCases === 'function' ? store.getCases() : [];
+    const caseLookup = new Map(cases.map((entry) => [String(entry && entry.id || ''), String(entry && entry.name || entry && entry.id || '')]));
+    const activeCaseId = typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : '';
+    const activeCase = cases.find((entry) => String(entry && entry.id || '') === String(activeCaseId)) || null;
+    const context = readCampaignContextFromStore();
+    const activeScope = context && context.activeScope ? context.activeScope : null;
+
+    const campaign = store.state.campaign;
+    const heat = Number(campaign.heat) || 0;
+    const cognitiveRisk = Number(campaign.cognitiveRisk) || 0;
+    const totalEvents = Array.isArray(campaign.events) ? campaign.events.length : 0;
+    const activeEvents = (typeof store.getEvents === 'function' ? store.getEvents(activeCaseId) : campaign.events) || [];
+    const activeBoard = typeof store.getBoard === 'function' ? store.getBoard(activeCaseId) : (store.state.board || null);
+    const activeBoardNodes = Array.isArray(activeBoard && activeBoard.nodes) ? activeBoard.nodes.length : 0;
+    const activeBoardLinks = Array.isArray(activeBoard && activeBoard.connections) ? activeBoard.connections.length : 0;
+
+    const scopedCases = Array.isArray(activeScope && activeScope.caseOrder) ? activeScope.caseOrder : [];
+    const scopedStatus = activeScope && activeScope.caseStatus && typeof activeScope.caseStatus === 'object' ? activeScope.caseStatus : {};
+    const resolvedCount = scopedCases.filter((id) => String(scopedStatus[id] || '').toLowerCase() === 'resolved').length;
+    const boardRefCount = Array.isArray(activeScope && activeScope.boardRefs) ? activeScope.boardRefs.length : 0;
+    const nextCaseId = findNextPlannedScopeCaseId(activeScope, activeCaseId);
+    const nextCaseLabel = caseLookup.get(String(nextCaseId || '')) || nextCaseId || 'No planned case queued';
+    const nowCaseLabel = activeCase && activeCase.name ? activeCase.name : (activeCaseId || '—');
+    const nowTs = Date.now();
+    const blockers = (Array.isArray(activeEvents) ? activeEvents : []).filter((evt) => {
+        if (!evt || evt.resolved) return false;
+        const dueAt = Date.parse(String(evt.dueAt || '').trim());
+        const overdue = Number.isFinite(dueAt) && dueAt < nowTs;
+        const severity = String(evt.impactSeverity || '').trim().toLowerCase();
+        const severe = severity === 'high' || severity === 'critical';
+        return overdue || severe;
+    });
+    const blockedLabel = blockers.length
+        ? (String(blockers[0].title || blockers[0].focus || '').trim() || `${blockers.length} unresolved blocker(s)`)
+        : 'No blockers';
+
+    metaEl.textContent = `${cases.length} cases | ${context && Array.isArray(context.scopes) ? context.scopes.length : 0} scopes`;
+    workflowGridEl.innerHTML = [
+        ['Now', nowCaseLabel],
+        ['Next', nextCaseLabel],
+        ['Blocked', blockedLabel]
+    ].map(([label, value]) => `
+        <div class="campaign-workflow-kpi">
+            <div class="campaign-overview-kpi-label">${escapeHtml(label)}</div>
+            <div class="campaign-overview-kpi-value">${escapeHtml(value)}</div>
+        </div>
+    `).join('');
+    setCampaignWorkflowStatus('Workflow actions ready.');
+
+    const kpis = [
+        ['Active Scope', activeScope && activeScope.name ? activeScope.name : '—'],
+        ['Active Case', activeCase && activeCase.name ? activeCase.name : (activeCaseId || '—')],
+        ['Heat', String(heat)],
+        ['Cognitive Risk', String(cognitiveRisk)],
+        ['Scoped Cases', String(scopedCases.length)],
+        ['Scoped Resolved', String(resolvedCount)],
+        ['Scope Board Refs', String(boardRefCount)],
+        ['Case Events', String(Array.isArray(activeEvents) ? activeEvents.length : 0)],
+        ['Campaign Events', String(totalEvents)],
+        ['Board Nodes', String(activeBoardNodes)],
+        ['Board Links', String(activeBoardLinks)]
+    ];
+    gridEl.innerHTML = kpis.map(([label, value]) => `
+        <div class="campaign-overview-kpi">
+            <div class="campaign-overview-kpi-label">${escapeHtml(label)}</div>
+            <div class="campaign-overview-kpi-value">${escapeHtml(value)}</div>
+        </div>
+    `).join('');
+}
+
+function renderCampaignContext() {
+    const scopeSelectEl = document.getElementById('campaign-scope-select');
+    const scopeMetaEl = document.getElementById('campaign-scope-meta');
+    const scopeCreateBtn = document.getElementById('campaign-scope-create-btn');
+    const scopeRenameBtn = document.getElementById('campaign-scope-rename-btn');
+    const scopeDeleteBtn = document.getElementById('campaign-scope-delete-btn');
+    const boardRefListEl = document.getElementById('scope-board-ref-list');
+    if (!scopeSelectEl || !scopeMetaEl) return;
+
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getCases !== 'function') {
+        scopeSelectEl.innerHTML = '';
+        scopeMetaEl.textContent = 'Store unavailable';
+        if (scopeCreateBtn) scopeCreateBtn.disabled = true;
+        if (scopeRenameBtn) scopeRenameBtn.disabled = true;
+        if (scopeDeleteBtn) scopeDeleteBtn.disabled = true;
+        if (boardRefListEl) boardRefListEl.textContent = 'Scope board references unavailable until store loads.';
+        setCampaignScopeStatus('Campaign scope is unavailable until store loads.', true);
+        return;
+    }
+
+    const cases = store.getCases();
+    const caseLookup = new Map(cases.map((entry) => [String(entry.id || ''), String(entry.name || entry.id || '')]));
+    const activeCaseId = typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : '';
+    const context = readCampaignContextFromStore();
+    const scopes = context && Array.isArray(context.scopes) ? context.scopes : [];
+    const activeScopeId = context ? context.activeScopeId : '';
+    const activeScope = context && context.activeScope ? context.activeScope : (scopes[0] || null);
+
+    const previous = scopeSelectEl.value;
+    scopeSelectEl.innerHTML = '';
+    scopes.forEach((scope) => {
+        const option = document.createElement('option');
+        option.value = scope.id;
+        option.textContent = scope.name || scope.id;
+        scopeSelectEl.appendChild(option);
+    });
+    if (scopes.some((scope) => scope.id === activeScopeId)) {
+        scopeSelectEl.value = activeScopeId;
+    } else if (scopes.some((scope) => scope.id === previous)) {
+        scopeSelectEl.value = previous;
+    }
+
+    const statusMap = activeScope && activeScope.caseStatus && typeof activeScope.caseStatus === 'object'
+        ? activeScope.caseStatus
+        : {};
+    const caseOrder = Array.isArray(activeScope && activeScope.caseOrder) ? activeScope.caseOrder : [];
+    let planned = 0;
+    let active = 0;
+    let resolved = 0;
+    caseOrder.forEach((id) => {
+        const token = String(statusMap[id] || '').trim().toLowerCase();
+        if (token === 'active') active += 1;
+        else if (token === 'resolved') resolved += 1;
+        else planned += 1;
+    });
+
+    const activeScopeName = activeScope && activeScope.name ? activeScope.name : '—';
+    const activeCaseName = caseLookup.get(String(activeCaseId || '')) || activeCaseId || '—';
+    const boardRefCount = Array.isArray(activeScope && activeScope.boardRefs) ? activeScope.boardRefs.length : 0;
+    scopeMetaEl.textContent = `${scopes.length} scope${scopes.length === 1 ? '' : 's'} | Active Scope: ${activeScopeName} | Cases: ${caseOrder.length} | Board Refs: ${boardRefCount} | Active Case (derived): ${activeCaseName}`;
+
+    if (scopeCreateBtn) scopeCreateBtn.disabled = false;
+    if (scopeRenameBtn) scopeRenameBtn.disabled = !activeScope;
+    if (scopeDeleteBtn) scopeDeleteBtn.disabled = !activeScope || scopes.length <= 1;
+
+    renderCampaignScopeCasePicker(activeScope, cases, caseLookup);
+    renderCampaignScopeSequence(activeScope, activeCaseId, caseLookup);
+    renderCampaignScopeBoardReferences(activeScope, caseLookup);
+    const activeCountMessage = active === 1 ? '1 active case enforced' : `${active} active cases found`;
+    setCampaignScopeStatus(`Scope "${activeScopeName}" ready. Planned ${planned} · Resolved ${resolved} · ${activeCountMessage}.`);
 }
 
 function renderCaseSwitcher() {
@@ -187,7 +809,11 @@ function renderCaseSwitcher() {
 
     const count = cases.length;
     const activeLabel = activeCase && activeCase.name ? activeCase.name : (selectEl.options[selectEl.selectedIndex] && selectEl.options[selectEl.selectedIndex].textContent) || '—';
-    metaEl.textContent = `${count} case${count === 1 ? '' : 's'} | Active: ${activeLabel}`;
+    const context = readCampaignContextFromStore();
+    const activeScopeLabel = context && context.activeScope && context.activeScope.name
+        ? context.activeScope.name
+        : '—';
+    metaEl.textContent = `${count} case${count === 1 ? '' : 's'} | Active: ${activeLabel} | Scope: ${activeScopeLabel}`;
     if (deleteBtn) deleteBtn.disabled = count <= 1;
     if (renameBtn) renameBtn.disabled = !count;
     if (createBtn) createBtn.disabled = false;
@@ -205,6 +831,8 @@ function selectActiveCase(caseId) {
         return;
     }
     renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
 }
 
 function createCaseFromInput() {
@@ -223,6 +851,8 @@ function createCaseFromInput() {
     const id = window.RTF_STORE.createCase(name);
     input.value = '';
     renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
     if (id) setCaseSwitcherStatus(`Created and switched to "${name}".`);
 }
 
@@ -248,6 +878,8 @@ function renameActiveCase() {
         return;
     }
     renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
     setCaseSwitcherStatus(`Renamed case to "${trimmed}".`);
 }
 
@@ -273,6 +905,226 @@ function deleteActiveCase() {
         return;
     }
     renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+}
+
+function selectCampaignScope(scopeId) {
+    if (!window.RTF_STORE || typeof window.RTF_STORE.setActiveCampaignScope !== 'function') {
+        setCampaignScopeStatus('Campaign scope switching is unavailable in this build.', true);
+        return;
+    }
+    if (!window.RTF_STORE.setActiveCampaignScope(scopeId, { syncCase: true })) {
+        setCampaignScopeStatus('Could not switch to that campaign scope.', true);
+        renderCampaignContext();
+        return;
+    }
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+}
+
+function createCampaignScopeFromInput() {
+    const input = document.getElementById('campaign-scope-name');
+    if (!input) return;
+    if (!window.RTF_STORE || typeof window.RTF_STORE.createCampaignScope !== 'function') {
+        setCampaignScopeStatus('Campaign scope creation unavailable in this build.', true);
+        return;
+    }
+    const name = String(input.value || '').trim();
+    if (!name) {
+        setCampaignScopeStatus('Enter a campaign scope name first.', true);
+        input.focus();
+        return;
+    }
+    const id = window.RTF_STORE.createCampaignScope(name, { syncCase: true });
+    input.value = '';
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+    if (id) setCampaignScopeStatus(`Created and switched to scope "${name}".`);
+}
+
+function renameCampaignScope() {
+    if (!window.RTF_STORE || typeof window.RTF_STORE.renameCampaignScope !== 'function') {
+        setCampaignScopeStatus('Campaign scope rename unavailable in this build.', true);
+        return;
+    }
+    const active = typeof window.RTF_STORE.getActiveCampaignScope === 'function'
+        ? window.RTF_STORE.getActiveCampaignScope()
+        : null;
+    if (!active || !active.id) {
+        setCampaignScopeStatus('No active campaign scope to rename.', true);
+        return;
+    }
+    const next = prompt('Rename active campaign scope:', active.name || '');
+    if (next === null) return;
+    const trimmed = next.trim();
+    if (!trimmed) {
+        setCampaignScopeStatus('Campaign scope name cannot be empty.', true);
+        return;
+    }
+    if (!window.RTF_STORE.renameCampaignScope(active.id, trimmed)) {
+        setCampaignScopeStatus('Campaign scope rename failed.', true);
+        return;
+    }
+    renderCampaignContext();
+    renderCampaignOverview();
+    renderCaseSwitcher();
+    setCampaignScopeStatus(`Renamed campaign scope to "${trimmed}".`);
+}
+
+function deleteCampaignScope() {
+    if (!window.RTF_STORE || typeof window.RTF_STORE.deleteCampaignScope !== 'function') {
+        setCampaignScopeStatus('Campaign scope delete unavailable in this build.', true);
+        return;
+    }
+    const active = typeof window.RTF_STORE.getActiveCampaignScope === 'function'
+        ? window.RTF_STORE.getActiveCampaignScope()
+        : null;
+    const allScopes = typeof window.RTF_STORE.getCampaignScopes === 'function'
+        ? window.RTF_STORE.getCampaignScopes()
+        : [];
+    if (!active || !active.id) {
+        setCampaignScopeStatus('No active campaign scope to delete.', true);
+        return;
+    }
+    if (!Array.isArray(allScopes) || allScopes.length <= 1) {
+        setCampaignScopeStatus('At least one campaign scope must remain.', true);
+        return;
+    }
+    const ok = confirm(`Delete campaign scope "${active.name}"?`);
+    if (!ok) return;
+    if (!window.RTF_STORE.deleteCampaignScope(active.id, { syncCase: true })) {
+        setCampaignScopeStatus('Campaign scope delete failed.', true);
+        return;
+    }
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+}
+
+function addCaseToActiveScope() {
+    const picker = document.getElementById('campaign-scope-case-add');
+    if (!picker) return;
+    const caseId = String(picker.value || '').trim();
+    if (!caseId) return;
+    if (!window.RTF_STORE || typeof window.RTF_STORE.addCaseToCampaignScope !== 'function') {
+        setCampaignScopeStatus('Adding cases to scope is unavailable in this build.', true);
+        return;
+    }
+    const activeScopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    if (!activeScopeId) {
+        setCampaignScopeStatus('No active campaign scope found.', true);
+        return;
+    }
+    if (!window.RTF_STORE.addCaseToCampaignScope(activeScopeId, caseId, { syncCase: false })) {
+        setCampaignScopeStatus('Could not add that case to the active scope.', true);
+        return;
+    }
+    renderCampaignContext();
+    renderCampaignOverview();
+    setCampaignScopeStatus('Case added to active scope.');
+}
+
+function removeCaseFromActiveScope(caseId) {
+    const cleanCaseId = String(caseId || '').trim();
+    if (!cleanCaseId) return;
+    if (!window.RTF_STORE || typeof window.RTF_STORE.removeCaseFromCampaignScope !== 'function') {
+        setCampaignScopeStatus('Removing cases from scope is unavailable in this build.', true);
+        return;
+    }
+    const activeScopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    if (!activeScopeId) return;
+    const ok = confirm('Remove this case from the active campaign scope?');
+    if (!ok) return;
+    if (!window.RTF_STORE.removeCaseFromCampaignScope(activeScopeId, cleanCaseId, { syncCase: true })) {
+        setCampaignScopeStatus('Could not remove that case from the active scope.', true);
+        return;
+    }
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+}
+
+function moveCampaignScopeCase(caseId, delta) {
+    const cleanCaseId = String(caseId || '').trim();
+    const shift = Number(delta || 0);
+    if (!cleanCaseId || !shift) return;
+    if (!window.RTF_STORE || typeof window.RTF_STORE.moveCampaignScopeCase !== 'function') {
+        setCampaignScopeStatus('Case reordering is unavailable in this build.', true);
+        return;
+    }
+    const activeScopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    if (!activeScopeId) return;
+    if (!window.RTF_STORE.moveCampaignScopeCase(activeScopeId, cleanCaseId, shift, { syncCase: false })) {
+        setCampaignScopeStatus('Could not reorder this case in the active scope.', true);
+        return;
+    }
+    renderCampaignContext();
+    renderCampaignOverview();
+}
+
+function updateCampaignScopeCaseStatus(caseId, status) {
+    const cleanCaseId = String(caseId || '').trim();
+    const cleanStatus = String(status || '').trim().toLowerCase();
+    if (!cleanCaseId || !cleanStatus) return;
+    if (!window.RTF_STORE || typeof window.RTF_STORE.setCampaignScopeCaseStatus !== 'function') {
+        setCampaignScopeStatus('Scope status edits are unavailable in this build.', true);
+        return;
+    }
+    const activeScopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    if (!activeScopeId) return;
+    if (!window.RTF_STORE.setCampaignScopeCaseStatus(activeScopeId, cleanCaseId, cleanStatus)) {
+        setCampaignScopeStatus('Could not update case status in this scope.', true);
+        return;
+    }
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+    setCampaignScopeStatus(`Case status set to "${cleanStatus}".`);
+}
+
+function setCampaignScopeActiveCase(caseId) {
+    const cleanCaseId = String(caseId || '').trim();
+    if (!cleanCaseId) return;
+    if (!window.RTF_STORE || typeof window.RTF_STORE.setCampaignScopeActiveCase !== 'function') {
+        setCampaignScopeStatus('Scope active-case selection is unavailable in this build.', true);
+        return;
+    }
+    const activeScopeId = typeof window.RTF_STORE.getActiveCampaignScopeId === 'function'
+        ? window.RTF_STORE.getActiveCampaignScopeId()
+        : '';
+    if (!activeScopeId) return;
+    if (!window.RTF_STORE.setCampaignScopeActiveCase(activeScopeId, cleanCaseId, { syncCase: true })) {
+        setCampaignScopeStatus('Could not set that case active for this scope.', true);
+        return;
+    }
+    renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
+    setCampaignScopeStatus('Scope active case updated.');
+}
+
+function referenceCaseOnBoard(caseId) {
+    const cleanCaseId = String(caseId || '').trim();
+    if (!cleanCaseId) return;
+    const store = window.RTF_STORE;
+    if (store && typeof store.addCampaignScopeBoardRef === 'function' && typeof store.getActiveCampaignScopeId === 'function') {
+        const activeScopeId = store.getActiveCampaignScopeId();
+        if (activeScopeId) {
+            store.addCampaignScopeBoardRef(activeScopeId, cleanCaseId, {});
+        }
+    }
+    openCaseReferenceInBoard(cleanCaseId);
 }
 
 function getSyncFormValues() {
@@ -953,6 +1805,8 @@ function initSyncPanel() {
         return;
     }
     renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
     const caseInput = document.getElementById('new-case-name');
     if (caseInput && !caseInput.dataset.boundEnter) {
         caseInput.dataset.boundEnter = '1';
@@ -962,12 +1816,21 @@ function initSyncPanel() {
             createCaseFromInput();
         });
     }
+    const scopeInput = document.getElementById('campaign-scope-name');
+    if (scopeInput && !scopeInput.dataset.boundEnter) {
+        scopeInput.dataset.boundEnter = '1';
+        scopeInput.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            createCampaignScopeFromInput();
+        });
+    }
     loadCustomizeDefaults();
     applySyncConfigToForm(window.RTF_STORE.getSyncConfig());
     latestSyncStatus = window.RTF_STORE.getSyncStatus();
     setSyncStatusText(latestSyncStatus);
     setQuickStatusFromSync(latestSyncStatus);
-    updateSyncPanelVisibility(latestSyncStatus);
+    syncSecretModeUi();
     window.RTF_STORE.onSyncStatus((status) => {
         latestSyncStatus = status;
         setSyncStatusText(status);
@@ -982,6 +1845,8 @@ bindDelegatedDataHandlers();
 window.addEventListener('load', initSyncPanel);
 window.addEventListener('rtf-store-updated', () => {
     renderCaseSwitcher();
+    renderCampaignContext();
+    renderCampaignOverview();
 });
 window.addEventListener('rtf-sync-status', (event) => {
     latestSyncStatus = event.detail || null;
