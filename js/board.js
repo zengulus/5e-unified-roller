@@ -147,6 +147,8 @@ const LEDGER_STATUS_LABELS = {
     resolved: 'Resolved'
 };
 const NARRATIVE_META_NODE_TYPES = new Set(['clue', 'theory', 'event']);
+const NARRATIVE_CERTAINTY_NODE_TYPES = new Set(['clue', 'theory']);
+const NARRATIVE_RELIABILITY_NODE_TYPES = new Set(['clue', 'theory']);
 const TRUST_LEVEL_LABELS = ['Hostile', 'Wary', 'Neutral', 'Trusted', 'Loyal'];
 const STIGMA_LEVEL_LABELS = ['Clean', 'Rumored', 'Noticed', 'Marked', 'Burned'];
 const GROUP_NODE_DEFAULT_WIDTH = 460;
@@ -347,9 +349,11 @@ function setNodeMeta(el, meta) {
     const clean = sanitizeNodeMeta(meta);
     if (!clean) {
         delete el.dataset.meta;
+        applyNoteVariantClass(el, null);
         return;
     }
     el.dataset.meta = JSON.stringify(clean);
+    applyNoteVariantClass(el, clean);
 }
 
 function getNodeMeta(el) {
@@ -365,6 +369,22 @@ function getNodeTypeFromEl(el) {
     if (!el || !el.classList) return '';
     const cls = Array.from(el.classList).find(c => c.startsWith('type-')) || '';
     return cls.replace('type-', '');
+}
+
+function getNoteVariantFromMeta(meta) {
+    const sourceType = String(meta && meta.sourceType || '').trim().toLowerCase();
+    if (sourceType === 'lead') return 'lead';
+    if (sourceType === 'ledger') return 'ledger';
+    return 'freeform';
+}
+
+function applyNoteVariantClass(nodeEl, meta) {
+    if (!nodeEl || !nodeEl.classList || !nodeEl.classList.contains('type-note')) return;
+    const variant = getNoteVariantFromMeta(meta);
+    Array.from(nodeEl.classList)
+        .filter((cls) => cls.startsWith('note-variant-'))
+        .forEach((cls) => nodeEl.classList.remove(cls));
+    nodeEl.classList.add(`note-variant-${variant}`);
 }
 
 function isGroupNodeType(type) {
@@ -588,11 +608,17 @@ function ensureNarrativeNodeMeta(nodeEl) {
     const certaintySeed = type === 'theory'
         ? (baseMeta.certainty !== undefined ? baseMeta.certainty : baseMeta.confidence)
         : baseMeta.certainty;
-    const clean = {
-        ...baseMeta,
-        certainty: clampPercent(certaintySeed, 50),
-        reliability: normalizeReliability(baseMeta.reliability)
-    };
+    const clean = { ...baseMeta };
+    if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
+        clean.certainty = clampPercent(certaintySeed, 50);
+    } else if (Object.prototype.hasOwnProperty.call(clean, 'certainty')) {
+        delete clean.certainty;
+    }
+    if (NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
+        clean.reliability = normalizeReliability(baseMeta.reliability);
+    } else if (Object.prototype.hasOwnProperty.call(clean, 'reliability')) {
+        delete clean.reliability;
+    }
     if (type === 'theory') {
         clean.sourceType = String(clean.sourceType || 'theory');
         clean.theoryStatus = normalizeTheoryStatus(clean.theoryStatus);
@@ -611,16 +637,22 @@ function syncNodeNarrativeMetaDisplay(nodeEl) {
     if (!meta) return;
     const slot = nodeEl.querySelector('[data-node-meta-badges]');
     if (!slot) return;
-    const certainty = clampPercent(meta.certainty, type === 'theory' ? meta.confidence : 50);
-    const reliability = getReliabilityLabel(meta.reliability);
-    slot.innerHTML = `
-        <span class="node-meta-pill">Certainty ${certainty}%</span>
-        <span class="node-meta-pill">${sanitizeText(reliability)}</span>
-    `;
+    const pills = [];
+    if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
+        const certainty = clampPercent(meta.certainty, type === 'theory' ? meta.confidence : 50);
+        pills.push(`<span class="node-meta-pill">Certainty ${certainty}%</span>`);
+    }
+    if (NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
+        const reliability = getReliabilityLabel(meta.reliability);
+        pills.push(`<span class="node-meta-pill">${sanitizeText(reliability)}</span>`);
+    }
+    slot.innerHTML = pills.join('');
 }
 
 function persistLinkedNodeNarrativeMeta(nodeEl) {
     if (!nodeEl || !window.RTF_STORE) return;
+    const type = getNodeTypeFromEl(nodeEl);
+    if (!NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) return;
     const meta = ensureNarrativeNodeMeta(nodeEl);
     if (!meta) return;
     const store = window.RTF_STORE;
@@ -1612,7 +1644,6 @@ function buildLocationNodePayload(location) {
 function buildEventNodePayload(evt) {
     const source = evt && typeof evt === 'object' ? evt : {};
     const heat = parseInt(source.heatDelta, 10);
-    const certainty = clampPercent(source.certainty, 50);
     const severity = String(source.impactSeverity || 'moderate');
     const scope = String(source.impactScope || 'local');
     const lines = [];
@@ -1625,7 +1656,6 @@ function buildEventNodePayload(evt) {
         }
     }
     lines.push(`<strong>Impact:</strong> ${sanitizeText(severity)} / ${sanitizeText(scope)}`);
-    lines.push(`<strong>Certainty:</strong> ${certainty}%`);
     if (source.highlights) lines.push(`<strong>Beats:</strong><br>${sanitizeMultiline(source.highlights)}`);
     if (source.fallout) lines.push(`<strong>Fallout:</strong><br>${sanitizeMultiline(source.fallout)}`);
     if (source.followUp) lines.push(`<strong>Next:</strong> ${sanitizeMultiline(source.followUp)}`);
@@ -1644,9 +1674,7 @@ function buildEventNodePayload(evt) {
                 caseId: source.caseId || '',
                 dueAt: source.dueAt || '',
                 impactSeverity: severity,
-                impactScope: scope,
-                certainty,
-                reliability: normalizeReliability(source.reliability || 'unknown')
+                impactScope: scope
             }
         }
     };
@@ -1710,17 +1738,18 @@ function buildLeadNoteNodePayload(lead) {
     const targetId = String(source.targetId || '').trim();
     const type = String(source.type || 'other').trim().toLowerCase();
     const status = String(source.status || 'open').trim().toLowerCase();
+    const statusLabel = getLeadStatusLabel(status);
+    const typeLabel = type ? type.toUpperCase() : 'OTHER';
     const lines = [];
-    lines.push(`<strong>Status:</strong> ${sanitizeText(getLeadStatusLabel(status))}`);
-    lines.push(`<strong>Type:</strong> ${sanitizeText(type ? type.toUpperCase() : 'OTHER')}`);
-    if (question) lines.push(`<strong>Question:</strong> ${sanitizeMultiline(question)}`);
-    if (nextStep) lines.push(`<strong>Next Step:</strong> ${sanitizeMultiline(nextStep)}`);
-    if (targetId) lines.push(`<strong>Target ID:</strong> ${sanitizeText(targetId)}`);
+    lines.push(`<div><strong>Status</strong>: ${sanitizeText(statusLabel)} | <strong>Type</strong>: ${sanitizeText(typeLabel)}</div>`);
+    if (question) lines.push(`<div><strong>Question</strong><br>${sanitizeMultiline(question)}</div>`);
+    if (nextStep) lines.push(`<div><strong>Next Step</strong><br>${sanitizeMultiline(nextStep)}</div>`);
+    if (!question && !nextStep) lines.push('<div><strong>Next Step</strong><br>Clarify this lead with a concrete action.</div>');
 
     return {
         nodeType: 'note',
         nodeData: {
-            title: `Lead: ${titleBase}`.slice(0, 180),
+            title: titleBase.slice(0, 180),
             body: lines.join('<br>'),
             meta: {
                 sourceType: 'lead',
@@ -1743,19 +1772,15 @@ function buildLedgerNoteNodePayload(entry) {
     const certainty = clampPercent(source.certainty, 50);
     const titleBase = statement || 'Ledger Entry';
     const lines = [];
-    lines.push(`<strong>Status:</strong> ${sanitizeText(getLedgerStatusLabel(status))}`);
-    lines.push(`<strong>Certainty:</strong> ${certainty}%`);
-    if (statement) lines.push(`<strong>Statement:</strong> ${sanitizeMultiline(statement)}`);
-    if (notes) lines.push(`<strong>Notes:</strong> ${sanitizeMultiline(notes)}`);
-    if (sourceType || sourceId) {
-        const sourceLabel = sourceId ? `${sourceType}${sourceType ? ':' : ''}${sourceId}` : sourceType;
-        lines.push(`<strong>Source:</strong> ${sanitizeText(sourceLabel)}`);
-    }
+    lines.push(`<div><strong>Status</strong>: ${sanitizeText(getLedgerStatusLabel(status))} | <strong>Certainty</strong>: ${certainty}%</div>`);
+    if (statement) lines.push(`<div><strong>Statement</strong><br>${sanitizeMultiline(statement)}</div>`);
+    if (notes) lines.push(`<div><strong>Notes</strong><br>${sanitizeMultiline(notes)}</div>`);
+    if (sourceType) lines.push(`<div><strong>Source</strong>: ${sanitizeText(sourceType)}</div>`);
 
     return {
         nodeType: 'note',
         nodeData: {
-            title: `Ledger: ${titleBase}`.slice(0, 180),
+            title: titleBase.slice(0, 180),
             body: lines.join('<br>'),
             meta: {
                 sourceType: 'ledger',
@@ -1767,6 +1792,16 @@ function buildLedgerNoteNodePayload(entry) {
             }
         }
     };
+}
+
+let notePopupTab = 'freeform';
+let noteLeadSearchQuery = '';
+let noteLedgerSearchQuery = '';
+
+function normalizeNoteTab(value) {
+    const token = String(value || '').trim().toLowerCase();
+    if (token === 'leads' || token === 'ledger') return token;
+    return 'freeform';
 }
 
 function getBoardLeadEntries() {
@@ -1803,51 +1838,125 @@ function createNoteSpawnTool(icon, label, submeta, payload) {
     return el;
 }
 
+function applyNotePopupTabState() {
+    const cleanTab = normalizeNoteTab(notePopupTab);
+    const tabs = Array.from(document.querySelectorAll('#note-popup [data-note-tab]'));
+    const panels = Array.from(document.querySelectorAll('#note-popup [data-note-panel]'));
+    tabs.forEach((tabBtn) => {
+        const tabName = normalizeNoteTab(tabBtn.dataset.noteTab);
+        tabBtn.classList.toggle('is-active', tabName === cleanTab);
+    });
+    panels.forEach((panel) => {
+        const panelName = normalizeNoteTab(panel.dataset.notePanel);
+        panel.classList.toggle('is-active', panelName === cleanTab);
+    });
+    notePopupTab = cleanTab;
+}
+
+function renderNoteFreeformList() {
+    const freeformList = document.getElementById('note-freeform-list');
+    if (!freeformList) return;
+    freeformList.innerHTML = '';
+    const freeform = buildFreeformNoteNodePayload();
+    freeformList.appendChild(createNoteSpawnTool('📝', 'Freeform Note', 'Blank sticky note', freeform));
+}
+
+function renderNoteLeadList() {
+    const leadList = document.getElementById('note-lead-list');
+    if (!leadList) return;
+    const query = String(noteLeadSearchQuery || '').trim().toLowerCase();
+    const leads = getBoardLeadEntries().filter((lead) => {
+        if (!query) return true;
+        const haystack = `${lead && lead.title || ''} ${lead && lead.question || ''} ${lead && lead.nextStep || ''} ${lead && lead.targetId || ''} ${lead && lead.type || ''} ${lead && lead.status || ''}`.toLowerCase();
+        return haystack.includes(query);
+    });
+    if (!leads.length) {
+        leadList.innerHTML = '<div class="board-popup-empty">No leads match this search.</div>';
+        return;
+    }
+    leadList.innerHTML = '';
+    leads.forEach((lead) => {
+        const payload = buildLeadNoteNodePayload(lead);
+        const title = String(lead && lead.title || '').trim() || 'Untitled Lead';
+        const statusLabel = getLeadStatusLabel(lead && lead.status);
+        const typeLabel = String(lead && lead.type || 'other').trim().toUpperCase();
+        leadList.appendChild(createNoteSpawnTool('🧭', title, `${statusLabel} • ${typeLabel}`, payload));
+    });
+}
+
+function renderNoteLedgerList() {
+    const ledgerList = document.getElementById('note-ledger-list');
+    if (!ledgerList) return;
+    const query = String(noteLedgerSearchQuery || '').trim().toLowerCase();
+    const ledgerEntries = getBoardLedgerEntries().filter((entry) => {
+        if (!query) return true;
+        const haystack = `${entry && entry.statement || ''} ${entry && entry.notes || ''} ${entry && entry.tags || ''} ${entry && entry.sourceType || ''} ${entry && entry.sourceId || ''} ${entry && entry.status || ''}`.toLowerCase();
+        return haystack.includes(query);
+    });
+    if (!ledgerEntries.length) {
+        ledgerList.innerHTML = '<div class="board-popup-empty">No ledger entries match this search.</div>';
+        return;
+    }
+    ledgerList.innerHTML = '';
+    ledgerEntries.forEach((entry) => {
+        const payload = buildLedgerNoteNodePayload(entry);
+        const statement = String(entry && entry.statement || '').trim() || 'Ledger Entry';
+        const statusLabel = getLedgerStatusLabel(entry && entry.status);
+        const certainty = clampPercent(entry && entry.certainty, 50);
+        ledgerList.appendChild(createNoteSpawnTool('📚', statement, `${statusLabel} • ${certainty}%`, payload));
+    });
+}
+
+function setNotePopupTab(tabName) {
+    notePopupTab = normalizeNoteTab(tabName);
+    applyNotePopupTabState();
+}
+
+function setNoteLeadSearch(value) {
+    noteLeadSearchQuery = String(value || '');
+    renderNoteLeadList();
+}
+
+function setNoteLedgerSearch(value) {
+    noteLedgerSearchQuery = String(value || '');
+    renderNoteLedgerList();
+}
+
 function renderNotePopup() {
     const container = document.getElementById('note-popup');
     if (!container) return;
     container.innerHTML = `
-        <div class="board-tool-submeta">Freeform</div>
-        <div id="note-freeform-list"></div>
-        <div class="board-tool-submeta">Leads</div>
-        <div id="note-lead-list"></div>
-        <div class="board-tool-submeta">Ledger</div>
-        <div id="note-ledger-list"></div>
+        <div class="note-tab-row">
+            <button type="button" class="note-tab-btn" data-note-tab="freeform" data-onclick="setNotePopupTab('freeform')">Freeform</button>
+            <button type="button" class="note-tab-btn" data-note-tab="leads" data-onclick="setNotePopupTab('leads')">Leads</button>
+            <button type="button" class="note-tab-btn" data-note-tab="ledger" data-onclick="setNotePopupTab('ledger')">Ledger</button>
+        </div>
+        <section class="note-tab-panel" data-note-panel="freeform">
+            <div id="note-freeform-list"></div>
+        </section>
+        <section class="note-tab-panel" data-note-panel="leads">
+            <div class="note-search-row">
+                <input id="note-lead-search" class="filter-input note-search-input" type="text" placeholder="Search leads..." data-oninput="setNoteLeadSearch(this.value)">
+            </div>
+            <div id="note-lead-list"></div>
+        </section>
+        <section class="note-tab-panel" data-note-panel="ledger">
+            <div class="note-search-row">
+                <input id="note-ledger-search" class="filter-input note-search-input" type="text" placeholder="Search ledger..." data-oninput="setNoteLedgerSearch(this.value)">
+            </div>
+            <div id="note-ledger-list"></div>
+        </section>
     `;
 
-    const freeformList = document.getElementById('note-freeform-list');
-    const leadList = document.getElementById('note-lead-list');
-    const ledgerList = document.getElementById('note-ledger-list');
-    if (!freeformList || !leadList || !ledgerList) return;
+    const leadSearchEl = document.getElementById('note-lead-search');
+    const ledgerSearchEl = document.getElementById('note-ledger-search');
+    if (leadSearchEl) leadSearchEl.value = noteLeadSearchQuery;
+    if (ledgerSearchEl) ledgerSearchEl.value = noteLedgerSearchQuery;
 
-    const freeform = buildFreeformNoteNodePayload();
-    freeformList.appendChild(createNoteSpawnTool('📝', 'Freeform Note', 'Blank sticky note', freeform));
-
-    const leads = getBoardLeadEntries();
-    if (!leads.length) {
-        leadList.innerHTML = '<div class="board-popup-empty">No leads in this case.</div>';
-    } else {
-        leads.forEach((lead) => {
-            const payload = buildLeadNoteNodePayload(lead);
-            const title = String(lead && lead.title || '').trim() || 'Untitled Lead';
-            const statusLabel = getLeadStatusLabel(lead && lead.status);
-            const typeLabel = String(lead && lead.type || 'other').trim().toUpperCase();
-            leadList.appendChild(createNoteSpawnTool('🧭', title, `${statusLabel} • ${typeLabel}`, payload));
-        });
-    }
-
-    const ledgerEntries = getBoardLedgerEntries();
-    if (!ledgerEntries.length) {
-        ledgerList.innerHTML = '<div class="board-popup-empty">No ledger entries found.</div>';
-    } else {
-        ledgerEntries.forEach((entry) => {
-            const payload = buildLedgerNoteNodePayload(entry);
-            const statement = String(entry && entry.statement || '').trim() || 'Ledger Entry';
-            const statusLabel = getLedgerStatusLabel(entry && entry.status);
-            const certainty = clampPercent(entry && entry.certainty, 50);
-            ledgerList.appendChild(createNoteSpawnTool('📚', statement, `${statusLabel} • ${certainty}%`, payload));
-        });
-    }
+    renderNoteFreeformList();
+    renderNoteLeadList();
+    renderNoteLedgerList();
+    applyNotePopupTabState();
 }
 
 function initNoteToolbar() {
@@ -3061,8 +3170,20 @@ function createNodeMarkup(type, content = {}) {
     }
 
     if (type === 'note') {
+        const variant = getNoteVariantFromMeta(content && content.meta);
+        if (variant === 'freeform') {
+            return `
+                <div class="sticky-sheet" data-edge-target>
+                    ${withTitle}
+                    <div class="node-body">${bodyHtml}</div>
+                </div>
+            `;
+        }
+        const variantLabel = variant === 'lead' ? 'Lead Brief' : 'Ledger Record';
+        const variantClass = variant === 'lead' ? 'note-card-lead' : 'note-card-ledger';
         return `
-            <div class="sticky-sheet" data-edge-target>
+            <div class="note-card ${variantClass}" data-edge-target>
+                <div class="note-kind">${variantLabel}</div>
                 ${withTitle}
                 <div class="node-body">${bodyHtml}</div>
             </div>
@@ -3685,6 +3806,8 @@ function showContextMenu(e, node) {
     const type = getNodeTypeFromEl(node);
     const isTheory = type === 'theory';
     const supportsNarrativeMeta = NARRATIVE_META_NODE_TYPES.has(type);
+    const supportsCertainty = NARRATIVE_CERTAINTY_NODE_TYPES.has(type);
+    const supportsReliability = NARRATIVE_RELIABILITY_NODE_TYPES.has(type);
     if (supportsNarrativeMeta) {
         ensureNarrativeNodeMeta(node);
         syncNodeNarrativeMetaDisplay(node);
@@ -3700,8 +3823,8 @@ function showContextMenu(e, node) {
     if (setImageItem) {
         setImageItem.style.display = IMAGE_EDITABLE_NODE_TYPES.has(type) ? 'block' : 'none';
     }
-    if (setCertaintyItem) setCertaintyItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
-    if (setReliabilityItem) setReliabilityItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
+    if (setCertaintyItem) setCertaintyItem.style.display = supportsCertainty ? 'block' : 'none';
+    if (setReliabilityItem) setReliabilityItem.style.display = supportsReliability ? 'block' : 'none';
     if (addLedgerItem) addLedgerItem.style.display = type !== 'group' ? 'block' : 'none';
     if (theoryConfidenceItem) theoryConfidenceItem.style.display = isTheory ? 'block' : 'none';
     if (theoryConfirmedItem) theoryConfirmedItem.style.display = isTheory ? 'block' : 'none';
@@ -3825,8 +3948,16 @@ function applyNarrativeMetaUpdate(nodeEl, updates = {}) {
         ...base,
         ...patch
     };
-    next.certainty = clampPercent(next.certainty, type === 'theory' ? next.confidence : 50);
-    next.reliability = normalizeReliability(next.reliability);
+    if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
+        next.certainty = clampPercent(next.certainty, type === 'theory' ? next.confidence : 50);
+    } else {
+        delete next.certainty;
+    }
+    if (NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
+        next.reliability = normalizeReliability(next.reliability);
+    } else {
+        delete next.reliability;
+    }
     if (type === 'theory') {
         next.sourceType = String(next.sourceType || 'theory');
         next.theoryStatus = normalizeTheoryStatus(next.theoryStatus);
@@ -3849,7 +3980,7 @@ function setTargetNodeCertainty() {
         return;
     }
     const type = getNodeTypeFromEl(nodeEl);
-    if (!NARRATIVE_META_NODE_TYPES.has(type)) {
+    if (!NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
         contextMenu.style.display = 'none';
         return;
     }
@@ -3875,7 +4006,7 @@ function setTargetNodeReliability() {
         return;
     }
     const type = getNodeTypeFromEl(nodeEl);
-    if (!NARRATIVE_META_NODE_TYPES.has(type)) {
+    if (!NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
         contextMenu.style.display = 'none';
         return;
     }
