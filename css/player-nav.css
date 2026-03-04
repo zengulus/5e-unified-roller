@@ -42,7 +42,7 @@
     position: absolute;
     top: calc(100% + 10px);
     right: 0;
-    width: min(340px, calc(100vw - 24px));
+    width: min(420px, calc(100vw - 24px));
     max-width: calc(100vw - 24px);
     padding: 10px;
     border: 1px solid rgba(255, 255, 255, 0.14);
@@ -117,6 +117,33 @@
 .hero-actions.has-hero-menu .hero-menu-nav-link {
     width: 100%;
     justify-content: flex-start;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+    border-radius: 14px;
+    padding: 10px 12px;
+    line-height: 1.25;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-label {
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-desc {
+    font-size: 0.73rem;
+    font-weight: 500;
+    color: color-mix(in srgb, #d8deea 74%, var(--accent-secondary) 26%);
+    text-shadow: none;
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-link:hover .hero-menu-nav-desc {
+    color: color-mix(in srgb, #eef2ff 80%, var(--accent-secondary) 20%);
+}
+
+.hero-actions.has-hero-menu .hero-menu-nav-link.is-active .hero-menu-nav-desc {
+    color: color-mix(in srgb, #f4f8ff 84%, var(--accent-secondary) 16%);
 }
 
 .hero-actions.has-hero-menu .hero-menu-nav-link.is-active {

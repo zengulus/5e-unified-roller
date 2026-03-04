@@ -1,39 +1,68 @@
 (function () {
     const PLAYER_NAV_ITEMS = [
-        { id: 'sheet', label: 'Sheet', href: 'index.html' },
-        { id: 'dashboard', label: 'Dashboard', href: 'player-dashboard.html' },
-        { id: 'timeline', label: 'Timeline', href: 'timeline.html' },
-        { id: 'leads', label: 'Leads', href: 'leads.html' },
-        { id: 'ledger', label: 'Ledger', href: 'ledger.html' },
-        { id: 'board', label: 'Board', href: 'board.html' },
-        { id: 'roster', label: 'Roster', href: 'roster.html' },
-        { id: 'locations', label: 'Locations', href: 'locations.html' },
-        { id: 'requisitions', label: 'Requisitions', href: 'requisitions.html' },
-        { id: 'prep', label: 'Prep/Procedure', href: 'prep-procedure.html' }
+        { id: 'sheet', label: 'Sheet', href: 'index.html', description: 'Your character sheet, rolls, inventory, spells, and story notes.' },
+        { id: 'dashboard', label: 'Dashboard', href: 'player-dashboard.html', description: 'Party snapshot for HP, AC, passives, and quick table status.' },
+        { id: 'timeline', label: 'Timeline', href: 'timeline.html', description: 'Session beats, fallout, and forward hooks in chronological order.' },
+        { id: 'leads', label: 'Leads', href: 'leads.html', description: 'Track investigation threads, vote priority, and lock next steps.' },
+        { id: 'ledger', label: 'Ledger', href: 'ledger.html', description: 'Known truths vs contested claims with certainty tracking.' },
+        { id: 'board', label: 'Board', href: 'board.html', description: 'Visual case map linking clues, people, locations, and theories.' },
+        { id: 'roster', label: 'Roster', href: 'roster.html', description: 'NPC database with trust, leverage, and notes for scene prep.' },
+        { id: 'locations', label: 'Locations', href: 'locations.html', description: 'Location index with district context, hooks, and references.' },
+        { id: 'requisitions', label: 'Requisitions', href: 'requisitions.html', description: 'Shared gear requests, statuses, priorities, and approvals.' },
+        { id: 'prep', label: 'Prep/Procedure', href: 'prep-procedure.html', description: 'Prep and procedure clocks for pacing, pressure, and spend.' }
     ];
     const GM_NAV_ITEMS = [
-        { id: 'gm', label: 'GM Hub', href: 'gm.html' },
-        { id: 'dm-screen', label: 'DM Screen', href: 'dm-screen.html' },
-        { id: 'encounters', label: 'Encounters', href: 'encounters.html' },
-        { id: 'clocks', label: 'Clocks', href: 'clocks.html' },
-        { id: 'clue', label: 'Clue', href: 'clue.html' },
-        { id: 'hq', label: 'HQ', href: 'hq.html' },
-        { id: 'hub', label: 'Hub', href: 'hub.html' },
-        { id: 'tourney', label: 'Tourney', href: 'tourney.html' }
+        { id: 'tools', label: 'Portal', href: 'tools.html', description: 'GM control hub for sync, import/export, and campaign utilities.' },
+        { id: 'gm', label: 'GM Hub', href: 'gm.html', description: 'Live GM console for initiative, quick rolls, and encounter control.' },
+        { id: 'dm-screen', label: 'DM Screen', href: 'dm-screen.html', description: 'Scene-forward reference panel for narration and table pacing.' },
+        { id: 'encounters', label: 'Encounters', href: 'encounters.html', description: 'Build and launch encounter recipes, hazards, and stat packages.' },
+        { id: 'clocks', label: 'Clocks', href: 'clocks.html', description: 'Create and run standalone progress or danger clocks.' },
+        { id: 'clue', label: 'Clue', href: 'clue.html', description: 'Generate clue intersections and mystery signal/noise prompts.' },
+        { id: 'hq', label: 'HQ', href: 'hq.html', description: 'Manage base facilities, projects, and operational support.' },
+        { id: 'hub', label: 'Hub', href: 'hub.html', description: 'Campaign status board for heat, pressure, and roster operations.' },
+        { id: 'tourney', label: 'Tourney', href: 'tourney.html', description: 'Bracket planner for duels, tournaments, and elimination arcs.' }
     ];
-
     const header = document.querySelector('.hero-header');
     if (!header || header.dataset.playerNavReady === '1') return;
 
     const body = document.body;
     const explicitActive = body && body.dataset ? String(body.dataset.playerNav || '').trim() : '';
     const path = String(window.location.pathname || '').split('/').pop().toLowerCase();
-    const inferredActive = (PLAYER_NAV_ITEMS.find((item) => item.href.toLowerCase() === path) || {}).id || '';
+    const inferredActive = (
+        PLAYER_NAV_ITEMS.find((item) => item.href.toLowerCase() === path)
+        || GM_NAV_ITEMS.find((item) => item.href.toLowerCase() === path)
+        || {}
+    ).id || '';
     const activeId = explicitActive || inferredActive;
 
     function isAddActionLabel(labelText) {
         const clean = String(labelText || '').trim().toLowerCase();
         return /^\+\s*(add|new|log)\b/.test(clean);
+    }
+
+    function hrefPointsToTools(linkEl) {
+        if (!(linkEl instanceof HTMLAnchorElement)) return false;
+        const rawHref = String(linkEl.getAttribute('href') || '').trim();
+        if (!rawHref) return false;
+
+        try {
+            const resolved = new URL(rawHref, window.location.href);
+            return String(resolved.pathname || '').toLowerCase().endsWith('/tools.html');
+        } catch (err) {
+            return rawHref.toLowerCase().replace(/^\.?\//, '').startsWith('tools.html');
+        }
+    }
+
+    function stripPortalActionsFromBars(bars) {
+        bars.forEach((bar) => {
+            const links = Array.from(bar.querySelectorAll('a.hero-btn'));
+            links.forEach((link) => {
+                if (!hrefPointsToTools(link)) return;
+                link.remove();
+            });
+            const hasControls = !!bar.querySelector('a, button, input, select, textarea');
+            if (!hasControls) bar.remove();
+        });
     }
 
     function buildNavPanel(items, panelTitle, ariaLabel, panelClass = 'hero-menu-nav-panel') {
@@ -55,7 +84,23 @@
             link.href = item.href;
             const isActive = item.id === activeId || item.href.toLowerCase() === path;
             link.className = `hero-btn ghost hero-menu-nav-link${isActive ? ' is-active' : ''}`;
-            link.textContent = item.label;
+            if (isActive) link.setAttribute('aria-current', 'page');
+            if (item.description) {
+                link.title = `${item.label}: ${item.description}`;
+            }
+
+            const label = document.createElement('span');
+            label.className = 'hero-menu-nav-label';
+            label.textContent = item.label;
+            link.appendChild(label);
+
+            if (item.description) {
+                const desc = document.createElement('span');
+                desc.className = 'hero-menu-nav-desc';
+                desc.textContent = item.description;
+                link.appendChild(desc);
+            }
+
             nav.appendChild(link);
         });
 
@@ -111,6 +156,8 @@
         }
         if (!bars.length) return;
 
+        stripPortalActionsFromBars(bars);
+        bars = bars.filter((bar) => bar && bar.isConnected);
         moveAddButtonsBelowHero(bars);
 
         const controls = document.createElement('div');
