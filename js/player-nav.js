@@ -4,6 +4,7 @@
         { id: 'dashboard', label: 'Dashboard', href: 'player-dashboard.html' },
         { id: 'timeline', label: 'Timeline', href: 'timeline.html' },
         { id: 'leads', label: 'Leads', href: 'leads.html' },
+        { id: 'ledger', label: 'Ledger', href: 'ledger.html' },
         { id: 'board', label: 'Board', href: 'board.html' },
         { id: 'roster', label: 'Roster', href: 'roster.html' },
         { id: 'locations', label: 'Locations', href: 'locations.html' },

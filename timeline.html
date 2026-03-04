@@ -45,8 +45,34 @@
                         <input type="text" id="eventFocus" placeholder="Precinct, Guild, District">
                     </div>
                     <div>
+                        <label>Deadline</label>
+                        <input type="datetime-local" id="eventDueAt">
+                    </div>
+                    <div>
                         <label>Heat Δ</label>
                         <input type="number" id="eventHeat" placeholder="0">
+                    </div>
+                    <div>
+                        <label>Severity</label>
+                        <select id="eventImpactSeverity">
+                            <option value="low">Low</option>
+                            <option value="moderate" selected>Moderate</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Scope</label>
+                        <select id="eventImpactScope">
+                            <option value="local" selected>Local</option>
+                            <option value="district">District</option>
+                            <option value="guildwide">Guildwide</option>
+                            <option value="citywide">Citywide</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Certainty (0-100)</label>
+                        <input type="number" id="eventCertainty" min="0" max="100" step="1" value="50">
                     </div>
                     <div>
                         <label>Tags</label>
@@ -56,6 +82,22 @@
                         <label>Image URL</label>
                         <input type="url" id="eventImageUrl" placeholder="https://...">
                     </div>
+                </div>
+                <div class="impact-editor">
+                    <label>Impacted Entities</label>
+                    <div class="impact-editor-row">
+                        <select id="eventImpactType" data-onchange="updateDraftImpactIdOptions()">
+                            <option value="npc">NPC</option>
+                            <option value="location">Location</option>
+                            <option value="requisition">Requisition</option>
+                            <option value="event">Timeline Event</option>
+                        </select>
+                        <select id="eventImpactId"></select>
+                        <input type="text" id="eventImpactNote" placeholder="Impact note (optional)">
+                        <button class="btn" type="button" data-onclick="addDraftEntityImpact()">Add Impact</button>
+                    </div>
+                    <div class="impact-quick-row" id="eventImpactQuickRow"></div>
+                    <div class="impact-chip-row" id="eventImpactList"></div>
                 </div>
                 <div class="event-body">
                     <textarea id="eventHighlights" placeholder="Highlights / Beats"></textarea>
@@ -83,6 +125,8 @@
                     <div class="filter-toggles">
                         <button class="toggle-btn" id="eventImpactOnly" type="button" aria-pressed="false"
                             data-onclick="toggleFilterButton(this, renderTimeline)">Heat / Fallout only</button>
+                        <button class="toggle-btn" id="eventOverdueOnly" type="button" aria-pressed="false"
+                            data-onclick="toggleFilterButton(this, renderTimeline)">Overdue only</button>
                         <button class="toggle-btn" id="eventAutoHeat" type="button" aria-pressed="false"
                             data-onclick="toggleAutoHeat(this)">Auto-sync Heat</button>
                         <button class="toggle-btn" id="eventHideResolved" type="button" aria-pressed="false"

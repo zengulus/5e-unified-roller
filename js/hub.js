@@ -146,6 +146,55 @@ function importData() {
     }
 }
 
+function getAllCaseEvents() {
+    if (!window.RTF_STORE || !window.RTF_STORE.state) return [];
+    if (!window.RTF_STORE.state.cases) {
+        const legacyEvents = window.RTF_STORE.state.campaign && Array.isArray(window.RTF_STORE.state.campaign.events)
+            ? window.RTF_STORE.state.campaign.events
+            : [];
+        return legacyEvents.slice();
+    }
+    const cases = Array.isArray(window.RTF_STORE.state.cases.items) ? window.RTF_STORE.state.cases.items : [];
+    const out = [];
+    cases.forEach((entry) => {
+        const events = entry && Array.isArray(entry.events) ? entry.events : [];
+        events.forEach((evt) => out.push(evt));
+    });
+    return out;
+}
+
+function renderNarrativePressure() {
+    const summaryEl = document.getElementById('hubNarrativePressureSummary');
+    if (!summaryEl || !window.RTF_STORE) return;
+    const events = getAllCaseEvents();
+    const now = Date.now();
+    const overdueCount = events.filter((evt) => {
+        if (!evt || evt.resolved) return false;
+        const dueTs = Date.parse(String(evt.dueAt || '').trim());
+        return Number.isFinite(dueTs) && dueTs < now;
+    }).length;
+    const highImpactCount = events.filter((evt) => {
+        if (!evt || evt.resolved) return false;
+        const severity = String(evt.impactSeverity || '').trim().toLowerCase();
+        return severity === 'high' || severity === 'critical';
+    }).length;
+    const ledger = window.RTF_STORE.state && window.RTF_STORE.state.campaign && window.RTF_STORE.state.campaign.ledger
+        ? window.RTF_STORE.state.campaign.ledger
+        : { entries: [] };
+    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const stableCount = entries.filter((entry) => String(entry && entry.status || '') === 'stable').length;
+    const contestedCount = entries.filter((entry) => {
+        const status = String(entry && entry.status || '');
+        return status === 'contested' || status === 'collapsed';
+    }).length;
+
+    summaryEl.innerHTML = `
+        <div>Overdue unresolved deadlines: <strong>${overdueCount}</strong></div>
+        <div>High-impact unresolved events: <strong>${highImpactCount}</strong></div>
+        <div>Ledger stable vs contested/collapsed: <strong>${stableCount} / ${contestedCount}</strong></div>
+    `;
+}
+
 function saveCase() {
     const campaign = getCampaign();
     if (!campaign || !campaign.case) return;
@@ -365,6 +414,7 @@ function render() {
     document.getElementById('rosterList').innerHTML = `${rosterMarkup}<datalist id="reward-options">${rewardOptions}</datalist>`;
 
     applyClockPieStyles(document.getElementById('rosterList'));
+    renderNarrativePressure();
 
 }
 

@@ -1,0 +1,246 @@
+body {
+    font-family: 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, var(--bg-top), var(--bg-bottom));
+    color: var(--text);
+    margin: 0;
+    min-height: 100vh;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: relative;
+    z-index: 2;
+}
+
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(8px);
+}
+
+h2 {
+    margin: 0 0 10px;
+    color: var(--accent);
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.ledger-form-grid,
+.ledger-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.ledger-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ledger-field-wide {
+    grid-column: 1 / -1;
+}
+
+.ledger-field label {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #9aa6ba;
+}
+
+input[type="text"],
+input[type="number"],
+select,
+textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: #fff;
+    border-radius: 8px;
+    padding: 9px 10px;
+    font-size: 0.92rem;
+    font-family: inherit;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+textarea {
+    resize: vertical;
+}
+
+.ledger-form-actions {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.ledger-summary {
+    margin: 10px 0;
+    color: #a9b7cb;
+    font-size: 0.9rem;
+}
+
+.ledger-list {
+    display: grid;
+    gap: 10px;
+}
+
+.ledger-entry {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.ledger-entry-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.ledger-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ledger-pill {
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    color: #d4dded;
+    background: rgba(0, 0, 0, 0.28);
+}
+
+.ledger-pill.status-stable {
+    border-color: rgba(120, 223, 174, 0.5);
+    color: #b9f3d5;
+}
+
+.ledger-pill.status-contested {
+    border-color: rgba(255, 206, 122, 0.55);
+    color: #ffe2ab;
+}
+
+.ledger-pill.status-collapsed {
+    border-color: rgba(255, 122, 122, 0.56);
+    color: #ffc2c2;
+}
+
+.ledger-pill.status-resolved {
+    border-color: rgba(146, 182, 255, 0.52);
+    color: #c8ddff;
+}
+
+.ledger-entry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+}
+
+.ledger-entry-grid .ledger-field-wide {
+    grid-column: 1 / -1;
+}
+
+.ledger-meta {
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: #8d98aa;
+}
+
+.ledger-actions {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.stable-facts-list {
+    display: grid;
+    gap: 8px;
+}
+
+.ledger-subtitle {
+    margin: 14px 0 8px;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #9fb2cd;
+}
+
+.stable-fact-item {
+    border: 1px solid rgba(128, 220, 178, 0.32);
+    border-radius: 8px;
+    background: rgba(6, 26, 18, 0.45);
+    padding: 8px 10px;
+    color: #d8f5e7;
+    font-size: 0.9rem;
+}
+
+.stable-fact-item.is-contested {
+    border-color: rgba(255, 208, 132, 0.32);
+    background: rgba(44, 30, 10, 0.42);
+    color: #ffe3b3;
+}
+
+.stable-fact-item.is-collapsed {
+    border-color: rgba(255, 128, 128, 0.35);
+    background: rgba(45, 14, 14, 0.45);
+    color: #ffc7c7;
+}
+
+.ledger-empty {
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+    color: #7f8897;
+}
+
+.ledger-accent-picker-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+canvas#vector-cloud {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+
+    .ledger-actions .btn,
+    .ledger-form-actions .btn {
+        width: 100%;
+    }
+}

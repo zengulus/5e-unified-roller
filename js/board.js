@@ -127,6 +127,14 @@ const ENCOUNTER_DRAFT_STORAGE_PREFIX = 'rtf_encounter_draft_';
 const LEAD_STORAGE_KEY = 'rtf_lead_queue_v1';
 const THEORY_RELATIONS = ['supports', 'contradicts', 'related'];
 const THEORY_STATUSES = new Set(['unproven', 'confirmed', 'disproven']);
+const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
+const RELIABILITY_LABELS = {
+    unknown: 'Unknown',
+    rumored: 'Rumored',
+    corroborated: 'Corroborated',
+    verified: 'Verified'
+};
+const NARRATIVE_META_NODE_TYPES = new Set(['clue', 'theory', 'event']);
 const TRUST_LEVEL_LABELS = ['Hostile', 'Wary', 'Neutral', 'Trusted', 'Loyal'];
 const STIGMA_LEVEL_LABELS = ['Clean', 'Rumored', 'Noticed', 'Marked', 'Burned'];
 const GROUP_NODE_DEFAULT_WIDTH = 460;
@@ -498,6 +506,11 @@ function normalizeTheoryRelation(value) {
     return THEORY_RELATIONS.includes(clean) ? clean : 'supports';
 }
 
+function normalizeReliability(value) {
+    const clean = String(value || '').trim().toLowerCase();
+    return RELIABILITY_LEVELS.has(clean) ? clean : 'unknown';
+}
+
 function clampPercent(value, fallback = 50) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return fallback;
@@ -522,6 +535,89 @@ function getTheoryRelationLabel(relation) {
     if (clean === 'contradicts') return 'Contradicts';
     if (clean === 'related') return 'Related';
     return 'Supports';
+}
+
+function getReliabilityLabel(value) {
+    const clean = normalizeReliability(value);
+    return RELIABILITY_LABELS[clean] || 'Unknown';
+}
+
+function getBoardMutationStamp() {
+    const store = window.RTF_STORE;
+    if (store && typeof store.getMutationStamp === 'function') {
+        const stamp = store.getMutationStamp();
+        return {
+            lastChangedBy: String(stamp && stamp.lastChangedBy || 'local'),
+            lastChangedAt: String(stamp && stamp.lastChangedAt || new Date().toISOString())
+        };
+    }
+    return {
+        lastChangedBy: 'local',
+        lastChangedAt: new Date().toISOString()
+    };
+}
+
+function stampNodeMeta(meta) {
+    const base = meta && typeof meta === 'object' ? meta : {};
+    const stamp = getBoardMutationStamp();
+    return {
+        ...base,
+        lastChangedBy: stamp.lastChangedBy,
+        lastChangedAt: stamp.lastChangedAt
+    };
+}
+
+function ensureNarrativeNodeMeta(nodeEl) {
+    if (!nodeEl || !nodeEl.classList) return null;
+    const type = getNodeTypeFromEl(nodeEl);
+    if (!NARRATIVE_META_NODE_TYPES.has(type)) return null;
+
+    const baseMeta = getNodeMeta(nodeEl) || {};
+    const certaintySeed = type === 'theory'
+        ? (baseMeta.certainty !== undefined ? baseMeta.certainty : baseMeta.confidence)
+        : baseMeta.certainty;
+    const clean = {
+        ...baseMeta,
+        certainty: clampPercent(certaintySeed, 50),
+        reliability: normalizeReliability(baseMeta.reliability)
+    };
+    if (type === 'theory') {
+        clean.sourceType = String(clean.sourceType || 'theory');
+        clean.theoryStatus = normalizeTheoryStatus(clean.theoryStatus);
+        clean.confidence = clampPercent(baseMeta.confidence !== undefined ? baseMeta.confidence : clean.certainty, clean.certainty);
+        clean.certainty = clampPercent(clean.certainty, clean.confidence);
+    }
+    setNodeMeta(nodeEl, clean);
+    return clean;
+}
+
+function syncNodeNarrativeMetaDisplay(nodeEl) {
+    if (!nodeEl || !nodeEl.classList) return;
+    const type = getNodeTypeFromEl(nodeEl);
+    if (!NARRATIVE_META_NODE_TYPES.has(type)) return;
+    const meta = ensureNarrativeNodeMeta(nodeEl);
+    if (!meta) return;
+    const slot = nodeEl.querySelector('[data-node-meta-badges]');
+    if (!slot) return;
+    const certainty = clampPercent(meta.certainty, type === 'theory' ? meta.confidence : 50);
+    const reliability = getReliabilityLabel(meta.reliability);
+    slot.innerHTML = `
+        <span class="node-meta-pill">Certainty ${certainty}%</span>
+        <span class="node-meta-pill">${sanitizeText(reliability)}</span>
+    `;
+}
+
+function persistLinkedNodeNarrativeMeta(nodeEl) {
+    if (!nodeEl || !window.RTF_STORE) return;
+    const meta = ensureNarrativeNodeMeta(nodeEl);
+    if (!meta) return;
+    const store = window.RTF_STORE;
+    if (String(meta.sourceType || '') !== 'timeline-event') return;
+    if (typeof store.updateEvent !== 'function') return;
+    const eventId = String(meta.eventId || '').trim();
+    if (!eventId) return;
+    const caseId = String(meta.caseId || '').trim();
+    store.updateEvent(eventId, { certainty: clampPercent(meta.certainty, 50) }, caseId || null);
 }
 
 function readLeadStorage() {
@@ -1502,9 +1598,20 @@ function buildLocationNodePayload(location) {
 function buildEventNodePayload(evt) {
     const source = evt && typeof evt === 'object' ? evt : {};
     const heat = parseInt(source.heatDelta, 10);
+    const certainty = clampPercent(source.certainty, 50);
+    const severity = String(source.impactSeverity || 'moderate');
+    const scope = String(source.impactScope || 'local');
     const lines = [];
     if (source.focus) lines.push(`<strong>Focus:</strong> ${sanitizeText(source.focus)}`);
     if (!isNaN(heat) && heat !== 0) lines.push(`<strong>Heat:</strong> ${heat > 0 ? '+' : ''}${heat}`);
+    if (source.dueAt) {
+        const dueTs = Date.parse(String(source.dueAt));
+        if (Number.isFinite(dueTs)) {
+            lines.push(`<strong>Due:</strong> ${sanitizeText(new Date(dueTs).toLocaleString())}`);
+        }
+    }
+    lines.push(`<strong>Impact:</strong> ${sanitizeText(severity)} / ${sanitizeText(scope)}`);
+    lines.push(`<strong>Certainty:</strong> ${certainty}%`);
     if (source.highlights) lines.push(`<strong>Beats:</strong><br>${sanitizeMultiline(source.highlights)}`);
     if (source.fallout) lines.push(`<strong>Fallout:</strong><br>${sanitizeMultiline(source.fallout)}`);
     if (source.followUp) lines.push(`<strong>Next:</strong> ${sanitizeMultiline(source.followUp)}`);
@@ -1520,7 +1627,12 @@ function buildEventNodePayload(evt) {
                 eventId: source.id || '',
                 heatDelta: !isNaN(heat) ? heat : '',
                 focus: source.focus || '',
-                caseId: source.caseId || ''
+                caseId: source.caseId || '',
+                dueAt: source.dueAt || '',
+                impactSeverity: severity,
+                impactScope: scope,
+                certainty,
+                reliability: normalizeReliability(source.reliability || 'unknown')
             }
         }
     };
@@ -2736,6 +2848,7 @@ function createNodeMarkup(type, content = {}) {
                 </div>
                 <div class="evidence-tag">${withTitle}</div>
             </div>
+            <div class="node-meta-badges" data-node-meta-badges></div>
             <div class="node-body">${bodyHtml}</div>
         `;
     }
@@ -2752,6 +2865,7 @@ function createNodeMarkup(type, content = {}) {
                     <div class="theory-confidence-fill" data-theory-fill></div>
                 </div>
             </div>
+            <div class="node-meta-badges" data-node-meta-badges></div>
             <div class="node-body">${bodyHtml}</div>
         `;
     }
@@ -2784,6 +2898,7 @@ function createNodeMarkup(type, content = {}) {
             <div class="node-timestamp-media node-media-shell node-media-contain" data-image-slot="timeline">
                 <div class="node-media-fallback">${icon}</div>
             </div>
+            <div class="node-meta-badges" data-node-meta-badges></div>
             <div class="node-body">${bodyHtml}</div>
         `;
     }
@@ -2811,11 +2926,14 @@ function createNodeMarkup(type, content = {}) {
 function ensureTheoryNodeMeta(nodeEl) {
     if (!nodeEl || !nodeEl.classList || !nodeEl.classList.contains('type-theory')) return null;
     const baseMeta = getNodeMeta(nodeEl) || {};
+    const confidence = clampPercent(baseMeta.confidence, 50);
     const clean = {
         ...baseMeta,
         sourceType: String(baseMeta.sourceType || 'theory'),
         theoryStatus: normalizeTheoryStatus(baseMeta.theoryStatus),
-        confidence: clampPercent(baseMeta.confidence, 50)
+        confidence,
+        certainty: clampPercent(baseMeta.certainty !== undefined ? baseMeta.certainty : confidence, confidence),
+        reliability: normalizeReliability(baseMeta.reliability)
     };
     setNodeMeta(nodeEl, clean);
     return clean;
@@ -2836,6 +2954,7 @@ function syncTheoryNodeDisplay(nodeEl) {
     if (statusEl) statusEl.textContent = getTheoryStatusLabel(status);
     if (confidenceEl) confidenceEl.textContent = `${confidence}%`;
     if (fillEl) fillEl.style.width = `${confidence}%`;
+    syncNodeNarrativeMetaDisplay(nodeEl);
 }
 
 function applyNodeImage(nodeEl, imageUrl = '') {
@@ -2947,9 +3066,13 @@ function createNode(type, x, y, id = null, content = {}) {
     if (type === 'theory') {
         ensureTheoryNodeMeta(nodeEl);
         syncTheoryNodeDisplay(nodeEl);
+    } else if (NARRATIVE_META_NODE_TYPES.has(type)) {
+        ensureNarrativeNodeMeta(nodeEl);
+        syncNodeNarrativeMetaDisplay(nodeEl);
     }
     applyNodeImage(nodeEl, requestedImageUrl);
     updateNodeCache(nodeId);
+    const finalMeta = getNodeMeta(nodeEl);
 
     // Ensure node is tracked in global state (both for new and loaded nodes)
     nodes.push({
@@ -2958,7 +3081,7 @@ function createNode(type, x, y, id = null, content = {}) {
         x: x - 75,
         y: y - 40,
         title: content.title || type.toUpperCase(),
-        meta: safeMeta
+        meta: finalMeta
     });
 
     return nodeEl;
@@ -3371,7 +3494,15 @@ function showContextMenu(e, node) {
 
     const type = getNodeTypeFromEl(node);
     const isTheory = type === 'theory';
+    const supportsNarrativeMeta = NARRATIVE_META_NODE_TYPES.has(type);
+    if (supportsNarrativeMeta) {
+        ensureNarrativeNodeMeta(node);
+        syncNodeNarrativeMetaDisplay(node);
+    }
     const setImageItem = document.getElementById('menu-set-image');
+    const setCertaintyItem = document.getElementById('menu-set-node-certainty');
+    const setReliabilityItem = document.getElementById('menu-set-node-reliability');
+    const addLedgerItem = document.getElementById('menu-add-ledger');
     const theoryConfidenceItem = document.getElementById('menu-set-theory-confidence');
     const theoryConfirmedItem = document.getElementById('menu-mark-theory-confirmed');
     const theoryDisprovenItem = document.getElementById('menu-mark-theory-disproven');
@@ -3379,6 +3510,9 @@ function showContextMenu(e, node) {
     if (setImageItem) {
         setImageItem.style.display = IMAGE_EDITABLE_NODE_TYPES.has(type) ? 'block' : 'none';
     }
+    if (setCertaintyItem) setCertaintyItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
+    if (setReliabilityItem) setReliabilityItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
+    if (addLedgerItem) addLedgerItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
     if (theoryConfidenceItem) theoryConfidenceItem.style.display = isTheory ? 'block' : 'none';
     if (theoryConfirmedItem) theoryConfirmedItem.style.display = isTheory ? 'block' : 'none';
     if (theoryDisprovenItem) theoryDisprovenItem.style.display = isTheory ? 'block' : 'none';
@@ -3481,16 +3615,153 @@ function setTargetTheoryConfidence() {
         return;
     }
     const nextValue = clampPercent(nextRaw, 50);
-    setNodeMeta(nodeEl, {
-        ...(getNodeMeta(nodeEl) || {}),
+    applyNarrativeMetaUpdate(nodeEl, {
         sourceType: 'theory',
         theoryStatus: normalizeTheoryStatus(meta.theoryStatus),
-        confidence: nextValue
+        confidence: nextValue,
+        certainty: nextValue
     });
-    syncTheoryNodeDisplay(nodeEl);
+    contextMenu.style.display = 'none';
+}
+
+function applyNarrativeMetaUpdate(nodeEl, updates = {}) {
+    if (!nodeEl || !nodeEl.classList) return false;
+    const type = getNodeTypeFromEl(nodeEl);
+    if (!NARRATIVE_META_NODE_TYPES.has(type)) return false;
+    const base = ensureNarrativeNodeMeta(nodeEl) || {};
+    const patch = updates && typeof updates === 'object' ? updates : {};
+    const next = {
+        ...base,
+        ...patch
+    };
+    next.certainty = clampPercent(next.certainty, type === 'theory' ? next.confidence : 50);
+    next.reliability = normalizeReliability(next.reliability);
+    if (type === 'theory') {
+        next.sourceType = String(next.sourceType || 'theory');
+        next.theoryStatus = normalizeTheoryStatus(next.theoryStatus);
+        next.confidence = clampPercent(next.confidence, next.certainty);
+        next.certainty = clampPercent(next.certainty, next.confidence);
+    }
+    setNodeMeta(nodeEl, stampNodeMeta(next));
+    if (type === 'theory') syncTheoryNodeDisplay(nodeEl);
+    else syncNodeNarrativeMetaDisplay(nodeEl);
     updateNodeCache(nodeEl.id);
     saveBoard();
+    persistLinkedNodeNarrativeMeta(nodeEl);
+    return true;
+}
+
+function setTargetNodeCertainty() {
+    const nodeEl = getContextTargetNode();
+    if (!nodeEl) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const type = getNodeTypeFromEl(nodeEl);
+    if (!NARRATIVE_META_NODE_TYPES.has(type)) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const meta = ensureNarrativeNodeMeta(nodeEl) || {};
+    const current = clampPercent(meta.certainty, type === 'theory' ? meta.confidence : 50);
+    const nextRaw = prompt('Set certainty (0-100):', String(current));
+    if (nextRaw === null) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const nextValue = clampPercent(nextRaw, current);
+    const patch = type === 'theory'
+        ? { certainty: nextValue, confidence: nextValue }
+        : { certainty: nextValue };
+    applyNarrativeMetaUpdate(nodeEl, patch);
     contextMenu.style.display = 'none';
+}
+
+function setTargetNodeReliability() {
+    const nodeEl = getContextTargetNode();
+    if (!nodeEl) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const type = getNodeTypeFromEl(nodeEl);
+    if (!NARRATIVE_META_NODE_TYPES.has(type)) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const meta = ensureNarrativeNodeMeta(nodeEl) || {};
+    const current = normalizeReliability(meta.reliability);
+    const nextRaw = prompt('Set reliability (unknown|rumored|corroborated|verified):', current);
+    if (nextRaw === null) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const nextValue = normalizeReliability(nextRaw);
+    applyNarrativeMetaUpdate(nodeEl, { reliability: nextValue });
+    contextMenu.style.display = 'none';
+}
+
+function addTargetNodeToLedger() {
+    const nodeEl = getContextTargetNode();
+    if (!nodeEl) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const type = getNodeTypeFromEl(nodeEl);
+    if (!NARRATIVE_META_NODE_TYPES.has(type)) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const store = window.RTF_STORE;
+    if (!store || typeof store.addLedgerEntry !== 'function') {
+        alert('Ledger is not available in this build.');
+        contextMenu.style.display = 'none';
+        return;
+    }
+
+    const summary = getNodeSummary(nodeEl.id);
+    if (!summary) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const meta = ensureNarrativeNodeMeta(nodeEl) || {};
+    const defaultStatement = String(summary.title || '').trim() || `Board ${type}`;
+    const statementRaw = prompt('Ledger statement:', defaultStatement);
+    if (statementRaw === null) {
+        contextMenu.style.display = 'none';
+        return;
+    }
+    const statement = String(statementRaw || '').trim();
+    if (!statement) {
+        alert('Statement is required.');
+        return;
+    }
+
+    let sourceType = type === 'theory' ? 'theory' : (type === 'clue' ? 'clue' : 'event');
+    let sourceId = String(summary.id || '').trim();
+    if (type === 'event' && String(meta.sourceType || '') === 'timeline-event' && meta.eventId) {
+        sourceType = 'event';
+        sourceId = String(meta.eventId || '').trim();
+    }
+    const caseId = String(meta.caseId || (typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : 'case_primary'));
+    const certainty = clampPercent(meta.certainty !== undefined ? meta.certainty : meta.confidence, 50);
+    const notes = String(summary.bodyText || '').trim().slice(0, 600);
+    const tagSeed = String(summary.type || type || 'board').toLowerCase();
+    const entryId = store.addLedgerEntry({
+        caseId,
+        statement,
+        status: 'stable',
+        sourceType,
+        sourceId,
+        certainty,
+        tags: `board,${tagSeed}`,
+        notes
+    });
+    if (!entryId) {
+        alert('Could not add ledger entry (statement may be empty).');
+        return;
+    }
+    contextMenu.style.display = 'none';
+    alert('Added to Ledger.');
 }
 
 function logTheoryStatusEvent(nodeEl, status) {
@@ -3524,15 +3795,12 @@ function markTargetTheory(status) {
         return;
     }
     const meta = ensureTheoryNodeMeta(nodeEl) || {};
-    setNodeMeta(nodeEl, {
-        ...(getNodeMeta(nodeEl) || {}),
+    applyNarrativeMetaUpdate(nodeEl, {
         sourceType: 'theory',
         confidence: clampPercent(meta.confidence, 50),
+        certainty: clampPercent(meta.certainty, clampPercent(meta.confidence, 50)),
         theoryStatus: cleanStatus
     });
-    syncTheoryNodeDisplay(nodeEl);
-    updateNodeCache(nodeEl.id);
-    saveBoard();
     logTheoryStatusEvent(nodeEl, cleanStatus);
     contextMenu.style.display = 'none';
 }
@@ -4411,5 +4679,8 @@ window.renderBoardEvents = renderBoardEvents;
 window.renderBoardRequisitions = renderBoardRequisitions;
 window.draftEncounterFromTargetNode = draftEncounterFromTargetNode;
 window.createLeadFromTargetNode = createLeadFromTargetNode;
+window.setTargetNodeCertainty = setTargetNodeCertainty;
+window.setTargetNodeReliability = setTargetNodeReliability;
+window.addTargetNodeToLedger = addTargetNodeToLedger;
 window.setTargetTheoryConfidence = setTargetTheoryConfidence;
 window.markTargetTheory = markTargetTheory;

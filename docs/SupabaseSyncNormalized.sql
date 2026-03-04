@@ -214,7 +214,7 @@ begin
     return;
   end if;
 
-  -- Core (rep, heat, cognitive risk, case template)
+  -- Core (rep, heat, cognitive risk, case template, ledger payload)
   insert into public.rtf_campaign_core (
     campaign_id,
     payload,
@@ -231,7 +231,8 @@ begin
         'rep', coalesce(s.state #> '{campaign,rep}', '{}'::jsonb),
         'heat', coalesce(s.state #> '{campaign,heat}', '0'::jsonb),
         'cognitiveRisk', coalesce(s.state #> '{campaign,cognitiveRisk}', '0'::jsonb),
-        'case', coalesce(s.state #> '{campaign,case}', '{}'::jsonb)
+        'case', coalesce(s.state #> '{campaign,case}', '{}'::jsonb),
+        'ledger', coalesce(s.state #> '{campaign,ledger}', '{"entries":[],"ui":{"filter":"all","search":"","sort":"updated_desc"}}'::jsonb)
       )
     ) as payload,
     coalesce((s.state #>> '{meta,syncRevision}')::bigint, 0) as revision,

@@ -1,7 +1,7 @@
 # LLM Tracking Expansion Plan (Items 1-6)
 
 Date: 2026-03-04  
-Status: Draft for review
+Status: Executed through Phase 8 (Phase 9 QA pending)
 
 ## Execution Progress Log
 1. 2026-03-04: Phase 0 (Design Lock) completed.
@@ -12,7 +12,15 @@ Status: Draft for review
 6. `ledger status`: `stable|contested|collapsed|resolved`
 7. Ledger storage decision: start with Option A (`campaign.ledger` in `rtf_campaign_core.payload`) and re-evaluate Option B table split after real usage.
 8. UI wording/defaults decision: use `Deadline` label in timeline UI and set default certainty to `50` for event/theory/clue unless explicitly set by user flow.
-9. Current execution checkpoint: finished through Phase 0; next phase is Phase 1 (Store Foundation).
+9. 2026-03-04: Phase 1 (Store Foundation) completed.
+10. 2026-03-04: Phase 2 (Timeline UI + Logic) completed.
+11. 2026-03-04: Phase 3 (Board Integration) completed.
+12. 2026-03-04: Phase 4 (Ledger Feature) completed.
+13. 2026-03-04: Phase 5 (Navigation + Placement) completed.
+14. 2026-03-04: Phase 6 (Sync + SQL + Migration docs) completed (Option A core payload).
+15. 2026-03-04: Phase 7 (LLM Snapshot v2 updates) completed.
+16. 2026-03-04: Phase 8 (Documentation updates) completed.
+17. Current execution checkpoint: Phase 9 QA/regression pass remains.
 
 ## 1. Objective
 Add six narrative-tracking capabilities to improve LLM-generated prose, consequences, and situational descriptions:
@@ -240,60 +248,60 @@ Update these docs:
 
 ### Phase 1: Store Foundation
 
-- [ ] Add `campaign.ledger` default state and sanitizers.
-- [ ] Extend event sanitization with fields 1-4 and 6.
-- [ ] Add ledger CRUD methods to `RTF_STORE`.
-- [ ] Add attribution helpers (`lastChangedBy`, `lastChangedAt`) for target entities.
-- [ ] Backfill defaults for existing loaded data.
+- [x] Add `campaign.ledger` default state and sanitizers.
+- [x] Extend event sanitization with fields 1-4 and 6.
+- [x] Add ledger CRUD methods to `RTF_STORE`.
+- [x] Add attribution helpers (`lastChangedBy`, `lastChangedAt`) for target entities.
+- [x] Backfill defaults for existing loaded data.
 
 ### Phase 2: Timeline UI + Logic
 
-- [ ] Add new form controls and edit inputs.
-- [ ] Render new pills/sections in event cards.
-- [ ] Implement impacted-entity selector and serialization.
-- [ ] Add overdue/high-impact visual treatment.
-- [ ] Ensure save scopes remain granular for sync.
+- [x] Add new form controls and edit inputs.
+- [x] Render new pills/sections in event cards.
+- [x] Implement impacted-entity selector and serialization.
+- [x] Add overdue/high-impact visual treatment.
+- [x] Ensure save scopes remain granular for sync.
 
 ### Phase 3: Board Integration
 
-- [ ] Add certainty/reliability context menu actions for relevant node types.
-- [ ] Persist new node metadata fields.
-- [ ] Add “Add to Ledger” action for node-driven truth capture.
-- [ ] Ensure linked source ids are included in generated ledger entries.
+- [x] Add certainty/reliability context menu actions for relevant node types.
+- [x] Persist new node metadata fields.
+- [x] Add “Add to Ledger” action for node-driven truth capture.
+- [x] Ensure linked source ids are included in generated ledger entries.
 
 ### Phase 4: Ledger Feature (New)
 
-- [ ] Create `ledger.html`, `js/ledger.js`, `css/ledger.css`.
-- [ ] Implement list, filters, create/edit/delete.
-- [ ] Add “Stable Truths” export panel.
-- [ ] Add cross-links back to board/timeline source entries.
+- [x] Create `ledger.html`, `js/ledger.js`, `css/ledger.css`.
+- [x] Implement list, filters, create/edit/delete.
+- [x] Add “Stable Truths” export panel.
+- [x] Add cross-links back to board/timeline source entries.
 
 ### Phase 5: Navigation + Placement
 
-- [ ] Add Ledger card in `tools.html`.
-- [ ] Add Ledger entry in `js/player-nav.js`.
-- [ ] Add Hub summary block + quick links.
+- [x] Add Ledger card in `tools.html`.
+- [x] Add Ledger entry in `js/player-nav.js`.
+- [x] Add Hub summary block + quick links.
 - [ ] Validate desktop/mobile layout behavior.
 
 ### Phase 6: Sync + SQL + Migration
 
-- [ ] Update normalized sync scopes and writes in `js/store.js`.
-- [ ] Update SQL migration script and docs.
+- [x] Update normalized sync scopes and writes in `js/store.js`.
+- [x] Update SQL migration script and docs.
 - [ ] Validate local-only mode and synced mode behavior.
 - [ ] Validate conflict handling with concurrent edits.
 
 ### Phase 7: LLM Snapshot v2
 
-- [ ] Extend snapshot builder with new fields and derived signals.
-- [ ] Add compact/full output mode updates.
+- [x] Extend snapshot builder with new fields and derived signals.
+- [x] Add compact/full output mode updates.
 - [ ] Validate snapshot readability and prompt token size.
 
 ### Phase 8: Documentation
 
-- [ ] Update README component table and usage notes.
-- [ ] Update Timeline, Board, Hub, ToolsHub docs.
-- [ ] Add `docs/Ledger.md`.
-- [ ] Update Supabase normalized docs and SQL notes.
+- [x] Update README component table and usage notes.
+- [x] Update Timeline, Board, Hub, ToolsHub docs.
+- [x] Add `docs/Ledger.md`.
+- [x] Update Supabase normalized docs and SQL notes.
 
 ### Phase 9: QA + Release
 

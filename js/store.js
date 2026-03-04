@@ -8,6 +8,10 @@
     const SYNC_STATUS_EVENT = 'rtf-sync-status';
     const SYNC_CONFLICT_EVENT = 'rtf-sync-conflict';
     const STORE_UPDATED_EVENT = 'rtf-store-updated';
+    const LEAD_STORAGE_KEY = 'rtf_lead_queue_v1';
+    const PREP_PROCEDURE_STATE_KEY = 'rtf_prep_procedure_state_v1';
+    const CLOCKS_STORAGE_KEY = 'rtf_clocks_page_v1';
+    const HEAT_SYNC_KEY = 'rtf_timeline_auto_heat';
     const SUPABASE_CDN_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
     const STORE_DEBUG = false;
 
@@ -81,6 +85,15 @@
         };
     };
 
+    const createDefaultLedgerState = () => ({
+        entries: [],
+        ui: {
+            filter: 'all',
+            search: '',
+            sort: 'updated_desc'
+        }
+    });
+
     const DEFAULT_BOARD_STATE = {
         name: "UNNAMED CASE",
         nodes: [],
@@ -105,6 +118,7 @@
             requisitions: [],
             events: [],
             encounters: [],
+            ledger: createDefaultLedgerState(),
             case: { title: "", guilds: "", goal: "", clock: "", obstacles: "", setPiece: "" }
         },
         board: { ...DEFAULT_BOARD_STATE },
@@ -151,6 +165,11 @@
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
     const ENCOUNTER_TIERS = new Set(['Routine', 'Standard', 'Elite', 'Boss']);
+    const IMPACT_SEVERITIES = new Set(['low', 'moderate', 'high', 'critical']);
+    const IMPACT_SCOPES = new Set(['local', 'district', 'guildwide', 'citywide']);
+    const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
+    const LEDGER_STATUSES = new Set(['stable', 'contested', 'collapsed', 'resolved']);
+    const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'npc', 'location', 'manual']);
 
     const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -172,6 +191,16 @@
             if (Number.isFinite(parsed)) return parsed;
         }
         return fallback;
+    };
+
+    const toIsoString = (value, fallback = '') => {
+        const parsed = toTimestamp(value, 0);
+        if (!parsed) return fallback;
+        try {
+            return new Date(parsed).toISOString();
+        } catch (err) {
+            return fallback;
+        }
     };
 
     const toTrimmedString = (value, fallback = '', maxLen = 4000) => {
@@ -202,6 +231,36 @@
     };
 
     const toBoolean = (value) => !!value;
+
+    const clampPercent = (value, fallback = 50) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return Math.max(0, Math.min(100, Math.round(fallback)));
+        return Math.max(0, Math.min(100, Math.round(parsed)));
+    };
+
+    const normalizeEnumToken = (value) => String(value || '').trim().toLowerCase();
+    const sanitizeImpactSeverity = (value, fallback = 'moderate') => {
+        const token = normalizeEnumToken(value);
+        return IMPACT_SEVERITIES.has(token) ? token : fallback;
+    };
+    const sanitizeImpactScope = (value, fallback = 'local') => {
+        const token = normalizeEnumToken(value);
+        return IMPACT_SCOPES.has(token) ? token : fallback;
+    };
+    const sanitizeReliability = (value, fallback = 'unknown') => {
+        const token = normalizeEnumToken(value);
+        return RELIABILITY_LEVELS.has(token) ? token : fallback;
+    };
+    const sanitizeLedgerStatus = (value, fallback = 'stable') => {
+        const token = normalizeEnumToken(value);
+        return LEDGER_STATUSES.has(token) ? token : fallback;
+    };
+    const sanitizeLedgerSourceType = (value, fallback = 'manual') => {
+        const token = normalizeEnumToken(value);
+        return LEDGER_SOURCE_TYPES.has(token) ? token : fallback;
+    };
+    const sanitizeAttributionBy = (value, fallback = '') => toTrimmedString(value, fallback, 120).trim();
+    const sanitizeAttributionAt = (value, fallback = '') => toIsoString(value, fallback);
 
     const buildEntityId = (prefix = 'entry', index = 0, bump = 0) => {
         const cleanPrefix = String(prefix || 'entry')
@@ -284,8 +343,9 @@
             npcs: Array.isArray(source.npcs) ? source.npcs : [],
             locations: Array.isArray(source.locations) ? source.locations : [],
             requisitions: Array.isArray(source.requisitions) ? source.requisitions : [],
-            events: Array.isArray(source.events) ? source.events : [],
+            events: sanitizeEventList(source.events),
             encounters: Array.isArray(source.encounters) ? source.encounters : [],
+            ledger: sanitizeLedgerState(source.ledger),
             case: sanitizeCase(source.case)
         };
     };
@@ -315,11 +375,109 @@
         return text || fallback;
     };
 
+    const sanitizeImpactEntityType = (value, fallback = 'other') => {
+        const token = normalizeEnumToken(value)
+            .replace(/[^a-z0-9_-]+/g, '')
+            .slice(0, 40);
+        return token || fallback;
+    };
+    const sanitizeEntityImpactEntry = (entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const out = {
+            type: sanitizeImpactEntityType(entry.type, 'other'),
+            id: toTrimmedString(entry.id, '', 80).trim(),
+            note: toTrimmedString(entry.note, '', 400).trim()
+        };
+        if (!out.id) return null;
+        if (Object.prototype.hasOwnProperty.call(entry, 'missingRef')) {
+            out.missingRef = toBoolean(entry.missingRef);
+        }
+        return out;
+    };
+    const sanitizeEntityImpacts = (value) => (
+        Array.isArray(value)
+            ? value
+                .map((entry) => sanitizeEntityImpactEntry(entry))
+                .filter(Boolean)
+            : []
+    );
+    const sanitizeLedgerUI = (value) => {
+        const source = value && typeof value === 'object' ? value : {};
+        const base = createDefaultLedgerState().ui;
+        return {
+            filter: toTrimmedString(source.filter, base.filter, 48).trim() || base.filter,
+            search: toTrimmedString(source.search, base.search, 160).trim(),
+            sort: toTrimmedString(source.sort, base.sort, 48).trim() || base.sort
+        };
+    };
+    const sanitizeLedgerEntry = (entry, index = 0) => {
+        const source = entry && typeof entry === 'object' ? entry : {};
+        const fallbackId = buildEntityId('ledger', index);
+        const createdAt = sanitizeAttributionAt(source.createdAt, new Date().toISOString()) || new Date().toISOString();
+        const changedAt = sanitizeAttributionAt(source.lastChangedAt, createdAt) || createdAt;
+        return {
+            id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
+            caseId: sanitizeCaseId(source.caseId, 'case_primary'),
+            statement: toTrimmedString(source.statement, '', 1200).trim(),
+            status: sanitizeLedgerStatus(source.status, 'stable'),
+            sourceType: sanitizeLedgerSourceType(source.sourceType, 'manual'),
+            sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
+            certainty: clampPercent(source.certainty, 50),
+            tags: toTrimmedString(source.tags, '', 1200),
+            notes: toTrimmedString(source.notes, '', 4000),
+            lastChangedBy: sanitizeAttributionBy(source.lastChangedBy, ''),
+            lastChangedAt: changedAt,
+            createdAt
+        };
+    };
+    const sanitizeLedgerState = (value) => {
+        const source = value && typeof value === 'object' ? value : {};
+        const base = createDefaultLedgerState();
+        const entries = Array.isArray(source.entries)
+            ? source.entries
+                .map((entry, idx) => sanitizeLedgerEntry(entry, idx))
+                .filter((entry) => !!entry.statement)
+            : base.entries.slice();
+        return {
+            entries,
+            ui: sanitizeLedgerUI(source.ui)
+        };
+    };
+    const sanitizeEvent = (event, index = 0) => {
+        const source = event && typeof event === 'object' ? event : {};
+        const fallbackId = buildEntityId('event', index);
+        const createdAt = sanitizeAttributionAt(source.created, new Date().toISOString()) || new Date().toISOString();
+        const changedAt = sanitizeAttributionAt(source.lastChangedAt, createdAt) || createdAt;
+        return {
+            ...source,
+            id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
+            title: toTrimmedString(source.title, '', 240),
+            focus: toTrimmedString(source.focus, '', 240),
+            heatDelta: toTrimmedString(source.heatDelta, '', 12),
+            tags: toTrimmedString(source.tags, '', 2000),
+            imageUrl: toImageUrl(source.imageUrl),
+            highlights: toTrimmedString(source.highlights, '', 6000),
+            fallout: toTrimmedString(source.fallout, '', 6000),
+            followUp: toTrimmedString(source.followUp, '', 6000),
+            source: toTrimmedString(source.source, '', 80),
+            kind: toTrimmedString(source.kind, '', 80),
+            resolved: toBoolean(source.resolved),
+            created: createdAt,
+            dueAt: sanitizeAttributionAt(source.dueAt, ''),
+            impactSeverity: sanitizeImpactSeverity(source.impactSeverity, 'moderate'),
+            impactScope: sanitizeImpactScope(source.impactScope, 'local'),
+            entityImpacts: sanitizeEntityImpacts(source.entityImpacts),
+            certainty: clampPercent(source.certainty, 50),
+            lastChangedBy: sanitizeAttributionBy(source.lastChangedBy, ''),
+            lastChangedAt: changedAt,
+            caseId: sanitizeCaseId(source.caseId, 'case_primary')
+        };
+    };
     const sanitizeEventList = (events) => (
         Array.isArray(events)
             ? events
                 .filter((entry) => entry && typeof entry === 'object')
-                .map((entry) => ({ ...entry }))
+                .map((entry, idx) => sanitizeEvent(entry, idx))
             : []
     );
 
@@ -631,6 +789,17 @@
         }
     };
 
+    const readJsonStorage = (key, fallback = null) => {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return fallback;
+            const parsed = JSON.parse(raw);
+            return parsed === undefined ? fallback : parsed;
+        } catch (err) {
+            return fallback;
+        }
+    };
+
     const scopesOverlap = (leftScope, rightScope) => {
         const left = normalizeScopeToken(leftScope);
         const right = normalizeScopeToken(rightScope);
@@ -665,6 +834,7 @@
         addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.locations, clean.campaign.locations);
         addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.requisitions, clean.campaign.requisitions);
         addEntityScopesToSnapshot(map, CAMPAIGN_ENTITY_SCOPE_PREFIXES.encounters, clean.campaign.encounters);
+        map.set('campaign.ledger', sanitizeLedgerState(clean.campaign.ledger));
         map.set('campaign.case', clean.campaign.case);
         map.set(SYNC_SCOPE_CASES_META, buildCasesMetaSnapshot(clean));
         map.set('hq', clean.hq);
@@ -1428,6 +1598,74 @@
             return changed;
         }
 
+        getMutationAuthor() {
+            const profileName = sanitizeAttributionBy(this.sync && this.sync.config ? this.sync.config.profileName : '', '');
+            if (profileName) return profileName;
+            const userId = sanitizeAttributionBy(this.sync ? this.sync.userId : '', '');
+            if (userId) return userId;
+            const instanceId = sanitizeAttributionBy(this.sync ? this.sync.instanceId : '', '');
+            if (instanceId) return instanceId;
+            return 'local';
+        }
+
+        getMutationStamp(nowIso = '') {
+            const at = sanitizeAttributionAt(nowIso, new Date().toISOString()) || new Date().toISOString();
+            return {
+                lastChangedBy: this.getMutationAuthor(),
+                lastChangedAt: at
+            };
+        }
+
+        stampRecordAttribution(record, stamp = null) {
+            if (!record || typeof record !== 'object') return false;
+            const nextStamp = stamp && typeof stamp === 'object' ? stamp : this.getMutationStamp();
+            record.lastChangedBy = sanitizeAttributionBy(nextStamp.lastChangedBy, this.getMutationAuthor());
+            record.lastChangedAt = sanitizeAttributionAt(nextStamp.lastChangedAt, new Date().toISOString()) || new Date().toISOString();
+            return true;
+        }
+
+        stampCampaignEntityByScope(key, scopeId, stamp) {
+            if (!this.state || !this.state.campaign || !Array.isArray(this.state.campaign[key])) return;
+            const list = this.state.campaign[key];
+            if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) {
+                list.forEach((entry) => this.stampRecordAttribution(entry, stamp));
+                return;
+            }
+            const idx = findEntityIndexByScopeId(list, scopeId);
+            if (idx >= 0) this.stampRecordAttribution(list[idx], stamp);
+        }
+
+        stampCaseEventsByScope(caseId, scopeId, stamp) {
+            const entry = this.getCaseEntry(caseId, { createIfMissing: true, strict: false });
+            if (!entry || !Array.isArray(entry.events)) return;
+            if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) {
+                entry.events.forEach((eventEntry) => this.stampRecordAttribution(eventEntry, stamp));
+                return;
+            }
+            const idx = findEntityIndexByScopeId(entry.events, scopeId);
+            if (idx >= 0) this.stampRecordAttribution(entry.events[idx], stamp);
+        }
+
+        applyScopeAttribution(scopes) {
+            const stamp = this.getMutationStamp();
+            normalizeScopeList(scopes).forEach((scope) => {
+                const campaignMatch = scope.match(/^campaign\.(npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
+                if (campaignMatch) {
+                    const key = campaignMatch[1];
+                    const scopeId = campaignMatch[2] || '';
+                    this.stampCampaignEntityByScope(key, scopeId, stamp);
+                    return;
+                }
+
+                const caseEventMatch = scope.match(/^cases\.([a-z0-9_-]+)\.events(?:\.([a-z0-9_-]+))?$/);
+                if (caseEventMatch) {
+                    const caseId = sanitizeCaseId(caseEventMatch[1], 'case_primary');
+                    const scopeId = caseEventMatch[2] || '';
+                    this.stampCaseEventsByScope(caseId, scopeId, stamp);
+                }
+            });
+        }
+
         save(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const skipCloud = !!opts.skipCloud;
@@ -1440,6 +1678,7 @@
                     scopes = normalizeScopeList([...scopes, ...idRepair.scopes]);
                 }
                 this.syncActiveCaseLegacyState();
+                this.applyScopeAttribution(scopes);
                 const now = Date.now();
                 this.state.meta.updated = now;
                 this.markLocalDirtyScopes(scopes, now);
@@ -2031,6 +2270,7 @@
                 if (Object.prototype.hasOwnProperty.call(payload, 'rep')) base.campaign.rep = sanitizeRep(payload.rep);
                 if (Object.prototype.hasOwnProperty.call(payload, 'heat')) base.campaign.heat = toNumber(payload.heat, 0);
                 if (Object.prototype.hasOwnProperty.call(payload, 'cognitiveRisk')) base.campaign.cognitiveRisk = toNumber(payload.cognitiveRisk, 0);
+                if (Object.prototype.hasOwnProperty.call(payload, 'ledger')) base.campaign.ledger = sanitizeLedgerState(payload.ledger);
                 if (Object.prototype.hasOwnProperty.call(payload, 'case')) base.campaign.case = sanitizeCase(payload.case);
             }
 
@@ -2950,7 +3190,7 @@
                         markCampaignAll();
                         return;
                     }
-                    if (scope === 'campaign.heat' || scope === 'campaign.cognitiveRisk' || scope === 'campaign.rep' || scope === 'campaign.case') plan.writeCore = true;
+                    if (scope === 'campaign.heat' || scope === 'campaign.cognitiveRisk' || scope === 'campaign.rep' || scope === 'campaign.case' || scope === 'campaign.ledger') plan.writeCore = true;
                     const campaignEntityMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
                     if (campaignEntityMatch) {
                         const key = campaignEntityMatch[1];
@@ -3462,6 +3702,7 @@
                     rep: cleanState.campaign.rep,
                     heat: cleanState.campaign.heat,
                     cognitiveRisk: cleanState.campaign.cognitiveRisk,
+                    ledger: sanitizeLedgerState(cleanState.campaign.ledger),
                     case: cleanState.campaign.case
                 };
                 const coreUpsert = await this.sync.client
@@ -4090,7 +4331,7 @@
         }
 
         refreshKnownViews() {
-            const handlers = ['render', 'renderRequisitions', 'renderTimeline', 'renderEncounters', 'renderCaseSwitcher'];
+            const handlers = ['render', 'renderRequisitions', 'renderTimeline', 'renderEncounters', 'renderCaseSwitcher', 'renderLedger'];
             handlers.forEach((name) => {
                 const fn = global[name];
                 if (typeof fn === 'function') {
@@ -4136,6 +4377,9 @@
             if (Object.prototype.hasOwnProperty.call(source, 'imageUrl')) {
                 source.imageUrl = toImageUrl(source.imageUrl);
             }
+            const stamp = this.getMutationStamp();
+            source.lastChangedBy = stamp.lastChangedBy;
+            source.lastChangedAt = stamp.lastChangedAt;
             this.state.campaign.npcs.push(source);
             const scope = buildNPCEntityScope(source.id);
             this.save({ scope: scope || 'campaign.npcs' });
@@ -4260,6 +4504,113 @@
             return this.state.campaign.npcs || [];
         }
 
+        getLocations() {
+            return this.state.campaign.locations || [];
+        }
+
+        getLedgerState() {
+            if (!this.state.campaign || typeof this.state.campaign !== 'object') {
+                this.state.campaign = sanitizeCampaign(null);
+            }
+            this.state.campaign.ledger = sanitizeLedgerState(this.state.campaign.ledger);
+            return this.state.campaign.ledger;
+        }
+
+        getLedgerEntries(caseId = null) {
+            const ledger = this.getLedgerState();
+            const list = Array.isArray(ledger.entries) ? ledger.entries : [];
+            if (!caseId) return list;
+            const cleanCaseId = sanitizeCaseId(caseId, this.getActiveCaseId());
+            return list.filter((entry) => entry && entry.caseId === cleanCaseId);
+        }
+
+        addLedgerEntry(entry) {
+            const ledger = this.getLedgerState();
+            const source = entry && typeof entry === 'object' ? entry : {};
+            const caseId = sanitizeCaseId(source.caseId, this.getActiveCaseId());
+            const nowIso = new Date().toISOString();
+            const stamp = this.getMutationStamp(nowIso);
+            const normalized = sanitizeLedgerEntry({
+                ...source,
+                caseId,
+                createdAt: sanitizeAttributionAt(source.createdAt, nowIso) || nowIso,
+                lastChangedBy: stamp.lastChangedBy,
+                lastChangedAt: stamp.lastChangedAt
+            }, ledger.entries.length);
+            if (!normalized.statement) return '';
+            ledger.entries.push(normalized);
+            this.save({ scope: 'campaign.ledger' });
+            return normalized.id;
+        }
+
+        updateLedgerEntry(id, updates) {
+            const ledger = this.getLedgerState();
+            const list = Array.isArray(ledger.entries) ? ledger.entries : [];
+            const targetId = toTrimmedString(id, '', 80).trim();
+            if (!targetId) return;
+            const idx = list.findIndex((entry) => String(entry && entry.id || '') === targetId);
+            if (idx < 0) return;
+            const patch = sanitizePatch(updates, {
+                caseId: (v) => sanitizeCaseId(v, list[idx].caseId || this.getActiveCaseId()),
+                statement: (v) => toTrimmedString(v, '', 1200).trim(),
+                status: (v) => sanitizeLedgerStatus(v, list[idx].status || 'stable'),
+                sourceType: (v) => sanitizeLedgerSourceType(v, list[idx].sourceType || 'manual'),
+                sourceId: (v) => toTrimmedString(v, '', 120).trim(),
+                certainty: (v) => clampPercent(v, list[idx].certainty),
+                tags: (v) => toTrimmedString(v, '', 1200),
+                notes: (v) => toTrimmedString(v, '', 4000),
+                createdAt: (v) => sanitizeAttributionAt(v, list[idx].createdAt || '')
+            });
+            if (!patch) return;
+            const stamp = this.getMutationStamp();
+            const current = list[idx] && typeof list[idx] === 'object' ? list[idx] : {};
+            const next = sanitizeLedgerEntry({
+                ...current,
+                ...patch,
+                lastChangedBy: stamp.lastChangedBy,
+                lastChangedAt: stamp.lastChangedAt
+            }, idx);
+            if (!next.statement) return;
+            list[idx] = next;
+            this.save({ scope: 'campaign.ledger' });
+        }
+
+        deleteLedgerEntry(id) {
+            const ledger = this.getLedgerState();
+            const list = Array.isArray(ledger.entries) ? ledger.entries : [];
+            const targetId = toTrimmedString(id, '', 80).trim();
+            if (!targetId) return;
+            const idx = list.findIndex((entry) => String(entry && entry.id || '') === targetId);
+            if (idx < 0) return;
+            list.splice(idx, 1);
+            this.save({ scope: 'campaign.ledger' });
+        }
+
+        updateLedgerUI(patch) {
+            const ledger = this.getLedgerState();
+            const updates = patch && typeof patch === 'object' ? patch : {};
+            ledger.ui = sanitizeLedgerUI({ ...(ledger.ui || {}), ...updates });
+            this.save({ scope: 'campaign.ledger' });
+        }
+
+        getStableLedgerEntries(caseId = null) {
+            return this.getLedgerEntries(caseId).filter((entry) => entry && entry.status === 'stable');
+        }
+
+        getStableFacts(caseId = null) {
+            const facts = [];
+            const seen = new Set();
+            this.getStableLedgerEntries(caseId).forEach((entry) => {
+                const statement = toTrimmedString(entry && entry.statement, '', 1200).trim();
+                if (!statement) return;
+                const key = statement.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                facts.push(statement);
+            });
+            return facts;
+        }
+
         // Requisitions
         getRequisitions() {
             return this.state.campaign.requisitions || [];
@@ -4267,6 +4618,7 @@
 
         addRequisition(req) {
             const source = req && typeof req === 'object' ? req : {};
+            const stamp = this.getMutationStamp();
             const sanitized = {
                 id: toTrimmedString(source.id || ('req_' + Date.now()), 'req_' + Date.now(), 80),
                 item: toTrimmedString(source.item, '', 240),
@@ -4283,7 +4635,9 @@
                 purpose: toTrimmedString(source.purpose, '', 4000),
                 notes: toTrimmedString(source.notes, '', 4000),
                 tags: toTrimmedString(source.tags, '', 4000),
-                created: toTrimmedString(source.created || new Date().toISOString(), new Date().toISOString(), 80)
+                created: sanitizeAttributionAt(source.created, new Date().toISOString()) || new Date().toISOString(),
+                lastChangedBy: stamp.lastChangedBy,
+                lastChangedAt: stamp.lastChangedAt
             };
             this.getRequisitions().push(sanitized);
             const scope = buildRequisitionEntityScope(sanitized.id);
@@ -4312,10 +4666,16 @@
                     purpose: (v) => toTrimmedString(v, '', 4000),
                     notes: (v) => toTrimmedString(v, '', 4000),
                     tags: (v) => toTrimmedString(v, '', 4000),
-                    created: (v) => toTrimmedString(v, '', 80)
+                    created: (v) => sanitizeAttributionAt(v, list[idx].created || '')
                 });
                 if (!patch) return;
-                list[idx] = { ...list[idx], ...patch };
+                const stamp = this.getMutationStamp();
+                list[idx] = {
+                    ...list[idx],
+                    ...patch,
+                    lastChangedBy: stamp.lastChangedBy,
+                    lastChangedAt: stamp.lastChangedAt
+                };
                 const scope = buildRequisitionEntityScope(id);
                 this.save({ scope: scope || 'campaign.requisitions' });
             }
@@ -4339,24 +4699,16 @@
 
         addEvent(evt, caseId = null) {
             const source = evt && typeof evt === 'object' ? evt : {};
-            const safeEvent = {
-                id: toTrimmedString(source.id || ('event_' + Date.now()), 'event_' + Date.now(), 80),
-                title: toTrimmedString(source.title, '', 240),
-                focus: toTrimmedString(source.focus, '', 240),
-                heatDelta: toTrimmedString(source.heatDelta, '', 12),
-                tags: toTrimmedString(source.tags, '', 2000),
-                imageUrl: toImageUrl(source.imageUrl),
-                highlights: toTrimmedString(source.highlights, '', 6000),
-                fallout: toTrimmedString(source.fallout, '', 6000),
-                followUp: toTrimmedString(source.followUp, '', 6000),
-                source: toTrimmedString(source.source, '', 80),
-                kind: toTrimmedString(source.kind, '', 80),
-                resolved: toBoolean(source.resolved),
-                created: toTrimmedString(source.created || new Date().toISOString(), new Date().toISOString(), 80)
-            };
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return '';
-            entry.events.push({ ...safeEvent, caseId: entry.id });
+            const stamp = this.getMutationStamp();
+            const safeEvent = sanitizeEvent({
+                ...source,
+                caseId: entry.id,
+                lastChangedBy: stamp.lastChangedBy,
+                lastChangedAt: stamp.lastChangedAt
+            }, entry.events.length);
+            entry.events.push(safeEvent);
             this.syncActiveCaseLegacyState();
             const scope = buildCaseEventEntityScope(entry.id, safeEvent.id);
             this.save({ scope: scope || `cases.${entry.id}.events` });
@@ -4379,13 +4731,25 @@
                     source: (v) => toTrimmedString(v, '', 80),
                     kind: (v) => toTrimmedString(v, '', 80),
                     resolved: (v) => toBoolean(v),
-                    created: (v) => toTrimmedString(v, '', 80)
+                    created: (v) => sanitizeAttributionAt(v, list[idx].created || ''),
+                    dueAt: (v) => sanitizeAttributionAt(v, ''),
+                    impactSeverity: (v) => sanitizeImpactSeverity(v, list[idx].impactSeverity || 'moderate'),
+                    impactScope: (v) => sanitizeImpactScope(v, list[idx].impactScope || 'local'),
+                    entityImpacts: (v) => sanitizeEntityImpacts(v),
+                    certainty: (v) => clampPercent(v, list[idx].certainty)
                 });
                 if (!patch) return;
-                list[idx] = { ...list[idx], ...patch };
-                this.syncActiveCaseLegacyState();
                 const activeCase = this.getCaseEntry(caseId);
                 const scopeId = activeCase && activeCase.id ? activeCase.id : this.getActiveCaseId();
+                const stamp = this.getMutationStamp();
+                list[idx] = sanitizeEvent({
+                    ...list[idx],
+                    ...patch,
+                    caseId: scopeId,
+                    lastChangedBy: stamp.lastChangedBy,
+                    lastChangedAt: stamp.lastChangedAt
+                }, idx);
+                this.syncActiveCaseLegacyState();
                 const eventId = toTrimmedString(list[idx].id || id, toTrimmedString(id, '', 80), 80);
                 const scope = buildCaseEventEntityScope(scopeId, eventId);
                 this.save({ scope: scope || `cases.${scopeId}.events` });
@@ -4414,6 +4778,7 @@
 
         addEncounter(enc) {
             const source = enc && typeof enc === 'object' ? enc : {};
+            const stamp = this.getMutationStamp();
             const safeEncounter = {
                 id: toTrimmedString(source.id || ('enc_' + Date.now()), 'enc_' + Date.now(), 80),
                 title: toTrimmedString(source.title, '', 240),
@@ -4427,7 +4792,9 @@
                 beats: toTrimmedString(source.beats, '', 6000),
                 rewards: toTrimmedString(source.rewards, '', 6000),
                 notes: toTrimmedString(source.notes, '', 6000),
-                created: toTrimmedString(source.created || new Date().toISOString(), new Date().toISOString(), 80)
+                created: sanitizeAttributionAt(source.created, new Date().toISOString()) || new Date().toISOString(),
+                lastChangedBy: stamp.lastChangedBy,
+                lastChangedAt: stamp.lastChangedAt
             };
             this.getEncounters().push(safeEncounter);
             const scope = buildEncounterEntityScope(safeEncounter.id);
@@ -4452,10 +4819,16 @@
                     beats: (v) => toTrimmedString(v, '', 6000),
                     rewards: (v) => toTrimmedString(v, '', 6000),
                     notes: (v) => toTrimmedString(v, '', 6000),
-                    created: (v) => toTrimmedString(v, '', 80)
+                    created: (v) => sanitizeAttributionAt(v, list[idx].created || '')
                 });
                 if (!patch) return;
-                list[idx] = { ...list[idx], ...patch };
+                const stamp = this.getMutationStamp();
+                list[idx] = {
+                    ...list[idx],
+                    ...patch,
+                    lastChangedBy: stamp.lastChangedBy,
+                    lastChangedAt: stamp.lastChangedAt
+                };
                 const scope = buildEncounterEntityScope(id);
                 this.save({ scope: scope || 'campaign.encounters' });
             }
@@ -4493,6 +4866,372 @@
             entry.board = sanitizeBoard(null);
             this.syncActiveCaseLegacyState();
             this.save({ scope: `cases.${entry.id}.board` });
+        }
+
+        buildLLMSnapshot(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const mode = String(opts.mode || 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+            const includeGM = !!opts.includeGM;
+            const includeSheets = !!opts.includeSheets;
+            const state = sanitizeState(this.state);
+            const campaign = state.campaign || sanitizeCampaign(null);
+            const activeCaseId = state.cases && state.cases.activeCaseId ? state.cases.activeCaseId : 'case_primary';
+            const cases = Array.isArray(state.cases && state.cases.items) ? state.cases.items : [];
+            const nowIso = new Date().toISOString();
+
+            const mapTheories = (board) => {
+                const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
+                const theories = [];
+                nodes.forEach((node) => {
+                    if (!node || typeof node !== 'object') return;
+                    if (String(node.type || '').toLowerCase() !== 'theory') return;
+                    const meta = node.meta && typeof node.meta === 'object' ? node.meta : {};
+                    const theoryStatus = normalizeEnumToken(meta.theoryStatus);
+                    theories.push({
+                        id: toTrimmedString(node.id, '', 120),
+                        title: toTrimmedString(node.title, 'Theory', 240),
+                        certainty: clampPercent(meta.certainty !== undefined ? meta.certainty : meta.confidence, 50),
+                        reliability: sanitizeReliability(meta.reliability, 'unknown'),
+                        status: (theoryStatus === 'confirmed' || theoryStatus === 'disproven') ? theoryStatus : 'unproven',
+                        lastChangedBy: sanitizeAttributionBy(meta.lastChangedBy, ''),
+                        lastChangedAt: sanitizeAttributionAt(meta.lastChangedAt, '')
+                    });
+                });
+                return mode === 'compact' ? theories.slice(0, 12) : theories;
+            };
+
+            const knownNPCRefs = new Set((Array.isArray(campaign.npcs) ? campaign.npcs : []).map((entry) => toTrimmedString(entry && entry.id, '', 80).trim()).filter(Boolean));
+            const knownLocationRefs = new Set((Array.isArray(campaign.locations) ? campaign.locations : []).map((entry) => toTrimmedString(entry && entry.id, '', 80).trim()).filter(Boolean));
+            const knownRequisitionRefs = new Set((Array.isArray(campaign.requisitions) ? campaign.requisitions : []).map((entry) => toTrimmedString(entry && entry.id, '', 80).trim()).filter(Boolean));
+            const knownEventRefs = new Set();
+            cases.forEach((caseEntry) => {
+                const events = sanitizeEventList(caseEntry && caseEntry.events);
+                events.forEach((eventEntry) => {
+                    const eventId = toTrimmedString(eventEntry && eventEntry.id, '', 80).trim();
+                    if (eventId) knownEventRefs.add(eventId);
+                });
+            });
+            const normalizeSnapshotEntityImpacts = (impacts) => {
+                return sanitizeEntityImpacts(impacts).map((entry) => {
+                    const clean = {
+                        type: sanitizeImpactEntityType(entry.type, 'other'),
+                        id: toTrimmedString(entry.id, '', 80).trim(),
+                        note: toTrimmedString(entry.note, '', 400).trim()
+                    };
+                    const type = clean.type;
+                    const id = clean.id;
+                    const existingMissingRef = !!entry.missingRef;
+                    let missingRef = existingMissingRef;
+                    if (!missingRef && id) {
+                        if (type === 'npc') missingRef = !knownNPCRefs.has(id);
+                        if (type === 'location') missingRef = !knownLocationRefs.has(id);
+                        if (type === 'requisition') missingRef = !knownRequisitionRefs.has(id);
+                        if (type === 'event') missingRef = !knownEventRefs.has(id);
+                    }
+                    if (mode === 'full' && missingRef) clean.missingRef = true;
+                    return clean;
+                });
+            };
+
+            const eventFromSnapshot = (eventEntry) => {
+                const event = sanitizeEvent(eventEntry, 0);
+                if (mode === 'full') {
+                    return {
+                        ...event,
+                        entityImpacts: normalizeSnapshotEntityImpacts(event.entityImpacts)
+                    };
+                }
+                return {
+                    id: event.id,
+                    title: event.title,
+                    resolved: !!event.resolved,
+                    heatDelta: event.heatDelta,
+                    focus: event.focus,
+                    tags: event.tags,
+                    dueAt: event.dueAt,
+                    impactSeverity: event.impactSeverity,
+                    impactScope: event.impactScope,
+                    entityImpacts: normalizeSnapshotEntityImpacts(event.entityImpacts),
+                    certainty: event.certainty,
+                    lastChangedBy: event.lastChangedBy,
+                    lastChangedAt: event.lastChangedAt,
+                    highlights: toTrimmedString(event.highlights, '', 800),
+                    fallout: toTrimmedString(event.fallout, '', 800),
+                    followUp: toTrimmedString(event.followUp, '', 800),
+                    created: event.created
+                };
+            };
+
+            const caseItems = cases.map((caseEntry) => {
+                const entry = caseEntry && typeof caseEntry === 'object' ? caseEntry : {};
+                const board = sanitizeBoard(entry.board);
+                const events = sanitizeEventList(entry.events).map((event) => ({
+                    ...event,
+                    caseId: sanitizeCaseId(event.caseId || entry.id, entry.id || activeCaseId)
+                }));
+                const sortedEvents = events.slice().sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
+                const compactEvents = sortedEvents
+                    .sort((left, right) => {
+                        if (!!left.resolved === !!right.resolved) return String(right.created || '').localeCompare(String(left.created || ''));
+                        return left.resolved ? 1 : -1;
+                    })
+                    .slice(0, 25)
+                    .sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
+                return {
+                    id: sanitizeCaseId(entry.id, 'case_primary'),
+                    name: sanitizeCaseName(entry.name, DEFAULT_CASE_NAME),
+                    events: (mode === 'full' ? sortedEvents : compactEvents).map(eventFromSnapshot),
+                    boardSummary: {
+                        nodes: Array.isArray(board.nodes) ? board.nodes.length : 0,
+                        connections: Array.isArray(board.connections) ? board.connections.length : 0,
+                        theories: mapTheories(board)
+                    }
+                };
+            });
+
+            const allEvents = caseItems.flatMap((entry) => Array.isArray(entry.events) ? entry.events.map((event) => ({
+                ...event,
+                caseId: entry.id,
+                caseName: entry.name
+            })) : []);
+            const openEvents = allEvents.filter((event) => !event.resolved);
+            const nowTs = Date.now();
+            const overdueEvents = openEvents.filter((event) => {
+                const dueTs = toTimestamp(event.dueAt, 0);
+                return !!dueTs && dueTs < nowTs;
+            });
+            const highImpactOpen = openEvents.filter((event) => event.impactSeverity === 'high' || event.impactSeverity === 'critical');
+            const lowCertHighImpact = highImpactOpen.filter((event) => clampPercent(event.certainty, 50) <= 45);
+
+            const ledger = sanitizeLedgerState(campaign.ledger);
+            const stableFacts = this.getStableFacts();
+            const compactLedgerEntries = ledger.entries
+                .filter((entry) => entry.status === 'stable' || entry.status === 'contested')
+                .map((entry) => ({
+                    id: entry.id,
+                    caseId: entry.caseId,
+                    statement: entry.statement,
+                    status: entry.status,
+                    sourceType: entry.sourceType,
+                    sourceId: entry.sourceId,
+                    certainty: entry.certainty,
+                    tags: entry.tags,
+                    lastChangedBy: entry.lastChangedBy,
+                    lastChangedAt: entry.lastChangedAt
+                }));
+            const ledgerEntries = mode === 'full' ? ledger.entries : compactLedgerEntries;
+
+            const compactEntity = (list, mapper) => {
+                const source = Array.isArray(list) ? list : [];
+                return source.map((entry) => mapper(entry && typeof entry === 'object' ? entry : {}));
+            };
+
+            const entities = mode === 'full'
+                ? {
+                    players: deepClone(Array.isArray(campaign.players) ? campaign.players : []),
+                    npcs: deepClone(Array.isArray(campaign.npcs) ? campaign.npcs : []),
+                    locations: deepClone(Array.isArray(campaign.locations) ? campaign.locations : []),
+                    requisitions: deepClone(Array.isArray(campaign.requisitions) ? campaign.requisitions : []),
+                    encounters: deepClone(Array.isArray(campaign.encounters) ? campaign.encounters : [])
+                }
+                : {
+                    players: compactEntity(campaign.players, (entry) => ({
+                        id: toTrimmedString(entry.id, '', 80),
+                        name: toTrimmedString(entry.name, '', 160),
+                        dp: toNumber(entry.dp, 0),
+                        hp: entry.hp,
+                        ac: toNumber(entry.ac, 0),
+                        pp: toNumber(entry.pp, 0),
+                        dc: toNumber(entry.dc, 0)
+                    })),
+                    npcs: compactEntity(campaign.npcs, (entry) => ({
+                        id: toTrimmedString(entry.id, '', 80),
+                        name: toTrimmedString(entry.name, '', 160),
+                        guild: toTrimmedString(entry.guild, '', 120),
+                        wants: toTrimmedString(entry.wants, '', 200),
+                        trust: toNumber(entry.trust, 2),
+                        stigma: toNumber(entry.stigma, 0),
+                        lastChangedBy: sanitizeAttributionBy(entry.lastChangedBy, ''),
+                        lastChangedAt: sanitizeAttributionAt(entry.lastChangedAt, '')
+                    })),
+                    locations: compactEntity(campaign.locations, (entry) => ({
+                        id: toTrimmedString(entry.id, '', 80),
+                        name: toTrimmedString(entry.name, '', 160),
+                        district: toTrimmedString(entry.district, '', 120),
+                        trust: toNumber(entry.trust, 2),
+                        stigma: toNumber(entry.stigma, 0),
+                        lastChangedBy: sanitizeAttributionBy(entry.lastChangedBy, ''),
+                        lastChangedAt: sanitizeAttributionAt(entry.lastChangedAt, '')
+                    })),
+                    requisitions: compactEntity(campaign.requisitions, (entry) => ({
+                        id: toTrimmedString(entry.id, '', 80),
+                        item: toTrimmedString(entry.item, '', 240),
+                        status: toTrimmedString(entry.status, '', 80),
+                        priority: toTrimmedString(entry.priority, '', 80),
+                        requester: toTrimmedString(entry.requester, '', 160),
+                        lastChangedBy: sanitizeAttributionBy(entry.lastChangedBy, ''),
+                        lastChangedAt: sanitizeAttributionAt(entry.lastChangedAt, '')
+                    })),
+                    encounters: compactEntity(campaign.encounters, (entry) => ({
+                        id: toTrimmedString(entry.id, '', 80),
+                        title: toTrimmedString(entry.title, '', 240),
+                        tier: toTrimmedString(entry.tier, '', 80),
+                        location: toTrimmedString(entry.location, '', 240),
+                        lastChangedBy: sanitizeAttributionBy(entry.lastChangedBy, ''),
+                        lastChangedAt: sanitizeAttributionAt(entry.lastChangedAt, '')
+                    }))
+                };
+
+            const leadStore = readJsonStorage(LEAD_STORAGE_KEY, {});
+            const leadCases = leadStore && typeof leadStore === 'object' ? leadStore : {};
+            const prepProcedureState = readJsonStorage(PREP_PROCEDURE_STATE_KEY, null) || {
+                prep: { filled: 0, total: 4 },
+                procedure: { filled: 0, total: 4 },
+                tokens: { count: 0, max: 6 }
+            };
+            const clocksState = readJsonStorage(CLOCKS_STORAGE_KEY, []);
+            const timelineAutoHeatSync = localStorage.getItem(HEAT_SYNC_KEY) !== 'false';
+
+            const pressure = [];
+            if (toNumber(campaign.heat, 0) >= 3) pressure.push('Heat in complication range (3-5).');
+            if (toNumber(campaign.heat, 0) >= 6) pressure.push('Heat critical: hard constraints active.');
+            if (toNumber(campaign.cognitiveRisk, 0) >= 2) pressure.push('Cognitive risk drift is active.');
+            if (!pressure.length) pressure.push('World pressure currently stable.');
+
+            const immediateComplications = [];
+            if (overdueEvents.length) immediateComplications.push('Overdue unresolved events exist.');
+            if (highImpactOpen.length) immediateComplications.push('High-impact unresolved events are active.');
+            if (!immediateComplications.length) immediateComplications.push('No urgent complications flagged.');
+
+            const openThreads = openEvents
+                .slice(0, mode === 'full' ? 50 : 12)
+                .map((event) => toTrimmedString(event.title, '', 240))
+                .filter(Boolean);
+
+            const attributionRecords = [];
+            const pushAttribution = (kind, record, titleField = 'title') => {
+                if (!record || typeof record !== 'object') return;
+                const lastChangedAt = sanitizeAttributionAt(record.lastChangedAt, '');
+                const lastChangedBy = sanitizeAttributionBy(record.lastChangedBy, '');
+                if (!lastChangedAt && !lastChangedBy) return;
+                attributionRecords.push({
+                    kind,
+                    id: toTrimmedString(record.id, '', 120),
+                    title: toTrimmedString(record[titleField], '', 240),
+                    lastChangedBy,
+                    lastChangedAt
+                });
+            };
+
+            caseItems.forEach((entry) => {
+                (entry.events || []).forEach((event) => pushAttribution('event', event, 'title'));
+                const theories = entry.boardSummary && Array.isArray(entry.boardSummary.theories) ? entry.boardSummary.theories : [];
+                theories.forEach((theory) => pushAttribution('theory', theory, 'title'));
+            });
+            ledger.entries.forEach((entry) => pushAttribution('ledger', entry, 'statement'));
+            (campaign.requisitions || []).forEach((entry) => pushAttribution('requisition', entry, 'item'));
+            (campaign.encounters || []).forEach((entry) => pushAttribution('encounter', entry, 'title'));
+            (campaign.npcs || []).forEach((entry) => pushAttribution('npc', entry, 'name'));
+            (campaign.locations || []).forEach((entry) => pushAttribution('location', entry, 'name'));
+
+            attributionRecords.sort((left, right) => toTimestamp(right.lastChangedAt, 0) - toTimestamp(left.lastChangedAt, 0));
+            const attributionByActor = {};
+            attributionRecords.forEach((record) => {
+                const key = record.lastChangedBy || 'unknown';
+                attributionByActor[key] = (attributionByActor[key] || 0) + 1;
+            });
+
+            const snapshot = {
+                schema: 'rtf_llm_snapshot_v2',
+                generatedAt: nowIso,
+                source: {
+                    mode,
+                    activeCaseId,
+                    appVersion: toTrimmedString(global.RTF_APP_VERSION || 'local-dev', 'local-dev', 80)
+                },
+                campaign: {
+                    heat: toNumber(campaign.heat, 0),
+                    cognitiveRisk: toNumber(campaign.cognitiveRisk, 0),
+                    rep: sanitizeRep(campaign.rep),
+                    caseTemplate: sanitizeCase(campaign.case)
+                },
+                cases: {
+                    activeCaseId,
+                    items: caseItems
+                },
+                entities,
+                ledger: {
+                    entries: ledgerEntries,
+                    stableFacts
+                },
+                sidecar: {
+                    leadsByCase: leadCases,
+                    prepProcedure: prepProcedureState,
+                    clocks: mode === 'full' ? (Array.isArray(clocksState) ? clocksState : []) : (Array.isArray(clocksState) ? clocksState.slice(0, 25) : []),
+                    timelineAutoHeatSync
+                },
+                signals: {
+                    worldPressure: pressure,
+                    immediateComplications,
+                    openThreads,
+                    overdue_now: overdueEvents.map((event) => ({
+                        id: event.id,
+                        title: event.title,
+                        caseId: event.caseId,
+                        dueAt: event.dueAt
+                    })),
+                    high_impact_open: highImpactOpen.map((event) => ({
+                        id: event.id,
+                        title: event.title,
+                        caseId: event.caseId,
+                        impactSeverity: event.impactSeverity,
+                        impactScope: event.impactScope
+                    })),
+                    low_certainty_high_impact: lowCertHighImpact.map((event) => ({
+                        id: event.id,
+                        title: event.title,
+                        caseId: event.caseId,
+                        certainty: clampPercent(event.certainty, 50),
+                        impactSeverity: event.impactSeverity
+                    }))
+                },
+                attributionSummary: {
+                    totalRecords: attributionRecords.length,
+                    byActor: attributionByActor,
+                    latest: attributionRecords.slice(0, mode === 'full' ? 30 : 10)
+                },
+                llmHints: {
+                    writingGoal: 'prose consequences + situational descriptions',
+                    focusWindow: 'next scene to next session'
+                }
+            };
+
+            if (includeGM || includeSheets) {
+                snapshot.optional = {};
+                if (includeGM) {
+                    const gmState = readJsonStorage('gmDashboardData', null);
+                    snapshot.optional.gm = gmState ? { available: true, data: gmState } : { available: false, data: {} };
+                }
+                if (includeSheets) {
+                    snapshot.optional.sheets = { available: false, data: [] };
+                }
+            }
+
+            return snapshot;
+        }
+
+        exportLLMSnapshot(options = {}) {
+            const snapshot = this.buildLLMSnapshot(options);
+            const mode = snapshot && snapshot.source ? snapshot.source.mode : 'compact';
+            const date = new Date().toISOString().slice(0, 10);
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(snapshot, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", `rtf_llm_snapshot_v2_${mode}_${date}.json`);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            return snapshot;
         }
 
         getHQLayout() {

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="manifest.json">
+    <title>Ledger</title>
+    <link rel="stylesheet" href="css/theme.css?v=20260222e">
+    <link rel="stylesheet" href="css/player-nav.css?v=20260223a">
+    <link rel="stylesheet" href="css/ledger.css?v=20260304a">
+</head>
+
+<body data-player-nav="ledger">
+    <canvas id="vector-cloud"></canvas>
+
+    <div class="container">
+        <header class="hero-header">
+            <div>
+                <p class="hero-eyebrow">Ravnica Task Force</p>
+                <h1>Ledger</h1>
+                <p class="hero-subtitle">Track stable truths, contested claims, and collapsed assumptions with source-linked entries.</p>
+            </div>
+            <div class="hero-actions">
+                <div class="hero-action-bar primary">
+                    <a class="hero-btn ghost" href="tools.html">Portal</a>
+                    <a class="hero-btn ghost" href="timeline.html">Timeline</a>
+                    <a class="hero-btn ghost" href="board.html">Board</a>
+                </div>
+                <div class="hero-action-bar secondary">
+                    <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
+                    <button class="hero-btn ghost" id="btn-bg-style" data-onclick="cycleBgStyle()">🌌 BG: Field</button>
+                </div>
+                <input type="color" id="accent-picker-input"
+                    class="ledger-accent-picker-input" data-onchange="setAccentColor(this.value)">
+            </div>
+        </header>
+
+        <section class="card">
+            <h2>Add Ledger Entry</h2>
+            <div class="ledger-form-grid">
+                <div class="ledger-field ledger-field-wide">
+                    <label>Statement</label>
+                    <textarea id="ledgerStatement" rows="2" placeholder="What is asserted to be true?"></textarea>
+                </div>
+                <div class="ledger-field">
+                    <label>Case</label>
+                    <select id="ledgerCase"></select>
+                </div>
+                <div class="ledger-field">
+                    <label>Status</label>
+                    <select id="ledgerStatus">
+                        <option value="stable">Stable</option>
+                        <option value="contested">Contested</option>
+                        <option value="collapsed">Collapsed</option>
+                        <option value="resolved">Resolved</option>
+                    </select>
+                </div>
+                <div class="ledger-field">
+                    <label>Source Type</label>
+                    <select id="ledgerSourceType">
+                        <option value="manual">Manual</option>
+                        <option value="event">Event</option>
+                        <option value="theory">Theory</option>
+                        <option value="clue">Clue</option>
+                        <option value="npc">NPC</option>
+                        <option value="location">Location</option>
+                    </select>
+                </div>
+                <div class="ledger-field">
+                    <label>Source ID</label>
+                    <input id="ledgerSourceId" type="text" placeholder="event_..., node_..., npc_...">
+                </div>
+                <div class="ledger-field">
+                    <label>Certainty (0-100)</label>
+                    <input id="ledgerCertainty" type="number" min="0" max="100" step="1" value="50">
+                </div>
+                <div class="ledger-field ledger-field-wide">
+                    <label>Tags</label>
+                    <input id="ledgerTags" type="text" placeholder="archive, witness, board">
+                </div>
+                <div class="ledger-field ledger-field-wide">
+                    <label>Notes</label>
+                    <textarea id="ledgerNotes" rows="2" placeholder="Context, caveats, supporting detail."></textarea>
+                </div>
+            </div>
+            <div class="ledger-form-actions">
+                <button class="btn btn-dp" data-onclick="createLedgerEntry()">Add Entry</button>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Ledger Entries</h2>
+            <div class="ledger-filter-grid">
+                <div class="ledger-field">
+                    <label>Search</label>
+                    <input id="ledgerSearch" type="text" placeholder="statement, tags, notes, source id"
+                        data-oninput="onLedgerFilterChange()">
+                </div>
+                <div class="ledger-field">
+                    <label>Case Filter</label>
+                    <select id="ledgerFilterCase" data-onchange="onLedgerFilterChange()"></select>
+                </div>
+                <div class="ledger-field">
+                    <label>Status Filter</label>
+                    <select id="ledgerFilterStatus" data-onchange="onLedgerFilterChange()">
+                        <option value="all">All</option>
+                        <option value="stable">Stable</option>
+                        <option value="contested">Contested</option>
+                        <option value="collapsed">Collapsed</option>
+                        <option value="resolved">Resolved</option>
+                    </select>
+                </div>
+                <div class="ledger-field">
+                    <label>Source Filter</label>
+                    <select id="ledgerFilterSource" data-onchange="onLedgerFilterChange()">
+                        <option value="all">All</option>
+                        <option value="manual">Manual</option>
+                        <option value="event">Event</option>
+                        <option value="theory">Theory</option>
+                        <option value="clue">Clue</option>
+                        <option value="npc">NPC</option>
+                        <option value="location">Location</option>
+                    </select>
+                </div>
+                <div class="ledger-field">
+                    <label>Sort</label>
+                    <select id="ledgerSort" data-onchange="onLedgerFilterChange()">
+                        <option value="updated_desc">Recently Updated</option>
+                        <option value="updated_asc">Oldest Updated</option>
+                        <option value="certainty_desc">Highest Certainty</option>
+                        <option value="certainty_asc">Lowest Certainty</option>
+                        <option value="status">Status</option>
+                    </select>
+                </div>
+            </div>
+            <div id="ledgerSummary" class="ledger-summary">Loading entries...</div>
+            <div id="ledgerList" class="ledger-list"></div>
+        </section>
+
+        <section class="card">
+            <h2>Stable Truths</h2>
+            <div id="ledgerStableSummary" class="ledger-summary">No stable entries yet.</div>
+            <div id="ledgerStableFacts" class="stable-facts-list"></div>
+            <h3 class="ledger-subtitle">Contested / Collapsed</h3>
+            <div id="ledgerContestedFacts" class="stable-facts-list"></div>
+            <div class="ledger-form-actions">
+                <button class="btn" data-onclick="copyStableFacts()">Copy Stable Facts</button>
+                <button class="btn btn-dp" data-onclick="exportStableFacts()">Export Stable Facts</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="js/delegated-handler.js"></script>
+    <script src="js/sw-register.js"></script>
+    <script src="js/data-guilds.js"></script>
+    <script src="js/data-setting.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/store.js?v=20260222a"></script>
+    <script src="js/player-nav.js?v=20260224c"></script>
+    <script src="js/vector-field.js"></script>
+    <script src="js/ledger.js?v=20260304a"></script>
+</body>
+
+</html>

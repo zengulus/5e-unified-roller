@@ -9,6 +9,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - **Cloud Sync Panel (Secret Mode)** – Manual Supabase URL/key/campaign controls, export of `connect.json`, and admin pull/push actions. This panel is intentionally behind Alt+Shift secret mode.
 - **Customise Seed Panel (Secret Mode)** – Hidden fork helper that loads default/store guild + NPC + location data and exports fork-ready `data-guilds*.js`, `data-npcs*.js`, and `data-locations*.js` files.
 - **Card Grid** – Responsive cards link to every HTML tool (player sheet, dashboards, HQ, timeline, etc.). Icons and short blurbs help the table pick the right door quickly.
+- **Ledger Card** – Dedicated jump into `ledger.html` for stable truths, contested claims, and source-linked narrative facts.
 - **Secret Panel** – DM-only cards are tagged with 🔒-red borders; once the secret mode is active they fade in with a light animation.
 
 ## Tips
@@ -18,7 +19,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - If you’re forking this repo, use the secret Customise panel to export fresh preload scripts for guilds/NPCs/locations, then drop them into `js/data-guilds.js`, `js/data-npcs.js`, and `js/data-locations.js`.
 - Use the accent picker before a session so all other pages inherit the same neon colorway.
 - Hide DM cards during open-table play so players only see approved utilities.
-- Import/export here touches the unified `RTF_STORE` stack (Hub, Board, Dashboard, Roster, Locations, Requisitions, Timeline, Encounters, HQ). Standalone utilities like the Character Sheet, Session Tracker, Narrative Engine, and Tournament Bracket keep their own local saves.
+- Import/export here touches the unified `RTF_STORE` stack (Hub, Board, Dashboard, Roster, Locations, Requisitions, Timeline, Ledger, Encounters, HQ). Standalone utilities like the Character Sheet, Session Tracker, Narrative Engine, and Tournament Bracket keep their own local saves.
 
 ## Related Project
 For a less setting-specific version of this toolset, see [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).

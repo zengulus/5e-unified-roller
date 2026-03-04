@@ -9,7 +9,7 @@ Modular clue board with physics nodes, quick-reference popups, and case-scoped l
 
 ## Building the Web
 - **Toolbar** – Drag People, Locations, Clues, Notes, and other custom node types straight onto the board. Additional tool groups open popovers stocked with guild details, NPC dossiers, locations, events, or requisition data that can be dragged in as fully formatted nodes.
-- **Editing Nodes** – Click the node body to edit text inline. Use the context menu (right-click) for actions like edit text, delete, or "Center & Optimize" to zoom to the highlighted node cluster.
+- **Editing Nodes** – Click the node body to edit text inline. Use the context menu (right-click) for actions like edit text, certainty/reliability updates (clue/theory/event), source image updates, ledger capture, delete, or "Center & Optimize" to zoom to the highlighted node cluster.
 - **Connections** – Drag from a node edge/port to another node to create a link, then use the connection label controls to set text, toggle arrowheads, or remove the link.
 
 ## Navigation
@@ -26,6 +26,11 @@ Modular clue board with physics nodes, quick-reference popups, and case-scoped l
 - **Store-Backed Links** – Opening `board.html?linkType=<npc|location|timeline-event|requisition>&id=<entity_id>` focuses an existing linked node or spawns one from campaign data.
 - **Lead Queue + Timeline Bridge** – Lead cards and timeline event actions use those URL params, so board jumps stay deterministic and case-scoped.
 - **URL Hygiene** – After resolving a cross-link request, Board clears `nodeId` / `linkType` / `id` from the URL.
+
+## Narrative Metadata + Ledger
+- **Certainty / Reliability** – Clue, Theory, and Event nodes support `certainty` and `reliability` fields in node meta; these are visible on node badges and included in saved board payloads.
+- **Theory Confidence Bridge** – Theory confidence updates keep certainty aligned for snapshot consumers.
+- **Add to Ledger** – Context action creates `campaign.ledger` entries with source links (`eventId` or node id), certainty carryover, and case linkage.
 
 ## Tips
 - Use guild popups to seed consistent iconography/colors that match your campaign; it keeps silhouettes recognizable when the web gets dense.

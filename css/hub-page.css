@@ -269,6 +269,20 @@ canvas#vector-cloud {
     color: #9ccfff;
 }
 
+.hub-narrative-pressure-summary {
+    display: grid;
+    gap: 6px;
+    color: #c7d8ef;
+    font-size: 0.9rem;
+}
+
+.hub-narrative-pressure-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .hub-status-system-text {
     display: none;
     margin-top: 8px;
@@ -411,6 +425,10 @@ body.hub-system-details-visible .hub-status-system-text {
     .hub-roster-actions,
     .hub-project-row {
         flex-direction: column;
+    }
+
+    .hub-narrative-pressure-actions .btn {
+        width: 100%;
     }
 
     .hub-player-project-col {
