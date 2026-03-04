@@ -40,6 +40,16 @@
     --page-inline-gutter: clamp(12px, 3vw, 32px);
     --surface-strong: color-mix(in srgb, #050c18 70%, var(--accent-secondary) 30%);
     --surface-soft: color-mix(in srgb, #050910 80%, var(--accent-tertiary) 20%);
+    --invest-card-bg: color-mix(in srgb, #090f1a 82%, var(--accent-tertiary) 18%);
+    --invest-card-bg-soft: color-mix(in srgb, #0e1626 74%, var(--accent-secondary) 26%);
+    --invest-card-bg-strong: color-mix(in srgb, #040910 86%, var(--accent-secondary) 14%);
+    --invest-border-soft: color-mix(in srgb, rgba(255, 255, 255, 0.2) 45%, var(--accent-tertiary) 55%);
+    --invest-border: color-mix(in srgb, rgba(255, 255, 255, 0.24) 32%, var(--accent-secondary) 68%);
+    --invest-border-strong: color-mix(in srgb, rgba(255, 255, 255, 0.34) 20%, var(--accent) 80%);
+    --invest-text-soft: color-mix(in srgb, #edf4ff 78%, var(--accent-secondary) 22%);
+    --invest-text-muted: color-mix(in srgb, #9aa9be 62%, var(--accent-tertiary) 38%);
+    --invest-surface-chip: color-mix(in srgb, rgba(4, 8, 14, 0.82) 70%, var(--accent-secondary) 30%);
+    --invest-shadow: 0 14px 32px color-mix(in srgb, rgba(0, 0, 0, 0.72) 74%, var(--accent-tertiary) 26%);
     --btn-surface: color-mix(in srgb, var(--accent) 55%, var(--accent-quaternary) 45%);
     --btn-surface-muted: color-mix(in srgb, var(--accent-tertiary) 35%, rgba(5, 9, 16, 0.85));
     --btn-border: color-mix(in srgb, var(--accent-quaternary) 60%, rgba(255, 255, 255, 0.16));

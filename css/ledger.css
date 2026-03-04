@@ -19,11 +19,11 @@ body {
 }
 
 .card {
-    background: var(--card-bg);
-    border: 1px solid var(--border);
+    background: var(--invest-card-bg);
+    border: 1px solid var(--invest-border-soft);
     border-radius: 12px;
     padding: 18px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    box-shadow: var(--invest-shadow);
     backdrop-filter: blur(8px);
 }
 
@@ -56,7 +56,7 @@ h2 {
     font-size: 0.72rem;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: #9aa6ba;
+    color: var(--invest-text-muted);
 }
 
 input[type="text"],
@@ -95,7 +95,7 @@ textarea {
 
 .ledger-summary {
     margin: 10px 0;
-    color: #a9b7cb;
+    color: var(--invest-text-muted);
     font-size: 0.9rem;
 }
 
@@ -105,10 +105,11 @@ textarea {
 }
 
 .ledger-entry {
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--invest-border-soft);
     border-radius: 10px;
     padding: 10px;
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--invest-card-bg-soft);
+    box-shadow: var(--invest-shadow);
 }
 
 .ledger-entry-head {
@@ -127,11 +128,15 @@ textarea {
 
 .ledger-pill {
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid var(--invest-border-soft);
     padding: 2px 8px;
     font-size: 0.72rem;
-    color: #d4dded;
-    background: rgba(0, 0, 0, 0.28);
+    color: var(--invest-text-soft);
+    background: var(--invest-surface-chip);
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .ledger-pill.status-stable {
@@ -160,6 +165,23 @@ textarea {
     gap: 8px;
 }
 
+.ledger-fact-text {
+    font-size: 0.94rem;
+    line-height: 1.45;
+    color: var(--invest-text-soft);
+    background: color-mix(in srgb, var(--invest-card-bg-strong) 86%, rgba(0, 0, 0, 0.14));
+    border: 1px solid var(--invest-border-soft);
+    border-radius: 8px;
+    padding: 9px 10px;
+}
+
+.ledger-fact-notes {
+    margin-top: 8px;
+    font-size: 0.84rem;
+    line-height: 1.4;
+    color: var(--invest-text-muted);
+}
+
 .ledger-entry-grid .ledger-field-wide {
     grid-column: 1 / -1;
 }
@@ -167,7 +189,7 @@ textarea {
 .ledger-meta {
     margin-top: 8px;
     font-size: 0.75rem;
-    color: #8d98aa;
+    color: var(--invest-text-muted);
 }
 
 .ledger-actions {
@@ -187,7 +209,7 @@ textarea {
     font-size: 0.82rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #9fb2cd;
+    color: var(--invest-text-muted);
 }
 
 .stable-fact-item {
@@ -212,11 +234,11 @@ textarea {
 }
 
 .ledger-empty {
-    border: 1px dashed rgba(255, 255, 255, 0.16);
+    border: 1px dashed var(--invest-border-soft);
     border-radius: 10px;
     padding: 14px;
     text-align: center;
-    color: #7f8897;
+    color: var(--invest-text-muted);
 }
 
 .ledger-accent-picker-input {

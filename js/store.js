@@ -169,7 +169,7 @@
     const IMPACT_SCOPES = new Set(['local', 'district', 'guildwide', 'citywide']);
     const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
     const LEDGER_STATUSES = new Set(['stable', 'contested', 'collapsed', 'resolved']);
-    const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'manual']);
+    const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'npc', 'location', 'requisition', 'case', 'other']);
 
     const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -255,12 +255,13 @@
         const token = normalizeEnumToken(value);
         return LEDGER_STATUSES.has(token) ? token : fallback;
     };
-    const sanitizeLedgerSourceType = (value, fallback = 'manual') => {
+    const sanitizeLedgerSourceType = (value, fallback = 'other') => {
         const token = normalizeEnumToken(value);
-        const normalized = (token === 'npc' || token === 'location' || token === 'requisition')
-            ? 'manual'
-            : token;
-        return LEDGER_SOURCE_TYPES.has(normalized) ? normalized : fallback;
+        const normalized = (token === 'manual')
+            ? 'other'
+            : (token === 'person' ? 'npc' : token);
+        if (LEDGER_SOURCE_TYPES.has(normalized)) return normalized;
+        return LEDGER_SOURCE_TYPES.has(fallback) ? fallback : 'other';
     };
     const sanitizeAttributionBy = (value, fallback = '') => toTrimmedString(value, fallback, 120).trim();
     const sanitizeAttributionAt = (value, fallback = '') => toIsoString(value, fallback);
@@ -422,10 +423,10 @@
             id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
             caseId: sanitizeCaseId(source.caseId, 'case_primary'),
             statement: toTrimmedString(source.statement, '', 1200).trim(),
-            status: sanitizeLedgerStatus(source.status, 'stable'),
-            sourceType: sanitizeLedgerSourceType(source.sourceType, 'manual'),
+            status: 'stable',
+            sourceType: sanitizeLedgerSourceType(source.sourceType, 'other'),
             sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
-            certainty: clampPercent(source.certainty, 50),
+            certainty: 100,
             tags: toTrimmedString(source.tags, '', 1200),
             notes: toTrimmedString(source.notes, '', 4000),
             lastChangedBy: sanitizeAttributionBy(source.lastChangedBy, ''),
@@ -4556,10 +4557,8 @@
             const patch = sanitizePatch(updates, {
                 caseId: (v) => sanitizeCaseId(v, list[idx].caseId || this.getActiveCaseId()),
                 statement: (v) => toTrimmedString(v, '', 1200).trim(),
-                status: (v) => sanitizeLedgerStatus(v, list[idx].status || 'stable'),
-                sourceType: (v) => sanitizeLedgerSourceType(v, list[idx].sourceType || 'manual'),
+                sourceType: (v) => sanitizeLedgerSourceType(v, list[idx].sourceType || 'other'),
                 sourceId: (v) => toTrimmedString(v, '', 120).trim(),
-                certainty: (v) => clampPercent(v, list[idx].certainty),
                 tags: (v) => toTrimmedString(v, '', 1200),
                 notes: (v) => toTrimmedString(v, '', 4000),
                 createdAt: (v) => sanitizeAttributionAt(v, list[idx].createdAt || '')

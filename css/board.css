@@ -247,15 +247,15 @@ body.mobile-board .popup-menu * {
     position: absolute;
     min-width: 180px;
     min-height: 110px;
-    background: rgba(30, 30, 35, 0.7);
+    background: var(--invest-card-bg);
     backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--invest-border-soft);
     border-radius: 10px;
     padding: 10px;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--invest-shadow);
     cursor: grab;
     z-index: 20;
     transition: box-shadow 0.2s, transform 0.1s, border-color 0.2s, filter 0.5s, opacity 0.5s;
@@ -273,7 +273,7 @@ body.mobile-board .popup-menu * {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid color-mix(in srgb, var(--invest-border-soft) 72%, transparent);
     padding-bottom: 5px;
     margin-bottom: 5px;
 }
@@ -294,7 +294,7 @@ body.mobile-board .popup-menu * {
 
 .node-body {
     font-size: 0.8rem;
-    color: #ccc;
+    color: var(--invest-text-soft);
     outline: none;
     min-height: 30px;
     line-height: 1.4;
@@ -313,9 +313,9 @@ body.mobile-board .popup-menu * {
     display: inline-flex;
     align-items: center;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background: rgba(0, 0, 0, 0.35);
-    color: #dce8ff;
+    border: 1px solid var(--invest-border-soft);
+    background: var(--invest-surface-chip);
+    color: var(--invest-text-soft);
     font-size: 0.65rem;
     letter-spacing: 0.03em;
     padding: 2px 8px;
@@ -364,7 +364,9 @@ body.mobile-board .popup-menu * {
 
 /* Shared image slot */
 .node-media-shell {
-    background: radial-gradient(circle at 25% 20%, rgba(255, 255, 255, 0.12), rgba(15, 15, 20, 0.88));
+    background: radial-gradient(circle at 25% 20%,
+            color-mix(in srgb, rgba(255, 255, 255, 0.16) 65%, var(--accent-secondary) 35%),
+            color-mix(in srgb, var(--invest-card-bg-strong) 82%, rgba(0, 0, 0, 0.18)));
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
@@ -374,7 +376,7 @@ body.mobile-board .popup-menu * {
 
 .node-media-shell.node-media-contain {
     background-size: contain;
-    background-color: rgba(8, 8, 10, 0.82);
+    background-color: color-mix(in srgb, var(--invest-card-bg-strong) 86%, rgba(0, 0, 0, 0.22));
 }
 
 .node-media-fallback {
@@ -410,19 +412,22 @@ body.mobile-board .popup-menu * {
     width: 96px;
     height: 96px;
     border-radius: 50%;
-    border: 3px solid rgba(229, 234, 242, 0.95);
+    border: 3px solid color-mix(in srgb, #f4f8ff 62%, var(--accent-secondary) 38%);
     position: absolute;
     top: -30px;
     left: 50%;
     transform: translateX(-50%);
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45), 0 0 18px rgba(113, 153, 255, 0.3);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45),
+        0 0 18px color-mix(in srgb, var(--accent-secondary) 46%, rgba(113, 153, 255, 0.3));
     z-index: 3;
 }
 
 .type-person .node-bust-base {
-    background: linear-gradient(165deg, rgba(30, 34, 44, 0.94), rgba(20, 22, 29, 0.94));
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-top: 3px solid rgba(150, 184, 255, 0.9);
+    background: linear-gradient(165deg,
+            color-mix(in srgb, var(--invest-card-bg-soft) 84%, rgba(12, 18, 32, 0.16)),
+            color-mix(in srgb, var(--invest-card-bg-strong) 90%, rgba(8, 12, 22, 0.1)));
+    border: 1px solid var(--invest-border);
+    border-top: 3px solid var(--invest-border-strong);
     border-radius: 16px 16px 10px 10px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
     padding: 12px 12px 10px;
@@ -440,15 +445,15 @@ body.mobile-board .popup-menu * {
     width: 300px;
     min-height: 205px;
     padding: 0;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border: 1px solid var(--invest-border);
     border-radius: 12px;
     overflow: visible;
-    background: rgba(15, 17, 22, 0.95);
+    background: linear-gradient(180deg, var(--invest-card-bg-soft), var(--invest-card-bg-strong));
 }
 
 .type-location .node-postcard-photo {
     min-height: 122px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    border-bottom: 1px solid var(--invest-border-soft);
     border-radius: 11px 11px 0 0;
     overflow: hidden;
 }
@@ -458,12 +463,14 @@ body.mobile-board .popup-menu * {
     left: 0;
     right: 0;
     bottom: 0;
-    background: linear-gradient(to top, rgba(4, 6, 10, 0.92), rgba(4, 6, 10, 0));
+    background: linear-gradient(to top,
+            color-mix(in srgb, var(--invest-card-bg-strong) 88%, rgba(4, 6, 10, 0.12)),
+            rgba(4, 6, 10, 0));
     padding: 22px 12px 10px;
 }
 
 .type-location .node-title {
-    color: #f8fcff;
+    color: color-mix(in srgb, #f8fcff 80%, var(--accent-secondary) 20%);
     text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
     font-size: 0.95rem;
 }
@@ -471,7 +478,7 @@ body.mobile-board .popup-menu * {
 .type-location .node-body {
     padding: 11px 12px 12px;
     margin: 0;
-    background: rgba(8, 10, 14, 0.45);
+    background: color-mix(in srgb, var(--invest-card-bg-strong) 82%, rgba(8, 10, 14, 0.18));
 }
 
 /* Clue: The Evidence Bag */
@@ -479,17 +486,19 @@ body.mobile-board .popup-menu * {
     width: 220px;
     min-height: 220px;
     padding: 10px;
-    border: 1px solid rgba(209, 184, 152, 0.35);
+    border: 1px solid color-mix(in srgb, var(--hq-warning) 48%, var(--invest-border-soft));
     border-radius: 10px;
-    background: linear-gradient(160deg, rgba(42, 33, 27, 0.9), rgba(24, 20, 18, 0.9));
+    background: linear-gradient(160deg,
+            color-mix(in srgb, #2f251f 62%, var(--hq-warning) 23%),
+            color-mix(in srgb, #1a1512 72%, var(--accent-tertiary) 28%));
 }
 
 .type-clue .node-evidence-stage {
     position: relative;
     min-height: 126px;
-    border: 1px dashed rgba(222, 198, 157, 0.45);
+    border: 1px dashed color-mix(in srgb, var(--hq-warning) 52%, var(--invest-border-soft));
     border-radius: 8px;
-    background: rgba(11, 10, 10, 0.4);
+    background: color-mix(in srgb, #100e0c 72%, var(--accent-tertiary) 28%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -501,16 +510,18 @@ body.mobile-board .popup-menu * {
     height: 112px;
     border-radius: 6px;
     background-size: contain;
-    background-color: rgba(7, 7, 7, 0.92);
+    background-color: color-mix(in srgb, #080707 76%, var(--hq-warning) 24%);
 }
 
 .type-clue .evidence-tag {
     position: absolute;
     right: -8px;
     top: -13px;
-    background: linear-gradient(145deg, #f6dba8, #d7b882);
-    color: #3b2b14;
-    border: 1px solid rgba(90, 60, 25, 0.4);
+    background: linear-gradient(145deg,
+            color-mix(in srgb, #f6dba8 74%, var(--accent-secondary) 26%),
+            color-mix(in srgb, #d7b882 74%, var(--accent-tertiary) 26%));
+    color: color-mix(in srgb, #3b2b14 82%, var(--accent-contrast) 18%);
+    border: 1px solid color-mix(in srgb, #6f4e24 60%, var(--accent-secondary) 40%);
     border-radius: 4px;
     padding: 5px 8px;
     transform: rotate(8deg);
@@ -530,12 +541,13 @@ body.mobile-board .popup-menu * {
     margin-top: 9px;
     font-size: 0.76rem;
     line-height: 1.35;
+    color: color-mix(in srgb, #f7e8cd 76%, var(--invest-text-soft) 24%);
 }
 
 .type-clue .node-meta-pill {
-    border-color: rgba(255, 220, 162, 0.42);
-    color: #ffe7bf;
-    background: rgba(19, 14, 9, 0.54);
+    border-color: color-mix(in srgb, var(--hq-warning) 58%, rgba(255, 220, 162, 0.42));
+    color: color-mix(in srgb, #ffe7bf 84%, var(--invest-text-soft) 16%);
+    background: color-mix(in srgb, #1a140d 72%, var(--accent-tertiary) 28%);
 }
 
 /* Theory: The Dossier */
@@ -543,9 +555,9 @@ body.mobile-board .popup-menu * {
     width: 250px;
     min-height: 180px;
     padding: 12px;
-    border: 1px solid rgba(155, 184, 255, 0.38);
+    border: 1px solid var(--invest-border);
     border-radius: 11px;
-    background: linear-gradient(160deg, rgba(18, 23, 39, 0.92), rgba(11, 15, 28, 0.92));
+    background: linear-gradient(160deg, var(--invest-card-bg-soft), var(--invest-card-bg-strong));
 }
 
 .type-theory .node-theory-head {
@@ -566,12 +578,12 @@ body.mobile-board .popup-menu * {
     justify-content: center;
     padding: 2px 8px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid var(--invest-border-soft);
     font-size: 0.67rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #d2ddff;
-    background: rgba(18, 23, 38, 0.7);
+    color: color-mix(in srgb, #d2ddff 78%, var(--accent-secondary) 22%);
+    background: color-mix(in srgb, var(--invest-card-bg-strong) 82%, rgba(18, 23, 38, 0.18));
 }
 
 .type-theory .theory-confidence-wrap {
@@ -602,9 +614,9 @@ body.mobile-board .popup-menu * {
 }
 
 .type-theory .node-meta-pill {
-    border-color: rgba(166, 194, 255, 0.45);
-    color: #d4e3ff;
-    background: rgba(10, 17, 30, 0.6);
+    border-color: var(--invest-border);
+    color: var(--invest-text-soft);
+    background: color-mix(in srgb, var(--invest-card-bg-strong) 78%, rgba(10, 17, 30, 0.22));
 }
 
 .type-theory.theory-confirmed {
@@ -633,10 +645,10 @@ body.mobile-board .popup-menu * {
     min-height: 170px;
     padding: 0;
     border-radius: 11px;
-    border: 1px solid rgba(146, 169, 201, 0.34);
+    border: 1px solid var(--invest-border);
     background:
-        linear-gradient(180deg, rgba(25, 38, 58, 0.92), rgba(16, 25, 39, 0.96));
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+        linear-gradient(180deg, var(--invest-card-bg-soft), var(--invest-card-bg-strong));
+    box-shadow: var(--invest-shadow);
 }
 
 .type-note .note-card {
@@ -659,43 +671,47 @@ body.mobile-board .popup-menu * {
     font-size: 1.02rem;
     line-height: 1.2;
     margin-bottom: 8px;
-    color: #eef4ff;
+    color: color-mix(in srgb, #eef4ff 82%, var(--accent-secondary) 18%);
 }
 
 .type-note .node-body {
     font-family: "Alegreya Sans", "Segoe UI", sans-serif;
     font-size: 0.9rem;
     line-height: 1.38;
-    color: #d8e5fb;
+    color: color-mix(in srgb, #d8e5fb 74%, var(--accent-secondary) 26%);
 }
 
 .type-note .node-body>div+div {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid rgba(174, 193, 224, 0.2);
+    border-top: 1px solid color-mix(in srgb, var(--invest-border-soft) 75%, rgba(174, 193, 224, 0.2));
 }
 
 .type-note .node-body strong {
-    color: #f4f8ff;
+    color: color-mix(in srgb, #f4f8ff 86%, var(--accent-secondary) 14%);
     letter-spacing: 0.02em;
 }
 
 .type-note.note-variant-lead {
-    border-color: rgba(84, 178, 255, 0.45);
-    background: linear-gradient(180deg, rgba(13, 40, 65, 0.96), rgba(9, 26, 43, 0.98));
+    border-color: color-mix(in srgb, #54b2ff 64%, var(--invest-border) 36%);
+    background: linear-gradient(180deg,
+            color-mix(in srgb, #0d2841 72%, var(--accent-secondary) 28%),
+            color-mix(in srgb, #091a2b 78%, var(--accent-tertiary) 22%));
 }
 
 .type-note.note-variant-lead .note-kind {
-    color: #8cd2ff;
+    color: color-mix(in srgb, #8cd2ff 78%, var(--accent-secondary) 22%);
 }
 
 .type-note.note-variant-ledger {
-    border-color: rgba(110, 214, 182, 0.44);
-    background: linear-gradient(180deg, rgba(16, 52, 44, 0.96), rgba(10, 35, 29, 0.98));
+    border-color: color-mix(in srgb, #6ed6b6 62%, var(--invest-border) 38%);
+    background: linear-gradient(180deg,
+            color-mix(in srgb, #12382f 76%, var(--accent-secondary) 24%),
+            color-mix(in srgb, #0b2520 80%, var(--accent-tertiary) 20%));
 }
 
 .type-note.note-variant-ledger .note-kind {
-    color: #8ef1d4;
+    color: color-mix(in srgb, #8ef1d4 78%, var(--accent-secondary) 22%);
 }
 
 .type-note.note-variant-freeform {
@@ -738,12 +754,12 @@ body.mobile-board .popup-menu * {
     width: 460px;
     min-height: 300px;
     padding: 34px 14px 12px;
-    border: 2px dashed color-mix(in srgb, var(--accent-secondary) 55%, rgba(255, 255, 255, 0.2));
+    border: 2px dashed var(--invest-border);
     border-radius: 14px;
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.01) 38%),
-        color-mix(in srgb, #101521 88%, rgba(255, 255, 255, 0.04));
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+        color-mix(in srgb, var(--invest-card-bg-soft) 88%, rgba(255, 255, 255, 0.04));
+    box-shadow: var(--invest-shadow);
     z-index: 12;
     resize: both;
     overflow: auto;
@@ -756,15 +772,17 @@ body.mobile-board .popup-menu * {
     max-width: calc(100% - 28px);
     padding: 5px 11px 6px;
     border-radius: 6px;
-    border: 1px solid color-mix(in srgb, var(--accent-secondary) 55%, rgba(255, 255, 255, 0.28));
+    border: 1px solid color-mix(in srgb, var(--invest-border-strong) 65%, rgba(255, 255, 255, 0.28));
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.08)),
-        color-mix(in srgb, #fff9d8 88%, #ebdf8e 12%);
+        linear-gradient(180deg,
+            color-mix(in srgb, rgba(255, 255, 255, 0.26) 72%, var(--accent-secondary) 28%),
+            rgba(255, 255, 255, 0.08)),
+        color-mix(in srgb, #fff9d8 74%, var(--accent-secondary) 26%);
     box-shadow: 0 8px 14px rgba(0, 0, 0, 0.26);
 }
 
 .type-group .group-tag .node-title {
-    color: #2f2a1c;
+    color: color-mix(in srgb, #2f2a1c 82%, var(--accent-contrast) 18%);
     font-size: 0.83rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -782,7 +800,7 @@ body.mobile-board .popup-menu * {
 }
 
 .type-group .group-body {
-    color: #d7e2ff;
+    color: var(--invest-text-soft);
     font-size: 0.78rem;
     line-height: 1.42;
     min-height: 62px;
@@ -797,24 +815,26 @@ body.mobile-board .popup-menu * {
     width: 210px;
     min-height: 280px;
     padding: 0;
-    border: 1px solid rgba(152, 191, 255, 0.35);
+    border: 1px solid var(--invest-border);
     border-radius: 10px;
     overflow: visible;
-    background: linear-gradient(160deg, rgba(12, 18, 28, 0.94), rgba(7, 10, 18, 0.94));
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+    background: linear-gradient(160deg, var(--invest-card-bg-soft), var(--invest-card-bg-strong));
+    box-shadow: var(--invest-shadow);
 }
 
 .type-event .node-timestamp-header {
     padding: 10px 10px 12px;
-    border-bottom: 1px solid rgba(166, 212, 255, 0.3);
-    background: linear-gradient(to bottom, rgba(28, 45, 70, 0.95), rgba(12, 20, 33, 0.95));
+    border-bottom: 1px solid var(--invest-border-soft);
+    background: linear-gradient(to bottom,
+            color-mix(in srgb, var(--invest-card-bg-soft) 76%, var(--accent-secondary) 24%),
+            var(--invest-card-bg-strong));
 }
 
 .type-event .timestamp-caption {
     font-family: "Courier New", monospace;
     font-size: 0.62rem;
     letter-spacing: 0.22em;
-    color: rgba(158, 204, 255, 0.75);
+    color: color-mix(in srgb, var(--invest-text-muted) 70%, rgba(158, 204, 255, 0.75) 30%);
     text-transform: uppercase;
     margin-bottom: 6px;
 }
@@ -823,21 +843,21 @@ body.mobile-board .popup-menu * {
     font-family: "Courier New", monospace;
     font-size: 1.08rem;
     letter-spacing: 0.07em;
-    color: #9dffbf;
-    text-shadow: 0 0 12px rgba(107, 255, 164, 0.28);
+    color: color-mix(in srgb, #b8ffd2 76%, var(--accent-secondary) 24%);
+    text-shadow: 0 0 12px color-mix(in srgb, var(--accent-secondary) 44%, rgba(107, 255, 164, 0.28));
     line-height: 1.2;
 }
 
 .type-event .node-timestamp-media {
     height: 88px;
-    border-bottom: 1px solid rgba(166, 212, 255, 0.2);
-    background-color: rgba(7, 11, 18, 0.78);
+    border-bottom: 1px solid color-mix(in srgb, var(--invest-border-soft) 78%, transparent);
+    background-color: color-mix(in srgb, var(--invest-card-bg-strong) 86%, rgba(7, 11, 18, 0.14));
 }
 
 .type-event .node-body {
     padding: 11px;
     font-size: 0.78rem;
-    color: #d5e5ff;
+    color: var(--invest-text-soft);
 }
 
 .type-event .node-meta-badges {
@@ -845,9 +865,9 @@ body.mobile-board .popup-menu * {
 }
 
 .type-event .node-meta-pill {
-    border-color: rgba(145, 221, 190, 0.42);
-    color: #c5f2df;
-    background: rgba(8, 18, 17, 0.5);
+    border-color: color-mix(in srgb, #9ce6c6 52%, var(--invest-border-soft));
+    color: color-mix(in srgb, #c5f2df 78%, var(--invest-text-soft) 22%);
+    background: color-mix(in srgb, #091c19 72%, var(--accent-tertiary) 28%);
 }
 
 .type-event .node-meta-badges:empty {
@@ -859,10 +879,10 @@ body.mobile-board .popup-menu * {
     width: 260px;
     min-height: 170px;
     padding: 14px 14px 12px;
-    border: 3px double rgba(45, 45, 45, 0.9);
+    border: 3px double color-mix(in srgb, #2d2d2d 68%, var(--accent-secondary) 32%);
     border-radius: 2px;
-    background: #ece8dc;
-    color: #1c1c1c;
+    background: color-mix(in srgb, #ece8dc 78%, var(--accent-secondary) 22%);
+    color: color-mix(in srgb, #1c1c1c 86%, var(--accent-contrast) 14%);
     box-shadow: 0 7px 18px rgba(0, 0, 0, 0.35);
     position: relative;
     overflow: visible;
@@ -875,7 +895,7 @@ body.mobile-board .popup-menu * {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(143, 35, 35, 0.11);
+    color: color-mix(in srgb, rgba(143, 35, 35, 0.11) 62%, var(--accent-secondary) 38%);
     font-weight: 700;
     letter-spacing: 0.2em;
     font-size: 1.45rem;
@@ -886,14 +906,14 @@ body.mobile-board .popup-menu * {
 .type-requisition .node-requisition-media {
     height: 82px;
     margin-bottom: 8px;
-    border: 1px solid rgba(34, 34, 34, 0.25);
+    border: 1px solid color-mix(in srgb, rgba(34, 34, 34, 0.25) 64%, var(--accent-secondary) 36%);
     border-radius: 2px;
-    background-color: rgba(240, 236, 227, 0.72);
+    background-color: color-mix(in srgb, rgba(240, 236, 227, 0.72) 72%, var(--accent-tertiary) 28%);
 }
 
 .type-requisition .node-title,
 .type-requisition .node-body {
-    color: #1e1e1e;
+    color: color-mix(in srgb, #1e1e1e 84%, var(--accent-contrast) 16%);
     position: relative;
 }
 
@@ -901,7 +921,7 @@ body.mobile-board .popup-menu * {
     text-transform: uppercase;
     font-size: 0.9rem;
     letter-spacing: 0.07em;
-    border-bottom: 1px dashed rgba(40, 40, 40, 0.6);
+    border-bottom: 1px dashed color-mix(in srgb, rgba(40, 40, 40, 0.6) 74%, var(--accent-secondary) 26%);
     padding-bottom: 6px;
     margin-bottom: 8px;
 }
@@ -1024,7 +1044,7 @@ body.show-ports .node .port {
 .node.editing {
     border-color: var(--gold);
     box-shadow: 0 0 15px var(--gold);
-    background: rgba(40, 40, 45, 0.9);
+    background: var(--invest-card-bg-soft);
     cursor: text;
 }
 

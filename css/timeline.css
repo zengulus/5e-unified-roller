@@ -2,9 +2,9 @@
     display: none;
     padding: 18px;
     margin-bottom: 20px;
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--invest-card-bg);
     border-radius: 12px;
-    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border: 1px dashed var(--invest-border-soft);
 }
 
 .event-form input,
@@ -18,8 +18,8 @@
     margin-top: 8px;
     padding: 10px;
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--invest-border-soft);
+    background: color-mix(in srgb, var(--invest-card-bg-strong) 88%, rgba(0, 0, 0, 0.12));
 }
 
 .impact-editor label {
@@ -27,7 +27,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #888;
+    color: var(--invest-text-muted);
     margin-bottom: 6px;
 }
 
@@ -56,15 +56,15 @@
     gap: 6px;
     padding: 4px 8px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--invest-border-soft);
+    background: var(--invest-surface-chip);
     font-size: 0.75rem;
 }
 
 .impact-chip-remove {
     background: transparent;
     border: none;
-    color: #d6d6d6;
+    color: var(--invest-text-soft);
     cursor: pointer;
     font-size: 0.95rem;
     line-height: 1;
@@ -72,7 +72,7 @@
 }
 
 .impact-empty {
-    color: #777;
+    color: var(--invest-text-muted);
     font-size: 0.8rem;
 }
 
@@ -90,8 +90,9 @@
     gap: 14px;
     align-items: flex-start;
     border-radius: 12px;
-    background: rgba(0, 0, 0, 0.35);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--invest-card-bg-soft);
+    border: 1px solid var(--invest-border-soft);
+    box-shadow: var(--invest-shadow);
 }
 
 .event-card.event-overdue {
@@ -143,7 +144,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #888;
+    color: var(--invest-text-muted);
 }
 
 .event-body {
@@ -202,8 +203,8 @@
     display: grid;
     gap: 14px;
     margin-bottom: 15px;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--invest-card-bg);
+    border: 1px solid var(--invest-border-soft);
     border-radius: 14px;
     padding: 14px;
 }
@@ -237,9 +238,9 @@
     gap: 8px;
     padding: 8px 14px;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: rgba(0, 0, 0, 0.3);
-    color: #cfcfcf;
+    border: 1px solid var(--invest-border-soft);
+    background: var(--invest-surface-chip);
+    color: var(--invest-text-soft);
     font-size: 0.85rem;
     letter-spacing: 0.02em;
     cursor: pointer;
@@ -251,15 +252,17 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.3);
+    background: color-mix(in srgb, var(--invest-text-soft) 34%, transparent);
     box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
 }
 
 .toggle-btn.active {
-    background: linear-gradient(135deg, rgba(94, 164, 255, 0.3), rgba(106, 255, 178, 0.18));
-    border-color: rgba(142, 200, 255, 0.6);
-    color: #eaf7ff;
-    box-shadow: 0 0 12px rgba(75, 173, 255, 0.25);
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--accent-secondary) 34%, rgba(94, 164, 255, 0.3)),
+            color-mix(in srgb, var(--accent-tertiary) 24%, rgba(106, 255, 178, 0.18)));
+    border-color: var(--invest-border-strong);
+    color: color-mix(in srgb, #eaf7ff 82%, var(--accent-secondary) 18%);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent-secondary) 34%, rgba(75, 173, 255, 0.25));
 }
 
 .toggle-btn.active::before {
@@ -285,9 +288,9 @@
 
 .empty-state {
     text-align: center;
-    color: #777;
+    color: var(--invest-text-muted);
     padding: 40px;
-    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border: 1px dashed var(--invest-border-soft);
     border-radius: 10px;
 }
 
@@ -321,8 +324,8 @@
     padding: 2px 8px;
     border-radius: 999px;
     font-size: 0.72rem;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--invest-border-soft);
+    background: var(--invest-surface-chip);
 }
 
 .event-impact-editor {
@@ -340,7 +343,7 @@
     max-height: 190px;
     object-fit: cover;
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid var(--invest-border-soft);
     display: block;
 }
 
@@ -395,16 +398,16 @@
 }
 
 .event-log-meta {
-    color: #666;
+    color: var(--invest-text-muted);
     flex: 1;
 }
 
 .lead-panel {
     margin-bottom: 18px;
     padding: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--invest-border-soft);
     border-radius: 12px;
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--invest-card-bg);
 }
 
 .lead-panel-head h3 {
@@ -414,7 +417,7 @@
 
 .lead-panel-head p {
     margin: 0 0 12px;
-    color: #9ca3af;
+    color: var(--invest-text-muted);
     font-size: 0.88rem;
 }
 
@@ -430,7 +433,7 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #8c8c8c;
+    color: var(--invest-text-muted);
 }
 
 .lead-form-actions {
@@ -440,12 +443,12 @@
 .lead-summary {
     margin-top: 10px;
     font-size: 0.84rem;
-    color: #a8a8a8;
+    color: var(--invest-text-muted);
 }
 
 .lead-vote-summary {
     font-size: 0.82rem;
-    color: #9aa0aa;
+    color: var(--invest-text-muted);
 }
 
 .lead-list {
@@ -456,9 +459,10 @@
 
 .lead-card {
     padding: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--invest-border-soft);
     border-radius: 10px;
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--invest-card-bg-soft);
+    box-shadow: var(--invest-shadow);
     display: grid;
     gap: 8px;
 }
@@ -489,11 +493,11 @@
 .lead-pill {
     display: inline-flex;
     align-items: center;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--invest-border-soft);
     border-radius: 999px;
     padding: 2px 10px;
     font-size: 0.73rem;
-    color: #d6d6d6;
+    color: var(--invest-text-soft);
 }
 
 .lead-pill.score {
@@ -513,7 +517,7 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #8b8b8b;
+    color: var(--invest-text-muted);
 }
 
 .lead-vote-row {
@@ -539,8 +543,8 @@
 }
 
 .lead-empty {
-    color: #777;
-    border: 1px dashed rgba(255, 255, 255, 0.09);
+    color: var(--invest-text-muted);
+    border: 1px dashed var(--invest-border-soft);
     border-radius: 8px;
     padding: 14px;
     text-align: center;

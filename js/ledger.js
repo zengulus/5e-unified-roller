@@ -2,27 +2,23 @@
     const delegatedHandlerEvents = ['click', 'change', 'input'];
     const delegatedHandlerCache = new Map();
     let delegatedHandlersBound = false;
-    const LEDGER_STATUSES = ['stable', 'contested', 'collapsed', 'resolved'];
-    const LEDGER_SOURCE_TYPES = ['manual', 'event', 'theory', 'clue'];
-    const STATUS_LABELS = {
-        stable: 'Stable',
-        contested: 'Contested',
-        collapsed: 'Collapsed',
-        resolved: 'Resolved'
-    };
+
+    const LEDGER_SOURCE_TYPES = ['case', 'event', 'npc', 'location', 'theory', 'clue', 'requisition', 'other'];
     const SOURCE_LABELS = {
-        manual: 'Manual',
-        event: 'Timeline Event',
-        theory: 'Board Theory',
-        clue: 'Board Clue'
+        case: 'Case',
+        event: 'Event',
+        npc: 'NPC',
+        location: 'Location',
+        theory: 'Theory',
+        clue: 'Clue',
+        requisition: 'Requisition',
+        other: 'Other'
     };
-    const LINKED_SOURCE_TYPES = new Set(['event', 'theory', 'clue']);
-    const LINKED_SOURCE_TYPE_LIST = ['event', 'theory', 'clue'];
-    const SOURCE_LINK_INDEX = {
-        event: [],
-        theory: [],
-        clue: []
-    };
+
+    const LINKED_SOURCE_TYPE_LIST = ['case', 'event', 'npc', 'location', 'theory', 'clue', 'requisition'];
+    const LINKED_SOURCE_TYPES = new Set(LINKED_SOURCE_TYPE_LIST);
+    const SOURCE_LINK_INDEX = Object.fromEntries(LINKED_SOURCE_TYPE_LIST.map((type) => [type, []]));
+
     let filtersHydrated = false;
 
     const escapeHtml = (value = '') => String(value || '')
@@ -31,6 +27,7 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+
     const escapeJsString = (value = '') => String(value || '')
         .replace(/\\/g, '\\\\')
         .replace(/'/g, "\\'")
@@ -38,6 +35,7 @@
         .replace(/\n/g, '\\n')
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
+
     const getStore = () => window.RTF_STORE;
 
     function getDelegatedHandlerFn(code) {
@@ -57,8 +55,7 @@
                 event.preventDefault();
                 event.stopPropagation();
             }
-        }
-        catch (err) {
+        } catch (err) {
             console.error(`Delegated handler failed for ${attrName}:`, code, err);
         }
     }
@@ -99,23 +96,11 @@
         return String(match.name || cleanId);
     }
 
-    function buildStatusOptions(selected = 'stable') {
-        const cleanSelected = LEDGER_STATUSES.includes(selected) ? selected : 'stable';
-        return LEDGER_STATUSES.map((status) =>
-            `<option value="${status}" ${status === cleanSelected ? 'selected' : ''}>${escapeHtml(STATUS_LABELS[status])}</option>`
-        ).join('');
-    }
-
-    function buildSourceOptions(selected = 'manual') {
-        const cleanSelected = LEDGER_SOURCE_TYPES.includes(selected) ? selected : 'manual';
-        return LEDGER_SOURCE_TYPES.map((type) =>
-            `<option value="${type}" ${type === cleanSelected ? 'selected' : ''}>${escapeHtml(SOURCE_LABELS[type])}</option>`
-        ).join('');
-    }
-
-    function normalizeSourceType(value) {
+    function normalizeSourceType(value, fallback = 'other') {
         const clean = String(value || '').trim().toLowerCase();
-        return LEDGER_SOURCE_TYPES.includes(clean) ? clean : 'manual';
+        const mapped = clean === 'manual' ? 'other' : (clean === 'person' ? 'npc' : clean);
+        if (LEDGER_SOURCE_TYPES.includes(mapped)) return mapped;
+        return LEDGER_SOURCE_TYPES.includes(fallback) ? fallback : 'other';
     }
 
     function normalizeSourceId(value) {
@@ -130,53 +115,46 @@
         return LINKED_SOURCE_TYPES.has(normalizeSourceType(sourceType));
     }
 
-    function sanitizeDomToken(value) {
-        return String(value || '')
-            .toLowerCase()
-            .replace(/[^a-z0-9_-]+/g, '_')
-            .replace(/^_+|_+$/g, '')
-            .slice(0, 64) || 'entry';
-    }
-
     function clearSourceLinkIndex() {
-        SOURCE_LINK_INDEX.event = [];
-        SOURCE_LINK_INDEX.theory = [];
-        SOURCE_LINK_INDEX.clue = [];
+        LINKED_SOURCE_TYPE_LIST.forEach((type) => {
+            SOURCE_LINK_INDEX[type] = [];
+        });
     }
 
-    function getLedgerSelfNodeIds(entryId, caseId = '') {
-        const cleanEntryId = String(entryId || '').trim();
-        const cleanCaseId = String(caseId || '').trim();
-        const out = new Set();
-        if (!cleanEntryId) return out;
-        const store = getStore();
-        if (!store || typeof store.getBoard !== 'function') return out;
-        const board = store.getBoard(cleanCaseId || undefined);
-        const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
-        nodes.forEach((node) => {
-            const nodeId = normalizeSourceId(node && node.id || '');
-            if (!isBoardNodeId(nodeId)) return;
-            const meta = node && typeof node.meta === 'object' ? node.meta : {};
-            if (String(meta.sourceType || '').trim().toLowerCase() !== 'ledger') return;
-            if (String(meta.ledgerEntryId || '').trim() !== cleanEntryId) return;
-            out.add(nodeId);
-        });
-        return out;
+    function mapBoardNodeTypeToSourceTypes(nodeType) {
+        switch (String(nodeType || '').trim().toLowerCase()) {
+            case 'person':
+                return ['npc'];
+            case 'location':
+                return ['location'];
+            case 'theory':
+                return ['theory'];
+            case 'clue':
+                return ['clue'];
+            case 'event':
+                return ['event'];
+            case 'requisition':
+                return ['requisition'];
+            default:
+                return [];
+        }
     }
 
     function refreshSourceLinkIndex() {
         clearSourceLinkIndex();
         const store = getStore();
         if (!store) return;
+
         const cases = getCases();
         const seen = new Set();
-        const pushOption = (sourceType, sourceId, label, caseId) => {
+
+        const pushOption = (sourceType, sourceId, label, caseId = '') => {
             const cleanType = normalizeSourceType(sourceType);
             if (!isLinkedSourceType(cleanType)) return;
             const cleanId = normalizeSourceId(sourceId);
             if (!cleanId) return;
             const cleanCaseId = String(caseId || '').trim();
-            const key = `${cleanType}:${cleanId}`;
+            const key = `${cleanType}:${cleanCaseId}:${cleanId}`;
             if (seen.has(key)) return;
             seen.add(key);
             SOURCE_LINK_INDEX[cleanType].push({
@@ -190,17 +168,18 @@
             const caseId = String(caseEntry && caseEntry.id || '').trim();
             if (!caseId) return;
             const caseName = String(caseEntry && caseEntry.name || caseId).trim() || caseId;
+            pushOption('case', caseId, `[Case] ${caseName}`, caseId);
+
             if (typeof store.getEvents === 'function') {
                 const events = store.getEvents(caseId);
                 (Array.isArray(events) ? events : []).forEach((evt) => {
                     const evtId = String(evt && evt.id || '').trim();
                     if (!evtId) return;
                     const evtTitle = String(evt && evt.title || evtId).trim() || evtId;
-                    LINKED_SOURCE_TYPE_LIST.forEach((type) => {
-                        pushOption(type, evtId, `[Timeline] ${evtTitle} • ${caseName}`, caseId);
-                    });
+                    pushOption('event', evtId, `[Timeline] ${evtTitle} • ${caseName}`, caseId);
                 });
             }
+
             if (typeof store.getBoard === 'function') {
                 const board = store.getBoard(caseId);
                 const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
@@ -209,14 +188,45 @@
                     if (!isBoardNodeId(nodeId)) return;
                     const nodeTitle = String(node && node.title || nodeId).trim() || nodeId;
                     const nodeType = String(node && node.type || 'node').trim().toLowerCase();
-                    LINKED_SOURCE_TYPE_LIST.forEach((type) => {
-                        pushOption(type, nodeId, `[Board] ${nodeTitle} (${nodeType || 'node'}) • ${caseName}`, caseId);
+                    const sourceTypes = mapBoardNodeTypeToSourceTypes(nodeType);
+                    sourceTypes.forEach((type) => {
+                        pushOption(type, nodeId, `[Board] ${nodeTitle} (${nodeType}) • ${caseName}`, caseId);
                     });
                 });
             }
         });
 
-        ['event', 'theory', 'clue'].forEach((type) => {
+        if (typeof store.getNPCs === 'function') {
+            const npcs = store.getNPCs();
+            (Array.isArray(npcs) ? npcs : []).forEach((npc) => {
+                const id = String(npc && npc.id || '').trim();
+                if (!id) return;
+                const name = String(npc && (npc.name || npc.title) || id).trim() || id;
+                pushOption('npc', id, `[NPC] ${name}`, '');
+            });
+        }
+
+        if (typeof store.getLocations === 'function') {
+            const locations = store.getLocations();
+            (Array.isArray(locations) ? locations : []).forEach((location) => {
+                const id = String(location && location.id || '').trim();
+                if (!id) return;
+                const name = String(location && (location.name || location.title) || id).trim() || id;
+                pushOption('location', id, `[Location] ${name}`, '');
+            });
+        }
+
+        if (typeof store.getRequisitions === 'function') {
+            const requisitions = store.getRequisitions();
+            (Array.isArray(requisitions) ? requisitions : []).forEach((requisition) => {
+                const id = String(requisition && requisition.id || '').trim();
+                if (!id) return;
+                const name = String(requisition && (requisition.item || requisition.title || requisition.name) || id).trim() || id;
+                pushOption('requisition', id, `[Req] ${name}`, '');
+            });
+        }
+
+        LINKED_SOURCE_TYPE_LIST.forEach((type) => {
             SOURCE_LINK_INDEX[type].sort((a, b) => {
                 const labelDelta = String(a.label || '').localeCompare(String(b.label || ''));
                 if (labelDelta !== 0) return labelDelta;
@@ -225,38 +235,41 @@
         });
     }
 
-    function getSourceOptionsForType(sourceType, caseId = '', blockedIds = null) {
+    function getSourceOptionsForType(sourceType, caseId = '') {
         const cleanType = normalizeSourceType(sourceType);
         if (!isLinkedSourceType(cleanType)) return [];
+
         const list = Array.isArray(SOURCE_LINK_INDEX[cleanType]) ? SOURCE_LINK_INDEX[cleanType] : [];
         const cleanCaseId = String(caseId || '').trim();
-        const scoped = cleanCaseId
-            ? list.filter((entry) => entry && String(entry.caseId || '') === cleanCaseId)
-            : list;
-        const base = cleanCaseId && scoped.length ? scoped : list;
-        if (!blockedIds || !blockedIds.size) return base;
-        return base.filter((entry) => !blockedIds.has(String(entry && entry.id || '')));
+        if (!cleanCaseId) return list;
+
+        const scoped = list.filter((entry) => {
+            const entryCaseId = String(entry && entry.caseId || '').trim();
+            return !entryCaseId || entryCaseId === cleanCaseId;
+        });
+
+        return scoped.length ? scoped : list;
     }
 
     function getSourcePickerPlaceholder(sourceType, optionsCount) {
         const cleanType = normalizeSourceType(sourceType);
-        if (!isLinkedSourceType(cleanType)) return 'No link required for manual provenance';
+        if (!isLinkedSourceType(cleanType)) return 'No linked record required';
         const label = String(SOURCE_LABELS[cleanType] || cleanType).toLowerCase();
         return optionsCount
-            ? `Filter ${label} links`
-            : `No ${label} links available`;
+            ? `Filter ${label} records`
+            : `No ${label} records available`;
     }
 
-    function isValidLinkedSourceId(sourceType, sourceId, caseId = '', blockedIds = null) {
+    function isValidLinkedSourceId(sourceType, sourceId, caseId = '') {
         const cleanType = normalizeSourceType(sourceType);
         const cleanId = normalizeSourceId(sourceId);
         if (!isLinkedSourceType(cleanType)) return !cleanId;
         if (!cleanId) return true;
-        return getSourceOptionsForType(cleanType, caseId, blockedIds).some((entry) => String(entry && entry.id || '') === cleanId);
+        return getSourceOptionsForType(cleanType, caseId).some((entry) => String(entry && entry.id || '') === cleanId);
     }
 
-    function buildSourceDatalistOptions(sourceType, caseId = '', blockedIds = null) {
-        const options = getSourceOptionsForType(sourceType, caseId, blockedIds);
+    function buildSourceDatalistOptions(sourceType, caseId = '') {
+        const options = getSourceOptionsForType(sourceType, caseId);
         return options.map((entry) => {
             const id = String(entry && entry.id || '');
             const label = String(entry && entry.label || id);
@@ -264,16 +277,50 @@
         }).join('');
     }
 
+    function buildSourceTypeOptions(selected = 'other', includeAll = false, fallback = 'other') {
+        const selectedToken = includeAll && String(selected || '').trim().toLowerCase() === 'all'
+            ? 'all'
+            : normalizeSourceType(selected, fallback);
+        const optionRows = LEDGER_SOURCE_TYPES.map((type) =>
+            `<option value="${type}" ${type === selectedToken ? 'selected' : ''}>${escapeHtml(SOURCE_LABELS[type] || type)}</option>`
+        ).join('');
+        if (!includeAll) return optionRows;
+        const allSelected = selectedToken === 'all' ? 'selected' : '';
+        return `<option value="all" ${allSelected}>All</option>${optionRows}`;
+    }
+
+    function ensureSourceTypeOptions() {
+        const sourceSelect = document.getElementById('ledgerSourceType');
+        const sourceFilterSelect = document.getElementById('ledgerFilterSource');
+        if (sourceSelect) {
+            const selected = normalizeSourceType(sourceSelect.value || 'case', 'case');
+            sourceSelect.innerHTML = buildSourceTypeOptions(selected, false, 'case');
+            sourceSelect.value = selected;
+        }
+        if (sourceFilterSelect) {
+            const selectedFilterRaw = String(sourceFilterSelect.value || 'all').trim().toLowerCase();
+            const selectedFilter = (selectedFilterRaw === 'all' || LEDGER_SOURCE_TYPES.includes(selectedFilterRaw))
+                ? selectedFilterRaw
+                : 'all';
+            sourceFilterSelect.innerHTML = buildSourceTypeOptions(selectedFilter, true, 'other');
+            sourceFilterSelect.value = selectedFilter;
+        }
+    }
+
     function refreshLedgerSourcePicker() {
         refreshSourceLinkIndex();
+        ensureSourceTypeOptions();
+
         const sourceTypeEl = document.getElementById('ledgerSourceType');
         const caseEl = document.getElementById('ledgerCase');
         const sourceIdEl = document.getElementById('ledgerSourceId');
         const datalistEl = document.getElementById('ledgerSourceOptions');
         if (!sourceTypeEl || !sourceIdEl || !datalistEl) return;
-        const sourceType = normalizeSourceType(sourceTypeEl.value);
+
+        const sourceType = normalizeSourceType(sourceTypeEl.value, 'case');
         const caseId = String(caseEl && caseEl.value || '').trim();
         const options = getSourceOptionsForType(sourceType, caseId);
+
         if (!isLinkedSourceType(sourceType)) {
             sourceIdEl.value = '';
             sourceIdEl.disabled = true;
@@ -282,53 +329,43 @@
             datalistEl.innerHTML = '';
             return;
         }
+
         sourceIdEl.disabled = false;
         sourceIdEl.setAttribute('list', 'ledgerSourceOptions');
         sourceIdEl.placeholder = getSourcePickerPlaceholder(sourceType, options.length);
         datalistEl.innerHTML = buildSourceDatalistOptions(sourceType, caseId);
-    }
 
-    function buildEntrySourceIdEditor(entry, escapedEntryId, sourceType) {
-        const cleanType = normalizeSourceType(sourceType);
-        if (!isLinkedSourceType(cleanType)) {
-            return '<input type="text" value="" disabled placeholder="No link required for manual provenance">';
+        if (!isValidLinkedSourceId(sourceType, sourceIdEl.value, caseId)) {
+            sourceIdEl.value = '';
         }
-        const caseId = String(entry && entry.caseId || '').trim();
-        const sourceId = normalizeSourceId(entry && entry.sourceId || '');
-        const blockedIds = getLedgerSelfNodeIds(entry && entry.id, caseId);
-        const options = getSourceOptionsForType(cleanType, caseId, blockedIds);
-        const listId = `ledgerSourceOptions_${sanitizeDomToken(String(entry && entry.id || escapedEntryId))}`;
-        return `
-            <input type="text" value="${escapeHtml(sourceId)}" list="${listId}" placeholder="${escapeHtml(getSourcePickerPlaceholder(cleanType, options.length))}"
-                data-onchange="updateLedgerField('${escapedEntryId}', 'sourceId', this.value)">
-            <datalist id="${listId}">
-                ${buildSourceDatalistOptions(cleanType, caseId, blockedIds)}
-            </datalist>
-        `;
     }
 
     function ensureCaseSelectOptions() {
         const caseSelect = document.getElementById('ledgerCase');
         const caseFilter = document.getElementById('ledgerFilterCase');
         if (!caseSelect || !caseFilter) return;
+
         const store = getStore();
         const cases = getCases();
         const activeCaseId = store && typeof store.getActiveCaseId === 'function'
             ? String(store.getActiveCaseId() || 'case_primary')
             : 'case_primary';
 
-        const selectedCase = caseSelect.value || activeCaseId;
-        const selectedFilterCase = caseFilter.value || 'all';
+        const selectedCase = String(caseSelect.value || activeCaseId);
+        const selectedFilterCase = String(caseFilter.value || 'all');
+
         caseSelect.innerHTML = cases.map((entry) => {
             const id = String(entry && entry.id || '');
             const name = String(entry && entry.name || id || 'Case');
             return `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`;
         }).join('');
-        if (!caseSelect.value && cases.length) caseSelect.value = cases[0].id;
-        if (cases.some((entry) => String(entry.id || '') === selectedCase)) {
+
+        if (cases.some((entry) => String(entry && entry.id || '') === selectedCase)) {
             caseSelect.value = selectedCase;
-        } else if (cases.some((entry) => String(entry.id || '') === activeCaseId)) {
+        } else if (cases.some((entry) => String(entry && entry.id || '') === activeCaseId)) {
             caseSelect.value = activeCaseId;
+        } else if (cases.length) {
+            caseSelect.value = String(cases[0].id || '');
         }
 
         caseFilter.innerHTML = '<option value="all">All Cases</option>' + cases.map((entry) => {
@@ -336,7 +373,8 @@
             const name = String(entry && entry.name || id || 'Case');
             return `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`;
         }).join('');
-        if (selectedFilterCase === 'all' || cases.some((entry) => String(entry.id || '') === selectedFilterCase)) {
+
+        if (selectedFilterCase === 'all' || cases.some((entry) => String(entry && entry.id || '') === selectedFilterCase)) {
             caseFilter.value = selectedFilterCase;
         }
     }
@@ -345,33 +383,36 @@
         if (filtersHydrated) return;
         const store = getStore();
         if (!store || typeof store.getLedgerState !== 'function') return;
+
         const state = store.getLedgerState();
         const ui = state && state.ui && typeof state.ui === 'object' ? state.ui : {};
-        const statusFilter = document.getElementById('ledgerFilterStatus');
+        const sourceFilter = document.getElementById('ledgerFilterSource');
         const searchInput = document.getElementById('ledgerSearch');
         const sortSelect = document.getElementById('ledgerSort');
-        if (statusFilter && ui.filter) statusFilter.value = String(ui.filter);
+
+        if (sourceFilter && ui.filter) sourceFilter.value = String(ui.filter);
         if (searchInput && ui.search) searchInput.value = String(ui.search);
         if (sortSelect && ui.sort) sortSelect.value = String(ui.sort);
+
         filtersHydrated = true;
     }
 
     function persistLedgerUIState() {
         const store = getStore();
         if (!store || typeof store.updateLedgerUI !== 'function') return;
-        const filterStatus = String((document.getElementById('ledgerFilterStatus') || {}).value || 'all');
+
+        const sourceFilter = String((document.getElementById('ledgerFilterSource') || {}).value || 'all');
         const search = String((document.getElementById('ledgerSearch') || {}).value || '').trim();
         const sort = String((document.getElementById('ledgerSort') || {}).value || 'updated_desc');
-        store.updateLedgerUI({ filter: filterStatus, search, sort });
+        store.updateLedgerUI({ filter: sourceFilter, search, sort });
     }
 
     function getFilterValues() {
         const caseFilter = String((document.getElementById('ledgerFilterCase') || {}).value || 'all');
-        const statusFilter = String((document.getElementById('ledgerFilterStatus') || {}).value || 'all');
         const sourceFilter = String((document.getElementById('ledgerFilterSource') || {}).value || 'all');
         const search = String((document.getElementById('ledgerSearch') || {}).value || '').trim().toLowerCase();
         const sort = String((document.getElementById('ledgerSort') || {}).value || 'updated_desc');
-        return { caseFilter, statusFilter, sourceFilter, search, sort };
+        return { caseFilter, sourceFilter, search, sort };
     }
 
     function readEntries() {
@@ -387,19 +428,20 @@
             list.sort((a, b) => String(a.lastChangedAt || '').localeCompare(String(b.lastChangedAt || '')));
             return list;
         }
-        if (sortMode === 'certainty_desc') {
-            list.sort((a, b) => Number(b.certainty || 0) - Number(a.certainty || 0));
+        if (sortMode === 'statement_asc') {
+            list.sort((a, b) => String(a.statement || '').localeCompare(String(b.statement || '')));
             return list;
         }
-        if (sortMode === 'certainty_asc') {
-            list.sort((a, b) => Number(a.certainty || 0) - Number(b.certainty || 0));
+        if (sortMode === 'statement_desc') {
+            list.sort((a, b) => String(b.statement || '').localeCompare(String(a.statement || '')));
             return list;
         }
-        if (sortMode === 'status') {
-            const order = new Map(LEDGER_STATUSES.map((status, idx) => [status, idx]));
+        if (sortMode === 'source') {
             list.sort((a, b) => {
-                const diff = (order.get(String(a.status || 'stable')) || 0) - (order.get(String(b.status || 'stable')) || 0);
-                if (diff !== 0) return diff;
+                const aSource = String(SOURCE_LABELS[normalizeSourceType(a && a.sourceType)] || normalizeSourceType(a && a.sourceType));
+                const bSource = String(SOURCE_LABELS[normalizeSourceType(b && b.sourceType)] || normalizeSourceType(b && b.sourceType));
+                const sourceDelta = aSource.localeCompare(bSource);
+                if (sourceDelta !== 0) return sourceDelta;
                 return String(b.lastChangedAt || '').localeCompare(String(a.lastChangedAt || ''));
             });
             return list;
@@ -413,11 +455,11 @@
         const filtered = entries.filter((entry) => {
             if (!entry || typeof entry !== 'object') return false;
             const caseMatch = cleanFilters.caseFilter === 'all' || String(entry.caseId || '') === cleanFilters.caseFilter;
-            const statusMatch = cleanFilters.statusFilter === 'all' || String(entry.status || '') === cleanFilters.statusFilter;
-            const sourceMatch = cleanFilters.sourceFilter === 'all' || String(entry.sourceType || '') === cleanFilters.sourceFilter;
-            const haystack = `${entry.statement || ''} ${entry.tags || ''} ${entry.notes || ''} ${entry.sourceId || ''} ${entry.lastChangedBy || ''}`.toLowerCase();
+            const sourceType = normalizeSourceType(entry.sourceType);
+            const sourceMatch = cleanFilters.sourceFilter === 'all' || sourceType === cleanFilters.sourceFilter;
+            const haystack = `${entry.statement || ''} ${entry.tags || ''} ${entry.notes || ''} ${entry.sourceId || ''} ${entry.lastChangedBy || ''} ${sourceType}`.toLowerCase();
             const searchMatch = cleanFilters.search ? haystack.includes(cleanFilters.search) : true;
-            return caseMatch && statusMatch && sourceMatch && searchMatch;
+            return caseMatch && sourceMatch && searchMatch;
         });
         return sortEntries(filtered, cleanFilters.sort);
     }
@@ -429,73 +471,46 @@
         return list.find((entry) => String(entry && entry.id || '') === cleanId) || null;
     }
 
+    function renderFactStatement(statement) {
+        return escapeHtml(String(statement || '').trim()).replace(/\n/g, '<br>');
+    }
+
     function buildEntryCard(entry) {
         const entryId = escapeJsString(entry.id || '');
-        const status = LEDGER_STATUSES.includes(entry.status) ? entry.status : 'stable';
-        const sourceType = LEDGER_SOURCE_TYPES.includes(entry.sourceType) ? entry.sourceType : 'manual';
-        const sourceTimelineAction = sourceType === 'event' && entry.sourceId && !isBoardNodeId(entry.sourceId)
+        const sourceType = normalizeSourceType(entry.sourceType);
+        const sourceLabel = SOURCE_LABELS[sourceType] || sourceType;
+        const sourceId = normalizeSourceId(entry.sourceId);
+        const caseName = getCaseName(entry.caseId);
+        const tags = String(entry.tags || '').trim();
+
+        const sourceTimelineAction = sourceType === 'event' && sourceId && !isBoardNodeId(sourceId)
             ? `<button class="btn" data-onclick="openLedgerSourceOnTimeline('${entryId}')">Timeline</button>`
             : '';
-        const sourceBoardAction = ((sourceType === 'event' || sourceType === 'theory' || sourceType === 'clue') && entry.sourceId)
+
+        const sourceBoardAction = sourceId && (
+            isBoardNodeId(sourceId)
+            || sourceType === 'event'
+            || sourceType === 'npc'
+            || sourceType === 'location'
+            || sourceType === 'requisition'
+        )
             ? `<button class="btn" data-onclick="openLedgerSourceOnBoard('${entryId}')">Board</button>`
             : '';
+
         return `
             <article class="ledger-entry">
                 <div class="ledger-entry-head">
                     <div class="ledger-pill-row">
-                        <span class="ledger-pill status-${status}">${escapeHtml(STATUS_LABELS[status] || status)}</span>
-                        <span class="ledger-pill">${escapeHtml(SOURCE_LABELS[sourceType] || sourceType)}</span>
-                        <span class="ledger-pill">Case: ${escapeHtml(getCaseName(entry.caseId))}</span>
-                        <span class="ledger-pill">Certainty ${Math.max(0, Math.min(100, Number(entry.certainty || 0)))}%</span>
+                        <span class="ledger-pill">${escapeHtml(sourceLabel)}</span>
+                        <span class="ledger-pill">Case: ${escapeHtml(caseName)}</span>
+                        ${sourceId ? `<span class="ledger-pill">Link: ${escapeHtml(sourceId)}</span>` : ''}
+                        ${tags ? `<span class="ledger-pill">Tags: ${escapeHtml(tags)}</span>` : ''}
                     </div>
                 </div>
-                <div class="ledger-entry-grid">
-                    <div class="ledger-field ledger-field-wide">
-                        <label>Statement</label>
-                        <textarea rows="2" data-onchange="updateLedgerField('${entryId}', 'statement', this.value)">${escapeHtml(entry.statement || '')}</textarea>
-                    </div>
-                    <div class="ledger-field">
-                        <label>Status</label>
-                        <select data-onchange="updateLedgerField('${entryId}', 'status', this.value)">
-                            ${buildStatusOptions(status)}
-                        </select>
-                    </div>
-                    <div class="ledger-field">
-                        <label>Where Heard</label>
-                        <select data-onchange="updateLedgerField('${entryId}', 'sourceType', this.value)">
-                            ${buildSourceOptions(sourceType)}
-                        </select>
-                    </div>
-                    <div class="ledger-field">
-                        <label>Linked Record</label>
-                        ${buildEntrySourceIdEditor(entry, entryId, sourceType)}
-                    </div>
-                    <div class="ledger-field">
-                        <label>Case</label>
-                        <select data-onchange="updateLedgerField('${entryId}', 'caseId', this.value)">
-                            ${getCases().map((row) => {
-                                const id = String(row && row.id || '');
-                                const name = String(row && row.name || id || 'Case');
-                                return `<option value="${escapeHtml(id)}" ${id === String(entry.caseId || '') ? 'selected' : ''}>${escapeHtml(name)}</option>`;
-                            }).join('')}
-                        </select>
-                    </div>
-                    <div class="ledger-field">
-                        <label>Certainty</label>
-                        <input type="number" min="0" max="100" step="1" value="${Math.max(0, Math.min(100, Number(entry.certainty || 0)))}"
-                            data-onchange="updateLedgerField('${entryId}', 'certainty', this.value)">
-                    </div>
-                    <div class="ledger-field ledger-field-wide">
-                        <label>Tags</label>
-                        <input type="text" value="${escapeHtml(entry.tags || '')}" data-onchange="updateLedgerField('${entryId}', 'tags', this.value)">
-                    </div>
-                    <div class="ledger-field ledger-field-wide">
-                        <label>Notes</label>
-                        <textarea rows="2" data-onchange="updateLedgerField('${entryId}', 'notes', this.value)">${escapeHtml(entry.notes || '')}</textarea>
-                    </div>
-                </div>
+                <div class="ledger-fact-text">${renderFactStatement(entry.statement)}</div>
+                ${entry.notes ? `<div class="ledger-fact-notes">${renderFactStatement(entry.notes)}</div>` : ''}
                 <div class="ledger-meta">
-                    Updated ${entry.lastChangedAt ? new Date(entry.lastChangedAt).toLocaleString() : '—'}${entry.lastChangedBy ? ` by ${escapeHtml(entry.lastChangedBy)}` : ''} • Created ${entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}
+                    Updated ${entry.lastChangedAt ? new Date(entry.lastChangedAt).toLocaleString() : '—'}${entry.lastChangedBy ? ` by ${escapeHtml(entry.lastChangedBy)}` : ''}
                 </div>
                 <div class="ledger-actions">
                     ${sourceTimelineAction}
@@ -509,43 +524,31 @@
     function renderStableFactsPanel(entries, filters) {
         const stableSummary = document.getElementById('ledgerStableSummary');
         const stableList = document.getElementById('ledgerStableFacts');
-        const contestedList = document.getElementById('ledgerContestedFacts');
-        if (!stableSummary || !stableList || !contestedList) return;
+        if (!stableSummary || !stableList) return;
+
         const allEntries = Array.isArray(entries) ? entries : [];
         const caseFilter = filters.caseFilter === 'all' ? '' : filters.caseFilter;
         const scoped = caseFilter
-            ? allEntries.filter((entry) => String(entry.caseId || '') === caseFilter)
+            ? allEntries.filter((entry) => String(entry && entry.caseId || '') === caseFilter)
             : allEntries;
-        const stable = scoped.filter((entry) => String(entry.status || '') === 'stable');
-        const contestedEntries = scoped.filter((entry) => String(entry.status || '') === 'contested');
-        const collapsedEntries = scoped.filter((entry) => String(entry.status || '') === 'collapsed');
-        const contested = contestedEntries.length;
-        const collapsed = collapsedEntries.length;
-        const resolved = scoped.filter((entry) => String(entry.status || '') === 'resolved').length;
-        stableSummary.textContent = `${stable.length} stable • ${contested} contested • ${collapsed} collapsed • ${resolved} resolved${caseFilter ? ` • ${getCaseName(caseFilter)}` : ''}`;
 
-        if (!stable.length) {
-            stableList.innerHTML = '<div class="ledger-empty">No stable facts yet.</div>';
-        } else {
-            stableList.innerHTML = stable.map((entry) => `<div class="stable-fact-item">${escapeHtml(entry.statement || '')}</div>`).join('');
-        }
-        const unstable = [...contestedEntries, ...collapsedEntries];
-        if (!unstable.length) {
-            contestedList.innerHTML = '<div class="ledger-empty">No contested or collapsed entries.</div>';
+        stableSummary.textContent = `${scoped.length} pinned facts${caseFilter ? ` • ${getCaseName(caseFilter)}` : ''}`;
+
+        if (!scoped.length) {
+            stableList.innerHTML = '<div class="ledger-empty">No pinned facts yet.</div>';
             return;
         }
-        contestedList.innerHTML = unstable.map((entry) => {
-            const status = String(entry.status || '');
-            const statusLabel = status === 'collapsed' ? 'Collapsed' : 'Contested';
-            const klass = status === 'collapsed' ? 'is-collapsed' : 'is-contested';
-            return `<div class="stable-fact-item ${klass}"><strong>${statusLabel}:</strong> ${escapeHtml(entry.statement || '')}</div>`;
-        }).join('');
+
+        stableList.innerHTML = scoped
+            .map((entry) => `<div class="stable-fact-item">${renderFactStatement(entry && entry.statement || '')}</div>`)
+            .join('');
     }
 
     function renderLedger() {
         const listEl = document.getElementById('ledgerList');
         const summaryEl = document.getElementById('ledgerSummary');
         if (!listEl || !summaryEl) return;
+
         if (!getStore()) {
             listEl.innerHTML = '<div class="ledger-empty">Store unavailable.</div>';
             summaryEl.textContent = 'Waiting for store...';
@@ -553,15 +556,19 @@
         }
 
         ensureCaseSelectOptions();
+        ensureSourceTypeOptions();
         hydrateUIFromLedgerState();
         refreshLedgerSourcePicker();
+
         const filters = getFilterValues();
         const entries = readEntries();
         const filtered = getFilteredEntries(entries, filters);
-        summaryEl.textContent = `${filtered.length} visible entries • ${entries.length} total`;
+
+        summaryEl.textContent = `${filtered.length} visible facts • ${entries.length} total`;
         listEl.innerHTML = filtered.length
             ? filtered.map(buildEntryCard).join('')
-            : '<div class="ledger-empty">No entries match these filters.</div>';
+            : '<div class="ledger-empty">No facts match these filters.</div>';
+
         renderStableFactsPanel(entries, filters);
     }
 
@@ -576,41 +583,45 @@
             alert('Store not ready. Reload and try again.');
             return;
         }
+
         const statementEl = document.getElementById('ledgerStatement');
         const statement = String(statementEl && statementEl.value || '').trim();
         if (!statement) {
-            alert('Statement is required.');
+            alert('Fact statement is required.');
             return;
         }
+
         refreshSourceLinkIndex();
         ensureCaseSelectOptions();
+
         const caseId = String((document.getElementById('ledgerCase') || {}).value || '');
-        const status = String((document.getElementById('ledgerStatus') || {}).value || 'stable');
-        const sourceType = normalizeSourceType(String((document.getElementById('ledgerSourceType') || {}).value || 'manual'));
+        const sourceType = normalizeSourceType(String((document.getElementById('ledgerSourceType') || {}).value || 'case'), 'case');
         let sourceId = normalizeSourceId((document.getElementById('ledgerSourceId') || {}).value || '');
+
         if (!isLinkedSourceType(sourceType)) {
             sourceId = '';
         } else if (sourceId && !isValidLinkedSourceId(sourceType, sourceId, caseId)) {
-            alert('Select a valid link from the filterable list.');
+            alert('Select a valid linked record from the filterable list.');
             return;
         }
-        const certainty = Number((document.getElementById('ledgerCertainty') || {}).value || 50);
+
         const tags = String((document.getElementById('ledgerTags') || {}).value || '');
         const notes = String((document.getElementById('ledgerNotes') || {}).value || '');
+
         const entryId = store.addLedgerEntry({
             caseId,
             statement,
-            status,
             sourceType,
             sourceId,
-            certainty,
             tags,
             notes
         });
+
         if (!entryId) {
-            alert('Could not add ledger entry.');
+            alert('Could not pin fact.');
             return;
         }
+
         if (statementEl) statementEl.value = '';
         const sourceIdEl = document.getElementById('ledgerSourceId');
         if (sourceIdEl) sourceIdEl.value = '';
@@ -618,103 +629,85 @@
         if (tagsEl) tagsEl.value = '';
         const notesEl = document.getElementById('ledgerNotes');
         if (notesEl) notesEl.value = '';
-        refreshLedgerSourcePicker();
-        renderLedger();
-    }
 
-    function updateLedgerField(id, field, value) {
-        const store = getStore();
-        if (!store || typeof store.updateLedgerEntry !== 'function') return;
-        refreshSourceLinkIndex();
-        const cleanField = String(field || '').trim();
-        if (!cleanField) return;
-        const entry = findEntryById(id);
-        if (cleanField === 'sourceType') {
-            const nextSourceType = normalizeSourceType(value);
-            const patch = { sourceType: nextSourceType };
-            if (!isLinkedSourceType(nextSourceType)) {
-                patch.sourceId = '';
-            } else {
-                const currentSourceId = normalizeSourceId(entry && entry.sourceId || '');
-                const caseId = String(entry && entry.caseId || '').trim();
-                const blockedIds = getLedgerSelfNodeIds(entry && entry.id, caseId);
-                if (currentSourceId && !isValidLinkedSourceId(nextSourceType, currentSourceId, caseId, blockedIds)) {
-                    patch.sourceId = '';
-                }
-            }
-            store.updateLedgerEntry(id, patch);
-            renderLedger();
-            return;
-        }
-        if (cleanField === 'sourceId') {
-            const sourceType = normalizeSourceType(entry && entry.sourceType || 'manual');
-            const caseId = String(entry && entry.caseId || '').trim();
-            const blockedIds = getLedgerSelfNodeIds(entry && entry.id, caseId);
-            const currentSourceId = normalizeSourceId(entry && entry.sourceId || '');
-            let nextSourceId = normalizeSourceId(value);
-            if (!isLinkedSourceType(sourceType)) {
-                nextSourceId = '';
-            } else if (nextSourceId && !isValidLinkedSourceId(sourceType, nextSourceId, caseId, blockedIds) && nextSourceId !== currentSourceId) {
-                alert('Select a valid link from the filterable list.');
-                renderLedger();
-                return;
-            }
-            store.updateLedgerEntry(id, { sourceId: nextSourceId });
-            renderLedger();
-            return;
-        }
-        const patch = cleanField === 'certainty'
-            ? { certainty: Number(value) }
-            : { [cleanField]: value };
-        store.updateLedgerEntry(id, patch);
+        refreshLedgerSourcePicker();
         renderLedger();
     }
 
     function deleteLedgerEntry(id) {
         const store = getStore();
         if (!store || typeof store.deleteLedgerEntry !== 'function') return;
-        if (!confirm('Delete this ledger entry?')) return;
+        if (!confirm('Delete this pinned fact?')) return;
         store.deleteLedgerEntry(id);
         renderLedger();
     }
 
     function openLedgerSourceOnTimeline(id) {
         const entry = findEntryById(id);
-        if (!entry || String(entry.sourceType || '') !== 'event' || !entry.sourceId) {
-            alert('This entry is not linked to a timeline event source.');
+        if (!entry || normalizeSourceType(entry.sourceType) !== 'event') {
+            alert('This fact is not linked to an event source.');
+            return;
+        }
+        const sourceId = normalizeSourceId(entry.sourceId);
+        if (!sourceId || isBoardNodeId(sourceId)) {
+            alert('No timeline event record is linked.');
             return;
         }
         const url = new URL('timeline.html', window.location.href);
-        url.searchParams.set('id', String(entry.sourceId));
+        url.searchParams.set('id', sourceId);
         window.location.assign(url.toString());
     }
 
     function openLedgerSourceOnBoard(id) {
         const entry = findEntryById(id);
-        if (!entry || !entry.sourceId) {
-            alert('This entry has no source link.');
+        if (!entry) {
+            alert('Fact not found.');
             return;
         }
-        const sourceType = String(entry.sourceType || '');
-        const sourceId = String(entry.sourceId || '');
+
+        const sourceType = normalizeSourceType(entry.sourceType);
+        const sourceId = normalizeSourceId(entry.sourceId);
+        if (!sourceId) {
+            alert('This fact has no linked record.');
+            return;
+        }
+
         const url = new URL('board.html', window.location.href);
         if (isBoardNodeId(sourceId)) {
             url.searchParams.set('nodeId', sourceId);
             window.location.assign(url.toString());
             return;
         }
+
         if (sourceType === 'event') {
             url.searchParams.set('linkType', 'timeline-event');
             url.searchParams.set('id', sourceId);
             window.location.assign(url.toString());
             return;
         }
-        if (sourceType === 'theory' || sourceType === 'clue') {
-            url.searchParams.set('nodeId', sourceId);
+
+        if (sourceType === 'npc') {
+            url.searchParams.set('linkType', 'npc');
+            url.searchParams.set('id', sourceId);
             window.location.assign(url.toString());
             return;
         }
-        alert('No board jump is available for this provenance type.');
+
+        if (sourceType === 'location') {
+            url.searchParams.set('linkType', 'location');
+            url.searchParams.set('id', sourceId);
+            window.location.assign(url.toString());
+            return;
+        }
+
+        if (sourceType === 'requisition') {
+            url.searchParams.set('linkType', 'requisition');
+            url.searchParams.set('id', sourceId);
+            window.location.assign(url.toString());
+            return;
+        }
+
+        alert('No board jump is available for this fact type.');
     }
 
     function getStableFactsText() {
@@ -722,39 +715,44 @@
         const caseFilter = filters.caseFilter === 'all' ? null : filters.caseFilter;
         const store = getStore();
         if (!store || typeof store.getStableFacts !== 'function') return '';
+
         const facts = store.getStableFacts(caseFilter);
         if (!Array.isArray(facts) || !facts.length) return '';
+
         return facts.map((fact, idx) => `${idx + 1}. ${fact}`).join('\n');
     }
 
     function copyStableFacts() {
         const text = getStableFactsText();
         if (!text) {
-            alert('No stable facts to copy.');
+            alert('No pinned facts to copy.');
             return;
         }
+
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(() => {
-                alert('Stable facts copied.');
+                alert('Facts copied.');
             }).catch(() => {
                 alert('Clipboard write failed.');
             });
             return;
         }
+
         alert('Clipboard API unavailable.');
     }
 
     function exportStableFacts() {
         const text = getStableFactsText();
         if (!text) {
-            alert('No stable facts to export.');
+            alert('No pinned facts to export.');
             return;
         }
+
         const dateStamp = new Date().toISOString().slice(0, 10);
         const blob = new Blob([text + '\n'], { type: 'text/plain' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `ledger-stable-facts-${dateStamp}.txt`;
+        link.download = `ledger-facts-${dateStamp}.txt`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -773,7 +771,6 @@
     window.onLedgerFilterChange = onLedgerFilterChange;
     window.refreshLedgerSourcePicker = refreshLedgerSourcePicker;
     window.createLedgerEntry = createLedgerEntry;
-    window.updateLedgerField = updateLedgerField;
     window.deleteLedgerEntry = deleteLedgerEntry;
     window.openLedgerSourceOnTimeline = openLedgerSourceOnTimeline;
     window.openLedgerSourceOnBoard = openLedgerSourceOnBoard;
