@@ -1,6 +1,9 @@
 (function () {
+    const delegatedHandlerEvents = ['click', 'change', 'input'];
+    const delegatedHandlerCache = new Map();
+    let delegatedHandlersBound = false;
     const LEDGER_STATUSES = ['stable', 'contested', 'collapsed', 'resolved'];
-    const LEDGER_SOURCE_TYPES = ['manual', 'event', 'theory', 'clue', 'npc', 'location'];
+    const LEDGER_SOURCE_TYPES = ['manual', 'event', 'theory', 'clue', 'npc', 'location', 'requisition'];
     const STATUS_LABELS = {
         stable: 'Stable',
         contested: 'Contested',
@@ -13,7 +16,8 @@
         theory: 'Theory',
         clue: 'Clue',
         npc: 'NPC',
-        location: 'Location'
+        location: 'Location',
+        requisition: 'Requisition'
     };
     let filtersHydrated = false;
 
@@ -31,6 +35,50 @@
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
     const getStore = () => window.RTF_STORE;
+
+    function getDelegatedHandlerFn(code) {
+        if (!delegatedHandlerCache.has(code)) {
+            delegatedHandlerCache.set(code, window.RTF_DELEGATED_HANDLER.compile(code));
+        }
+        return delegatedHandlerCache.get(code);
+    }
+
+    function runDelegatedHandler(el, attrName, event) {
+        const code = el.getAttribute(attrName);
+        if (!code) return;
+
+        try {
+            const result = getDelegatedHandlerFn(code).call(el, event);
+            if (result === false) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        }
+        catch (err) {
+            console.error(`Delegated handler failed for ${attrName}:`, code, err);
+        }
+    }
+
+    function handleDelegatedDataEvent(event) {
+        const attrName = `data-on${event.type}`;
+        let node = event.target instanceof Element ? event.target : null;
+
+        while (node) {
+            if (node.hasAttribute(attrName)) {
+                runDelegatedHandler(node, attrName, event);
+                if (event.cancelBubble) break;
+            }
+            node = node.parentElement;
+        }
+    }
+
+    function bindDelegatedDataHandlers() {
+        if (delegatedHandlersBound) return;
+        delegatedHandlersBound = true;
+        delegatedHandlerEvents.forEach((eventName) => {
+            document.addEventListener(eventName, handleDelegatedDataEvent);
+        });
+    }
 
     function getCases() {
         const store = getStore();
@@ -325,13 +373,17 @@
 
     function createLedgerEntry() {
         const store = getStore();
-        if (!store || typeof store.addLedgerEntry !== 'function') return;
+        if (!store || typeof store.addLedgerEntry !== 'function') {
+            alert('Store not ready. Reload and try again.');
+            return;
+        }
         const statementEl = document.getElementById('ledgerStatement');
         const statement = String(statementEl && statementEl.value || '').trim();
         if (!statement) {
             alert('Statement is required.');
             return;
         }
+        ensureCaseSelectOptions();
         const caseId = String((document.getElementById('ledgerCase') || {}).value || '');
         const status = String((document.getElementById('ledgerStatus') || {}).value || 'stable');
         const sourceType = String((document.getElementById('ledgerSourceType') || {}).value || 'manual');
@@ -354,6 +406,10 @@
             return;
         }
         if (statementEl) statementEl.value = '';
+        const sourceIdEl = document.getElementById('ledgerSourceId');
+        if (sourceIdEl) sourceIdEl.value = '';
+        const tagsEl = document.getElementById('ledgerTags');
+        if (tagsEl) tagsEl.value = '';
         const notesEl = document.getElementById('ledgerNotes');
         if (notesEl) notesEl.value = '';
         renderLedger();
@@ -481,6 +537,7 @@
     window.copyStableFacts = copyStableFacts;
     window.exportStableFacts = exportStableFacts;
 
+    bindDelegatedDataHandlers();
     window.addEventListener('load', waitForStore);
     window.addEventListener('rtf-store-updated', (event) => {
         if (!event || !event.detail) return;

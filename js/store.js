@@ -169,7 +169,7 @@
     const IMPACT_SCOPES = new Set(['local', 'district', 'guildwide', 'citywide']);
     const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
     const LEDGER_STATUSES = new Set(['stable', 'contested', 'collapsed', 'resolved']);
-    const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'npc', 'location', 'manual']);
+    const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'npc', 'location', 'requisition', 'manual']);
 
     const deepClone = (value) => JSON.parse(JSON.stringify(value));
 

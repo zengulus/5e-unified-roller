@@ -8,7 +8,7 @@
     <title>Ravnica Investigation Board</title>
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260223a">
-    <link rel="stylesheet" href="css/board.css?v=20260224f">
+    <link rel="stylesheet" href="css/board.css?v=20260304a">
     <meta name="theme-color" content="#1e1e1e">
 </head>
 
@@ -76,9 +76,10 @@
                     <div class="icon">🧠</div>
                     <div class="label">Theory</div>
                 </div>
-                <div class="tool-item" data-node-type="note" draggable="true" data-ondragstart="startDragNew(event, 'note')">
+                <div class="tool-item" id="btn-notes"
+                    data-onclick="event.stopPropagation(); window.togglePopup('note-popup')">
                     <div class="icon">📝</div>
-                    <div class="label">Note</div>
+                    <div class="label">Notes</div>
                 </div>
                 <div class="tool-item" data-node-type="group" draggable="true" data-ondragstart="startDragNew(event, 'group')">
                     <div class="icon">🗂️</div>
@@ -125,6 +126,7 @@
         <div id="location-popup" class="popup-menu"></div>
         <div id="event-popup" class="popup-menu"></div>
         <div id="req-popup" class="popup-menu"></div>
+        <div id="note-popup" class="popup-menu"></div>
     </div>
     </div>
     </div>
@@ -158,7 +160,7 @@
     <script src="js/session-log.js"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script src="js/my-story-board-bridge.js?v=20260224g"></script>
-    <script src="js/board.js?v=20260224d"></script>
+    <script src="js/board.js?v=20260304a"></script>
 </body>
 
 </html>

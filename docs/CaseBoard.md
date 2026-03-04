@@ -8,7 +8,7 @@ Modular clue board with physics nodes, quick-reference popups, and case-scoped l
 - **Save Behavior** – Most node/connection edits save immediately, and the hero `💾 Save` button is always available before major layout changes.
 
 ## Building the Web
-- **Toolbar** – Drag People, Locations, Clues, Notes, and other custom node types straight onto the board. Additional tool groups open popovers stocked with guild details, NPC dossiers, locations, events, or requisition data that can be dragged in as fully formatted nodes.
+- **Toolbar** – Drag People, Locations, Clues, and other custom node types straight onto the board. The `Notes` popover now offers `Freeform Note`, `Leads`, and `Ledger` options so you can drop structured note nodes without retyping.
 - **Editing Nodes** – Click the node body to edit text inline. Use the context menu (right-click) for actions like edit text, certainty/reliability updates (clue/theory/event), source image updates, ledger capture, delete, or "Center & Optimize" to zoom to the highlighted node cluster.
 - **Connections** – Drag from a node edge/port to another node to create a link, then use the connection label controls to set text, toggle arrowheads, or remove the link.
 

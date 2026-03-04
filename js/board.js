@@ -134,6 +134,18 @@ const RELIABILITY_LABELS = {
     corroborated: 'Corroborated',
     verified: 'Verified'
 };
+const LEAD_STATUS_LABELS = {
+    open: 'Open',
+    blocked: 'Blocked',
+    resolved: 'Resolved',
+    'dead-end': 'Dead End'
+};
+const LEDGER_STATUS_LABELS = {
+    stable: 'Stable',
+    contested: 'Contested',
+    collapsed: 'Collapsed',
+    resolved: 'Resolved'
+};
 const NARRATIVE_META_NODE_TYPES = new Set(['clue', 'theory', 'event']);
 const TRUST_LEVEL_LABELS = ['Hostile', 'Wary', 'Neutral', 'Trusted', 'Loyal'];
 const STIGMA_LEVEL_LABELS = ['Clean', 'Rumored', 'Noticed', 'Marked', 'Burned'];
@@ -1453,6 +1465,7 @@ function handleRemoteStoreUpdate(event) {
     if (isExternalBoardMode()) return;
     if (!event || !event.detail || event.detail.source !== 'remote') return;
     loadBoard();
+    renderNotePopup();
     updateViewCSS();
 }
 
@@ -1462,6 +1475,7 @@ function initToolbars() {
     initLocationToolbar();
     initEventToolbar();
     initRequisitionToolbar();
+    initNoteToolbar();
     initFormattingToolbar();
 }
 
@@ -1663,6 +1677,182 @@ function buildRequisitionNodePayload(req) {
             }
         }
     };
+}
+
+function getLeadStatusLabel(status) {
+    const clean = String(status || '').trim().toLowerCase();
+    return LEAD_STATUS_LABELS[clean] || LEAD_STATUS_LABELS.open;
+}
+
+function getLedgerStatusLabel(status) {
+    const clean = String(status || '').trim().toLowerCase();
+    return LEDGER_STATUS_LABELS[clean] || LEDGER_STATUS_LABELS.stable;
+}
+
+function buildFreeformNoteNodePayload() {
+    return {
+        nodeType: 'note',
+        nodeData: {
+            title: 'Freeform Note',
+            body: '',
+            meta: {
+                sourceType: 'freeform-note'
+            }
+        }
+    };
+}
+
+function buildLeadNoteNodePayload(lead) {
+    const source = lead && typeof lead === 'object' ? lead : {};
+    const titleBase = String(source.title || '').trim() || 'Untitled Lead';
+    const question = String(source.question || '').trim();
+    const nextStep = String(source.nextStep || '').trim();
+    const targetId = String(source.targetId || '').trim();
+    const type = String(source.type || 'other').trim().toLowerCase();
+    const status = String(source.status || 'open').trim().toLowerCase();
+    const lines = [];
+    lines.push(`<strong>Status:</strong> ${sanitizeText(getLeadStatusLabel(status))}`);
+    lines.push(`<strong>Type:</strong> ${sanitizeText(type ? type.toUpperCase() : 'OTHER')}`);
+    if (question) lines.push(`<strong>Question:</strong> ${sanitizeMultiline(question)}`);
+    if (nextStep) lines.push(`<strong>Next Step:</strong> ${sanitizeMultiline(nextStep)}`);
+    if (targetId) lines.push(`<strong>Target ID:</strong> ${sanitizeText(targetId)}`);
+
+    return {
+        nodeType: 'note',
+        nodeData: {
+            title: `Lead: ${titleBase}`.slice(0, 180),
+            body: lines.join('<br>'),
+            meta: {
+                sourceType: 'lead',
+                leadId: String(source.id || '').trim().slice(0, 120),
+                leadType: type.slice(0, 40),
+                leadStatus: status.slice(0, 40),
+                leadTargetId: targetId.slice(0, 120)
+            }
+        }
+    };
+}
+
+function buildLedgerNoteNodePayload(entry) {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const statement = String(source.statement || '').trim();
+    const notes = String(source.notes || '').trim();
+    const status = String(source.status || 'stable').trim().toLowerCase();
+    const sourceType = String(source.sourceType || 'manual').trim();
+    const sourceId = String(source.sourceId || '').trim();
+    const certainty = clampPercent(source.certainty, 50);
+    const titleBase = statement || 'Ledger Entry';
+    const lines = [];
+    lines.push(`<strong>Status:</strong> ${sanitizeText(getLedgerStatusLabel(status))}`);
+    lines.push(`<strong>Certainty:</strong> ${certainty}%`);
+    if (statement) lines.push(`<strong>Statement:</strong> ${sanitizeMultiline(statement)}`);
+    if (notes) lines.push(`<strong>Notes:</strong> ${sanitizeMultiline(notes)}`);
+    if (sourceType || sourceId) {
+        const sourceLabel = sourceId ? `${sourceType}${sourceType ? ':' : ''}${sourceId}` : sourceType;
+        lines.push(`<strong>Source:</strong> ${sanitizeText(sourceLabel)}`);
+    }
+
+    return {
+        nodeType: 'note',
+        nodeData: {
+            title: `Ledger: ${titleBase}`.slice(0, 180),
+            body: lines.join('<br>'),
+            meta: {
+                sourceType: 'ledger',
+                ledgerEntryId: String(source.id || '').trim().slice(0, 120),
+                ledgerStatus: status.slice(0, 40),
+                ledgerSourceType: sourceType.slice(0, 40),
+                ledgerSourceId: sourceId.slice(0, 120),
+                caseId: String(source.caseId || '').trim().slice(0, 120)
+            }
+        }
+    };
+}
+
+function getBoardLeadEntries() {
+    const caseId = getActiveLeadCaseId();
+    const all = readLeadStorage();
+    const list = Array.isArray(all[caseId]) ? all[caseId].slice() : [];
+    list.sort((left, right) => String(right.updated || right.created || '').localeCompare(String(left.updated || left.created || '')));
+    return list.slice(0, 40);
+}
+
+function getBoardLedgerEntries() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getLedgerEntries !== 'function') return [];
+    const activeCaseId = typeof store.getActiveCaseId === 'function'
+        ? String(store.getActiveCaseId() || 'case_primary')
+        : 'case_primary';
+    const entries = store.getLedgerEntries();
+    const list = Array.isArray(entries) ? entries.slice() : [];
+    list.sort((left, right) => String(right.lastChangedAt || right.created || '').localeCompare(String(left.lastChangedAt || left.created || '')));
+    const caseScoped = list.filter((entry) => String(entry && entry.caseId || 'case_primary') === activeCaseId);
+    return (caseScoped.length ? caseScoped : list).slice(0, 40);
+}
+
+function createNoteSpawnTool(icon, label, submeta, payload) {
+    const el = document.createElement('div');
+    el.className = 'tool-item';
+    el.draggable = true;
+    const safeLabel = sanitizeText(label || 'Note');
+    const safeSubmeta = sanitizeText(submeta || '');
+    const safeIcon = sanitizeText(icon || '📝');
+    el.innerHTML = `<div class="icon">${safeIcon}</div><div class="label">${safeLabel}${safeSubmeta ? `<div class="board-tool-submeta">${safeSubmeta}</div>` : ''}</div>`;
+    el.ondragstart = (e) => startDragNew(e, payload.nodeType, payload.nodeData);
+    setMobileToolSpawnData(el, payload.nodeType, payload.nodeData);
+    return el;
+}
+
+function renderNotePopup() {
+    const container = document.getElementById('note-popup');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="board-tool-submeta">Freeform</div>
+        <div id="note-freeform-list"></div>
+        <div class="board-tool-submeta">Leads</div>
+        <div id="note-lead-list"></div>
+        <div class="board-tool-submeta">Ledger</div>
+        <div id="note-ledger-list"></div>
+    `;
+
+    const freeformList = document.getElementById('note-freeform-list');
+    const leadList = document.getElementById('note-lead-list');
+    const ledgerList = document.getElementById('note-ledger-list');
+    if (!freeformList || !leadList || !ledgerList) return;
+
+    const freeform = buildFreeformNoteNodePayload();
+    freeformList.appendChild(createNoteSpawnTool('📝', 'Freeform Note', 'Blank sticky note', freeform));
+
+    const leads = getBoardLeadEntries();
+    if (!leads.length) {
+        leadList.innerHTML = '<div class="board-popup-empty">No leads in this case.</div>';
+    } else {
+        leads.forEach((lead) => {
+            const payload = buildLeadNoteNodePayload(lead);
+            const title = String(lead && lead.title || '').trim() || 'Untitled Lead';
+            const statusLabel = getLeadStatusLabel(lead && lead.status);
+            const typeLabel = String(lead && lead.type || 'other').trim().toUpperCase();
+            leadList.appendChild(createNoteSpawnTool('🧭', title, `${statusLabel} • ${typeLabel}`, payload));
+        });
+    }
+
+    const ledgerEntries = getBoardLedgerEntries();
+    if (!ledgerEntries.length) {
+        ledgerList.innerHTML = '<div class="board-popup-empty">No ledger entries found.</div>';
+    } else {
+        ledgerEntries.forEach((entry) => {
+            const payload = buildLedgerNoteNodePayload(entry);
+            const statement = String(entry && entry.statement || '').trim() || 'Ledger Entry';
+            const statusLabel = getLedgerStatusLabel(entry && entry.status);
+            const certainty = clampPercent(entry && entry.certainty, 50);
+            ledgerList.appendChild(createNoteSpawnTool('📚', statement, `${statusLabel} • ${certainty}%`, payload));
+        });
+    }
+}
+
+function initNoteToolbar() {
+    if (!document.getElementById('note-popup')) return;
+    renderNotePopup();
 }
 
 function initGuildToolbar() {
@@ -3512,7 +3702,7 @@ function showContextMenu(e, node) {
     }
     if (setCertaintyItem) setCertaintyItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
     if (setReliabilityItem) setReliabilityItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
-    if (addLedgerItem) addLedgerItem.style.display = supportsNarrativeMeta ? 'block' : 'none';
+    if (addLedgerItem) addLedgerItem.style.display = type !== 'group' ? 'block' : 'none';
     if (theoryConfidenceItem) theoryConfidenceItem.style.display = isTheory ? 'block' : 'none';
     if (theoryConfirmedItem) theoryConfirmedItem.style.display = isTheory ? 'block' : 'none';
     if (theoryDisprovenItem) theoryDisprovenItem.style.display = isTheory ? 'block' : 'none';
@@ -3542,6 +3732,7 @@ window.addEventListener('click', (e) => {
 window.togglePopup = function (id) {
     const el = document.getElementById(id);
     if (!el) return;
+    if (id === 'note-popup') renderNotePopup();
 
     // Close others
     document.querySelectorAll('.popup-menu').forEach(p => {
@@ -3707,7 +3898,7 @@ function addTargetNodeToLedger() {
         return;
     }
     const type = getNodeTypeFromEl(nodeEl);
-    if (!NARRATIVE_META_NODE_TYPES.has(type)) {
+    if (type === 'group') {
         contextMenu.style.display = 'none';
         return;
     }
@@ -3723,7 +3914,9 @@ function addTargetNodeToLedger() {
         contextMenu.style.display = 'none';
         return;
     }
-    const meta = ensureNarrativeNodeMeta(nodeEl) || {};
+    const meta = NARRATIVE_META_NODE_TYPES.has(type)
+        ? (ensureNarrativeNodeMeta(nodeEl) || {})
+        : (getNodeMeta(nodeEl) || {});
     const defaultStatement = String(summary.title || '').trim() || `Board ${type}`;
     const statementRaw = prompt('Ledger statement:', defaultStatement);
     if (statementRaw === null) {
@@ -3736,14 +3929,49 @@ function addTargetNodeToLedger() {
         return;
     }
 
-    let sourceType = type === 'theory' ? 'theory' : (type === 'clue' ? 'clue' : 'event');
-    let sourceId = String(summary.id || '').trim();
-    if (type === 'event' && String(meta.sourceType || '') === 'timeline-event' && meta.eventId) {
+    let sourceType = 'manual';
+    let sourceId = '';
+    const metaSourceType = String(meta.sourceType || '').trim().toLowerCase();
+
+    if (type === 'theory') {
+        sourceType = 'theory';
+        sourceId = String(summary.id || '').trim();
+    } else if (type === 'clue') {
+        sourceType = 'clue';
+        sourceId = String(summary.id || '').trim();
+    } else if (type === 'event') {
         sourceType = 'event';
-        sourceId = String(meta.eventId || '').trim();
+        sourceId = String(summary.id || '').trim();
+        if (metaSourceType === 'timeline-event' && meta.eventId) {
+            sourceId = String(meta.eventId || '').trim();
+        }
+    } else if (metaSourceType === 'npc' && meta.npcId) {
+        sourceType = 'npc';
+        sourceId = String(meta.npcId || '').trim();
+    } else if (metaSourceType === 'location' && meta.locationId) {
+        sourceType = 'location';
+        sourceId = String(meta.locationId || '').trim();
+    } else if (metaSourceType === 'requisition' && meta.requisitionId) {
+        sourceType = 'requisition';
+        sourceId = String(meta.requisitionId || '').trim();
+    } else if (metaSourceType === 'lead') {
+        const leadType = String(meta.leadType || '').trim().toLowerCase();
+        const leadTargetId = String(meta.leadTargetId || '').trim();
+        if (leadTargetId) {
+            if (leadType === 'npc' || leadType === 'location' || leadType === 'requisition') {
+                sourceType = leadType;
+                sourceId = leadTargetId;
+            } else if (leadType === 'event') {
+                sourceType = 'event';
+                sourceId = leadTargetId;
+            }
+        }
     }
     const caseId = String(meta.caseId || (typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : 'case_primary'));
-    const certainty = clampPercent(meta.certainty !== undefined ? meta.certainty : meta.confidence, 50);
+    const certainty = clampPercent(
+        meta.certainty !== undefined ? meta.certainty : (meta.confidence !== undefined ? meta.confidence : 50),
+        50
+    );
     const notes = String(summary.bodyText || '').trim().slice(0, 600);
     const tagSeed = String(summary.type || type || 'board').toLowerCase();
     const entryId = store.addLedgerEntry({
