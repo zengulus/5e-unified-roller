@@ -119,9 +119,9 @@
         'dead-end': 'Dead End'
     };
     const LEAD_VOTE_SCORES = {
-        hot: 2,
+        hot: 1,
         cold: 0,
-        'dead-end': -2
+        'dead-end': -1
     };
     const LEAD_LINKABLE_TYPES = new Set(['event', 'npc', 'location', 'requisition', 'theory', 'clue']);
     const LEAD_TARGET_INDEX = {
@@ -287,7 +287,13 @@
         if (!cleanLeadId) return out;
         const store = getStore();
         if (!store) return out;
-        const board = getTimelineBoard(store);
+        let board = null;
+        try {
+            board = getTimelineBoard(store);
+        } catch (err) {
+            console.error('Timeline lead target index: failed to read board state for self-node filtering.', err);
+            return out;
+        }
         if (!board) return out;
         const nodes = Array.isArray(board && board.nodes) ? board.nodes : [];
         nodes.forEach((node) => {
@@ -1070,13 +1076,44 @@
         const leadId = escapeHandlerArg(String(lead && lead.id || ''));
         const score = getLeadScore(lead);
         const currentVote = voter && lead && lead.votes ? lead.votes[voter] : '';
+        const typeLabel = escapeHtml(String(lead && lead.type || 'other').trim().toUpperCase() || 'OTHER');
+        const question = escapeHtml(String(lead && lead.question || '').trim());
+        const nextStep = escapeHtml(String(lead && lead.nextStep || '').trim());
+        const statusValue = String(lead && lead.status || 'open');
+        const rawTarget = String(lead && lead.targetId || '').trim();
+        const linkedRecord = rawTarget
+            ? `${typeLabel} • ${escapeHtml(rawTarget)}`
+            : 'None';
+        const voteSummary = escapeHtml(formatLeadVotes(lead));
         return `
             <article class="lead-card">
                 <div class="lead-head">
                     <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
                     <div class="lead-meta">
+                        <span class="lead-pill">${typeLabel}</span>
                         <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
                         <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
+                    </div>
+                </div>
+                <div class="lead-row">
+                    <div>
+                        <label>Question</label>
+                        <input type="text" value="${question}" data-onchange="updateLeadField('${leadId}', 'question', this.value)">
+                    </div>
+                    <div>
+                        <label>Next Step</label>
+                        <input type="text" value="${nextStep}" data-onchange="updateLeadField('${leadId}', 'nextStep', this.value)">
+                    </div>
+                </div>
+                <div class="lead-row">
+                    <div>
+                        <label>Status</label>
+                        <select data-onchange="updateLeadField('${leadId}', 'status', this.value)">
+                            ${LEAD_STATUSES.map((status) => `<option value="${status}" ${status === statusValue ? 'selected' : ''}>${escapeHtml(LEAD_STATUS_LABELS[status])}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="lead-fallback-info">
+                        <div class="lead-fallback-line"><span class="lead-fallback-label">Linked:</span> ${linkedRecord}</div>
                     </div>
                 </div>
                 <div class="lead-vote-row">
@@ -1085,6 +1122,7 @@
                     <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
                     <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
                 </div>
+                <div class="lead-vote-summary">${voteSummary}</div>
                 <div class="lead-actions">
                     <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
                     <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>

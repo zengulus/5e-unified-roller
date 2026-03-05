@@ -542,6 +542,30 @@
     flex-wrap: wrap;
 }
 
+.lead-fallback-info {
+    display: grid;
+    gap: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--invest-border-soft);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--invest-card-bg-soft) 65%, rgba(0, 0, 0, 0.12));
+    min-height: 100%;
+    align-content: center;
+}
+
+.lead-fallback-line {
+    font-size: 0.84rem;
+    color: var(--invest-text-soft);
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.lead-fallback-label {
+    color: var(--invest-text-muted);
+    margin-right: 6px;
+    font-weight: 600;
+}
+
 .lead-empty {
     color: var(--invest-text-muted);
     border: 1px dashed var(--invest-border-soft);
