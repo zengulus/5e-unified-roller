@@ -1361,7 +1361,11 @@ body.focus-active .header-overlay {
 /* Scrollable List Content */
 #npc-list-content,
 #loc-list-content,
-#guild-list-content {
+#guild-list-content,
+#player-list-content,
+#event-list-content,
+#case-list-content,
+#req-list-content {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
     gap: 15px;
@@ -1733,7 +1737,11 @@ body.focus-active .header-overlay {
 
     #npc-list-content,
     #loc-list-content,
-    #guild-list-content {
+    #guild-list-content,
+    #player-list-content,
+    #event-list-content,
+    #case-list-content,
+    #req-list-content {
         grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
         gap: 10px;
         padding: 12px;
