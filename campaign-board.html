@@ -95,6 +95,11 @@
                     <div class="icon">🏛️</div>
                     <div class="label">Guilds</div>
                 </div>
+                <div class="tool-item" id="btn-players"
+                    data-onclick="event.stopPropagation(); window.togglePopup('player-popup')">
+                    <div class="icon">🧑‍💼</div>
+                    <div class="label">Players</div>
+                </div>
                 <div class="tool-item" id="btn-npcs" data-onclick="event.stopPropagation(); window.togglePopup('npc-popup')">
                     <div class="icon">👥</div>
                     <div class="label">NPCs</div>
@@ -126,6 +131,7 @@
     <!-- POPUP MENUS -->
     <div id="popup-layer">
         <div id="guild-popup" class="popup-menu"></div>
+        <div id="player-popup" class="popup-menu"></div>
         <div id="npc-popup" class="popup-menu"></div>
         <div id="location-popup" class="popup-menu"></div>
         <div id="event-popup" class="popup-menu"></div>
@@ -164,7 +170,7 @@
     <script src="js/vector-field.js?v=20260224g"></script>
     <script src="js/my-story-board-bridge.js?v=20260224g"></script>
     <script>window.RTF_VIEW_SCOPE = 'campaign';</script>
-    <script src="js/board.js?v=20260305b"></script>
+    <script src="js/board.js?v=20260305c"></script>
 </body>
 
 </html>

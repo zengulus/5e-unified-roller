@@ -122,7 +122,7 @@ const CONNECTION_COLOR_PALETTE = [
 const IMAGE_EDITABLE_NODE_TYPES = new Set(['person', 'location', 'clue', 'event', 'requisition']);
 const EDGE_CONNECT_ZONE_PX = 18;
 const BOARD_LINK_FLASH_MS = 2200;
-const BOARD_CROSSLINK_TYPES = new Set(['npc', 'location', 'timeline-event', 'requisition', 'case']);
+const BOARD_CROSSLINK_TYPES = new Set(['player', 'npc', 'location', 'timeline-event', 'requisition', 'case']);
 const ENCOUNTER_DRAFT_STORAGE_PREFIX = 'rtf_encounter_draft_';
 const LEAD_STORAGE_KEY = 'rtf_lead_queue_v1';
 const BOARD_VIEW_SCOPE = String(window.RTF_VIEW_SCOPE || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
@@ -453,6 +453,7 @@ function getNoteVariantFromMeta(meta) {
     const sourceType = String(meta && meta.sourceType || '').trim().toLowerCase();
     if (sourceType === 'lead') return 'lead';
     if (sourceType === 'ledger') return 'ledger';
+    if (sourceType === 'case') return 'ledger';
     return 'freeform';
 }
 
@@ -502,6 +503,7 @@ function normalizeNoteNodeContent(content = {}) {
     if (!sourceType) {
         if (/^lead\s*:/i.test(title)) sourceType = 'lead';
         else if (/^ledger\s*:/i.test(title)) sourceType = 'ledger';
+        else if (/^case\s*ref\s*:/i.test(title)) sourceType = 'case';
     }
 
     if (sourceType === 'lead') {
@@ -510,6 +512,9 @@ function normalizeNoteNodeContent(content = {}) {
     } else if (sourceType === 'ledger') {
         title = title.replace(/^ledger\s*:\s*/i, '').trim() || 'Ledger Entry';
         body = normalizeLegacyLedgerNoteBody(body);
+    } else if (sourceType === 'case') {
+        title = title.replace(/^case\s*ref\s*:\s*/i, '').trim() || 'Case';
+        body = '';
     }
 
     if (sourceType) metaSource.sourceType = sourceType;
@@ -1101,6 +1106,7 @@ function logBoardTimeline(entry, options = {}) {
 function getSourceDescriptor(meta) {
     if (!meta || !meta.sourceType) return '';
     const type = String(meta.sourceType);
+    if (type === 'player') return ' from player roster';
     if (type === 'npc') return ' from NPC roster';
     if (type === 'location') return ' from locations database';
     if (type === 'timeline-event') return ' from mission timeline';
@@ -1554,6 +1560,16 @@ function resolveCrossLinkPayload(request) {
     const campaign = store && store.state && store.state.campaign ? store.state.campaign : null;
     if (!store || !campaign || !request) return null;
 
+    if (request.linkType === 'player') {
+        const players = (typeof store.getPlayers === 'function')
+            ? store.getPlayers()
+            : (Array.isArray(campaign.players) ? campaign.players : []);
+        const player = players.find((entry) => String(entry && entry.id || '') === request.id);
+        if (!player) return null;
+        const payload = buildPlayerNodePayload(player);
+        return { ...payload, sourceType: 'player', sourceIdKey: 'playerId', sourceId: request.id };
+    }
+
     if (request.linkType === 'npc') {
         const npcs = Array.isArray(campaign.npcs) ? campaign.npcs : [];
         const npc = npcs.find((entry) => String(entry && entry.id || '') === request.id);
@@ -1862,6 +1878,7 @@ function handleRemoteStoreUpdate(event) {
 
 function initToolbars() {
     initGuildToolbar();
+    initPlayerToolbar();
     initNPCToolbar();
     initLocationToolbar();
     initEventToolbar();
@@ -2079,6 +2096,38 @@ function buildNPCNodePayload(npc) {
     };
 }
 
+function buildPlayerNodePayload(player) {
+    const source = player && typeof player === 'object' ? player : {};
+    const name = String(source.name || 'Player').trim() || 'Player';
+    const lines = [];
+    const ac = Number.parseInt(source.ac, 10);
+    const hp = String(source.hp || '').trim();
+    const pp = Number.parseInt(source.pp, 10);
+    const dc = Number.parseInt(source.dc, 10);
+    const dp = Number.parseInt(source.dp, 10);
+    if (Number.isFinite(ac)) lines.push(`<strong>AC:</strong> ${ac}`);
+    if (hp) lines.push(`<strong>HP:</strong> ${sanitizeText(hp)}`);
+    if (Number.isFinite(pp)) lines.push(`<strong>PP:</strong> ${pp}`);
+    if (Number.isFinite(dc)) lines.push(`<strong>DC:</strong> ${dc}`);
+    if (Number.isFinite(dp)) lines.push(`<strong>DP:</strong> ${dp}`);
+    if (source.projectName) lines.push(`<strong>Project:</strong> ${sanitizeText(source.projectName)}`);
+    if (source.projectReward) lines.push(`<strong>Reward:</strong> ${sanitizeText(source.projectReward)}`);
+
+    return {
+        nodeType: 'person',
+        nodeData: {
+            title: name,
+            body: lines.join('<br>'),
+            imageUrl: source.imageUrl || '',
+            meta: {
+                sourceType: 'player',
+                playerId: String(source.id || '').trim(),
+                playerName: name
+            }
+        }
+    };
+}
+
 function buildLocationNodePayload(location) {
     const source = location && typeof location === 'object' ? location : {};
     let body = `${sanitizeText(source.district || '')}`;
@@ -2170,38 +2219,23 @@ function buildRequisitionNodePayload(req) {
 
 function buildCaseReferenceNodePayload(caseEntry, scopeEntry = null) {
     const source = caseEntry && typeof caseEntry === 'object' ? caseEntry : {};
-    const scope = scopeEntry && typeof scopeEntry === 'object' ? scopeEntry : null;
     const caseId = String(source.id || '').trim();
     const caseName = String(source.name || 'Case').trim() || 'Case';
-    const board = source.board && typeof source.board === 'object' ? source.board : {};
-    const caseEvents = Array.isArray(source.events) ? source.events : [];
-    const boardNodes = Array.isArray(board.nodes) ? board.nodes.length : 0;
-    const boardLinks = Array.isArray(board.connections) ? board.connections.length : 0;
-
-    const scopeName = scope ? String(scope.name || '').trim() : '';
-    const scopeCaseOrder = scope && Array.isArray(scope.caseOrder) ? scope.caseOrder : [];
-    const sequence = caseId ? (scopeCaseOrder.findIndex((id) => String(id || '') === caseId) + 1) : 0;
+    const imageUrl = sanitizeImageUrl(source.imageUrl || '');
+    const scope = scopeEntry && typeof scopeEntry === 'object' ? scopeEntry : null;
     const statusMap = scope && scope.caseStatus && typeof scope.caseStatus === 'object' ? scope.caseStatus : {};
     const status = caseId ? String(statusMap[caseId] || '').trim().toLowerCase() : '';
 
-    const lines = [];
-    if (scopeName) lines.push(`<strong>Scope:</strong> ${sanitizeText(scopeName)}`);
-    if (sequence > 0) lines.push(`<strong>Sequence:</strong> #${sequence}`);
-    if (status) lines.push(`<strong>Status:</strong> ${sanitizeText(status.charAt(0).toUpperCase() + status.slice(1))}`);
-    lines.push(`<strong>Timeline Events:</strong> ${caseEvents.length}`);
-    lines.push(`<strong>Board Graph:</strong> ${boardNodes} nodes / ${boardLinks} links`);
-
     return {
-        nodeType: 'note',
+        nodeType: 'location',
         nodeData: {
-            title: `Case Ref: ${caseName}`.slice(0, 180),
-            body: lines.join('<br>'),
+            title: caseName.slice(0, 180),
+            body: '',
+            imageUrl,
             meta: {
                 sourceType: 'case',
                 caseId,
                 caseName,
-                scopeId: scope ? String(scope.id || '').trim().slice(0, 120) : '',
-                scopeName: scopeName.slice(0, 160),
                 caseStatus: status.slice(0, 40)
             }
         }
@@ -2506,6 +2540,61 @@ function initGuildToolbar() {
     });
 }
 
+function initPlayerToolbar() {
+    const container = document.getElementById('player-popup');
+    if (!container || !window.RTF_STORE) return;
+
+    container.innerHTML = `
+        <div class="filter-bar">
+            <input type="text" id="player-search-board" class="filter-input" placeholder="Search players..." data-oninput="renderBoardPlayers()">
+        </div>
+        <div id="player-list-content"></div>
+    `;
+
+    renderBoardPlayers();
+}
+
+function renderBoardPlayers() {
+    const listContainer = document.getElementById('player-list-content');
+    if (!listContainer || !window.RTF_STORE) return;
+
+    const searchEl = document.getElementById('player-search-board');
+    const searchTerm = String(searchEl && searchEl.value || '').toLowerCase();
+    const players = (typeof window.RTF_STORE.getPlayers === 'function')
+        ? window.RTF_STORE.getPlayers()
+        : (window.RTF_STORE.state && window.RTF_STORE.state.campaign && Array.isArray(window.RTF_STORE.state.campaign.players)
+            ? window.RTF_STORE.state.campaign.players
+            : []);
+
+    const filtered = players.filter((entry) => {
+        const text = `${entry && entry.name || ''} ${entry && entry.projectName || ''} ${entry && entry.projectReward || ''}`.toLowerCase();
+        return text.includes(searchTerm);
+    }).sort((a, b) => {
+        const left = String(a && a.name || '').toLowerCase();
+        const right = String(b && b.name || '').toLowerCase();
+        return left.localeCompare(right);
+    });
+
+    if (!filtered.length) {
+        listContainer.innerHTML = '<div class="board-popup-empty">No players found.</div>';
+        return;
+    }
+
+    listContainer.innerHTML = '';
+    filtered.forEach((player) => {
+        const payload = buildPlayerNodePayload(player);
+        const label = sanitizeText(String(player && player.name || 'Player'));
+        const project = sanitizeText(String(player && player.projectName || '').trim());
+        const el = document.createElement('div');
+        el.className = 'tool-item';
+        el.draggable = true;
+        el.innerHTML = `<div class="icon">🧑‍💼</div><div class="label">${label}${project ? `<div class="board-tool-submeta">${project}</div>` : ''}</div>`;
+        el.ondragstart = (event) => startDragNew(event, payload.nodeType, payload.nodeData);
+        setMobileToolSpawnData(el, payload.nodeType, payload.nodeData);
+        listContainer.appendChild(el);
+    });
+}
+
 function initNPCToolbar() {
     const container = document.getElementById('npc-popup');
     if (!container || !window.RTF_STORE) return;
@@ -2707,11 +2796,13 @@ function renderBoardCases() {
 
     const searchTerm = (document.getElementById('case-search-board').value || '').toLowerCase();
     const statusFilter = String(document.getElementById('case-status-board').value || '').trim().toLowerCase();
-    const cases = (typeof window.RTF_STORE.getCases === 'function'
-        ? window.RTF_STORE.getCases()
-        : (window.RTF_STORE.state && window.RTF_STORE.state.cases && Array.isArray(window.RTF_STORE.state.cases.items)
-            ? window.RTF_STORE.state.cases.items
-            : []))
+    const cases = (window.RTF_STORE.state && window.RTF_STORE.state.cases && Array.isArray(window.RTF_STORE.state.cases.items)
+        ? window.RTF_STORE.state.cases.items
+        : [])
+        .filter((entry) => {
+            const caseId = String(entry && entry.id || '').trim();
+            return !!caseId && caseId !== 'campaign_meta';
+        })
         .slice();
     const activeCaseId = getBoardActiveCaseId(window.RTF_STORE);
     const activeScope = (typeof window.RTF_STORE.getActiveCampaignScope === 'function')
@@ -2747,10 +2838,8 @@ function renderBoardCases() {
         const payload = buildCaseReferenceNodePayload(entry, activeScope);
         const status = String(scopeStatusMap[caseId] || (caseId === activeCaseId ? 'active' : 'planned')).trim().toLowerCase();
         const statusLabel = status ? (status.charAt(0).toUpperCase() + status.slice(1)) : 'Planned';
-        const nodeCount = Array.isArray(entry && entry.board && entry.board.nodes) ? entry.board.nodes.length : 0;
-        const eventCount = Array.isArray(entry && entry.events) ? entry.events.length : 0;
         const title = sanitizeText(String(entry && entry.name || caseId));
-        const sub = `${sanitizeText(statusLabel)} • ${eventCount} events • ${nodeCount} nodes`;
+        const sub = `${sanitizeText(statusLabel)} Case`;
         const el = document.createElement('div');
         el.className = 'tool-item';
         el.draggable = true;
@@ -4455,6 +4544,7 @@ window.togglePopup = function (id) {
     const el = document.getElementById(id);
     if (!el) return;
     if (id === 'note-popup') renderNotePopup();
+    if (id === 'player-popup') renderBoardPlayers();
     if (id === 'case-popup') renderBoardCases();
 
     // Close others
@@ -4801,6 +4891,28 @@ function persistLinkedNodeImageUrl(nodeEl, imageUrl = '') {
     const meta = getNodeMeta(nodeEl) || {};
     const store = window.RTF_STORE;
     const clean = sanitizeImageUrl(imageUrl);
+
+    if (meta.sourceType === 'player') {
+        const campaign = store.state && store.state.campaign ? store.state.campaign : null;
+        const list = (typeof store.getPlayers === 'function')
+            ? store.getPlayers()
+            : (campaign && Array.isArray(campaign.players) ? campaign.players : []);
+        const rawPlayerId = String(meta.playerId || '').trim();
+        const rawPlayerName = String(meta.playerName || '').trim();
+        const target = list.find((entry) => String(entry && entry.id || '') === rawPlayerId)
+            || (!rawPlayerId && rawPlayerName
+                ? list.find((entry) => String(entry && entry.name || '').trim() === rawPlayerName)
+                : null);
+        if (!target) return;
+        if (clean) target.imageUrl = clean;
+        else delete target.imageUrl;
+        if (typeof store.save === 'function') {
+            const normalizedId = String(target.id || rawPlayerId || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 80);
+            const scope = normalizedId ? `campaign.players.${normalizedId}` : 'campaign.players';
+            store.save({ scope });
+        }
+        return;
+    }
 
     if (meta.sourceType === 'npc') {
         const campaign = store.state && store.state.campaign ? store.state.campaign : null;
@@ -6102,9 +6214,11 @@ window.RTF_BOARD_EMBED_API = {
 };
 
 // Expose filter functions to window for HTML event handlers
+window.renderBoardPlayers = renderBoardPlayers;
 window.renderNPCs = renderNPCs;
 window.renderLocations = renderLocations;
 window.renderBoardEvents = renderBoardEvents;
+window.renderBoardCases = renderBoardCases;
 window.renderBoardRequisitions = renderBoardRequisitions;
 window.draftEncounterFromTargetNode = draftEncounterFromTargetNode;
 window.createLeadFromTargetNode = createLeadFromTargetNode;
