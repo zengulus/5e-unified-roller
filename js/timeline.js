@@ -1081,8 +1081,9 @@
         const nextStep = escapeHtml(String(lead && lead.nextStep || '').trim());
         const statusValue = String(lead && lead.status || 'open');
         const rawTarget = String(lead && lead.targetId || '').trim();
+        const targetDisplay = escapeHtml(getLeadTargetDisplayValue(String(lead && lead.type || 'other'), rawTarget, String(lead && lead.id || '')) || '');
         const linkedRecord = rawTarget
-            ? `${typeLabel} • ${escapeHtml(rawTarget)}`
+            ? `${typeLabel} • ${targetDisplay || escapeHtml(rawTarget)}`
             : 'None';
         const voteSummary = escapeHtml(formatLeadVotes(lead));
         return `
