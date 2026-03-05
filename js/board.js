@@ -142,6 +142,9 @@ const LEAD_STATUS_LABELS = {
     resolved: 'Resolved',
     'dead-end': 'Dead End'
 };
+const BOARD_LEAD_TYPES = new Set(['npc', 'location', 'clue', 'event', 'requisition', 'theory', 'other']);
+const BOARD_LEAD_STATUSES = new Set(['open', 'blocked', 'resolved', 'dead-end']);
+const BOARD_LEAD_VOTES = new Set(['hot', 'cold', 'dead-end']);
 const LEDGER_STATUS_LABELS = {
     stable: 'Pinned Fact',
     contested: 'Needs Review',
@@ -853,37 +856,125 @@ function writeLeadStorage(next) {
     localStorage.setItem(LEAD_STORAGE_KEY, JSON.stringify(clean));
 }
 
+function createBoardLeadId() {
+    return `lead_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeBoardLeadType(value) {
+    const clean = String(value || '').trim().toLowerCase();
+    return BOARD_LEAD_TYPES.has(clean) ? clean : 'other';
+}
+
+function normalizeBoardLeadStatus(value) {
+    const clean = String(value || '').trim().toLowerCase();
+    return BOARD_LEAD_STATUSES.has(clean) ? clean : 'open';
+}
+
+function normalizeBoardLeadVotes(votes) {
+    const source = votes && typeof votes === 'object' ? votes : {};
+    const out = {};
+    Object.keys(source).forEach((name) => {
+        const cleanName = String(name || '').trim().slice(0, 60);
+        const vote = String(source[name] || '').trim().toLowerCase();
+        if (!cleanName) return;
+        if (!BOARD_LEAD_VOTES.has(vote)) return;
+        out[cleanName] = vote;
+    });
+    return out;
+}
+
+function sanitizeBoardLeadEntry(raw, idx = 0) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const nowIso = new Date().toISOString();
+    return {
+        id: String(source.id || `lead_${idx + 1}`).trim() || createBoardLeadId(),
+        type: normalizeBoardLeadType(source.type),
+        targetId: String(source.targetId || '').trim().slice(0, 120),
+        title: String(source.title || '').trim().slice(0, 180) || `Lead ${idx + 1}`,
+        question: String(source.question || '').trim().slice(0, 500),
+        nextStep: String(source.nextStep || '').trim().slice(0, 500),
+        status: normalizeBoardLeadStatus(source.status),
+        votes: normalizeBoardLeadVotes(source.votes),
+        created: String(source.created || nowIso),
+        updated: String(source.updated || source.created || nowIso)
+    };
+}
+
+function getBoardLeadTimestamp(lead) {
+    const raw = String((lead && (lead.updated || lead.created)) || '');
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mergeBoardLeadEntries(primaryList, secondaryList) {
+    const merged = new Map();
+    const ingest = (list, sourceRank) => {
+        (Array.isArray(list) ? list : []).forEach((entry, idx) => {
+            const clean = sanitizeBoardLeadEntry(entry, idx);
+            const existing = merged.get(clean.id);
+            if (!existing) {
+                merged.set(clean.id, { lead: clean, sourceRank });
+                return;
+            }
+            const existingTs = getBoardLeadTimestamp(existing.lead);
+            const nextTs = getBoardLeadTimestamp(clean);
+            if (nextTs > existingTs || (nextTs === existingTs && sourceRank < existing.sourceRank)) {
+                merged.set(clean.id, { lead: clean, sourceRank });
+            }
+        });
+    };
+
+    ingest(primaryList, 0);
+    ingest(secondaryList, 1);
+    return Array.from(merged.values()).map((entry) => entry.lead);
+}
+
+function areBoardLeadListsEqual(left, right) {
+    const leftClean = Array.isArray(left) ? left.map((entry, idx) => sanitizeBoardLeadEntry(entry, idx)) : [];
+    const rightClean = Array.isArray(right) ? right.map((entry, idx) => sanitizeBoardLeadEntry(entry, idx)) : [];
+    if (leftClean.length !== rightClean.length) return false;
+    for (let i = 0; i < leftClean.length; i += 1) {
+        if (JSON.stringify(leftClean[i]) !== JSON.stringify(rightClean[i])) return false;
+    }
+    return true;
+}
+
 function getCaseLeadsFromStore(caseId) {
     const store = window.RTF_STORE;
     if (!store || typeof store.getLeads !== 'function') return null;
     const list = store.getLeads(caseId);
-    return Array.isArray(list) ? list.slice() : [];
+    if (!Array.isArray(list)) return [];
+    return list.map((entry, idx) => sanitizeBoardLeadEntry(entry, idx));
 }
 
 function setCaseLeadsInStore(caseId, leads) {
     const store = window.RTF_STORE;
     if (!store || typeof store.setLeads !== 'function') return false;
-    store.setLeads(Array.isArray(leads) ? leads : [], caseId);
+    const clean = Array.isArray(leads) ? leads.map((entry, idx) => sanitizeBoardLeadEntry(entry, idx)) : [];
+    store.setLeads(clean, caseId);
     return true;
 }
 
 function getCaseLeadEntries(caseId) {
     const storeLeads = getCaseLeadsFromStore(caseId);
-    if (Array.isArray(storeLeads) && storeLeads.length) {
-        const legacyStore = readLeadStorage();
-        legacyStore[caseId] = storeLeads.slice();
-        writeLeadStorage(legacyStore);
-        return storeLeads.slice();
-    }
-
     const legacyStore = readLeadStorage();
-    const legacyLeads = Array.isArray(legacyStore[caseId]) ? legacyStore[caseId].slice() : [];
-    if (legacyLeads.length) setCaseLeadsInStore(caseId, legacyLeads);
-    return legacyLeads;
+    const legacyLeads = Array.isArray(legacyStore[caseId])
+        ? legacyStore[caseId].map((entry, idx) => sanitizeBoardLeadEntry(entry, idx))
+        : [];
+    const mergedLeads = mergeBoardLeadEntries(storeLeads, legacyLeads);
+
+    if (Array.isArray(storeLeads) && !areBoardLeadListsEqual(storeLeads, mergedLeads)) {
+        setCaseLeadsInStore(caseId, mergedLeads);
+    }
+    if (!areBoardLeadListsEqual(legacyLeads, mergedLeads)) {
+        legacyStore[caseId] = mergedLeads.slice();
+        writeLeadStorage(legacyStore);
+    }
+    return mergedLeads;
 }
 
 function saveCaseLeadEntries(caseId, leads) {
-    const clean = Array.isArray(leads) ? leads.slice() : [];
+    const clean = Array.isArray(leads) ? leads.map((entry, idx) => sanitizeBoardLeadEntry(entry, idx)) : [];
     setCaseLeadsInStore(caseId, clean);
     const legacyStore = readLeadStorage();
     legacyStore[caseId] = clean;

@@ -13,6 +13,7 @@
         .replace(/\n/g, '\\n')
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
+    const escapeHandlerArg = (str = '') => escapeHtml(escapeJsString(str));
     const delegatedHandlerEvents = ['click', 'change', 'input'];
     const delegatedHandlerCache = new Map();
     let delegatedHandlersBound = false;
@@ -466,9 +467,10 @@
         }
         const options = getLeadTargetOptions(cleanType, leadId);
         const listId = `leadTargetOptions_${String(leadId || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'lead'}`;
+        const safeLeadId = escapeHandlerArg(String(leadId || ''));
         return `
             <input type="text" value="${escapeHtml(getLeadTargetDisplayValue(cleanType, value, leadId))}" list="${listId}" placeholder="${escapeHtml(getLeadTargetPlaceholder(cleanType, options.length))}"
-                data-onchange="updateLeadField('${escapeJsString(String(leadId || ''))}', 'targetId', this.value)">
+                data-onchange="updateLeadField('${safeLeadId}', 'targetId', this.value)">
             <datalist id="${listId}">
                 ${buildLeadTargetDatalist(cleanType, leadId)}
             </datalist>
@@ -523,17 +525,92 @@
         localStorage.setItem(LEAD_STORAGE_KEY, JSON.stringify(clean));
     };
 
-    const getCaseLeads = (caseId = getTimelineScopeId()) => {
+    const readLegacyCaseLeads = (caseId = getTimelineScopeId()) => {
         const all = readLeadStorage();
         const list = Array.isArray(all[caseId]) ? all[caseId] : [];
         return list.map((entry, idx) => sanitizeLead(entry, idx));
     };
 
-    const saveCaseLeads = (leads, caseId = getTimelineScopeId()) => {
+    const writeLegacyCaseLeads = (leads, caseId = getTimelineScopeId()) => {
         const all = readLeadStorage();
         const clean = Array.isArray(leads) ? leads.map((entry, idx) => sanitizeLead(entry, idx)) : [];
         all[caseId] = clean;
         writeLeadStorage(all);
+        return clean;
+    };
+
+    const getCaseLeadsFromStore = (caseId = getTimelineScopeId()) => {
+        const store = getStore();
+        if (!store || typeof store.getLeads !== 'function') return null;
+        const list = store.getLeads(caseId);
+        if (!Array.isArray(list)) return [];
+        return list.map((entry, idx) => sanitizeLead(entry, idx));
+    };
+
+    const setCaseLeadsInStore = (leads, caseId = getTimelineScopeId()) => {
+        const store = getStore();
+        if (!store || typeof store.setLeads !== 'function') return false;
+        store.setLeads(leads, caseId);
+        return true;
+    };
+
+    const getLeadTimestamp = (lead) => {
+        const raw = String((lead && (lead.updated || lead.created)) || '');
+        const parsed = Date.parse(raw);
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const mergeLeadListsById = (primaryList, secondaryList) => {
+        const merged = new Map();
+        const ingest = (list, sourceRank) => {
+            (Array.isArray(list) ? list : []).forEach((entry, idx) => {
+                const clean = sanitizeLead(entry, idx);
+                const existing = merged.get(clean.id);
+                if (!existing) {
+                    merged.set(clean.id, { lead: clean, sourceRank });
+                    return;
+                }
+                const existingTs = getLeadTimestamp(existing.lead);
+                const nextTs = getLeadTimestamp(clean);
+                if (nextTs > existingTs || (nextTs === existingTs && sourceRank < existing.sourceRank)) {
+                    merged.set(clean.id, { lead: clean, sourceRank });
+                }
+            });
+        };
+
+        ingest(primaryList, 0);
+        ingest(secondaryList, 1);
+        return Array.from(merged.values()).map((entry) => entry.lead);
+    };
+
+    const areLeadListsEqual = (left, right) => {
+        const leftClean = Array.isArray(left) ? left.map((entry, idx) => sanitizeLead(entry, idx)) : [];
+        const rightClean = Array.isArray(right) ? right.map((entry, idx) => sanitizeLead(entry, idx)) : [];
+        if (leftClean.length !== rightClean.length) return false;
+        for (let i = 0; i < leftClean.length; i += 1) {
+            if (JSON.stringify(leftClean[i]) !== JSON.stringify(rightClean[i])) return false;
+        }
+        return true;
+    };
+
+    const getCaseLeads = (caseId = getTimelineScopeId()) => {
+        const storeLeads = getCaseLeadsFromStore(caseId);
+        const legacyLeads = readLegacyCaseLeads(caseId);
+        const mergedLeads = mergeLeadListsById(storeLeads, legacyLeads);
+
+        if (Array.isArray(storeLeads) && !areLeadListsEqual(storeLeads, mergedLeads)) {
+            setCaseLeadsInStore(mergedLeads, caseId);
+        }
+        if (!areLeadListsEqual(legacyLeads, mergedLeads)) {
+            writeLegacyCaseLeads(mergedLeads, caseId);
+        }
+        return mergedLeads;
+    };
+
+    const saveCaseLeads = (leads, caseId = getTimelineScopeId()) => {
+        const clean = Array.isArray(leads) ? leads.map((entry, idx) => sanitizeLead(entry, idx)) : [];
+        setCaseLeadsInStore(clean, caseId);
+        writeLegacyCaseLeads(clean, caseId);
     };
 
     const getLeadScore = (lead) => {
@@ -963,56 +1040,89 @@
             return;
         }
 
-        listEl.innerHTML = sorted.map((lead) => {
-            const leadId = escapeJsString(lead.id);
-            const score = getLeadScore(lead);
-            const currentVote = voter && lead.votes ? lead.votes[voter] : '';
-            return `
+        try {
+            listEl.innerHTML = sorted.map((lead) => {
+                const leadId = escapeHandlerArg(lead.id);
+                const score = getLeadScore(lead);
+                const currentVote = voter && lead.votes ? lead.votes[voter] : '';
+                return `
+                    <article class="lead-card">
+                        <div class="lead-head">
+                            <strong>${escapeHtml(lead.title)}</strong>
+                            <div class="lead-meta">
+                                <span class="lead-pill">${escapeHtml((lead.type || 'other').toUpperCase())}</span>
+                                <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[lead.status] || 'Open')}</span>
+                                <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
+                            </div>
+                        </div>
+                        <div class="lead-row">
+                            <div>
+                                <label>Question</label>
+                                <input type="text" value="${escapeHtml(lead.question || '')}" data-onchange="updateLeadField('${leadId}', 'question', this.value)">
+                            </div>
+                            <div>
+                                <label>Next Step</label>
+                                <input type="text" value="${escapeHtml(lead.nextStep || '')}" data-onchange="updateLeadField('${leadId}', 'nextStep', this.value)">
+                            </div>
+                        </div>
+                        <div class="lead-row">
+                            <div>
+                                <label>Status</label>
+                                <select data-onchange="updateLeadField('${leadId}', 'status', this.value)">
+                                    ${LEAD_STATUSES.map((status) => `<option value="${status}" ${status === lead.status ? 'selected' : ''}>${escapeHtml(LEAD_STATUS_LABELS[status])}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label>Linked Record</label>
+                                ${buildLeadTargetEditor(lead.id, lead.type, lead.targetId)}
+                            </div>
+                        </div>
+                        <div class="lead-vote-row">
+                            <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
+                            <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
+                            <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
+                            <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
+                        </div>
+                        <div class="lead-vote-summary">${escapeHtml(formatLeadVotes(lead))}</div>
+                        <div class="lead-actions">
+                            <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
+                            <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
+                        </div>
+                    </article>
+                `;
+            }).join('');
+        } catch (err) {
+            console.error('Timeline lead queue render failed; falling back to compact list.', err);
+            listEl.innerHTML = sorted.map((lead) => `
                 <article class="lead-card">
                     <div class="lead-head">
-                        <strong>${escapeHtml(lead.title)}</strong>
+                        <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
                         <div class="lead-meta">
-                            <span class="lead-pill">${escapeHtml((lead.type || 'other').toUpperCase())}</span>
-                            <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[lead.status] || 'Open')}</span>
-                            <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
+                            <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
                         </div>
                     </div>
-                    <div class="lead-row">
-                        <div>
-                            <label>Question</label>
-                            <input type="text" value="${escapeHtml(lead.question || '')}" data-onchange="updateLeadField('${leadId}', 'question', this.value)">
-                        </div>
-                        <div>
-                            <label>Next Step</label>
-                            <input type="text" value="${escapeHtml(lead.nextStep || '')}" data-onchange="updateLeadField('${leadId}', 'nextStep', this.value)">
-                        </div>
-                    </div>
-                    <div class="lead-row">
-                        <div>
-                            <label>Status</label>
-                            <select data-onchange="updateLeadField('${leadId}', 'status', this.value)">
-                                ${LEAD_STATUSES.map((status) => `<option value="${status}" ${status === lead.status ? 'selected' : ''}>${escapeHtml(LEAD_STATUS_LABELS[status])}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div>
-                            <label>Linked Record</label>
-                            ${buildLeadTargetEditor(lead.id, lead.type, lead.targetId)}
-                        </div>
-                    </div>
-                    <div class="lead-vote-row">
-                        <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
-                        <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
-                        <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
-                        <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
-                    </div>
-                    <div class="lead-vote-summary">${escapeHtml(formatLeadVotes(lead))}</div>
                     <div class="lead-actions">
-                        <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
-                        <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
+                        <button class="btn btn-danger" data-onclick="deleteLead('${escapeHandlerArg(String(lead && lead.id || ''))}')">Delete</button>
                     </div>
                 </article>
-            `;
-        }).join('');
+            `).join('');
+        }
+
+        if (sorted.length && !listEl.querySelector('.lead-card')) {
+            listEl.innerHTML = sorted.map((lead) => `
+                <article class="lead-card">
+                    <div class="lead-head">
+                        <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
+                        <div class="lead-meta">
+                            <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
+                        </div>
+                    </div>
+                    <div class="lead-actions">
+                        <button class="btn btn-danger" data-onclick="deleteLead('${escapeHandlerArg(String(lead && lead.id || ''))}')">Delete</button>
+                    </div>
+                </article>
+            `).join('');
+        }
     }
 
     function spendProcedureShield(eventId) {
