@@ -299,7 +299,7 @@
         nodes.forEach((node) => {
             const nodeId = normalizeTargetId(node && node.id || '');
             if (!isBoardNodeId(nodeId)) return;
-            const meta = node && typeof node.meta === 'object' ? node.meta : {};
+            const meta = node && node.meta && typeof node.meta === 'object' ? node.meta : {};
             if (String(meta.sourceType || '').trim().toLowerCase() !== 'lead') return;
             if (String(meta.leadId || '').trim() !== cleanLeadId) return;
             out.add(nodeId);
