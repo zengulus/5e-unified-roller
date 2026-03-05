@@ -255,9 +255,15 @@ function isEditableTouchTarget(target) {
     return !!target.closest('input, textarea, select, button, a, [contenteditable="true"], .label-input');
 }
 
-function isTouchUIArea(target) {
+const BOARD_UI_SAFE_ZONE_SELECTOR = '.toolbar-scroll-wrapper, .popup-menu, .hero-header, #toolbar-toggle, .context-menu, .string-label, .hero-add-row, .hero-menu-panel, .hero-menu-btn';
+
+function isBoardUiSafeZone(target) {
     if (!target || typeof target.closest !== 'function') return false;
-    return !!target.closest('.toolbar-scroll-wrapper, .popup-menu, .hero-header, #toolbar-toggle, .context-menu, .string-label');
+    return !!target.closest(BOARD_UI_SAFE_ZONE_SELECTOR);
+}
+
+function isTouchUIArea(target) {
+    return isBoardUiSafeZone(target);
 }
 
 function isTypingElement(target) {
@@ -4079,7 +4085,7 @@ function togglePanMode() {
 }
 
 document.addEventListener('wheel', (e) => {
-    if (e.target.closest('.toolbar-scroll-wrapper') || e.target.closest('.popup-menu')) return;
+    if (isBoardUiSafeZone(e.target)) return;
     e.preventDefault();
     const d = e.deltaY > 0 ? -1 : 1;
     const f = d * 0.1;
@@ -4094,6 +4100,7 @@ document.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 document.addEventListener('mousedown', (e) => {
+    if (isBoardUiSafeZone(e.target)) return;
     if (e.button === 1 || (panMode && e.button === 0 && !e.target.closest('.node'))) {
         isPanning = true;
         panStart = { x: e.clientX, y: e.clientY };
