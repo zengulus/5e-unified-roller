@@ -255,6 +255,16 @@ function isEditableTouchTarget(target) {
     return !!target.closest('input, textarea, select, button, a, [contenteditable="true"], .label-input');
 }
 
+function createBoardNodeId() {
+    let candidate = '';
+    let guard = 0;
+    do {
+        candidate = `node_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        guard += 1;
+    } while (document.getElementById(candidate) && guard < 24);
+    return candidate;
+}
+
 const BOARD_UI_SAFE_ZONE_SELECTOR = '.toolbar-scroll-wrapper, .popup-menu, .hero-header, #toolbar-toggle, .context-menu, .string-label, .hero-add-row, .hero-menu-panel, .hero-menu-btn';
 
 function isBoardUiSafeZone(target) {
@@ -841,6 +851,43 @@ function readLeadStorage() {
 function writeLeadStorage(next) {
     const clean = next && typeof next === 'object' ? next : {};
     localStorage.setItem(LEAD_STORAGE_KEY, JSON.stringify(clean));
+}
+
+function getCaseLeadsFromStore(caseId) {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getLeads !== 'function') return null;
+    const list = store.getLeads(caseId);
+    return Array.isArray(list) ? list.slice() : [];
+}
+
+function setCaseLeadsInStore(caseId, leads) {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.setLeads !== 'function') return false;
+    store.setLeads(Array.isArray(leads) ? leads : [], caseId);
+    return true;
+}
+
+function getCaseLeadEntries(caseId) {
+    const storeLeads = getCaseLeadsFromStore(caseId);
+    if (Array.isArray(storeLeads) && storeLeads.length) {
+        const legacyStore = readLeadStorage();
+        legacyStore[caseId] = storeLeads.slice();
+        writeLeadStorage(legacyStore);
+        return storeLeads.slice();
+    }
+
+    const legacyStore = readLeadStorage();
+    const legacyLeads = Array.isArray(legacyStore[caseId]) ? legacyStore[caseId].slice() : [];
+    if (legacyLeads.length) setCaseLeadsInStore(caseId, legacyLeads);
+    return legacyLeads;
+}
+
+function saveCaseLeadEntries(caseId, leads) {
+    const clean = Array.isArray(leads) ? leads.slice() : [];
+    setCaseLeadsInStore(caseId, clean);
+    const legacyStore = readLeadStorage();
+    legacyStore[caseId] = clean;
+    writeLeadStorage(legacyStore);
 }
 
 function getActiveLeadCaseId() {
@@ -2177,8 +2224,7 @@ function normalizeNoteTab(value) {
 
 function getBoardLeadEntries() {
     const caseId = getActiveLeadCaseId();
-    const all = readLeadStorage();
-    const list = Array.isArray(all[caseId]) ? all[caseId].slice() : [];
+    const list = getCaseLeadEntries(caseId);
     list.sort((left, right) => String(right.updated || right.created || '').localeCompare(String(left.updated || left.created || '')));
     return list.slice(0, 40);
 }
@@ -3749,7 +3795,7 @@ function updateNodeImageMeta(nodeEl, imageUrl = '') {
 }
 
 function createNode(type, x, y, id = null, content = {}) {
-    const nodeId = id || 'node_' + Date.now();
+    const nodeId = id || createBoardNodeId();
     const nodeType = String(type || '').toLowerCase();
     const safeContent = (nodeType === 'note')
         ? normalizeNoteNodeContent(content)
@@ -4148,13 +4194,19 @@ function saveBoard() {
             syncGroupNodeMeta(el);
             nodeMeta = getNodeMeta(el);
         }
+        const titleEl = el.querySelector('.node-title');
+        const bodyEl = el.querySelector('.node-body');
+        const titleText = titleEl ? titleEl.innerText : (el.dataset.lastTitle || nodeType.toUpperCase());
+        const bodyHtml = bodyEl ? bodyEl.innerHTML : (el.dataset.lastBody || '');
+        el.dataset.lastTitle = titleText;
+        el.dataset.lastBody = bodyHtml;
         return {
             id: el.id,
             type: nodeType,
             x: parseInt(el.style.left, 10),
             y: parseInt(el.style.top, 10),
-            title: el.querySelector('.node-title').innerText,
-            body: el.querySelector('.node-body').innerHTML,
+            title: titleText,
+            body: bodyHtml,
             meta: nodeMeta
         };
     });
@@ -4632,9 +4684,8 @@ function createLeadFromTargetNode() {
         other: 'Choose one concrete scene action to pursue this lead.'
     };
 
-    const storeObj = readLeadStorage();
     const caseId = getActiveLeadCaseId();
-    const list = Array.isArray(storeObj[caseId]) ? storeObj[caseId] : [];
+    const list = getCaseLeadEntries(caseId);
     list.push({
         id: `lead_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         type: leadType,
@@ -4649,8 +4700,7 @@ function createLeadFromTargetNode() {
         created: new Date().toISOString(),
         updated: new Date().toISOString()
     });
-    storeObj[caseId] = list;
-    writeLeadStorage(storeObj);
+    saveCaseLeadEntries(caseId, list);
     alert(`Lead created for ${summary.title}.`);
     contextMenu.style.display = 'none';
 }
@@ -4749,9 +4799,20 @@ function editTargetNode() {
             }
         }
     };
+    let editAutosaveTimer = null;
+    const queueEditAutosave = () => {
+        if (editAutosaveTimer) clearTimeout(editAutosaveTimer);
+        editAutosaveTimer = setTimeout(() => {
+            editAutosaveTimer = null;
+            updateNodeCache(el.id);
+            saveBoard();
+        }, 180);
+    };
 
     t.addEventListener('keydown', handleKey);
     b.addEventListener('keydown', handleKey);
+    t.addEventListener('input', queueEditAutosave);
+    b.addEventListener('input', queueEditAutosave);
 
     let closed = false;
     let toolbarFocusOutHandler = null;
@@ -4762,6 +4823,12 @@ function editTargetNode() {
         el.classList.remove('editing');
         t.removeEventListener('keydown', handleKey);
         b.removeEventListener('keydown', handleKey);
+        t.removeEventListener('input', queueEditAutosave);
+        b.removeEventListener('input', queueEditAutosave);
+        if (editAutosaveTimer) {
+            clearTimeout(editAutosaveTimer);
+            editAutosaveTimer = null;
+        }
         if (tb) {
             if (toolbarFocusOutHandler) tb.removeEventListener('focusout', toolbarFocusOutHandler);
             tb.style.display = 'none';

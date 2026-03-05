@@ -141,7 +141,8 @@
                     id: 'case_primary',
                     name: DEFAULT_CASE_NAME,
                     board: { ...DEFAULT_BOARD_STATE },
-                    events: []
+                    events: [],
+                    leads: []
                 }
             ]
         },
@@ -199,6 +200,8 @@
     const RELIABILITY_LEVELS = new Set(['unknown', 'rumored', 'corroborated', 'verified']);
     const LEDGER_STATUSES = new Set(['stable', 'contested', 'collapsed', 'resolved']);
     const LEDGER_SOURCE_TYPES = new Set(['event', 'theory', 'clue', 'npc', 'location', 'requisition', 'case', 'other']);
+    const LEAD_TYPES = new Set(['npc', 'location', 'clue', 'event', 'requisition', 'theory', 'other']);
+    const LEAD_STATUSES = new Set(['open', 'blocked', 'resolved', 'dead-end']);
 
     const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -677,6 +680,52 @@
                 .map((entry, idx) => sanitizeEvent(entry, idx))
             : []
     );
+    const sanitizeLeadType = (value, fallback = 'other') => {
+        const token = normalizeEnumToken(value);
+        return LEAD_TYPES.has(token) ? token : fallback;
+    };
+    const sanitizeLeadStatus = (value, fallback = 'open') => {
+        const token = normalizeEnumToken(value);
+        return LEAD_STATUSES.has(token) ? token : fallback;
+    };
+    const sanitizeLeadVotes = (votes) => {
+        const source = votes && typeof votes === 'object' ? votes : {};
+        const out = {};
+        Object.keys(source).forEach((key) => {
+            const name = toTrimmedString(key, '', 60).trim();
+            if (!name) return;
+            const voteToken = normalizeEnumToken(source[key]);
+            if (voteToken !== 'hot' && voteToken !== 'cold' && voteToken !== 'dead-end') return;
+            out[name] = voteToken;
+        });
+        return out;
+    };
+    const sanitizeLead = (lead, index = 0) => {
+        const source = lead && typeof lead === 'object' ? lead : {};
+        const nowIso = new Date().toISOString();
+        const fallbackId = buildEntityId('lead', index);
+        const createdAt = sanitizeAttributionAt(source.created, nowIso) || nowIso;
+        const updatedAt = sanitizeAttributionAt(source.updated, createdAt) || createdAt;
+        return {
+            id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
+            type: sanitizeLeadType(source.type, 'other'),
+            targetId: toTrimmedString(source.targetId, '', 120).trim(),
+            title: toTrimmedString(source.title, '', 180).trim() || `Lead ${index + 1}`,
+            question: toTrimmedString(source.question, '', 500).trim(),
+            nextStep: toTrimmedString(source.nextStep, '', 500).trim(),
+            status: sanitizeLeadStatus(source.status, 'open'),
+            votes: sanitizeLeadVotes(source.votes),
+            created: createdAt,
+            updated: updatedAt
+        };
+    };
+    const sanitizeLeadList = (leads) => (
+        Array.isArray(leads)
+            ? leads
+                .filter((entry) => entry && typeof entry === 'object')
+                .map((entry, idx) => sanitizeLead(entry, idx))
+            : []
+    );
 
     const sanitizeCases = (cases, campaign, board) => {
         const source = cases && typeof cases === 'object' ? cases : {};
@@ -688,7 +737,8 @@
             id: 'case_primary',
             name: legacyCaseTitle,
             board: sanitizeBoard(board),
-            events: sanitizeEventList(baseCampaign.events)
+            events: sanitizeEventList(baseCampaign.events),
+            leads: []
         };
 
         const listRaw = Array.isArray(source.items) ? source.items
@@ -714,7 +764,8 @@
                 id,
                 name: sanitizeCaseName(row.name, fallbackName),
                 board: sanitizeBoard(row.board),
-                events: sanitizeEventList(row.events)
+                events: sanitizeEventList(row.events),
+                leads: sanitizeLeadList(row.leads)
             };
             items.push(normalized);
         });
@@ -724,7 +775,8 @@
                 id: 'case_primary',
                 name: legacyCaseTitle,
                 board: sanitizeBoard(null),
-                events: []
+                events: [],
+                leads: []
             });
         }
 
@@ -1066,6 +1118,7 @@
             if (!entry || !entry.id) return;
             map.set(`cases.${entry.id}.board`, stripBoardNodeLocalFields(entry.board));
             addEntityScopesToSnapshot(map, buildCaseEventsScopePrefix(entry.id), sanitizeEventList(entry.events));
+            map.set(`cases.${entry.id}.leads`, sanitizeLeadList(entry.leads));
         });
         return map;
     };
@@ -1111,7 +1164,8 @@
                 id: caseId,
                 name: sanitizeCaseName(caseId, DEFAULT_CASE_NAME),
                 board: sanitizeBoard(null),
-                events: []
+                events: [],
+                leads: []
             };
         }
         targetState.cases.items.push(targetCase);
@@ -1140,7 +1194,8 @@
                 id: entry.id,
                 name: sanitizeCaseName(entry.name, DEFAULT_CASE_NAME),
                 board: sanitizeBoard(null),
-                events: []
+                events: [],
+                leads: []
             });
         });
 
@@ -1149,7 +1204,8 @@
                 id: 'case_primary',
                 name: DEFAULT_CASE_NAME,
                 board: sanitizeBoard(null),
-                events: []
+                events: [],
+                leads: []
             });
         }
 
@@ -1272,7 +1328,7 @@
             return;
         }
 
-        const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name)$/);
+        const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name|leads)$/);
         if (caseFieldMatch) {
             const caseId = caseFieldMatch[1];
             const field = caseFieldMatch[2];
@@ -1281,11 +1337,13 @@
                 id: caseId,
                 name: targetCase.name || DEFAULT_CASE_NAME,
                 board: sanitizeBoard(null),
-                events: []
+                events: [],
+                leads: []
             };
             if (field === 'board') targetCase.board = deepClone(sourceCase.board);
             if (field === 'events') targetCase.events = deepClone(sourceCase.events);
             if (field === 'name') targetCase.name = sanitizeCaseName(sourceCase.name, targetCase.name || DEFAULT_CASE_NAME);
+            if (field === 'leads') targetCase.leads = sanitizeLeadList(sourceCase.leads);
             return;
         }
 
@@ -1298,6 +1356,7 @@
             targetCase.name = sanitizeCaseName(sourceCase.name, targetCase.name || DEFAULT_CASE_NAME);
             targetCase.board = deepClone(sourceCase.board);
             targetCase.events = deepClone(sourceCase.events);
+            targetCase.leads = sanitizeLeadList(sourceCase.leads);
             return;
         }
 
@@ -1686,7 +1745,8 @@
                     id: desiredId,
                     name: prettyName,
                     board: sanitizeBoard({ name: prettyName }),
-                    events: []
+                    events: [],
+                    leads: []
                 };
                 cases.items.push(entry);
             }
@@ -1695,6 +1755,7 @@
             if (!entry) entry = cases.items.find((item) => item && item.id === cases.activeCaseId) || cases.items[0];
             if (!entry.board || typeof entry.board !== 'object') entry.board = sanitizeBoard(null);
             if (!Array.isArray(entry.events)) entry.events = [];
+            if (!Array.isArray(entry.leads)) entry.leads = [];
             return entry || null;
         }
 
@@ -2138,7 +2199,8 @@
                 id,
                 name: cleanName,
                 board: sanitizeBoard({ name: cleanName }),
-                events: []
+                events: [],
+                leads: []
             };
             cases.items.push(entry);
             cases.activeCaseId = id;
@@ -3050,7 +3112,8 @@
                     id: caseId,
                     name: caseName,
                     board: sanitizeBoard({ name: caseName }),
-                    events: []
+                    events: [],
+                    leads: sanitizeLeadList(payload.leads)
                 });
             });
 
@@ -3061,7 +3124,8 @@
                         id: caseId,
                         name: DEFAULT_CASE_NAME,
                         board: sanitizeBoard(null),
-                        events: []
+                        events: [],
+                        leads: []
                     });
                     caseOrder.push(caseId);
                 }
@@ -3089,7 +3153,8 @@
                         id: caseId,
                         name: DEFAULT_CASE_NAME,
                         board: sanitizeBoard(null),
-                        events: []
+                        events: [],
+                        leads: []
                     });
                     caseOrder.push(caseId);
                 }
@@ -3978,13 +4043,13 @@
                     addCaseEventScopeId(caseId, scopeId);
                     return;
                 }
-                const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name)$/);
+                const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name|leads)$/);
                 if (caseFieldMatch) {
                     const caseId = sanitizeCaseId(caseFieldMatch[1], 'case_primary');
                     const field = caseFieldMatch[2];
                     if (field === 'board') plan.caseBoards.add(caseId);
                     if (field === 'events') plan.caseEvents.add(caseId);
-                    if (field === 'name') plan.writeCaseState = true;
+                    if (field === 'name' || field === 'leads') plan.writeCaseState = true;
                     return;
                 }
                 const caseWholeMatch = scope.match(/^cases\.([a-z0-9_-]+)$/);
@@ -4213,7 +4278,10 @@
                     case_name: caseName,
                     is_active: caseId === activeCaseId,
                     sort_order: idx,
-                    payload: { name: caseName },
+                    payload: {
+                        name: caseName,
+                        leads: sanitizeLeadList(entry && entry.leads)
+                    },
                     ...writeMeta
                 };
             });
@@ -4224,7 +4292,7 @@
                     case_name: DEFAULT_CASE_NAME,
                     is_active: true,
                     sort_order: 0,
-                    payload: { name: DEFAULT_CASE_NAME },
+                    payload: { name: DEFAULT_CASE_NAME, leads: [] },
                     ...writeMeta
                 });
             }
@@ -5537,6 +5605,22 @@
             this.save({ scope: 'campaign.meta.board' });
         }
 
+        getLeads(caseId = null) {
+            const entry = this.getCaseEntry(caseId, { createIfMissing: true });
+            if (!entry) return [];
+            entry.leads = sanitizeLeadList(entry.leads);
+            return entry.leads;
+        }
+
+        setLeads(leads, caseId = null) {
+            const entry = this.getCaseEntry(caseId, { createIfMissing: true });
+            if (!entry) return [];
+            entry.leads = sanitizeLeadList(leads);
+            this.syncActiveCaseLegacyState();
+            this.save({ scope: `cases.${entry.id}.leads` });
+            return deepClone(entry.leads);
+        }
+
         // Mission Events
         getEvents(caseId = null) {
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
@@ -5890,8 +5974,24 @@
                     }))
                 };
 
-            const leadStore = readJsonStorage(LEAD_STORAGE_KEY, {});
-            const leadCases = leadStore && typeof leadStore === 'object' ? leadStore : {};
+            const leadCases = {};
+            caseItems.forEach((entry) => {
+                if (!entry || !entry.id) return;
+                const leads = sanitizeLeadList(entry.leads);
+                if (!leads.length) return;
+                leadCases[entry.id] = leads;
+            });
+            if (!Object.keys(leadCases).length) {
+                const leadStore = readJsonStorage(LEAD_STORAGE_KEY, {});
+                const legacyLeadCases = leadStore && typeof leadStore === 'object' ? leadStore : {};
+                Object.keys(legacyLeadCases).forEach((key) => {
+                    const caseId = sanitizeCaseId(key, '');
+                    if (!caseId) return;
+                    const leads = sanitizeLeadList(legacyLeadCases[key]);
+                    if (!leads.length) return;
+                    leadCases[caseId] = leads;
+                });
+            }
             const filteredLeadCases = target === 'case'
                 ? (leadCases[activeCaseId] ? { [activeCaseId]: leadCases[activeCaseId] } : {})
                 : leadCases;

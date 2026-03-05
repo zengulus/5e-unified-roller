@@ -28,6 +28,9 @@
                     <button class="hero-btn ghost" data-onclick="handleExport()">📤 Export</button>
                     <button class="hero-btn ghost" data-onclick="handleExportCaseLLMSnapshot()">🤖 Case Snapshot</button>
                     <button class="hero-btn ghost" data-onclick="handleExportCampaignLLMSnapshot()">🤖 Campaign Snapshot</button>
+                    <button class="hero-btn ghost" data-onclick="importConnectFile()">🔑 Import connect.json</button>
+                    <button class="hero-btn ghost" data-onclick="useBundledConnect()">🧷 Use bundled connect.json</button>
+                    <button class="hero-btn ghost" data-onclick="exportConnectFile()">📄 Export connect.json</button>
                 </div>
                 <div class="hero-action-bar secondary">
                     <button class="hero-btn ghost" id="btn-secret-mode" data-onclick="toggleSecretMode()">🧩 GM Mode</button>
@@ -221,20 +224,6 @@
             </div>
             <p class="customize-hint"><code>name</code> is required for NPC/location records. Guild entries can be plain strings or objects with <code>name</code>.</p>
             <div id="customize-status" class="customize-status">Ready. Load defaults or campaign data to start.</div>
-        </section>
-
-        <section class="sync-quick card" id="sync-quick" aria-label="Quick Cloud Connect">
-            <div class="sync-quick-head">
-                <h2 class="sync-quick-title">Cloud Connect</h2>
-            </div>
-            <p class="sync-quick-note">
-                Players: import a DM-provided <code>connect.json</code> and you should be online in a few seconds.
-            </p>
-            <div class="sync-quick-actions">
-                <button class="sync-btn primary" data-onclick="importConnectFile()">Import connect.json</button>
-                <button class="sync-btn" data-onclick="useBundledConnect()">Use bundled connect.json</button>
-            </div>
-            <div id="sync-quick-status" class="sync-quick-status">Status: waiting for sync engine...</div>
         </section>
 
     </div>

@@ -1636,7 +1636,7 @@ function updateSyncPanelVisibility(status) {
     const panel = document.getElementById('sync-panel');
     const customize = document.getElementById('customize-panel');
     const quick = document.getElementById('sync-quick');
-    if (!panel || !quick) return;
+    if (!panel) return;
 
     const isSecret = document.body.classList.contains('secret-active');
     const connected = !!(status && status.connected);
@@ -1645,7 +1645,7 @@ function updateSyncPanelVisibility(status) {
     panel.classList.toggle('tools-hidden', !isSecret);
     if (customize) customize.classList.toggle('tools-hidden', !isSecret);
     // Quick connect is for onboarding only; hide after successful connection.
-    quick.classList.toggle('tools-hidden', connected);
+    if (quick) quick.classList.toggle('tools-hidden', connected);
 }
 
 function saveSyncConfig() {

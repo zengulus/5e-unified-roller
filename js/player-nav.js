@@ -34,6 +34,199 @@
     const path = String(window.location.pathname || '').split('/').pop().toLowerCase();
     const inferredActive = (ALL_NAV_ITEMS.find((item) => item.href.toLowerCase() === path) || {}).id || '';
     const activeId = explicitActive || inferredActive;
+    const CONNECT_OPTIONAL_TABLE_KEYS = [
+        'schema',
+        'tableName',
+        'normalizedCoreTable',
+        'normalizedHQTable',
+        'normalizedCaseStateTable',
+        'normalizedCaseBoardsTable',
+        'normalizedCaseEventsTable',
+        'normalizedPlayersTable',
+        'normalizedNPCsTable',
+        'normalizedLocationsTable',
+        'normalizedRequisitionsTable',
+        'normalizedEncountersTable'
+    ];
+
+    function getStore() {
+        if (!window.RTF_STORE || typeof window.RTF_STORE !== 'object') return null;
+        return window.RTF_STORE;
+    }
+
+    function normalizeConnectPayload(raw) {
+        const source = raw && typeof raw === 'object' ? raw : null;
+        if (!source) return null;
+        const supabaseUrl = String(source.supabaseUrl || source.projectUrl || source.url || '').trim();
+        const anonKey = String(source.anonKey || source.key || '').trim();
+        const campaignId = String(source.campaignId || source.campaign || '').trim().toLowerCase();
+        const backendMode = String(source.backendMode || source.syncBackend || '').trim() || 'normalized';
+        if (!supabaseUrl || !anonKey || !campaignId) return null;
+
+        const payload = {
+            enabled: true,
+            autoConnect: source.autoConnect !== false,
+            supabaseUrl,
+            anonKey,
+            campaignId,
+            backendMode
+        };
+
+        CONNECT_OPTIONAL_TABLE_KEYS.forEach((key) => {
+            const value = String(source[key] || '').trim();
+            if (value) payload[key] = value;
+        });
+        return payload;
+    }
+
+    function promptForConnectProfileName(existing = '') {
+        const initial = String(existing || '').trim();
+        if (initial) return initial;
+
+        while (true) {
+            const entered = prompt('Enter your player name for sync tracking (required):', '');
+            if (entered === null) return '';
+            const clean = String(entered || '').trim();
+            if (clean) return clean;
+            alert('Player name is required to connect.');
+        }
+    }
+
+    async function applyConnectProfile(raw, options = {}) {
+        const store = getStore();
+        if (!store || typeof store.setSyncConfig !== 'function' || typeof store.connectSync !== 'function') {
+            return { ok: false, error: 'Sync store is not available on this page.' };
+        }
+        const payload = normalizeConnectPayload(raw);
+        if (!payload) return { ok: false, error: 'Invalid connect.json format.' };
+
+        const opts = options && typeof options === 'object' ? options : {};
+        const currentConfig = (typeof store.getSyncConfig === 'function') ? store.getSyncConfig() : {};
+        const requestedName = String(opts.profileName || currentConfig.profileName || '').trim();
+        const profileName = promptForConnectProfileName(requestedName);
+        if (!profileName) return { ok: false, error: 'Player name is required to connect.' };
+        payload.profileName = profileName;
+
+        store.setSyncConfig(payload, { reconnect: false });
+        const result = await store.connectSync();
+        if (!result || result.ok === false) {
+            const status = (typeof store.getSyncStatus === 'function') ? store.getSyncStatus() : null;
+            return { ok: false, error: (status && status.lastError) || 'Connect failed.' };
+        }
+        return { ok: true };
+    }
+
+    async function importConnectFileFromSettings() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'application/json,.json';
+        input.onchange = async (event) => {
+            const target = event && event.target ? event.target : null;
+            const file = target && target.files && target.files[0] ? target.files[0] : null;
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                const result = await applyConnectProfile(parsed);
+                if (!result.ok) {
+                    alert(result.error || 'Failed to import connect.json.');
+                    return;
+                }
+                alert('connect.json imported and sync connected.');
+            } catch (err) {
+                alert('Invalid connect.json file.');
+            }
+        };
+        input.click();
+    }
+
+    async function useBundledConnectFromSettings() {
+        try {
+            const response = await fetch('connect.json', { cache: 'no-store' });
+            if (!response.ok) {
+                alert('No valid bundled connect.json found at site root.');
+                return;
+            }
+            const parsed = await response.json();
+            const result = await applyConnectProfile(parsed);
+            if (!result.ok) {
+                alert(result.error || 'Failed using bundled connect.json.');
+                return;
+            }
+            alert('Bundled connect.json applied and connected.');
+        } catch (err) {
+            alert('No valid bundled connect.json found at site root.');
+        }
+    }
+
+    function exportConnectFileFromSettings() {
+        const store = getStore();
+        if (!store || typeof store.getSyncConfig !== 'function') {
+            alert('Sync store is not available on this page.');
+            return;
+        }
+        const config = store.getSyncConfig();
+        const payload = {
+            supabaseUrl: String(config && config.supabaseUrl || '').trim(),
+            anonKey: String(config && config.anonKey || '').trim(),
+            campaignId: String(config && config.campaignId || '').trim(),
+            profileName: '',
+            backendMode: String(config && config.backendMode || 'legacy').trim() || 'legacy',
+            autoConnect: config ? (config.autoConnect !== false) : true
+        };
+        CONNECT_OPTIONAL_TABLE_KEYS.forEach((key) => {
+            const value = String(config && config[key] || '').trim();
+            if (value) payload[key] = value;
+        });
+        if (!payload.supabaseUrl || !payload.anonKey || !payload.campaignId) {
+            alert('Missing URL, anon key, or campaign ID.');
+            return;
+        }
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'connect.json';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function settingsPanelHasConnectActions(panel) {
+        if (!panel) return false;
+        return !!panel.querySelector('[data-onclick*="importConnectFile"], [data-onclick*="useBundledConnect"], [data-onclick*="exportConnectFile"], [data-player-nav-connect-action="1"]');
+    }
+
+    function buildGlobalConnectActionBar() {
+        const bar = document.createElement('div');
+        bar.className = 'hero-action-bar secondary';
+        bar.dataset.playerNavConnectBar = '1';
+
+        const mkBtn = (label, handler) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'hero-btn ghost';
+            btn.dataset.playerNavConnectAction = '1';
+            btn.textContent = label;
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                Promise.resolve(handler()).catch((err) => {
+                    console.error('Connect action failed', err);
+                    alert('Connect action failed.');
+                });
+            });
+            return btn;
+        };
+
+        bar.append(
+            mkBtn('🔑 Import connect.json', importConnectFileFromSettings),
+            mkBtn('🧷 Use bundled connect.json', useBundledConnectFromSettings),
+            mkBtn('📄 Export connect.json', exportConnectFileFromSettings)
+        );
+        return bar;
+    }
 
     function isAddActionLabel(labelText) {
         const clean = String(labelText || '').trim().toLowerCase();
@@ -282,6 +475,9 @@
             if (!hasControls) return;
             settingsPanel.appendChild(bar);
         });
+        if (!settingsPanelHasConnectActions(settingsPanel)) {
+            settingsPanel.appendChild(buildGlobalConnectActionBar());
+        }
 
         const setOpenState = (targetPanel, navMode) => {
             const showNav = targetPanel === 'nav';

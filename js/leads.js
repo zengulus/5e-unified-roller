@@ -392,17 +392,51 @@
         localStorage.setItem(LEAD_STORAGE_KEY, JSON.stringify(clean));
     }
 
-    function getCaseLeads(caseId = getActiveCaseId()) {
+    function readLegacyCaseLeads(caseId = getActiveCaseId()) {
         const all = readLeadStorage();
         const list = Array.isArray(all[caseId]) ? all[caseId] : [];
         return list.map((entry, idx) => sanitizeLead(entry, idx));
     }
 
-    function saveCaseLeads(leads, caseId = getActiveCaseId()) {
+    function writeLegacyCaseLeads(leads, caseId = getActiveCaseId()) {
         const all = readLeadStorage();
         const clean = Array.isArray(leads) ? leads.map((entry, idx) => sanitizeLead(entry, idx)) : [];
         all[caseId] = clean;
         writeLeadStorage(all);
+        return clean;
+    }
+
+    function getCaseLeadsFromStore(caseId = getActiveCaseId()) {
+        const store = getStore();
+        if (!store || typeof store.getLeads !== 'function') return null;
+        const list = store.getLeads(caseId);
+        if (!Array.isArray(list)) return [];
+        return list.map((entry, idx) => sanitizeLead(entry, idx));
+    }
+
+    function setCaseLeadsInStore(leads, caseId = getActiveCaseId()) {
+        const store = getStore();
+        if (!store || typeof store.setLeads !== 'function') return false;
+        store.setLeads(leads, caseId);
+        return true;
+    }
+
+    function getCaseLeads(caseId = getActiveCaseId()) {
+        const storeLeads = getCaseLeadsFromStore(caseId);
+        if (Array.isArray(storeLeads) && storeLeads.length) {
+            writeLegacyCaseLeads(storeLeads, caseId);
+            return storeLeads;
+        }
+
+        const legacyLeads = readLegacyCaseLeads(caseId);
+        if (legacyLeads.length) setCaseLeadsInStore(legacyLeads, caseId);
+        return legacyLeads;
+    }
+
+    function saveCaseLeads(leads, caseId = getActiveCaseId()) {
+        const clean = Array.isArray(leads) ? leads.map((entry, idx) => sanitizeLead(entry, idx)) : [];
+        setCaseLeadsInStore(clean, caseId);
+        writeLegacyCaseLeads(clean, caseId);
     }
 
     function getLeadScore(lead) {
