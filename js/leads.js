@@ -753,6 +753,86 @@
         window.location.assign(url.toString());
     }
 
+    function buildFullLeadCardMarkup(lead, voter, focusedClass = '') {
+        const leadId = escapeHandlerArg(lead.id);
+        const score = getLeadScore(lead);
+        const currentVote = voter && lead.votes ? lead.votes[voter] : '';
+        return `
+            <article class="lead-card${focusedClass}" data-lead-id="${escapeHtml(lead.id)}">
+                <div class="lead-head">
+                    <strong>${escapeHtml(lead.title)}</strong>
+                    <div class="lead-meta">
+                        <span class="lead-pill">${escapeHtml((lead.type || 'other').toUpperCase())}</span>
+                        <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[lead.status] || 'Open')}</span>
+                        <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
+                    </div>
+                </div>
+                <div class="lead-row">
+                    <div>
+                        <label>Question</label>
+                        <input type="text" value="${escapeHtml(lead.question || '')}" data-onchange="updateLeadField('${leadId}', 'question', this.value)">
+                    </div>
+                    <div>
+                        <label>Next Step</label>
+                        <input type="text" value="${escapeHtml(lead.nextStep || '')}" data-onchange="updateLeadField('${leadId}', 'nextStep', this.value)">
+                    </div>
+                </div>
+                <div class="lead-row">
+                    <div>
+                        <label>Status</label>
+                        <select data-onchange="updateLeadField('${leadId}', 'status', this.value)">
+                            ${LEAD_STATUSES.map((status) => `<option value="${status}" ${status === lead.status ? 'selected' : ''}>${escapeHtml(LEAD_STATUS_LABELS[status])}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label>Linked Record</label>
+                        ${buildLeadTargetEditor(lead.id, lead.type, lead.targetId)}
+                    </div>
+                </div>
+                <div class="lead-vote-row">
+                    <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
+                    <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
+                    <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
+                    <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
+                </div>
+                <div class="lead-vote-summary">${escapeHtml(formatLeadVotes(lead))}</div>
+                <div class="lead-actions">
+                    <button class="btn" data-onclick="openLeadOnTimeline('${leadId}')">Timeline</button>
+                    <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
+                    <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
+                </div>
+            </article>
+        `;
+    }
+
+    function buildFallbackLeadCardMarkup(lead, voter, focusedClass = '') {
+        const leadId = escapeHandlerArg(String(lead && lead.id || ''));
+        const score = getLeadScore(lead);
+        const currentVote = voter && lead && lead.votes ? lead.votes[voter] : '';
+        return `
+            <article class="lead-card${focusedClass}" data-lead-id="${escapeHtml(String(lead && lead.id || ''))}">
+                <div class="lead-head">
+                    <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
+                    <div class="lead-meta">
+                        <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
+                        <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
+                    </div>
+                </div>
+                <div class="lead-vote-row">
+                    <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
+                    <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
+                    <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
+                    <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
+                </div>
+                <div class="lead-actions">
+                    <button class="btn" data-onclick="openLeadOnTimeline('${leadId}')">Timeline</button>
+                    <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
+                    <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
+                </div>
+            </article>
+        `;
+    }
+
     function renderLeadQueue() {
         const listEl = document.getElementById('leadList');
         const summaryEl = document.getElementById('leadSummary');
@@ -778,91 +858,15 @@
             return;
         }
 
-        try {
-            listEl.innerHTML = sorted.map((lead) => {
-                const leadId = escapeHandlerArg(lead.id);
-                const score = getLeadScore(lead);
-                const currentVote = voter && lead.votes ? lead.votes[voter] : '';
-                const focusedClass = focusedLeadId && focusedLeadId === lead.id ? ' is-focused' : '';
-                return `
-                    <article class="lead-card${focusedClass}" data-lead-id="${escapeHtml(lead.id)}">
-                        <div class="lead-head">
-                            <strong>${escapeHtml(lead.title)}</strong>
-                            <div class="lead-meta">
-                                <span class="lead-pill">${escapeHtml((lead.type || 'other').toUpperCase())}</span>
-                                <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[lead.status] || 'Open')}</span>
-                                <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
-                            </div>
-                        </div>
-                        <div class="lead-row">
-                            <div>
-                                <label>Question</label>
-                                <input type="text" value="${escapeHtml(lead.question || '')}" data-onchange="updateLeadField('${leadId}', 'question', this.value)">
-                            </div>
-                            <div>
-                                <label>Next Step</label>
-                                <input type="text" value="${escapeHtml(lead.nextStep || '')}" data-onchange="updateLeadField('${leadId}', 'nextStep', this.value)">
-                            </div>
-                        </div>
-                        <div class="lead-row">
-                            <div>
-                                <label>Status</label>
-                                <select data-onchange="updateLeadField('${leadId}', 'status', this.value)">
-                                    ${LEAD_STATUSES.map((status) => `<option value="${status}" ${status === lead.status ? 'selected' : ''}>${escapeHtml(LEAD_STATUS_LABELS[status])}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div>
-                                <label>Linked Record</label>
-                                ${buildLeadTargetEditor(lead.id, lead.type, lead.targetId)}
-                            </div>
-                        </div>
-                        <div class="lead-vote-row">
-                            <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
-                            <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
-                            <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
-                            <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
-                        </div>
-                        <div class="lead-vote-summary">${escapeHtml(formatLeadVotes(lead))}</div>
-                        <div class="lead-actions">
-                            <button class="btn" data-onclick="openLeadOnTimeline('${leadId}')">Timeline</button>
-                            <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
-                            <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
-                        </div>
-                    </article>
-                `;
-            }).join('');
-        } catch (err) {
-            console.error('Lead Queue render failed; falling back to compact list.', err);
-            listEl.innerHTML = sorted.map((lead) => `
-                <article class="lead-card" data-lead-id="${escapeHtml(String(lead && lead.id || ''))}">
-                    <div class="lead-head">
-                        <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
-                        <div class="lead-meta">
-                            <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
-                        </div>
-                    </div>
-                    <div class="lead-actions">
-                        <button class="btn btn-danger" data-onclick="deleteLead('${escapeHandlerArg(String(lead && lead.id || ''))}')">Delete</button>
-                    </div>
-                </article>
-            `).join('');
-        }
-
-        if (sorted.length && !listEl.querySelector('.lead-card')) {
-            listEl.innerHTML = sorted.map((lead) => `
-                <article class="lead-card" data-lead-id="${escapeHtml(String(lead && lead.id || ''))}">
-                    <div class="lead-head">
-                        <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
-                        <div class="lead-meta">
-                            <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
-                        </div>
-                    </div>
-                    <div class="lead-actions">
-                        <button class="btn btn-danger" data-onclick="deleteLead('${escapeHandlerArg(String(lead && lead.id || ''))}')">Delete</button>
-                    </div>
-                </article>
-            `).join('');
-        }
+        listEl.innerHTML = sorted.map((lead) => {
+            const focusedClass = focusedLeadId && focusedLeadId === lead.id ? ' is-focused' : '';
+            try {
+                return buildFullLeadCardMarkup(lead, voter, focusedClass);
+            } catch (err) {
+                console.error('Lead Queue card render failed; using fallback for lead:', lead && lead.id, err);
+                return buildFallbackLeadCardMarkup(lead, voter, focusedClass);
+            }
+        }).join('');
     }
 
     function focusLeadFromUrlIfPresent() {

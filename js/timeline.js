@@ -1015,6 +1015,84 @@
         alert('Board jump needs a board node ID (node_...) or an NPC/location/event/requisition lead.');
     }
 
+    function buildTimelineFullLeadCardMarkup(lead, voter) {
+        const leadId = escapeHandlerArg(lead.id);
+        const score = getLeadScore(lead);
+        const currentVote = voter && lead.votes ? lead.votes[voter] : '';
+        return `
+            <article class="lead-card">
+                <div class="lead-head">
+                    <strong>${escapeHtml(lead.title)}</strong>
+                    <div class="lead-meta">
+                        <span class="lead-pill">${escapeHtml((lead.type || 'other').toUpperCase())}</span>
+                        <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[lead.status] || 'Open')}</span>
+                        <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
+                    </div>
+                </div>
+                <div class="lead-row">
+                    <div>
+                        <label>Question</label>
+                        <input type="text" value="${escapeHtml(lead.question || '')}" data-onchange="updateLeadField('${leadId}', 'question', this.value)">
+                    </div>
+                    <div>
+                        <label>Next Step</label>
+                        <input type="text" value="${escapeHtml(lead.nextStep || '')}" data-onchange="updateLeadField('${leadId}', 'nextStep', this.value)">
+                    </div>
+                </div>
+                <div class="lead-row">
+                    <div>
+                        <label>Status</label>
+                        <select data-onchange="updateLeadField('${leadId}', 'status', this.value)">
+                            ${LEAD_STATUSES.map((status) => `<option value="${status}" ${status === lead.status ? 'selected' : ''}>${escapeHtml(LEAD_STATUS_LABELS[status])}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label>Linked Record</label>
+                        ${buildLeadTargetEditor(lead.id, lead.type, lead.targetId)}
+                    </div>
+                </div>
+                <div class="lead-vote-row">
+                    <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
+                    <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
+                    <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
+                    <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
+                </div>
+                <div class="lead-vote-summary">${escapeHtml(formatLeadVotes(lead))}</div>
+                <div class="lead-actions">
+                    <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
+                    <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
+                </div>
+            </article>
+        `;
+    }
+
+    function buildTimelineFallbackLeadCardMarkup(lead, voter) {
+        const leadId = escapeHandlerArg(String(lead && lead.id || ''));
+        const score = getLeadScore(lead);
+        const currentVote = voter && lead && lead.votes ? lead.votes[voter] : '';
+        return `
+            <article class="lead-card">
+                <div class="lead-head">
+                    <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
+                    <div class="lead-meta">
+                        <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
+                        <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
+                    </div>
+                </div>
+                <div class="lead-vote-row">
+                    <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
+                    <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
+                    <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
+                    <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
+                </div>
+                <div class="lead-actions">
+                    <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
+                    <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
+                </div>
+            </article>
+        `;
+    }
+
     function renderLeadQueue() {
         const listEl = document.getElementById('leadList');
         const summaryEl = document.getElementById('leadSummary');
@@ -1040,89 +1118,14 @@
             return;
         }
 
-        try {
-            listEl.innerHTML = sorted.map((lead) => {
-                const leadId = escapeHandlerArg(lead.id);
-                const score = getLeadScore(lead);
-                const currentVote = voter && lead.votes ? lead.votes[voter] : '';
-                return `
-                    <article class="lead-card">
-                        <div class="lead-head">
-                            <strong>${escapeHtml(lead.title)}</strong>
-                            <div class="lead-meta">
-                                <span class="lead-pill">${escapeHtml((lead.type || 'other').toUpperCase())}</span>
-                                <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[lead.status] || 'Open')}</span>
-                                <span class="lead-pill score">Score ${score >= 0 ? '+' : ''}${score}</span>
-                            </div>
-                        </div>
-                        <div class="lead-row">
-                            <div>
-                                <label>Question</label>
-                                <input type="text" value="${escapeHtml(lead.question || '')}" data-onchange="updateLeadField('${leadId}', 'question', this.value)">
-                            </div>
-                            <div>
-                                <label>Next Step</label>
-                                <input type="text" value="${escapeHtml(lead.nextStep || '')}" data-onchange="updateLeadField('${leadId}', 'nextStep', this.value)">
-                            </div>
-                        </div>
-                        <div class="lead-row">
-                            <div>
-                                <label>Status</label>
-                                <select data-onchange="updateLeadField('${leadId}', 'status', this.value)">
-                                    ${LEAD_STATUSES.map((status) => `<option value="${status}" ${status === lead.status ? 'selected' : ''}>${escapeHtml(LEAD_STATUS_LABELS[status])}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div>
-                                <label>Linked Record</label>
-                                ${buildLeadTargetEditor(lead.id, lead.type, lead.targetId)}
-                            </div>
-                        </div>
-                        <div class="lead-vote-row">
-                            <button class="btn ${currentVote === 'hot' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'hot')">Hot</button>
-                            <button class="btn ${currentVote === 'cold' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'cold')">Cold</button>
-                            <button class="btn ${currentVote === 'dead-end' ? 'is-selected' : ''}" data-onclick="setLeadVote('${leadId}', 'dead-end')">Dead End</button>
-                            <button class="btn" data-onclick="clearLeadVote('${leadId}')">Clear Vote</button>
-                        </div>
-                        <div class="lead-vote-summary">${escapeHtml(formatLeadVotes(lead))}</div>
-                        <div class="lead-actions">
-                            <button class="btn" data-onclick="openLeadOnBoard('${leadId}')">Board</button>
-                            <button class="btn btn-danger" data-onclick="deleteLead('${leadId}')">Delete</button>
-                        </div>
-                    </article>
-                `;
-            }).join('');
-        } catch (err) {
-            console.error('Timeline lead queue render failed; falling back to compact list.', err);
-            listEl.innerHTML = sorted.map((lead) => `
-                <article class="lead-card">
-                    <div class="lead-head">
-                        <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
-                        <div class="lead-meta">
-                            <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
-                        </div>
-                    </div>
-                    <div class="lead-actions">
-                        <button class="btn btn-danger" data-onclick="deleteLead('${escapeHandlerArg(String(lead && lead.id || ''))}')">Delete</button>
-                    </div>
-                </article>
-            `).join('');
-        }
-
-        if (sorted.length && !listEl.querySelector('.lead-card')) {
-            listEl.innerHTML = sorted.map((lead) => `
-                <article class="lead-card">
-                    <div class="lead-head">
-                        <strong>${escapeHtml(String(lead && lead.title || 'Untitled Lead'))}</strong>
-                        <div class="lead-meta">
-                            <span class="lead-pill">${escapeHtml(LEAD_STATUS_LABELS[String(lead && lead.status || 'open')] || 'Open')}</span>
-                        </div>
-                    </div>
-                    <div class="lead-actions">
-                        <button class="btn btn-danger" data-onclick="deleteLead('${escapeHandlerArg(String(lead && lead.id || ''))}')">Delete</button>
-                    </div>
-                </article>
-            `).join('');
-        }
+        listEl.innerHTML = sorted.map((lead) => {
+            try {
+                return buildTimelineFullLeadCardMarkup(lead, voter);
+            } catch (err) {
+                console.error('Timeline lead card render failed; using fallback for lead:', lead && lead.id, err);
+                return buildTimelineFallbackLeadCardMarkup(lead, voter);
+            }
+        }).join('');
     }
 
     function spendProcedureShield(eventId) {
