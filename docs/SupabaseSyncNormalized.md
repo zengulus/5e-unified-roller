@@ -2,6 +2,12 @@
 
 This is an optional high-concurrency schema for teams that want better simultaneous editing than the current single-row `rtf_campaign_state` model.
 
+Current normalized client behavior is hybrid:
+
+- Exact row scopes for players, NPCs, locations, requisitions, encounters, and timeline events prefer newer remote data and auto-resolve quietly.
+- Protected shared scopes such as boards, HQ, ledger/core payloads, and bulk collection writes still surface conflicts when edits overlap.
+- Foreground reconnects pull quickly, reconcile pulls run every few seconds, and presence heartbeats are faster than the legacy defaults to reduce dual-edit windows.
+
 ## Why this model
 
 - `rtf_campaign_state` is simple, but any write touches a very large document.
@@ -42,7 +48,7 @@ Each row keeps:
 - `cases.<id>.events` -> `rtf_case_events`
 - `hq` -> `rtf_campaign_hq`
 
-`campaign.meta.events.<eventId>` scope writes still map to `rtf_campaign_core` because campaign meta data is stored in the core payload JSON.
+`campaign.meta.events.<eventId>` scope writes still map to `rtf_campaign_core` because campaign meta data is stored in the core payload JSON. The client still tracks these at exact-scope granularity for merge decisions, but they are not stored in a dedicated events table.
 
 ## Schema impact for campaign meta
 

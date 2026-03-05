@@ -1375,14 +1375,14 @@ function renderSyncConflictPanel(status) {
     const hasConflict = !!(conflict || (status && status.pendingConflict));
     panel.classList.toggle('tools-hidden', !hasConflict);
     if (!hasConflict) {
-        detail.textContent = 'Remote changes overlap local edits.';
+        detail.textContent = 'Protected shared scopes overlap local edits. Routine row edits auto-resolve.';
         return;
     }
 
     const dirtyScopes = conflict ? formatScopeList(conflict.dirtyScopes) : formatScopeList(status && status.conflictScopes);
     const remoteScopes = conflict ? formatScopeList(conflict.remoteChangedScopes) : '—';
     const overlap = conflict ? formatScopeList(conflict.overlappingScopes) : formatScopeList(status && status.conflictScopes);
-    detail.textContent = `Local scopes: ${dirtyScopes} | Remote scopes: ${remoteScopes} | Overlap: ${overlap}`;
+    detail.textContent = `Protected scopes only | Local: ${dirtyScopes} | Remote: ${remoteScopes} | Overlap: ${overlap}`;
 }
 
 function setQuickStatus(message) {
@@ -1397,7 +1397,7 @@ function setQuickStatusFromSync(status) {
         return;
     }
     if (status.mode === 'conflict' || status.pendingConflict) {
-        setQuickStatus('conflict detected: resolve in Cloud Sync panel.');
+        setQuickStatus('protected conflict detected: resolve in Cloud Sync panel.');
         return;
     }
     if (status.mode === 'locked') {
@@ -1714,7 +1714,7 @@ async function pullSyncNow() {
     const result = await window.RTF_STORE.pullFromCloud({ force: true });
     if (!result.ok) {
         if (result.reason === 'conflict') {
-            alert('Conflict detected while pulling. Resolve it in the Cloud Sync panel.');
+            alert('Protected sync conflict detected while pulling. Resolve it in the Cloud Sync panel.');
             return;
         }
         const status = window.RTF_STORE.getSyncStatus();
@@ -1727,7 +1727,7 @@ async function pushSyncNow() {
     const result = await window.RTF_STORE.pushToCloud();
     if (!result.ok) {
         if (result.reason === 'conflict') {
-            alert('Sync conflict detected. Use "Accept Remote" or "Keep Local + Merge Push" in the Cloud Sync panel.');
+            alert('Protected sync conflict detected. Routine row edits auto-resolve; use "Accept Remote" or "Keep Local + Merge Push" for shared boards/core/HQ changes.');
             return;
         }
         if (result.reason === 'locked') {

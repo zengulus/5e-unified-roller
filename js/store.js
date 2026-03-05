@@ -3,6 +3,7 @@
     const LEGACY_HUB_KEY = 'ravnicaHubV3_2';
     const LEGACY_BOARD_KEY = 'invBoardData';
     const DIRTY_SCOPES_KEY = 'ravnica_sync_dirty_scopes_v1';
+    const SCOPE_BASELINES_KEY = 'ravnica_sync_scope_baselines_v1';
 
     const SYNC_CONFIG_KEY = 'ravnica_sync_config_v1';
     const SYNC_STATUS_EVENT = 'rtf-sync-status';
@@ -186,9 +187,9 @@
         normalizedLocationsTable: 'rtf_campaign_locations',
         normalizedRequisitionsTable: 'rtf_campaign_requisitions',
         normalizedEncountersTable: 'rtf_campaign_encounters',
-        syncDelayMs: 900,
-        reconcileIntervalMs: 20000,
-        presenceHeartbeatMs: 8000,
+        syncDelayMs: 350,
+        reconcileIntervalMs: 5000,
+        presenceHeartbeatMs: 3000,
         lockTtlMs: 20000
     };
 
@@ -910,6 +911,49 @@
     const buildCaseEventOrderScope = (caseId) => buildEntityOrderScope(buildCaseEventsScopePrefix(caseId));
     const buildCampaignMetaEventEntityScope = (eventId) => buildEntityScope(CAMPAIGN_META_EVENTS_SCOPE_PREFIX, eventId);
     const buildCampaignMetaEventOrderScope = () => buildEntityOrderScope(CAMPAIGN_META_EVENTS_SCOPE_PREFIX);
+    const parseGranularNormalizedLwwScope = (scopeToken) => {
+        const scope = normalizeScopeToken(scopeToken);
+
+        const campaignEntityMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)\.([a-z0-9_-]+)$/);
+        if (campaignEntityMatch) {
+            const entityId = normalizeEntityScopeId(campaignEntityMatch[2]);
+            if (!entityId || entityId === ENTITY_SCOPE_ORDER_TOKEN) return null;
+            return {
+                scope,
+                kind: 'campaign-entity',
+                key: campaignEntityMatch[1],
+                entityId
+            };
+        }
+
+        const campaignMetaEventMatch = scope.match(/^campaign\.meta\.events\.([a-z0-9_-]+)$/);
+        if (campaignMetaEventMatch) {
+            const eventId = normalizeEntityScopeId(campaignMetaEventMatch[1]);
+            if (!eventId || eventId === ENTITY_SCOPE_ORDER_TOKEN) return null;
+            return {
+                scope,
+                kind: 'campaign-meta-event',
+                eventId
+            };
+        }
+
+        const caseEventMatch = scope.match(/^cases\.([a-z0-9_-]+)\.events\.([a-z0-9_-]+)$/);
+        if (caseEventMatch) {
+            const caseId = sanitizeCaseId(caseEventMatch[1], 'case_primary');
+            const eventId = normalizeEntityScopeId(caseEventMatch[2]);
+            if (!eventId || eventId === ENTITY_SCOPE_ORDER_TOKEN) return null;
+            return {
+                scope,
+                kind: 'case-event',
+                caseId,
+                eventId
+            };
+        }
+
+        return null;
+    };
+    const isGranularNormalizedLwwScope = (scopeToken) => !!parseGranularNormalizedLwwScope(scopeToken);
+    const isProtectedConflictScope = (scopeToken) => !isGranularNormalizedLwwScope(scopeToken);
     const findEntityIndexByScopeId = (list, scopeId) => {
         if (!Array.isArray(list) || !scopeId) return -1;
         return list.findIndex((entry) => normalizeEntityScopeId(entry && entry.id) === scopeId);
@@ -1061,6 +1105,33 @@
             return [];
         }
     };
+    const parseStoredScopeBaselines = () => {
+        try {
+            const raw = localStorage.getItem(SCOPE_BASELINES_KEY);
+            if (!raw) return new Map();
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return new Map();
+
+            const map = new Map();
+            Object.keys(parsed).forEach((scopeToken) => {
+                const scope = normalizeScopeToken(scopeToken);
+                if (!isGranularNormalizedLwwScope(scope)) return;
+
+                const row = parsed[scopeToken];
+                if (!row || typeof row !== 'object') return;
+                map.set(scope, {
+                    revision: toNonNegativeInt(row.revision, 0),
+                    updatedAt: toTimestamp(row.updatedAt, 0),
+                    exists: row.exists !== false,
+                    signature: typeof row.signature === 'string' ? row.signature : ''
+                });
+            });
+            return map;
+        } catch (err) {
+            console.warn('RTF_STORE: Failed to parse scope baselines cache', err);
+            return new Map();
+        }
+    };
 
     const readJsonStorage = (key, fallback = null) => {
         try {
@@ -1151,6 +1222,33 @@
     const getCaseById = (state, caseId) => {
         if (!state || !state.cases || !Array.isArray(state.cases.items)) return null;
         return state.cases.items.find((entry) => entry && entry.id === caseId) || null;
+    };
+    const hasGranularNormalizedScopeInState = (state, scopeToken) => {
+        const parsed = parseGranularNormalizedLwwScope(scopeToken);
+        if (!parsed) return false;
+
+        if (parsed.kind === 'campaign-entity') {
+            const list = state && state.campaign && Array.isArray(state.campaign[parsed.key])
+                ? state.campaign[parsed.key]
+                : [];
+            return findEntityIndexByScopeId(list, parsed.entityId) >= 0;
+        }
+
+        if (parsed.kind === 'campaign-meta-event') {
+            const meta = state && state.campaignMeta && typeof state.campaignMeta === 'object'
+                ? state.campaignMeta
+                : null;
+            const list = meta && Array.isArray(meta.events) ? meta.events : [];
+            return findEntityIndexByScopeId(list, parsed.eventId) >= 0;
+        }
+
+        if (parsed.kind === 'case-event') {
+            const entry = getCaseById(state, parsed.caseId);
+            const list = entry && Array.isArray(entry.events) ? entry.events : [];
+            return findEntityIndexByScopeId(list, parsed.eventId) >= 0;
+        }
+
+        return false;
     };
 
     const ensureCaseForScope = (targetState, sourceState, caseId) => {
@@ -1588,13 +1686,15 @@
                 supabaseLoadPromise: null,
                 lastCloudStateSig: '',
                 localDirtyScopes: new Set(parseStoredDirtyScopes()),
+                scopeBaselines: parseStoredScopeBaselines(),
                 lastSyncedState: sanitizeState(this.state),
                 lastKnownRemoteRevision: 0,
                 pendingConflict: null,
                 localSoftLocks: new Map(),
                 remoteSoftLocks: new Map(),
                 remotePeers: new Map(),
-                hadStoredStateAtBoot: false
+                hadStoredStateAtBoot: false,
+                lastForegroundPullAt: 0
             };
 
             if (coercedSyncConfig.changed) {
@@ -1633,8 +1733,14 @@
             };
 
             this.onStorageSyncEvent = this.onStorageSyncEvent.bind(this);
+            this.onWindowFocus = this.onWindowFocus.bind(this);
+            this.onDocumentVisibilityChange = this.onDocumentVisibilityChange.bind(this);
             if (typeof global.addEventListener === 'function') {
                 global.addEventListener('storage', this.onStorageSyncEvent);
+                global.addEventListener('focus', this.onWindowFocus);
+            }
+            if (global.document && typeof global.document.addEventListener === 'function') {
+                global.document.addEventListener('visibilitychange', this.onDocumentVisibilityChange);
             }
 
             this.load();
@@ -1678,6 +1784,228 @@
             } catch (err) {
                 console.warn('RTF_STORE: Failed to apply cross-tab storage update', err);
             }
+        }
+
+        onWindowFocus() {
+            this.scheduleForegroundPull('focus');
+        }
+
+        onDocumentVisibilityChange() {
+            if (!global.document || global.document.visibilityState !== 'visible') return;
+            this.scheduleForegroundPull('visibility');
+        }
+
+        scheduleForegroundPull(reason = 'foreground') {
+            if (!this.syncStatus.connected || !this.isNormalizedReadMode()) return;
+            const now = Date.now();
+            if (now - toTimestamp(this.sync.lastForegroundPullAt, 0) < 2000) return;
+            this.sync.lastForegroundPullAt = now;
+            this.pullFromCloud({ force: false, silent: true, reason }).catch(() => { });
+        }
+
+        persistScopeBaselines() {
+            try {
+                const payload = {};
+                if (this.sync.scopeBaselines && this.sync.scopeBaselines.size) {
+                    this.sync.scopeBaselines.forEach((baseline, scopeToken) => {
+                        const scope = normalizeScopeToken(scopeToken);
+                        if (!isGranularNormalizedLwwScope(scope) || !baseline || typeof baseline !== 'object') return;
+                        payload[scope] = {
+                            revision: toNonNegativeInt(baseline.revision, 0),
+                            updatedAt: toTimestamp(baseline.updatedAt, 0),
+                            exists: baseline.exists !== false,
+                            signature: typeof baseline.signature === 'string' ? baseline.signature : ''
+                        };
+                    });
+                }
+                if (!Object.keys(payload).length) {
+                    localStorage.removeItem(SCOPE_BASELINES_KEY);
+                    return;
+                }
+                localStorage.setItem(SCOPE_BASELINES_KEY, JSON.stringify(payload));
+            } catch (err) {
+                console.warn('RTF_STORE: Failed to persist scope baselines cache', err);
+            }
+        }
+
+        getScopeBaseline(scopeToken) {
+            const scope = normalizeScopeToken(scopeToken);
+            if (!isGranularNormalizedLwwScope(scope) || !this.sync.scopeBaselines) return null;
+            const baseline = this.sync.scopeBaselines.get(scope);
+            if (!baseline || typeof baseline !== 'object') return null;
+            return {
+                revision: toNonNegativeInt(baseline.revision, 0),
+                updatedAt: toTimestamp(baseline.updatedAt, 0),
+                exists: baseline.exists !== false,
+                signature: typeof baseline.signature === 'string' ? baseline.signature : ''
+            };
+        }
+
+        setScopeBaseline(scopeToken, baseline) {
+            const scope = normalizeScopeToken(scopeToken);
+            if (!isGranularNormalizedLwwScope(scope)) return false;
+            if (!this.sync.scopeBaselines) this.sync.scopeBaselines = new Map();
+            if (!baseline || typeof baseline !== 'object') {
+                this.sync.scopeBaselines.delete(scope);
+                return true;
+            }
+            this.sync.scopeBaselines.set(scope, {
+                revision: toNonNegativeInt(baseline.revision, 0),
+                updatedAt: toTimestamp(baseline.updatedAt, 0),
+                exists: baseline.exists !== false,
+                signature: typeof baseline.signature === 'string' ? baseline.signature : ''
+            });
+            return true;
+        }
+
+        replaceLocalDirtyScopes(scopes, timestamp = Date.now()) {
+            const list = Array.isArray(scopes) ? normalizeScopeList(scopes) : [];
+            this.clearLocalDirtyScopes();
+            if (list.length) this.markLocalDirtyScopes(list, timestamp);
+            return list;
+        }
+
+        getNormalizedRemoteScopeMeta(remoteRow, scopeToken) {
+            const scope = normalizeScopeToken(scopeToken);
+            if (!isGranularNormalizedLwwScope(scope)) return null;
+
+            const directMeta = remoteRow && remoteRow.scopeMeta instanceof Map
+                ? remoteRow.scopeMeta.get(scope)
+                : null;
+            if (directMeta && typeof directMeta === 'object') {
+                return {
+                    revision: toNonNegativeInt(directMeta.revision, 0),
+                    updatedAt: toTimestamp(directMeta.updatedAt, 0),
+                    exists: directMeta.exists !== false,
+                    signature: typeof directMeta.signature === 'string' ? directMeta.signature : ''
+                };
+            }
+
+            const remoteSnapshot = remoteRow && remoteRow.state ? buildScopeSnapshot(remoteRow.state) : null;
+
+            return {
+                revision: toNonNegativeInt(remoteRow && remoteRow.revision, 0),
+                updatedAt: toTimestamp(remoteRow && remoteRow.updatedAt, 0),
+                exists: !!(remoteSnapshot && remoteSnapshot.has(scope)),
+                signature: remoteSnapshot && remoteSnapshot.has(scope)
+                    ? JSON.stringify(remoteSnapshot.get(scope))
+                    : ''
+            };
+        }
+
+        didRemoteGranularScopeChangeSinceBaseline(scopeToken, remoteRow, explicitBaseline = null) {
+            const scope = normalizeScopeToken(scopeToken);
+            if (!isGranularNormalizedLwwScope(scope)) return false;
+            const baseline = explicitBaseline && typeof explicitBaseline === 'object'
+                ? {
+                    revision: toNonNegativeInt(explicitBaseline.revision, 0),
+                    updatedAt: toTimestamp(explicitBaseline.updatedAt, 0),
+                    exists: explicitBaseline.exists !== false,
+                    signature: typeof explicitBaseline.signature === 'string' ? explicitBaseline.signature : ''
+                }
+                : this.getScopeBaseline(scope);
+            if (!baseline) return false;
+
+            const remoteMeta = this.getNormalizedRemoteScopeMeta(remoteRow, scope);
+            if (!remoteMeta) return false;
+            if ((baseline.exists !== false) !== (remoteMeta.exists !== false)) return true;
+            if (!remoteMeta.exists && !baseline.exists) return false;
+            if ((baseline.signature || remoteMeta.signature) && baseline.signature !== remoteMeta.signature) return true;
+            return toNonNegativeInt(remoteMeta.revision, 0) > toNonNegativeInt(baseline.revision, 0);
+        }
+
+        syncScopeBaselinesFromRemoteRow(remoteRow, scopes = null, options = {}) {
+            if (!this.isNormalizedReadMode()) return;
+            const opts = options && typeof options === 'object' ? options : {};
+            const skipDirtyScopes = !!opts.skipDirtyScopes;
+            const currentDirty = skipDirtyScopes && this.sync.localDirtyScopes
+                ? new Set(this.sync.localDirtyScopes)
+                : null;
+
+            const requestedScopes = Array.isArray(scopes)
+                ? scopes.slice()
+                : (scopes ? [scopes] : null);
+            const scopeSet = new Set();
+            if (requestedScopes && requestedScopes.length) {
+                requestedScopes.forEach((scopeToken) => {
+                    const scope = normalizeScopeToken(scopeToken);
+                    if (isGranularNormalizedLwwScope(scope)) scopeSet.add(scope);
+                });
+            } else {
+                if (this.sync.scopeBaselines) {
+                    this.sync.scopeBaselines.forEach((_row, scopeToken) => {
+                        const scope = normalizeScopeToken(scopeToken);
+                        if (isGranularNormalizedLwwScope(scope)) scopeSet.add(scope);
+                    });
+                }
+                if (remoteRow && remoteRow.scopeMeta instanceof Map) {
+                    remoteRow.scopeMeta.forEach((_row, scopeToken) => {
+                        const scope = normalizeScopeToken(scopeToken);
+                        if (isGranularNormalizedLwwScope(scope)) scopeSet.add(scope);
+                    });
+                }
+                if ((!remoteRow || !(remoteRow.scopeMeta instanceof Map)) && remoteRow && remoteRow.state) {
+                    buildScopeSnapshot(remoteRow.state).forEach((_value, scopeToken) => {
+                        const scope = normalizeScopeToken(scopeToken);
+                        if (isGranularNormalizedLwwScope(scope)) scopeSet.add(scope);
+                    });
+                }
+            }
+
+            scopeSet.forEach((scope) => {
+                if (currentDirty && currentDirty.has(scope)) return;
+                const meta = this.getNormalizedRemoteScopeMeta(remoteRow, scope);
+                if (!meta) return;
+                this.setScopeBaseline(scope, meta);
+            });
+            this.persistScopeBaselines();
+        }
+
+        syncScopeBaselinesFromLocalState(scopes = null, meta = {}) {
+            if (!this.isNormalizedReadMode()) return;
+            const opts = meta && typeof meta === 'object' ? meta : {};
+            const revision = toNonNegativeInt(
+                opts.revision,
+                toNonNegativeInt(this.state && this.state.meta && this.state.meta.syncRevision, 0)
+            );
+            const updatedAt = toTimestamp(
+                opts.updatedAt,
+                toTimestamp(this.state && this.state.meta && this.state.meta.updated, Date.now())
+            );
+
+            const requestedScopes = Array.isArray(scopes)
+                ? scopes.slice()
+                : (scopes ? [scopes] : null);
+            const scopeSet = new Set();
+            if (requestedScopes && requestedScopes.length) {
+                requestedScopes.forEach((scopeToken) => {
+                    const scope = normalizeScopeToken(scopeToken);
+                    if (isGranularNormalizedLwwScope(scope)) scopeSet.add(scope);
+                });
+            } else {
+                if (this.sync.scopeBaselines) {
+                    this.sync.scopeBaselines.forEach((_row, scopeToken) => {
+                        const scope = normalizeScopeToken(scopeToken);
+                        if (isGranularNormalizedLwwScope(scope)) scopeSet.add(scope);
+                    });
+                }
+                buildScopeSnapshot(this.state).forEach((_value, scopeToken) => {
+                    const scope = normalizeScopeToken(scopeToken);
+                    if (isGranularNormalizedLwwScope(scope)) scopeSet.add(scope);
+                });
+            }
+
+            const snapshot = buildScopeSnapshot(this.state);
+
+            scopeSet.forEach((scope) => {
+                this.setScopeBaseline(scope, {
+                    revision,
+                    updatedAt,
+                    exists: snapshot.has(scope),
+                    signature: snapshot.has(scope) ? JSON.stringify(snapshot.get(scope)) : ''
+                });
+            });
+            this.persistScopeBaselines();
         }
 
         ensureCaseStateIntegrity() {
@@ -2317,6 +2645,14 @@
                 }
                 this.sync.lastSyncedState = sanitizeState(this.state);
                 this.sync.lastKnownRemoteRevision = toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0);
+                if (this.isNormalizedReadMode()
+                    && (!this.sync.localDirtyScopes || !this.sync.localDirtyScopes.size)
+                    && (!this.sync.scopeBaselines || !this.sync.scopeBaselines.size)) {
+                    this.syncScopeBaselinesFromLocalState(null, {
+                        revision: this.sync.lastKnownRemoteRevision,
+                        updatedAt: toTimestamp(this.state.meta && this.state.meta.updated, 0)
+                    });
+                }
             } catch (e) {
                 console.error("RTF_STORE: Load failed", e);
                 this.sync.hadStoredStateAtBoot = false;
@@ -3258,6 +3594,36 @@
                 requisitionRows: requisitionsRes.data,
                 encounterRows: encountersRes.data
             });
+            const assembledSnapshot = buildScopeSnapshot(assembledState);
+            const scopeMeta = new Map();
+            const setScopeMeta = (scopeToken, rowMeta) => {
+                const scope = normalizeScopeToken(scopeToken);
+                if (!isGranularNormalizedLwwScope(scope)) return;
+                const row = rowMeta && typeof rowMeta === 'object' ? rowMeta : {};
+                scopeMeta.set(scope, {
+                    revision: toNonNegativeInt(row.revision, 0),
+                    updatedAt: toTimestamp(row.updated_at, 0),
+                    exists: assembledSnapshot.has(scope),
+                    signature: assembledSnapshot.has(scope)
+                        ? JSON.stringify(assembledSnapshot.get(scope))
+                        : ''
+                });
+            };
+
+            playersRes.data.forEach((row) => setScopeMeta(buildPlayerEntityScope(row && row.player_id), row));
+            npcsRes.data.forEach((row) => setScopeMeta(buildNPCEntityScope(row && row.npc_id), row));
+            locationsRes.data.forEach((row) => setScopeMeta(buildLocationEntityScope(row && row.location_id), row));
+            requisitionsRes.data.forEach((row) => setScopeMeta(buildRequisitionEntityScope(row && row.requisition_id), row));
+            encountersRes.data.forEach((row) => setScopeMeta(buildEncounterEntityScope(row && row.encounter_id), row));
+            eventsRes.data.forEach((row) => setScopeMeta(buildCaseEventEntityScope(row && row.case_id, row && row.event_id), row));
+            if (coreRes.data) {
+                assembledSnapshot.forEach((_value, scopeToken) => {
+                    const scope = normalizeScopeToken(scopeToken);
+                    if (!scope.startsWith('campaign.meta.events.')) return;
+                    if (!isGranularNormalizedLwwScope(scope)) return;
+                    setScopeMeta(scope, coreRes.data);
+                });
+            }
 
             const metaRows = [
                 ...this.extractRowMeta(coreRes.data),
@@ -3300,7 +3666,8 @@
                     updatedAt: toTimestamp(assembledState.meta.updated, remoteUpdatedAt),
                     updatedAtRaw: remoteUpdatedAtRaw,
                     updatedBy: remoteUpdatedBy,
-                    updatedByName: remoteUpdatedByName
+                    updatedByName: remoteUpdatedByName,
+                    scopeMeta
                 }
             };
         }
@@ -3361,14 +3728,190 @@
             };
         }
 
-        buildConflictRecord(remoteRow, localScopes) {
+        buildNormalizedDirtyScopeResolution(remoteRow, localScopes) {
             const remoteState = sanitizeState(remoteRow && remoteRow.state ? remoteRow.state : null);
-            const localState = sanitizeState(this.state);
             const baseline = sanitizeState(this.sync.lastSyncedState || remoteState);
             const dirtyScopes = this.getDirtyScopesSnapshot(localScopes);
             const remoteChangedScopes = getChangedScopes(baseline, remoteState);
-            const overlappingScopes = getOverlappingScopes(dirtyScopes, remoteChangedScopes);
-            const mergedState = mergeStateByScopes(remoteState, localState, dirtyScopes);
+            const overlappingScopeSet = new Set(getOverlappingScopes(dirtyScopes, remoteChangedScopes));
+            const remoteChangedScopeSet = new Set(remoteChangedScopes);
+            const remoteResolvedScopes = [];
+            const protectedOverlapScopes = [];
+            const retainedDirtyScopes = [];
+
+            dirtyScopes.forEach((scope) => {
+                if (!overlappingScopeSet.has(scope)) {
+                    retainedDirtyScopes.push(scope);
+                    return;
+                }
+                if (isGranularNormalizedLwwScope(scope)
+                    && remoteChangedScopeSet.has(scope)
+                    && this.didRemoteGranularScopeChangeSinceBaseline(scope, remoteRow)) {
+                    remoteResolvedScopes.push(scope);
+                    return;
+                }
+                protectedOverlapScopes.push(scope);
+                retainedDirtyScopes.push(scope);
+            });
+
+            const mergeBase = mergeRemoteBoardWithLocalLayout(remoteState, this.state);
+            const mergedState = retainedDirtyScopes.length
+                ? mergeStateByScopes(mergeBase, this.state, retainedDirtyScopes)
+                : mergeBase;
+            return {
+                dirtyScopes,
+                remoteChangedScopes,
+                remoteResolvedScopes,
+                protectedOverlapScopes,
+                retainedDirtyScopes,
+                mergedState
+            };
+        }
+
+        buildNormalizedPushScopeFilter(remoteRow, dirtyScopes) {
+            const scopeList = Array.isArray(dirtyScopes)
+                ? (dirtyScopes.length ? normalizeScopeList(dirtyScopes) : [])
+                : this.getDirtyScopesSnapshot(dirtyScopes);
+            const remainingDirtyScopes = [];
+            const remoteWinScopes = [];
+            const syncedScopes = [];
+
+            scopeList.forEach((scope) => {
+                if (!isGranularNormalizedLwwScope(scope)) {
+                    remainingDirtyScopes.push(scope);
+                    return;
+                }
+
+                const baseline = this.getScopeBaseline(scope);
+                if (!baseline) {
+                    remainingDirtyScopes.push(scope);
+                    return;
+                }
+
+                const localExists = hasGranularNormalizedScopeInState(this.state, scope);
+                const remoteMeta = this.getNormalizedRemoteScopeMeta(remoteRow, scope);
+                if (!remoteMeta) {
+                    remainingDirtyScopes.push(scope);
+                    return;
+                }
+
+                const remoteChanged = this.didRemoteGranularScopeChangeSinceBaseline(scope, remoteRow, baseline);
+                if (!localExists) {
+                    if (!remoteMeta.exists) {
+                        syncedScopes.push(scope);
+                        return;
+                    }
+                    if (remoteChanged) {
+                        remoteWinScopes.push(scope);
+                        return;
+                    }
+                    remainingDirtyScopes.push(scope);
+                    return;
+                }
+
+                if (!baseline.exists && remoteMeta.exists) {
+                    remoteWinScopes.push(scope);
+                    return;
+                }
+                if (remoteChanged) {
+                    remoteWinScopes.push(scope);
+                    return;
+                }
+
+                remainingDirtyScopes.push(scope);
+            });
+
+            return {
+                remainingDirtyScopes,
+                remoteWinScopes,
+                syncedScopes,
+                resolvedScopes: [...remoteWinScopes, ...syncedScopes]
+            };
+        }
+
+        applyMergedRemoteState(remoteRow, dirtyScopes, reason = 'auto-merge', options = {}) {
+            if (!remoteRow || !remoteRow.state) return false;
+            const opts = options && typeof options === 'object' ? options : {};
+            const retainedDirtyScopes = Array.isArray(dirtyScopes)
+                ? (dirtyScopes.length ? normalizeScopeList(dirtyScopes) : [])
+                : this.getDirtyScopesSnapshot(dirtyScopes);
+            const remoteState = sanitizeState(remoteRow.state);
+            const remoteRevision = toNonNegativeInt(remoteRow.revision, 0);
+            const remoteUpdatedAt = toTimestamp(remoteRow.updatedAt, 0);
+            const mergeBase = mergeRemoteBoardWithLocalLayout(remoteState, this.state);
+            const mergedState = opts.mergedState
+                ? sanitizeState(opts.mergedState)
+                : (retainedDirtyScopes.length
+                    ? mergeStateByScopes(mergeBase, this.state, retainedDirtyScopes)
+                    : mergeBase);
+            const localStamp = Date.now();
+
+            this.state = sanitizeState(mergedState);
+            this.syncActiveCaseLegacyState();
+            this.ensureCampaignEntityIds(false);
+            this.state.meta.updated = localStamp;
+            this.state.meta.syncRevision = remoteRevision || toNonNegativeInt(this.state.meta.syncRevision, 0);
+            this.replaceLocalDirtyScopes(retainedDirtyScopes, localStamp);
+            this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, remoteRevision);
+            if (remoteUpdatedAt > this.sync.lastRemoteSeenAt) this.sync.lastRemoteSeenAt = remoteUpdatedAt;
+            this.sync.lastCloudStateSig = JSON.stringify(stripLocalOnlyFieldsForCloud(remoteState));
+            this.sync.lastSyncedState = sanitizeState(remoteState);
+
+            try {
+                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+            } catch (writeErr) {
+                console.warn('RTF_STORE: Failed writing merged local state', writeErr);
+            }
+
+            this.syncScopeBaselinesFromRemoteRow(remoteRow, null, { skipDirtyScopes: true });
+            if (opts.clearPendingConflict !== false
+                && this.sync.pendingConflict
+                && remoteRevision >= toNonNegativeInt(this.sync.pendingConflict.remoteRevision, 0)) {
+                this.sync.pendingConflict = null;
+            }
+
+            const broadcastSource = opts.broadcastSource || (retainedDirtyScopes.length ? 'local' : 'remote');
+            this.broadcastStoreUpdate(broadcastSource, {
+                source: reason,
+                scopes: retainedDirtyScopes,
+                updatedAt: remoteUpdatedAt,
+                updatedBy: remoteRow.updatedBy || '',
+                revision: remoteRevision
+            });
+
+            if (opts.schedulePush !== false && retainedDirtyScopes.length) {
+                this.scheduleCloudPush(reason);
+            }
+            if (!opts.skipStatus) {
+                this.updateSyncStatus({
+                    mode: 'ready',
+                    connected: true,
+                    pendingPush: !!retainedDirtyScopes.length,
+                    message: opts.message || (retainedDirtyScopes.length
+                        ? 'Merged remote changes with remaining local edits.'
+                        : 'Applied latest cloud state.')
+                });
+            }
+            return true;
+        }
+
+        buildConflictRecord(remoteRow, localScopes, options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const remoteState = sanitizeState(remoteRow && remoteRow.state ? remoteRow.state : null);
+            const localState = sanitizeState(this.state);
+            const baseline = sanitizeState(this.sync.lastSyncedState || remoteState);
+            const dirtyScopes = Array.isArray(opts.dirtyScopes)
+                ? (opts.dirtyScopes.length ? normalizeScopeList(opts.dirtyScopes) : [])
+                : this.getDirtyScopesSnapshot(localScopes);
+            const remoteChangedScopes = Array.isArray(opts.remoteChangedScopes)
+                ? (opts.remoteChangedScopes.length ? normalizeScopeList(opts.remoteChangedScopes) : [])
+                : getChangedScopes(baseline, remoteState);
+            const overlappingScopes = Array.isArray(opts.overlappingScopes)
+                ? (opts.overlappingScopes.length ? normalizeScopeList(opts.overlappingScopes) : [])
+                : getOverlappingScopes(dirtyScopes, remoteChangedScopes);
+            const mergedState = opts.mergedState
+                ? sanitizeState(opts.mergedState)
+                : mergeStateByScopes(mergeRemoteBoardWithLocalLayout(remoteState, localState), localState, dirtyScopes);
             return {
                 id: `conf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
                 createdAt: Date.now(),
@@ -3382,33 +3925,25 @@
                 remoteUpdatedBy: remoteRow && remoteRow.updatedBy ? remoteRow.updatedBy : '',
                 remoteUpdatedByName: remoteRow && remoteRow.updatedByName ? remoteRow.updatedByName : '',
                 mergedState,
-                remoteState
+                remoteState,
+                remoteScopeMeta: opts.remoteScopeMeta || (remoteRow && remoteRow.scopeMeta ? remoteRow.scopeMeta : null)
             };
         }
 
         adoptMergedConflictState(conflict, reason = 'auto-merge') {
             if (!conflict || !conflict.mergedState) return false;
-            const dirtyScopes = conflict.dirtyScopes && conflict.dirtyScopes.length ? conflict.dirtyScopes : [SYNC_SCOPE_GLOBAL];
-            this.state = sanitizeState(conflict.mergedState);
-            this.syncActiveCaseLegacyState();
-            this.ensureCampaignEntityIds(false);
-            this.state.meta.updated = Date.now();
-            this.state.meta.syncRevision = toNonNegativeInt(conflict.remoteRevision, this.state.meta.syncRevision);
-            this.markLocalDirtyScopes(dirtyScopes, Date.now());
-            this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, toNonNegativeInt(conflict.remoteRevision, 0));
-            this.sync.lastSyncedState = sanitizeState(conflict.remoteState);
-            try {
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-            } catch (writeErr) {
-                console.warn('RTF_STORE: Failed writing merged conflict state', writeErr);
-            }
-            this.broadcastStoreUpdate('local', { source: reason, scopes: dirtyScopes });
-            this.scheduleCloudPush(reason);
-            this.updateSyncStatus({
-                mode: 'ready',
+            return this.applyMergedRemoteState({
+                state: conflict.remoteState,
+                revision: conflict.remoteRevision,
+                updatedAt: conflict.remoteUpdatedAt,
+                updatedAtRaw: conflict.remoteUpdatedAtRaw,
+                updatedBy: conflict.remoteUpdatedBy,
+                updatedByName: conflict.remoteUpdatedByName,
+                scopeMeta: conflict.remoteScopeMeta || null
+            }, Array.isArray(conflict.dirtyScopes) ? conflict.dirtyScopes : [], reason, {
+                mergedState: conflict.mergedState,
                 message: 'Merged non-overlapping remote changes with local edits.'
             });
-            return true;
         }
 
         getPendingConflict() {
@@ -3434,7 +3969,7 @@
             const summary = this.getPendingConflict();
             this.updateSyncStatus({
                 mode: 'conflict',
-                message: 'Remote changed while you were editing. Resolve the conflict before pushing.',
+                message: 'Protected shared scopes changed while you were editing. Resolve the conflict before pushing.',
                 pendingPush: false
             });
             if (summary && typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
@@ -3635,7 +4170,7 @@
                 if (!pull.ok && pull.reason === 'conflict') {
                     this.updateSyncStatus({
                         mode: 'conflict',
-                        message: 'Connected. Conflict detected with local edits.'
+                        message: 'Connected. Protected shared-scope conflict detected with local edits.'
                     });
                 }
                 if (pull.ok && pull.applied) {
@@ -3856,6 +4391,16 @@
             if (this.isNormalizedReadMode()) {
                 const updatedByNormalized = row.updated_by || '';
                 if (updatedByNormalized && updatedByNormalized === this.sync.instanceId) return;
+                const normalizedRevision = toNonNegativeInt(row.revision, 0);
+                if (normalizedRevision > this.sync.lastKnownRemoteRevision) {
+                    this.sync.lastKnownRemoteRevision = normalizedRevision;
+                    this.updateSyncStatus({
+                        connected: true,
+                        message: this.sync.pendingConflict
+                            ? this.syncStatus.message
+                            : 'Shared update detected. Catching up.'
+                    });
+                }
                 this.scheduleNormalizedRealtimePull();
                 return;
             }
@@ -4615,7 +5160,7 @@
             const silent = !!opts.silent;
             const force = !!opts.force;
             const startAttempt = toNonNegativeInt(opts.attempt, 0);
-            const dirtyScopes = precomputedDirtyScopes || this.getDirtyScopesSnapshot(opts.scopes);
+            let dirtyScopes = precomputedDirtyScopes || this.getDirtyScopesSnapshot(opts.scopes);
 
             if (!this.sync.client || !this.syncStatus.connected) {
                 return { ok: false, reason: 'not-connected' };
@@ -4638,7 +5183,8 @@
 
                 for (let attempt = startAttempt; attempt <= 2; attempt += 1) {
                     this.touchSoftLockScopes(dirtyScopes);
-                    const lockConflicts = this.getRemoteLockConflicts(dirtyScopes);
+                    const blockingLockScopes = dirtyScopes.filter((scope) => isProtectedConflictScope(scope));
+                    const lockConflicts = blockingLockScopes.length ? this.getRemoteLockConflicts(blockingLockScopes) : [];
                     if (lockConflicts.length && !force) {
                         this.updateSyncStatus({
                             mode: 'locked',
@@ -4653,24 +5199,83 @@
                     if (!fetched.ok) return fetched;
                     const remoteRow = fetched.row;
                     const remoteRevision = remoteRow ? toNonNegativeInt(remoteRow.revision, 0) : 0;
+                    if (remoteRow && remoteRow.state) {
+                        this.sync.lastCloudStateSig = JSON.stringify(stripLocalOnlyFieldsForCloud(remoteRow.state));
+                    }
+
+                    const pushFilter = this.buildNormalizedPushScopeFilter(remoteRow, dirtyScopes);
+                    if (pushFilter.resolvedScopes.length) {
+                        if (remoteRow && remoteRow.state) {
+                            this.applyMergedRemoteState(remoteRow, pushFilter.remainingDirtyScopes, 'push-filter-remote', {
+                                schedulePush: false,
+                                clearPendingConflict: false,
+                                skipStatus: true
+                            });
+                        } else {
+                            this.replaceLocalDirtyScopes(pushFilter.remainingDirtyScopes, Date.now());
+                            this.syncScopeBaselinesFromRemoteRow(remoteRow, pushFilter.resolvedScopes, { skipDirtyScopes: false });
+                        }
+                        dirtyScopes = pushFilter.remainingDirtyScopes;
+                        baseRevision = Math.max(baseRevision, remoteRevision);
+
+                        if (!dirtyScopes.length) {
+                            this.clearPendingConflict({ keepStatus: true });
+                            this.updateSyncStatus({
+                                mode: 'ready',
+                                connected: true,
+                                pendingPush: false,
+                                message: pushFilter.remoteWinScopes.length
+                                    ? 'Kept newer remote row updates.'
+                                    : 'Cloud already reflects those row deletions.',
+                                lastError: ''
+                            });
+                            return {
+                                ok: true,
+                                reason: pushFilter.remoteWinScopes.length ? 'remote-win' : 'already-synced'
+                            };
+                        }
+                    }
 
                     if (remoteRow && remoteRevision > baseRevision) {
-                        const conflict = this.buildConflictRecord(remoteRow, dirtyScopes);
-                        if (!conflict.overlappingScopes.length && attempt < 2) {
-                            this.state = sanitizeState(conflict.mergedState);
-                            this.syncActiveCaseLegacyState();
-                            this.ensureCampaignEntityIds(false);
-                            this.markLocalDirtyScopes(dirtyScopes, Date.now());
-                            try {
-                                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                            } catch (writeErr) {
-                                console.warn('RTF_STORE: Failed writing merged local state', writeErr);
-                            }
+                        const resolution = this.buildNormalizedDirtyScopeResolution(remoteRow, dirtyScopes);
+                        const conflict = this.buildConflictRecord(remoteRow, dirtyScopes, {
+                            dirtyScopes: resolution.retainedDirtyScopes,
+                            remoteChangedScopes: resolution.remoteChangedScopes,
+                            overlappingScopes: resolution.protectedOverlapScopes,
+                            mergedState: resolution.mergedState,
+                            remoteScopeMeta: remoteRow.scopeMeta || null
+                        });
+                        if (!resolution.protectedOverlapScopes.length) {
+                            this.applyMergedRemoteState(remoteRow, resolution.retainedDirtyScopes, 'auto-merge-push', {
+                                mergedState: resolution.mergedState,
+                                schedulePush: false,
+                                clearPendingConflict: false,
+                                skipStatus: true
+                            });
+                            dirtyScopes = resolution.retainedDirtyScopes;
                             baseRevision = conflict.remoteRevision;
-                            continue;
+                            if (!dirtyScopes.length) {
+                                this.clearPendingConflict({ keepStatus: true });
+                                this.updateSyncStatus({
+                                    mode: 'ready',
+                                    connected: true,
+                                    pendingPush: false,
+                                    message: 'Kept newer remote row updates.',
+                                    lastError: ''
+                                });
+                                return { ok: true, reason: 'remote-win' };
+                            }
+                            if (attempt < 2) continue;
+                        } else {
+                            this.applyMergedRemoteState(remoteRow, resolution.retainedDirtyScopes, 'push-conflict-refresh', {
+                                mergedState: resolution.mergedState,
+                                schedulePush: false,
+                                clearPendingConflict: false,
+                                skipStatus: true
+                            });
+                            this.setPendingConflict(conflict);
+                            return { ok: false, reason: 'conflict', conflict: this.getPendingConflict() };
                         }
-                        this.setPendingConflict(conflict);
-                        return { ok: false, reason: 'conflict', conflict: this.getPendingConflict() };
                     }
 
                     const mergedForCloud = remoteRow
@@ -4725,6 +5330,7 @@
                     }
 
                     this.clearLocalDirtyScopes(dirtyScopes);
+                    this.syncScopeBaselinesFromLocalState(dirtyScopes, { revision: nextRevision, updatedAt });
                     this.sync.lastPushAt = Date.now();
                     this.sync.lastCloudStateSig = JSON.stringify(stripLocalOnlyFieldsForCloud(payloadState));
                     this.sync.lastSyncedState = sanitizeState(this.state);
@@ -4795,6 +5401,46 @@
                 || (remoteRevision === localRevision && remoteUpdatedAt > localUpdatedAt);
             const dirtyScopes = hasLocalDirty ? this.getDirtyScopesSnapshot() : [];
             if (!force && hasLocalDirty && localIsOlder) {
+                if (this.isNormalizedReadMode()) {
+                    const resolution = this.buildNormalizedDirtyScopeResolution(row, dirtyScopes);
+                    const shouldApplyResolution = !!resolution.remoteChangedScopes.length || !!resolution.remoteResolvedScopes.length;
+                    const conflict = this.buildConflictRecord(row, dirtyScopes, {
+                        dirtyScopes: resolution.retainedDirtyScopes,
+                        remoteChangedScopes: resolution.remoteChangedScopes,
+                        overlappingScopes: resolution.protectedOverlapScopes,
+                        mergedState: resolution.mergedState,
+                        remoteScopeMeta: row.scopeMeta || null
+                    });
+
+                    if (shouldApplyResolution) {
+                        this.applyMergedRemoteState(row, resolution.retainedDirtyScopes, 'auto-merge-pull', {
+                            mergedState: resolution.mergedState,
+                            schedulePush: !resolution.protectedOverlapScopes.length,
+                            clearPendingConflict: false,
+                            skipStatus: !!resolution.protectedOverlapScopes.length,
+                            message: resolution.retainedDirtyScopes.length
+                                ? 'Merged latest cloud state with remaining local edits.'
+                                : 'Applied latest cloud state.'
+                        });
+                    }
+
+                    if (resolution.protectedOverlapScopes.length) {
+                        this.setPendingConflict(conflict);
+                        this.sync.lastPullAt = Date.now();
+                        return { ok: false, reason: 'conflict', conflict: this.getPendingConflict() };
+                    }
+
+                    if (shouldApplyResolution) {
+                        this.sync.lastPullAt = Date.now();
+                        return {
+                            ok: true,
+                            reason: resolution.retainedDirtyScopes.length ? 'merged' : 'applied-remote-win',
+                            applied: !resolution.retainedDirtyScopes.length,
+                            merged: !!resolution.retainedDirtyScopes.length
+                        };
+                    }
+                }
+
                 const latestDirtyAt = this.getLatestDirtyScopeUpdatedAt(dirtyScopes);
                 const localDirtyIsOlder = !!latestDirtyAt && !!remoteUpdatedAt && latestDirtyAt <= remoteUpdatedAt;
                 if (localDirtyIsOlder) {
@@ -4803,7 +5449,8 @@
                         updatedAt: remoteUpdatedAt,
                         updatedBy: row.updatedBy,
                         revision: remoteRevision,
-                        force: true
+                        force: true,
+                        scopeMeta: row.scopeMeta || null
                     });
                     if (appliedStale) {
                         this.sync.lastPullAt = Date.now();
@@ -4849,6 +5496,7 @@
                 updatedAt: remoteUpdatedAt,
                 updatedBy: row.updatedBy,
                 revision: remoteRevision,
+                scopeMeta: row.scopeMeta || null,
                 force
             });
 
@@ -5128,6 +5776,15 @@
             this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, toNonNegativeInt(this.state.meta.syncRevision, 0));
             this.sync.lastSyncedState = sanitizeState(this.state);
             if (meta.clearDirty !== false) this.clearLocalDirtyScopes();
+            if (meta.scopeMeta || this.isNormalizedReadMode()) {
+                this.syncScopeBaselinesFromRemoteRow({
+                    state: sanitizeState(remoteState),
+                    revision: remoteRevision,
+                    updatedAt: remoteUpdated,
+                    updatedBy: meta.updatedBy || '',
+                    scopeMeta: meta.scopeMeta || null
+                }, null, { skipDirtyScopes: false });
+            }
             if (this.sync.pendingConflict && remoteRevision >= toNonNegativeInt(this.sync.pendingConflict.remoteRevision, 0)) {
                 this.sync.pendingConflict = null;
             }

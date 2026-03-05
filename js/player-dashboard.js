@@ -179,6 +179,10 @@ const deletePlayer = (idx) => {
     }
 };
 
+window.addPlayer = addPlayer;
+window.updatePlayer = updatePlayer;
+window.deletePlayer = deletePlayer;
+
 // Init
 bindDelegatedDataHandlers();
 

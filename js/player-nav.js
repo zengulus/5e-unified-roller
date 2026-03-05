@@ -228,6 +228,220 @@
         return bar;
     }
 
+    function hasConfiguredSync(config) {
+        const source = config && typeof config === 'object' ? config : null;
+        if (!source) return false;
+        return !!(
+            String(source.supabaseUrl || '').trim()
+            && String(source.anonKey || '').trim()
+            && String(source.campaignId || '').trim()
+        );
+    }
+
+    function formatRelativeSyncTime(ts) {
+        const stamp = Number(ts);
+        if (!Number.isFinite(stamp) || stamp <= 0) return '';
+        const diff = Math.max(0, Date.now() - stamp);
+        if (diff < 15000) return 'just now';
+
+        const minute = 60 * 1000;
+        const hour = 60 * minute;
+        const day = 24 * hour;
+        if (diff < hour) {
+            const mins = Math.max(1, Math.round(diff / minute));
+            return `${mins} min ago`;
+        }
+        if (diff < day) {
+            const hours = Math.max(1, Math.round(diff / hour));
+            return `${hours} hr ago`;
+        }
+        const days = Math.max(1, Math.round(diff / day));
+        return `${days} day${days === 1 ? '' : 's'} ago`;
+    }
+
+    function describeSyncExperience(status, conflict) {
+        const store = getStore();
+        const config = store && typeof store.getSyncConfig === 'function'
+            ? store.getSyncConfig()
+            : null;
+        const configured = hasConfiguredSync(config);
+        const profileName = config && config.profileName ? String(config.profileName).trim() : '';
+        const campaignId = config && config.campaignId ? String(config.campaignId).trim() : '';
+        const latestSharedAt = status
+            ? Math.max(Number(status.lastPullAt) || 0, Number(status.lastPushAt) || 0)
+            : 0;
+        const latestSharedAge = formatRelativeSyncTime(latestSharedAt);
+        const sharedMeta = [
+            campaignId ? `Campaign: ${campaignId}.` : '',
+            profileName ? `Name: ${profileName}.` : '',
+            latestSharedAge ? `Last shared update: ${latestSharedAge}.` : ''
+        ].filter(Boolean).join(' ');
+
+        if (!store) {
+            return {
+                state: 'local-page',
+                buttonLabel: 'Local only',
+                title: 'This page stays local',
+                detail: 'Cloud sync does not affect this page.',
+                meta: 'Character sheets and standalone tools stay on this browser.',
+                primaryAction: '',
+                primaryLabel: '',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (!status) {
+            return {
+                state: 'checking',
+                buttonLabel: 'Checking',
+                title: 'Checking shared sync',
+                detail: 'This page is still loading sync status.',
+                meta: campaignId ? `Campaign: ${campaignId}.` : '',
+                primaryAction: '',
+                primaryLabel: '',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (status.pendingConflict || conflict) {
+            const changedBy = conflict && (conflict.remoteUpdatedByName || conflict.remoteUpdatedBy)
+                ? String(conflict.remoteUpdatedByName || conflict.remoteUpdatedBy).trim()
+                : '';
+            return {
+                state: 'attention',
+                buttonLabel: 'Review sync',
+                title: 'Latest shared version is waiting',
+                detail: 'A shared board or campaign document changed in two places. Choose which version to keep so this page can finish catching up.',
+                meta: [
+                    'Routine row edits already auto-resolve.',
+                    changedBy ? `Latest shared change came from ${changedBy}.` : '',
+                    sharedMeta
+                ].filter(Boolean).join(' '),
+                primaryAction: 'accept-remote',
+                primaryLabel: 'Use latest shared version',
+                secondaryAction: 'keep-local',
+                secondaryLabel: 'Keep my shared changes'
+            };
+        }
+
+        if (status.mode === 'connecting') {
+            return {
+                state: 'connecting',
+                buttonLabel: 'Connecting',
+                title: 'Connecting to shared campaign',
+                detail: 'Shared updates will appear here once the connection is ready.',
+                meta: sharedMeta,
+                primaryAction: '',
+                primaryLabel: '',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (!status.enabled) {
+            if (configured) {
+                return {
+                    state: 'offline',
+                    buttonLabel: 'Turn on sync',
+                    title: 'Shared sync is turned off',
+                    detail: 'This page is using local data until cloud sync is turned back on.',
+                    meta: sharedMeta,
+                    primaryAction: 'enable-sync',
+                    primaryLabel: 'Turn on sync',
+                    secondaryAction: '',
+                    secondaryLabel: ''
+                };
+            }
+            return {
+                state: 'not-configured',
+                buttonLabel: 'Not connected',
+                title: 'Shared sync is not connected',
+                detail: 'This page is using local data on this device. You may be missing newer shared updates until you connect.',
+                meta: 'Open connect actions here when you want this page to join the shared campaign.',
+                primaryAction: 'settings',
+                primaryLabel: 'Open connect actions',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (!status.connected) {
+            const hasLocalEdits = !!(status.pendingPush || Number(status.dirtyScopes) > 0);
+            return {
+                state: 'offline',
+                buttonLabel: hasLocalEdits ? 'Reconnect' : 'Not connected',
+                title: hasLocalEdits ? 'Your latest edits are still local' : 'Not connected to shared campaign',
+                detail: hasLocalEdits
+                    ? 'Reconnect to share these edits and catch up to the latest campaign state.'
+                    : 'You may not have the latest shared version on this page until it reconnects.',
+                meta: [
+                    status.lastError ? `Last problem: ${status.lastError}.` : '',
+                    sharedMeta
+                ].filter(Boolean).join(' '),
+                primaryAction: configured ? 'connect' : 'settings',
+                primaryLabel: configured ? 'Reconnect now' : 'Open connect actions',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (status.mode === 'locked' && Number(status.activeRemoteLocks) > 0) {
+            return {
+                state: 'shared-busy',
+                buttonLabel: 'Shared busy',
+                title: 'Another player is editing a shared document',
+                detail: 'Routine row edits still auto-resolve. Shared boards and campaign documents may take a moment to update here.',
+                meta: sharedMeta,
+                primaryAction: 'refresh',
+                primaryLabel: 'Refresh now',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (status.pendingPush || Number(status.dirtyScopes) > 0) {
+            return {
+                state: 'saving',
+                buttonLabel: 'Saving',
+                title: 'Saving your changes',
+                detail: 'Your edits are on their way to the shared campaign.',
+                meta: sharedMeta,
+                primaryAction: 'sync-now',
+                primaryLabel: 'Sync now',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (Number(status.remoteRevision) > Number(status.localRevision)) {
+            return {
+                state: 'updating',
+                buttonLabel: 'Updating',
+                title: 'Pulling the latest shared changes',
+                detail: 'Another player updated the campaign. This page is catching up now.',
+                meta: sharedMeta,
+                primaryAction: 'refresh',
+                primaryLabel: 'Refresh now',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        return {
+            state: 'ready',
+            buttonLabel: 'Up to date',
+            title: 'Up to date',
+            detail: 'This page has the latest shared campaign data.',
+            meta: sharedMeta,
+            primaryAction: 'refresh',
+            primaryLabel: 'Refresh now',
+            secondaryAction: '',
+            secondaryLabel: ''
+        };
+    }
+
     function isAddActionLabel(labelText) {
         const clean = String(labelText || '').trim().toLowerCase();
         return /^\+\s*(add|new|log)\b/.test(clean);
@@ -449,7 +663,23 @@
         gearBtn.setAttribute('aria-expanded', 'false');
         gearBtn.textContent = '⚙';
 
-        controls.append(compassBtn, gearBtn);
+        const syncBtn = document.createElement('button');
+        syncBtn.type = 'button';
+        syncBtn.className = 'hero-menu-btn hero-menu-sync';
+        syncBtn.setAttribute('aria-label', 'Open shared sync status');
+        syncBtn.setAttribute('aria-expanded', 'false');
+        syncBtn.title = 'Shared sync status';
+
+        const syncBtnDot = document.createElement('span');
+        syncBtnDot.className = 'hero-menu-sync-dot';
+        syncBtnDot.setAttribute('aria-hidden', 'true');
+
+        const syncBtnLabel = document.createElement('span');
+        syncBtnLabel.className = 'hero-menu-sync-label';
+        syncBtnLabel.textContent = 'Checking';
+
+        syncBtn.append(syncBtnDot, syncBtnLabel);
+        controls.append(compassBtn, syncBtn, gearBtn);
 
         const defaultNavMode = GM_NAV_ITEMS.some((item) => isNavItemActive(item)) ? 'gm' : 'primary';
         const navPanel = buildNavPanel(defaultNavMode);
@@ -479,15 +709,95 @@
             settingsPanel.appendChild(buildGlobalConnectActionBar());
         }
 
+        const syncPanel = document.createElement('div');
+        syncPanel.className = 'hero-menu-panel hero-menu-sync-panel';
+        syncPanel.setAttribute('aria-hidden', 'true');
+
+        const syncEyebrow = document.createElement('div');
+        syncEyebrow.className = 'hero-menu-panel-title hero-menu-sync-eyebrow';
+        syncEyebrow.textContent = '☁ Shared Sync';
+
+        const syncHeadline = document.createElement('div');
+        syncHeadline.className = 'hero-menu-sync-headline';
+
+        const syncHeadlineDot = document.createElement('span');
+        syncHeadlineDot.className = 'hero-menu-sync-dot';
+        syncHeadlineDot.setAttribute('aria-hidden', 'true');
+
+        const syncHeadlineTitle = document.createElement('div');
+        syncHeadlineTitle.className = 'hero-menu-sync-title';
+        syncHeadlineTitle.textContent = 'Checking shared sync';
+
+        syncHeadline.append(syncHeadlineDot, syncHeadlineTitle);
+
+        const syncDetail = document.createElement('div');
+        syncDetail.className = 'hero-menu-sync-detail';
+        syncDetail.textContent = 'This page is still loading sync status.';
+
+        const syncMeta = document.createElement('div');
+        syncMeta.className = 'hero-menu-sync-meta';
+
+        const syncNotice = document.createElement('div');
+        syncNotice.className = 'hero-menu-sync-notice';
+        syncNotice.hidden = true;
+
+        const syncActions = document.createElement('div');
+        syncActions.className = 'hero-menu-sync-actions';
+        syncActions.hidden = true;
+
+        const syncPrimaryBtn = document.createElement('button');
+        syncPrimaryBtn.type = 'button';
+        syncPrimaryBtn.className = 'hero-btn primary';
+
+        const syncSecondaryBtn = document.createElement('button');
+        syncSecondaryBtn.type = 'button';
+        syncSecondaryBtn.className = 'hero-btn ghost';
+
+        syncActions.append(syncPrimaryBtn, syncSecondaryBtn);
+        syncPanel.append(syncEyebrow, syncHeadline, syncDetail, syncMeta, syncNotice, syncActions);
+
+        let latestSyncStatus = null;
+        let latestSyncConflict = null;
+        let syncActionInFlight = false;
+        let syncActionNotice = '';
+        let syncActionNoticeIsError = false;
+
+        const refreshSyncSnapshots = () => {
+            const store = getStore();
+            latestSyncStatus = store && typeof store.getSyncStatus === 'function'
+                ? store.getSyncStatus()
+                : null;
+            latestSyncConflict = store && typeof store.getPendingConflict === 'function'
+                ? store.getPendingConflict()
+                : null;
+        };
+
+        const setSyncNotice = (message, isError = false) => {
+            syncActionNotice = String(message || '').trim();
+            syncActionNoticeIsError = !!(syncActionNotice && isError);
+        };
+
+        const setSyncActionButton = (button, action, label) => {
+            const hasAction = !!action && !!label;
+            button.hidden = !hasAction;
+            button.disabled = syncActionInFlight || !hasAction;
+            button.dataset.syncAction = hasAction ? action : '';
+            if (hasAction) button.textContent = label;
+        };
+
         const setOpenState = (targetPanel, navMode) => {
             const showNav = targetPanel === 'nav';
             const showSettings = targetPanel === 'settings';
+            const showSync = targetPanel === 'sync';
             navPanel.classList.toggle('is-open', showNav);
             navPanel.setAttribute('aria-hidden', showNav ? 'false' : 'true');
             settingsPanel.classList.toggle('is-open', showSettings);
             settingsPanel.setAttribute('aria-hidden', showSettings ? 'false' : 'true');
+            syncPanel.classList.toggle('is-open', showSync);
+            syncPanel.setAttribute('aria-hidden', showSync ? 'false' : 'true');
             compassBtn.setAttribute('aria-expanded', showNav ? 'true' : 'false');
             gearBtn.setAttribute('aria-expanded', showSettings ? 'true' : 'false');
+            syncBtn.setAttribute('aria-expanded', showSync ? 'true' : 'false');
 
             if (showNav) {
                 renderNavList(navPanel, navMode === 'gm' ? 'gm' : 'primary');
@@ -505,6 +815,157 @@
 
             clearNavFilter(navPanel);
         };
+
+        const renderSyncExperience = () => {
+            const experience = describeSyncExperience(latestSyncStatus, latestSyncConflict);
+            const panelMessage = syncActionInFlight ? 'Working...' : syncActionNotice;
+
+            syncBtn.dataset.syncState = experience.state;
+            syncPanel.dataset.syncState = experience.state;
+            syncBtn.title = experience.title;
+            syncBtn.setAttribute('aria-label', `${experience.title}. Open shared sync status`);
+            syncBtnLabel.textContent = experience.buttonLabel;
+            syncHeadlineTitle.textContent = experience.title;
+            syncDetail.textContent = experience.detail;
+            syncMeta.textContent = experience.meta || '';
+            syncMeta.hidden = !experience.meta;
+
+            syncNotice.hidden = !panelMessage;
+            syncNotice.textContent = panelMessage;
+            syncNotice.classList.toggle('is-error', !syncActionInFlight && !!panelMessage && syncActionNoticeIsError);
+
+            setSyncActionButton(syncPrimaryBtn, experience.primaryAction, experience.primaryLabel);
+            setSyncActionButton(syncSecondaryBtn, experience.secondaryAction, experience.secondaryLabel);
+            syncActions.hidden = syncPrimaryBtn.hidden && syncSecondaryBtn.hidden;
+        };
+
+        async function runSyncAction(action) {
+            if (!action) return;
+            if (action === 'settings') {
+                setOpenState('settings');
+                return;
+            }
+
+            const store = getStore();
+            if (!store || syncActionInFlight) return;
+
+            syncActionInFlight = true;
+            setSyncNotice('', false);
+            renderSyncExperience();
+
+            try {
+                if (action === 'enable-sync') {
+                    if (typeof store.setSyncConfig !== 'function') {
+                        throw new Error('Shared sync controls are unavailable on this page.');
+                    }
+                    store.setSyncConfig({ enabled: true }, { reconnect: true });
+                    setSyncNotice('Turning shared sync back on.');
+                } else if (action === 'connect') {
+                    if (typeof store.connectSync !== 'function') {
+                        throw new Error('Reconnect is unavailable on this page.');
+                    }
+                    const result = await store.connectSync();
+                    if (!result || result.ok === false) {
+                        throw new Error((store.getSyncStatus && store.getSyncStatus().lastError) || 'Reconnect failed.');
+                    }
+                    setSyncNotice('Connected to the shared campaign.');
+                } else if (action === 'refresh') {
+                    if (typeof store.pullFromCloud !== 'function') {
+                        throw new Error('Refresh is unavailable on this page.');
+                    }
+                    const result = await store.pullFromCloud({ force: false, silent: false });
+                    if (result && result.ok === false) {
+                        if (result.reason === 'conflict') {
+                            setSyncNotice('The latest shared version needs review.', false);
+                        } else {
+                            throw new Error(result.error || 'Could not refresh shared data.');
+                        }
+                    } else {
+                        setSyncNotice(
+                            result && result.reason === 'up-to-date'
+                                ? 'Already on the latest shared version.'
+                                : 'Checked for new shared updates.'
+                        );
+                    }
+                } else if (action === 'sync-now') {
+                    const currentStatus = typeof store.getSyncStatus === 'function'
+                        ? store.getSyncStatus()
+                        : latestSyncStatus;
+                    if (!currentStatus || !currentStatus.connected) {
+                        if (typeof store.connectSync !== 'function') {
+                            throw new Error('Reconnect is unavailable on this page.');
+                        }
+                        const result = await store.connectSync();
+                        if (!result || result.ok === false) {
+                            throw new Error((store.getSyncStatus && store.getSyncStatus().lastError) || 'Reconnect failed.');
+                        }
+                        setSyncNotice('Connected to the shared campaign.');
+                    } else if (currentStatus.pendingPush || Number(currentStatus.dirtyScopes) > 0) {
+                        if (typeof store.pushToCloud !== 'function') {
+                            throw new Error('Sync is unavailable on this page.');
+                        }
+                        const result = await store.pushToCloud({ silent: false });
+                        if (result && result.ok === false) {
+                            if (result.reason === 'conflict') {
+                                setSyncNotice('The latest shared version needs review.', false);
+                            } else if (result.reason === 'locked') {
+                                setSyncNotice('Another player is editing a shared document right now.', false);
+                            } else {
+                                throw new Error(result.error || 'Could not share your latest edits.');
+                            }
+                        } else {
+                            setSyncNotice('Shared changes sent.');
+                        }
+                    } else if (typeof store.pullFromCloud === 'function') {
+                        const result = await store.pullFromCloud({ force: false, silent: false });
+                        if (result && result.ok === false) {
+                            if (result.reason === 'conflict') {
+                                setSyncNotice('The latest shared version needs review.', false);
+                            } else {
+                                throw new Error(result.error || 'Could not refresh shared data.');
+                            }
+                        } else {
+                            setSyncNotice(
+                                result && result.reason === 'up-to-date'
+                                    ? 'Already on the latest shared version.'
+                                    : 'Checked for new shared updates.'
+                            );
+                        }
+                    }
+                } else if (action === 'accept-remote') {
+                    if (typeof store.resolvePendingConflict !== 'function') {
+                        throw new Error('Conflict review is unavailable on this page.');
+                    }
+                    const result = await store.resolvePendingConflict('accept-remote');
+                    if (!result || result.ok === false) {
+                        throw new Error('Could not apply the latest shared version.');
+                    }
+                    setSyncNotice('Latest shared version applied.');
+                } else if (action === 'keep-local') {
+                    if (typeof store.resolvePendingConflict !== 'function') {
+                        throw new Error('Conflict review is unavailable on this page.');
+                    }
+                    const result = await store.resolvePendingConflict('keep-local');
+                    if (!result || result.ok === false) {
+                        if (result && result.reason === 'conflict') {
+                            setSyncNotice('Shared review is still needed.', false);
+                        } else if (result && result.reason === 'locked') {
+                            setSyncNotice('Another player is editing that shared document right now.', false);
+                        } else {
+                            throw new Error((result && result.error) || 'Could not keep your shared changes.');
+                        }
+                    } else {
+                        setSyncNotice('Your shared changes were kept and synced.');
+                    }
+                }
+            } catch (err) {
+                setSyncNotice(err && err.message ? err.message : 'Sync action failed.', true);
+            } finally {
+                syncActionInFlight = false;
+                refreshSyncSnapshots();
+                renderSyncExperience();
+            }
+        }
 
         const toggleNavPanel = (mode) => {
             const navOpen = navPanel.classList.contains('is-open');
@@ -528,23 +989,49 @@
             toggleNavPanel('gm');
         });
 
+        syncBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const syncOpen = syncPanel.classList.contains('is-open');
+            if (syncOpen) {
+                setOpenState('');
+                return;
+            }
+            setOpenState('sync');
+        });
+
         gearBtn.addEventListener('click', (event) => {
             event.stopPropagation();
             const navOpen = navPanel.classList.contains('is-open');
             const settingsOpen = settingsPanel.classList.contains('is-open');
+            const syncOpen = syncPanel.classList.contains('is-open');
             if (settingsOpen) {
                 setOpenState('');
                 return;
             }
-            if (navOpen) {
+            if (navOpen || syncOpen) {
                 setOpenState('settings');
                 return;
             }
             setOpenState('settings');
         });
 
+        [syncPrimaryBtn, syncSecondaryBtn].forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                runSyncAction(button.dataset.syncAction || '').catch((err) => {
+                    setSyncNotice(err && err.message ? err.message : 'Sync action failed.', true);
+                    syncActionInFlight = false;
+                    refreshSyncSnapshots();
+                    renderSyncExperience();
+                });
+            });
+        });
+
         document.addEventListener('click', (event) => {
-            const anyOpen = navPanel.classList.contains('is-open') || settingsPanel.classList.contains('is-open');
+            const anyOpen = navPanel.classList.contains('is-open')
+                || settingsPanel.classList.contains('is-open')
+                || syncPanel.classList.contains('is-open');
             if (!anyOpen) return;
             if (actions.contains(event.target)) return;
             setOpenState('');
@@ -552,13 +1039,35 @@
 
         document.addEventListener('keydown', (event) => {
             if (event.key !== 'Escape') return;
-            const anyOpen = navPanel.classList.contains('is-open') || settingsPanel.classList.contains('is-open');
+            const anyOpen = navPanel.classList.contains('is-open')
+                || settingsPanel.classList.contains('is-open')
+                || syncPanel.classList.contains('is-open');
             if (!anyOpen) return;
             setOpenState('');
         });
 
+        refreshSyncSnapshots();
+        renderSyncExperience();
+
+        const store = getStore();
+        if (store && typeof store.onSyncStatus === 'function') {
+            store.onSyncStatus((status) => {
+                if (!syncActionInFlight) setSyncNotice('', false);
+                latestSyncStatus = status || null;
+                latestSyncConflict = typeof store.getPendingConflict === 'function'
+                    ? store.getPendingConflict()
+                    : null;
+                renderSyncExperience();
+            });
+        }
+        window.addEventListener('rtf-sync-conflict', () => {
+            if (!syncActionInFlight) setSyncNotice('', false);
+            refreshSyncSnapshots();
+            renderSyncExperience();
+        });
+
         actions.classList.add('has-hero-menu');
-        actions.append(controls, navPanel, settingsPanel);
+        actions.append(controls, navPanel, syncPanel, settingsPanel);
         actions.dataset.heroMenuReady = '1';
     }
 
