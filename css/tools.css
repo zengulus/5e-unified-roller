@@ -142,6 +142,7 @@ a {
     text-align: left;
     gap: 16px;
     padding: 24px;
+    overflow: visible;
     z-index: 2;
 }
 
@@ -422,7 +423,9 @@ a {
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px;
+    padding-bottom: 14px;
     background: rgba(0, 0, 0, 0.2);
+    overflow: visible;
 }
 
 .campaign-advanced summary {
@@ -441,6 +444,7 @@ a {
     text-align: left;
     gap: 14px;
     padding: 24px;
+    overflow: visible;
     z-index: 2;
 }
 

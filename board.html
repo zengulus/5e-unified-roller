@@ -109,6 +109,11 @@
                     <div class="icon">🕰️</div>
                     <div class="label">Events</div>
                 </div>
+                <div class="tool-item" id="btn-cases"
+                    data-onclick="event.stopPropagation(); window.togglePopup('case-popup')">
+                    <div class="icon">🗃️</div>
+                    <div class="label">Cases</div>
+                </div>
                 <div class="tool-item" id="btn-reqs"
                     data-onclick="event.stopPropagation(); window.togglePopup('req-popup')">
                     <div class="icon">📦</div>
@@ -124,6 +129,7 @@
         <div id="npc-popup" class="popup-menu"></div>
         <div id="location-popup" class="popup-menu"></div>
         <div id="event-popup" class="popup-menu"></div>
+        <div id="case-popup" class="popup-menu"></div>
         <div id="req-popup" class="popup-menu"></div>
         <div id="note-popup" class="popup-menu"></div>
     </div>
@@ -157,7 +163,7 @@
     <script src="js/session-log.js"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script src="js/my-story-board-bridge.js?v=20260224g"></script>
-    <script src="js/board.js?v=20260305a"></script>
+    <script src="js/board.js?v=20260305b"></script>
 </body>
 
 </html>

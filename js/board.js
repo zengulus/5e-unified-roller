@@ -1721,6 +1721,7 @@ function initToolbars() {
     initNPCToolbar();
     initLocationToolbar();
     initEventToolbar();
+    initCaseToolbar();
     initRequisitionToolbar();
     initNoteToolbar();
     initFormattingToolbar();
@@ -2531,6 +2532,86 @@ function renderBoardEvents() {
             : '';
         el.innerHTML = `<div class="icon">🕰️</div><div class="label">${title}${heatBadge}${meta ? `<div class="board-tool-submeta">${meta}</div>` : ''}</div>`;
         const payload = buildEventNodePayload(evt);
+        el.ondragstart = (e) => startDragNew(e, payload.nodeType, payload.nodeData);
+        setMobileToolSpawnData(el, payload.nodeType, payload.nodeData);
+        listContainer.appendChild(el);
+    });
+}
+
+function initCaseToolbar() {
+    const container = document.getElementById('case-popup');
+    if (!container || !window.RTF_STORE) return;
+
+    container.innerHTML = `
+        <div class="filter-bar">
+            <input type="text" id="case-search-board" class="filter-input" placeholder="Search cases..." data-oninput="renderBoardCases()">
+            <select id="case-status-board" class="filter-select" data-onchange="renderBoardCases()">
+                <option value="">All Scope Statuses</option>
+                <option value="active">Active</option>
+                <option value="planned">Planned</option>
+                <option value="resolved">Resolved</option>
+            </select>
+        </div>
+        <div id="case-list-content"></div>
+    `;
+
+    renderBoardCases();
+}
+
+function renderBoardCases() {
+    const listContainer = document.getElementById('case-list-content');
+    if (!listContainer || !window.RTF_STORE) return;
+
+    const searchTerm = (document.getElementById('case-search-board').value || '').toLowerCase();
+    const statusFilter = String(document.getElementById('case-status-board').value || '').trim().toLowerCase();
+    const cases = (typeof window.RTF_STORE.getCases === 'function'
+        ? window.RTF_STORE.getCases()
+        : (window.RTF_STORE.state && window.RTF_STORE.state.cases && Array.isArray(window.RTF_STORE.state.cases.items)
+            ? window.RTF_STORE.state.cases.items
+            : []))
+        .slice();
+    const activeCaseId = getBoardActiveCaseId(window.RTF_STORE);
+    const activeScope = (typeof window.RTF_STORE.getActiveCampaignScope === 'function')
+        ? window.RTF_STORE.getActiveCampaignScope()
+        : null;
+    const scopeStatusMap = activeScope && activeScope.caseStatus && typeof activeScope.caseStatus === 'object'
+        ? activeScope.caseStatus
+        : {};
+
+    const filtered = cases.filter((entry) => {
+        const caseId = String(entry && entry.id || '').trim();
+        const caseName = String(entry && entry.name || caseId || '').trim();
+        const status = String(scopeStatusMap[caseId] || (caseId === activeCaseId ? 'active' : 'planned')).trim().toLowerCase();
+        const text = `${caseName} ${caseId} ${status}`.toLowerCase();
+        const matchesSearch = text.includes(searchTerm);
+        const matchesStatus = statusFilter ? status === statusFilter : true;
+        return matchesSearch && matchesStatus;
+    }).sort((a, b) => {
+        const left = String(a && a.name || a && a.id || '').toLowerCase();
+        const right = String(b && b.name || b && b.id || '').toLowerCase();
+        return left.localeCompare(right);
+    });
+
+    if (!filtered.length) {
+        listContainer.innerHTML = '<div class="board-popup-empty">No matching cases found.</div>';
+        return;
+    }
+
+    listContainer.innerHTML = '';
+    filtered.forEach((entry) => {
+        const caseId = String(entry && entry.id || '').trim();
+        if (!caseId) return;
+        const payload = buildCaseReferenceNodePayload(entry, activeScope);
+        const status = String(scopeStatusMap[caseId] || (caseId === activeCaseId ? 'active' : 'planned')).trim().toLowerCase();
+        const statusLabel = status ? (status.charAt(0).toUpperCase() + status.slice(1)) : 'Planned';
+        const nodeCount = Array.isArray(entry && entry.board && entry.board.nodes) ? entry.board.nodes.length : 0;
+        const eventCount = Array.isArray(entry && entry.events) ? entry.events.length : 0;
+        const title = sanitizeText(String(entry && entry.name || caseId));
+        const sub = `${sanitizeText(statusLabel)} • ${eventCount} events • ${nodeCount} nodes`;
+        const el = document.createElement('div');
+        el.className = 'tool-item';
+        el.draggable = true;
+        el.innerHTML = `<div class="icon">🗃️</div><div class="label">${title}<div class="board-tool-submeta">${sub}</div></div>`;
         el.ondragstart = (e) => startDragNew(e, payload.nodeType, payload.nodeData);
         setMobileToolSpawnData(el, payload.nodeType, payload.nodeData);
         listContainer.appendChild(el);
@@ -4224,6 +4305,7 @@ window.togglePopup = function (id) {
     const el = document.getElementById(id);
     if (!el) return;
     if (id === 'note-popup') renderNotePopup();
+    if (id === 'case-popup') renderBoardCases();
 
     // Close others
     document.querySelectorAll('.popup-menu').forEach(p => {

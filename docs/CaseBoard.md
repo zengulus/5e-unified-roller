@@ -5,7 +5,7 @@ Case-scoped by design. For campaign-level graphing, use [Campaign Board](Campaig
 
 ## Core Concepts
 - **Case File Meta** – The hero header exposes an editable case name that renders across exports and sessions. Portal, save, and clear buttons live in the same action bar along with pan-mode and background/accent controls.
-- **Shared Data** – The board pulls guilds, NPCs, locations, timeline events, and requisitions from `RTF_STORE`, so popups always reflect the latest campaign state without retyping.
+- **Shared Data** – The board pulls guilds, NPCs, locations, timeline events, requisitions, and cases from `RTF_STORE`, so popups always reflect the latest campaign state without retyping.
 - **Save Behavior** – Most node/connection edits save immediately, and the hero `💾 Save` button is always available before major layout changes.
 
 ## Building the Web
@@ -24,7 +24,7 @@ Case-scoped by design. For campaign-level graphing, use [Campaign Board](Campaig
 
 ## Cross-Link Entry Points
 - **Direct Node Focus** – Opening `board.html?nodeId=<node_id>` centers and flashes an existing node.
-- **Store-Backed Links** – Opening `board.html?linkType=<npc|location|timeline-event|requisition>&id=<entity_id>` focuses an existing linked node or spawns one from campaign data.
+- **Store-Backed Links** – Opening `board.html?linkType=<npc|location|timeline-event|requisition|case>&id=<entity_id>` focuses an existing linked node or spawns one from campaign data.
 - **Lead Queue + Timeline Bridge** – Lead cards and timeline event actions use those URL params, so board jumps stay deterministic and case-scoped.
 - **URL Hygiene** – After resolving a cross-link request, Board clears `nodeId` / `linkType` / `id` from the URL.
 

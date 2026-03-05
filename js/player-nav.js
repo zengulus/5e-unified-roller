@@ -11,13 +11,13 @@
         { id: 'dashboard', label: 'Player Dashboard', href: 'player-dashboard.html', description: 'Editable party grid for HP, AC, passives, and save DC at a glance.', keywords: 'players dashboard' },
         { id: 'prep', label: 'Prep & Procedure Clocks', href: 'prep-procedure.html', description: 'Prep/procedure clocks with token spend and timeline logging actions.', keywords: 'prep procedure clocks' },
         { id: 'hq', label: 'HQ Layout Foundry', href: 'hq.html', description: 'HQ layout foundry with floor plans, downtime slots, and resource staging.', keywords: 'hq base map' },
-        { id: 'tools', label: 'Campaign Hub (Tools)', href: 'tools.html', description: 'Campaign context hub for scope sequencing, import/export, cloud sync, and workflow actions.', keywords: 'tools scope pulse' },
-        { id: 'hub', label: 'Campaign Strategic Hub', href: 'hub.html', description: 'Campaign strategic dashboard for heat, faction standing, and downtime.', keywords: 'campaign heat reputation' },
         { id: 'campaign-timeline', label: 'Campaign Timeline', href: 'campaign-timeline.html', description: 'Campaign-level timeline for cross-case beats, blockers, and decisions.', keywords: 'campaign meta timeline' },
         { id: 'campaign-board', label: 'Campaign Board', href: 'campaign-board.html', description: 'Campaign meta-board for cross-case links, scope references, and arc mapping.', keywords: 'campaign meta board' }
     ];
     const GM_NAV_ITEMS = [
         { id: 'gm', label: 'GM Session Hub', href: 'gm.html', description: 'Session tracker for initiative, quick mobs, rollers, loot, and combat log.', keywords: 'gm combat initiative' },
+        { id: 'tools', label: 'Campaign Hub (Tools)', href: 'tools.html', description: 'Campaign context hub for scope sequencing, import/export, cloud sync, and workflow actions.', keywords: 'tools scope pulse' },
+        { id: 'hub', label: 'Campaign Strategic Hub', href: 'hub.html', description: 'Campaign strategic dashboard for heat, faction standing, and downtime.', keywords: 'campaign heat reputation' },
         { id: 'dm-screen', label: 'Narrative Engine (DM Screen)', href: 'dm-screen.html', description: 'Narrative engine for incident prompts, sensory texture, hazards, and fallout.', keywords: 'dm narrative screen' },
         { id: 'encounters', label: 'Encounter Recipes', href: 'encounters.html', description: 'Modular encounter recipe cards with tier/location/objective planning.', keywords: 'encounters combat planning' },
         { id: 'clocks', label: 'Generic Clocks', href: 'clocks.html', description: 'Standalone progress/danger clocks with segment control and PNG export.', keywords: 'clocks progress' },
