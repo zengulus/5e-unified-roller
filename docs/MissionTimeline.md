@@ -5,10 +5,11 @@ Case-scoped by design. For campaign-level logging, use [Campaign Timeline](Campa
 
 ## Layout
 - **Event Form** – Toggle the log form to add operation title, focus/district, heat delta, severity/scope, certainty, tags, optional image URL, highlights, fallout, and follow-up notes. Events save directly into the active case timeline.
-- **Filter Bar** – Live search, focus filter, sort order (Newest, Oldest, Heat), and toggles for `Heat / Fallout only`, `Auto-sync Heat`, and `Hide Resolved`.
+- **Filter Bar** – Live search, focus filter, sort order (Newest, Oldest, Heat), and toggles for `Heat / Fallout only`, `Auto-sync Heat`, `Hide Resolved`, and `Move Up / Down`.
 - **Filter Actions** – One-click jump to `leads.html` plus `Export Recap`, which downloads a filtered markdown summary (`mission-timeline-recap-YYYY-MM-DD.md`) and attempts clipboard copy.
 - **Timeline List** – Cards support inline edits for severity, scope, certainty, and status toggles. High-impact events are visually emphasized. Per-event actions include `Lead Queue`, `Copy to Campaign Timeline`, `Board`, and soft delete with undo timing.
 - **Procedure Shield Action** – Positive-heat events show `Shield -1` (or `Shield -1 (Free)` when available) to reduce event heat using Prep/Procedure resources.
+- **Timeline Reorder Mode** – While viewing `Newest` or `Oldest`, toggle `Move Up / Down` to expose per-event `Up`/`Down` controls. Reordering persists for the current case/campaign timeline and still works from filtered views, so the sequence can track the table’s updated understanding of what happened when.
 
 ## Usage Flow
 1. **Prep** – Before session start, skim the previous beats via the Heat-only filter to remind the table what’s still hot.

@@ -164,6 +164,19 @@
     justify-content: flex-end;
     margin-top: 10px;
     gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.event-reorder-controls {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.event-reorder-controls .btn[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .tag-pill {

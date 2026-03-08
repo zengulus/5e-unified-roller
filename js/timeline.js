@@ -260,6 +260,19 @@
         }
         return null;
     };
+    const getTimelineOrderScope = () => (isCampaignMetaView()
+        ? 'campaign.meta.events.__order'
+        : `cases.${getActiveCaseId()}.events.__order`);
+    const getTimelineSortMode = () => {
+        const sortEl = document.getElementById('eventSort');
+        const mode = String(sortEl && sortEl.value || '').trim().toLowerCase();
+        return mode === 'oldest' || mode === 'heat' ? mode : 'newest';
+    };
+    const isChronologicalSortSelected = () => {
+        const mode = getTimelineSortMode();
+        return mode === 'oldest' || mode === 'newest';
+    };
+    const isMoveModeEnabled = () => isButtonPressed('eventMoveMode') && isChronologicalSortSelected();
 
     const normalizeLeadType = (value) => {
         const clean = String(value || '').trim().toLowerCase();
@@ -756,6 +769,47 @@
         const cleanId = String(id || '').trim();
         if (!cleanId) return;
         window.location.assign(buildBoardLinkForEvent(cleanId));
+    }
+
+    function persistTimelineEventOrder(store) {
+        if (!store || typeof store.save !== 'function') return;
+        if (!isCampaignMetaView() && typeof store.syncActiveCaseLegacyState === 'function') {
+            store.syncActiveCaseLegacyState();
+        }
+        store.save({ scope: getTimelineOrderScope() });
+    }
+
+    function moveTimelineEvent(id, direction) {
+        const cleanId = String(id || '').trim();
+        const step = Number(direction);
+        const store = getStore();
+        if (!cleanId || !store || !Number.isFinite(step) || step === 0) return;
+
+        const sortEl = document.getElementById('eventSort');
+        if (sortEl) {
+            const currentSort = String(sortEl.value || '').trim().toLowerCase();
+            if (currentSort !== 'oldest' && currentSort !== 'newest') {
+                sortEl.value = 'oldest';
+            }
+        }
+
+        const { filtered } = getFilteredEvents();
+        const filteredIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        const currentIndex = filteredIds.indexOf(cleanId);
+        const targetIndex = currentIndex + (step < 0 ? -1 : 1);
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= filteredIds.length) return;
+
+        const events = getTimelineEvents(store);
+        if (!Array.isArray(events)) return;
+        const sourceIdx = events.findIndex((evt) => String(evt && evt.id || '').trim() === cleanId);
+        const targetId = filteredIds[targetIndex];
+        const destinationIdx = events.findIndex((evt) => String(evt && evt.id || '').trim() === targetId);
+        if (sourceIdx < 0 || destinationIdx < 0 || sourceIdx === destinationIdx) return;
+
+        const [moved] = events.splice(sourceIdx, 1);
+        events.splice(destinationIdx, 0, moved);
+        persistTimelineEventOrder(store);
+        renderTimeline();
     }
 
     function toggleEventForm() {
@@ -1373,7 +1427,7 @@
         return cleaned.replace(/\s*\n+\s*/g, ' ');
     }
 
-    function buildEventCard(evt) {
+    function buildEventCard(evt, index = 0, total = 0, reorderMode = false) {
         const evtId = escapeJsString(evt.id || '');
         const heat = parseInt(evt.heatDelta, 10);
         const heatClass = heat > 0 ? 'tag-pill-heat-up' : 'tag-pill-heat-down';
@@ -1409,6 +1463,12 @@
         const copyToCampaignButton = isCampaignMetaView()
             ? ''
             : `<button class="btn" data-onclick="copyEventToCampaignTimeline('${evtId}')">Copy to Campaign Timeline</button>`;
+        const reorderControls = reorderMode
+            ? `<div class="event-reorder-controls">
+                    <button class="btn" ${index <= 0 ? 'disabled' : ''} data-onclick="moveTimelineEvent('${evtId}', -1)">Up</button>
+                    <button class="btn" ${index >= total - 1 ? 'disabled' : ''} data-onclick="moveTimelineEvent('${evtId}', 1)">Down</button>
+               </div>`
+            : '';
 
         return `
         <div class="event-card${imageMarkup ? ' has-image' : ''}${highImpactClass}">
@@ -1468,6 +1528,7 @@
                 <div class="event-actions">
                     <small class="event-log-meta">Logged ${evt.created ? new Date(evt.created).toLocaleString() : '—'}</small>
                     ${attribution ? `<small class="event-log-meta">${attribution}</small>` : ''}
+                    ${reorderControls}
                     ${procedureShieldButton}
                     ${leadActionButton}
                     ${copyToCampaignButton}
@@ -1506,7 +1567,7 @@
 
         const search = (document.getElementById('eventSearch').value || '').toLowerCase();
         const focusFilter = document.getElementById('eventFocusFilter').value;
-        const sort = document.getElementById('eventSort').value;
+        const sort = getTimelineSortMode();
         const impactOnly = isButtonPressed('eventImpactOnly');
         const hideResolved = isButtonPressed('eventHideResolved');
 
@@ -1525,19 +1586,15 @@
             return matchesSearch && matchesFocus && matchesImpact && matchesResolved;
         });
 
-        filtered.sort((a, b) => {
-            if (sort === 'heat') {
+        if (sort === 'heat') {
+            filtered.sort((a, b) => {
                 const aHeat = Math.abs(parseInt(a.heatDelta || '0', 10));
                 const bHeat = Math.abs(parseInt(b.heatDelta || '0', 10));
                 return bHeat - aHeat;
-            }
-            const aTime = a.created || '';
-            const bTime = b.created || '';
-            if (sort === 'oldest') {
-                return aTime.localeCompare(bTime);
-            }
-            return bTime.localeCompare(aTime);
-        });
+            });
+        } else if (sort === 'newest') {
+            filtered.reverse();
+        }
 
         return {
             filtered,
@@ -1622,9 +1679,14 @@
         const container = document.getElementById('timelineList');
         if (!container) return;
         const { filtered } = getFilteredEvents();
+        const moveModeButton = document.getElementById('eventMoveMode');
+        if (moveModeButton && !isChronologicalSortSelected() && moveModeButton.getAttribute('aria-pressed') === 'true') {
+            setButtonPressed(moveModeButton, false);
+        }
+        const reorderMode = isMoveModeEnabled();
 
         container.innerHTML = filtered.length
-            ? filtered.map(buildEventCard).join('')
+            ? filtered.map((evt, index) => buildEventCard(evt, index, filtered.length, reorderMode)).join('')
             : '<div class="empty-state">No events logged yet.</div>';
         renderLeadQueue();
     }
@@ -1658,6 +1720,7 @@
     window.toggleEventForm = toggleEventForm;
     window.addTimelineEvent = addTimelineEvent;
     window.renderTimeline = renderTimeline;
+    window.moveTimelineEvent = moveTimelineEvent;
     window.updateEventField = updateEventField;
     window.deleteTimelineEvent = deleteTimelineEvent;
     window.copyEventToCampaignTimeline = copyEventToCampaignTimeline;
@@ -1677,6 +1740,7 @@
     window.openLeadOnBoard = openLeadOnBoard;
     window.toggleFilterButton = toggleFilterButton;
     window.toggleAutoHeat = toggleAutoHeat;
+    window.toggleMoveMode = toggleMoveMode;
     window.toggleResolved = toggleResolved;
 
     window.addEventListener('load', waitForStore);
@@ -1717,6 +1781,20 @@
         const next = button.getAttribute('aria-pressed') !== 'true';
         setButtonPressed(button, next);
         setHeatAutoSync(next);
+    }
+
+    function toggleMoveMode(button) {
+        if (!button) return;
+        const next = button.getAttribute('aria-pressed') !== 'true';
+        const sortEl = document.getElementById('eventSort');
+        if (next && sortEl) {
+            const currentSort = String(sortEl.value || '').trim().toLowerCase();
+            if (currentSort !== 'oldest' && currentSort !== 'newest') {
+                sortEl.value = 'oldest';
+            }
+        }
+        setButtonPressed(button, next);
+        renderTimeline();
     }
 
     function toggleResolved(id, button) {
