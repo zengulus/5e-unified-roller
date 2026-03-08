@@ -5,11 +5,11 @@ Case-scoped by design. For campaign-level logging, use [Campaign Timeline](Campa
 
 ## Layout
 - **Event Form** – Toggle the log form to add operation title, focus/district, heat delta, tags, optional image URL, highlights, fallout, and follow-up notes. Events save directly into the active case timeline.
-- **Filter Bar** – Live search, focus filter, sort order (`Latest to Earliest`, `Earliest to Latest`, `Heat`), and toggles for `Heat / Fallout only`, `Auto-sync Heat`, and `Hide Resolved`.
+- **Filter Bar** – Live search, focus filter, sort order (`Latest to Earliest`, `Earliest to Latest`, `Heat`), and toggles for `Heat / Fallout only`, `Auto-sync Heat`, and `Hide Resolved`. Alt+Shift+Click the page title to reveal GM-only controls, including `Admin Move Mode`.
 - **Filter Actions** – One-click jump to `leads.html` plus `Export Recap`, which downloads a filtered markdown summary (`mission-timeline-recap-YYYY-MM-DD.md`) and attempts clipboard copy.
 - **Timeline List** – Cards support inline edits for title, focus, heat, tags, image, notes, and status toggles. Per-event actions include `Lead Queue`, `Copy to Campaign Timeline`, `Board`, and soft delete with undo timing.
 - **Procedure Shield Action** – Positive-heat events show `Shield -1` (or `Shield -1 (Free)` when available) to reduce event heat using Prep/Procedure resources.
-- **Drag Reordering** – While viewing `Latest to Earliest` or `Earliest to Latest`, each card exposes a `Drag` handle. Dragging works against the currently filtered list and rewrites the canonical earliest-to-latest sequence for that case timeline.
+- **Admin Move Mode** – Once GM controls are revealed, `Admin Move Mode` exposes side controls for `Top`, `Up`, `Swap`, `Down`, and `Bottom` while viewing `Latest to Earliest` or `Earliest to Latest`. These operate against the currently filtered list while rewriting the canonical earliest-to-latest sequence for that case timeline.
 
 ## Usage Flow
 1. **Prep** – Before session start, skim the previous beats via the Heat-only filter to remind the table what’s still hot.

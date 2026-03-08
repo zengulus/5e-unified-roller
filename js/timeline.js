@@ -19,12 +19,7 @@
     let delegatedHandlersBound = false;
     let deleteManager = null;
     let pendingDeepLinkFocus = '';
-    let timelineDragHandlersBound = false;
-    const timelineDragState = {
-        draggedId: '',
-        overId: '',
-        placement: 'before'
-    };
+    let pendingSwapEventId = '';
     const sanitizeImageUrl = (url = '') => {
         const candidate = String(url || '').trim();
         if (!candidate) return '';
@@ -258,6 +253,38 @@
         const mode = getTimelineSortMode();
         return mode === 'oldest' || mode === 'newest';
     };
+    const isTimelineAdminVisible = () => document.body.classList.contains('secret-active');
+    const isAdminMoveModeEnabled = () => isTimelineAdminVisible() && isButtonPressed('eventAdminMoveMode') && isChronologicalSortSelected();
+
+    function clearPendingSwapSelection() {
+        pendingSwapEventId = '';
+    }
+
+    function syncTimelineAdminUi() {
+        const moveModeButton = document.getElementById('eventAdminMoveMode');
+        const adminVisible = isTimelineAdminVisible();
+        if (moveModeButton && !adminVisible && moveModeButton.getAttribute('aria-pressed') === 'true') {
+            setButtonPressed(moveModeButton, false);
+        }
+        if (!adminVisible || !isChronologicalSortSelected()) {
+            clearPendingSwapSelection();
+        }
+    }
+
+    function toggleTimelineSecretMode(forceState) {
+        if (typeof forceState === 'boolean') {
+            document.body.classList.toggle('secret-active', forceState);
+        } else {
+            document.body.classList.toggle('secret-active');
+        }
+        syncTimelineAdminUi();
+        renderTimeline();
+    }
+
+    function tryTimelineSecretToggle(event) {
+        if (!event || !event.altKey || !event.shiftKey) return;
+        toggleTimelineSecretMode();
+    }
 
     const getClueSourceDescriptor = (meta) => {
         if (!meta || !meta.sourceType) return '';
@@ -868,147 +895,108 @@
         store.save({ scope: getTimelineOrderScope() });
     }
 
-    function clearTimelineDragState() {
-        timelineDragState.draggedId = '';
-        timelineDragState.overId = '';
-        timelineDragState.placement = 'before';
-        const container = document.getElementById('timelineList');
-        if (!container) return;
-        container.querySelectorAll('.event-card.is-dragging, .event-card.drop-before, .event-card.drop-after')
-            .forEach((card) => {
-                card.classList.remove('is-dragging', 'drop-before', 'drop-after');
-            });
-    }
-
-    function setTimelineDropIndicator(card, placement) {
-        const container = document.getElementById('timelineList');
-        if (!container) return;
-        container.querySelectorAll('.event-card.drop-before, .event-card.drop-after')
-            .forEach((entry) => {
-                if (entry !== card) entry.classList.remove('drop-before', 'drop-after');
-            });
-        if (!card) return;
-        card.classList.remove('drop-before', 'drop-after');
-        card.classList.add(placement === 'after' ? 'drop-after' : 'drop-before');
-    }
-
-    function reorderTimelineEventsByVisibleOrder(sourceId, targetId, placement = 'before') {
-        const cleanSourceId = String(sourceId || '').trim();
-        const cleanTargetId = String(targetId || '').trim();
-        const normalizedPlacement = placement === 'after' ? 'after' : 'before';
-        const store = getStore();
-        if (!cleanSourceId || !cleanTargetId || cleanSourceId === cleanTargetId || !store || !isChronologicalSortSelected()) return;
+    function getVisibleTimelineIds() {
         const { filtered } = getFilteredEvents();
-        const visibleIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
-        if (visibleIds.length < 2 || !visibleIds.includes(cleanSourceId) || !visibleIds.includes(cleanTargetId)) return;
-        const events = getTimelineEvents(store);
-        if (!Array.isArray(events)) return;
+        return filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+    }
 
-        const reorderedVisibleIds = visibleIds.filter((id) => id !== cleanSourceId);
-        const targetVisibleIdx = reorderedVisibleIds.indexOf(cleanTargetId);
-        if (targetVisibleIdx < 0) return;
-        const insertIdx = normalizedPlacement === 'after' ? targetVisibleIdx + 1 : targetVisibleIdx;
-        reorderedVisibleIds.splice(insertIdx, 0, cleanSourceId);
+    function applyVisibleTimelineOrder(nextVisibleIds) {
+        const store = getStore();
+        if (!store || !isChronologicalSortSelected()) return false;
+        const currentVisibleIds = getVisibleTimelineIds();
+        const desiredVisibleIds = Array.isArray(nextVisibleIds)
+            ? nextVisibleIds.map((id) => String(id || '').trim()).filter(Boolean)
+            : [];
+        if (!currentVisibleIds.length || currentVisibleIds.length !== desiredVisibleIds.length) return false;
+        const currentIdSet = new Set(currentVisibleIds);
+        if (currentIdSet.size !== desiredVisibleIds.length) return false;
+        if (desiredVisibleIds.some((id) => !currentIdSet.has(id))) return false;
+
+        const events = getTimelineEvents(store);
+        if (!Array.isArray(events)) return false;
 
         const baseVisibleIds = getTimelineSortMode() === 'newest'
-            ? reorderedVisibleIds.slice().reverse()
-            : reorderedVisibleIds.slice();
-        const visibleIdSet = new Set(baseVisibleIds);
+            ? desiredVisibleIds.slice().reverse()
+            : desiredVisibleIds.slice();
         const eventById = new Map(events.map((evt) => [String(evt && evt.id || '').trim(), evt]));
         const visibleSlots = [];
         events.forEach((evt, index) => {
             const evtId = String(evt && evt.id || '').trim();
-            if (visibleIdSet.has(evtId)) visibleSlots.push(index);
+            if (currentIdSet.has(evtId)) visibleSlots.push(index);
         });
-        if (visibleSlots.length !== baseVisibleIds.length) return;
+        if (visibleSlots.length !== baseVisibleIds.length) return false;
 
         const nextOrder = events.slice();
         for (let i = 0; i < baseVisibleIds.length; i += 1) {
             const replacement = eventById.get(baseVisibleIds[i]);
-            if (!replacement) return;
+            if (!replacement) return false;
             nextOrder[visibleSlots[i]] = replacement;
         }
 
         events.splice(0, events.length, ...nextOrder);
         persistTimelineEventOrder(store);
-        renderTimeline();
+        return true;
     }
 
-    function handleTimelineDragStart(event) {
-        if (!isChronologicalSortSelected()) return;
-        const handle = event.target && typeof event.target.closest === 'function'
-            ? event.target.closest('[data-timeline-drag-handle]')
-            : null;
-        if (!handle) return;
-        const draggedId = String(handle.dataset.timelineDragHandle || '').trim();
-        if (!draggedId) return;
-        timelineDragState.draggedId = draggedId;
-        timelineDragState.overId = '';
-        timelineDragState.placement = 'before';
-        const card = handle.closest('.event-card');
-        if (card) card.classList.add('is-dragging');
-        if (event.dataTransfer) {
-            event.dataTransfer.effectAllowed = 'move';
-            try {
-                event.dataTransfer.setData('text/plain', draggedId);
-            } catch (err) {
-                console.warn('Timeline drag data transfer failed', err);
-            }
-        }
+    function moveTimelineEvent(id, direction) {
+        const cleanId = String(id || '').trim();
+        const step = Number(direction);
+        if (!cleanId || !Number.isFinite(step) || step === 0 || !isAdminMoveModeEnabled()) return;
+        const visibleIds = getVisibleTimelineIds();
+        const currentIndex = visibleIds.indexOf(cleanId);
+        const targetIndex = currentIndex + (step < 0 ? -1 : 1);
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= visibleIds.length) return;
+        const nextVisibleIds = visibleIds.slice();
+        const [moved] = nextVisibleIds.splice(currentIndex, 1);
+        nextVisibleIds.splice(targetIndex, 0, moved);
+        clearPendingSwapSelection();
+        if (applyVisibleTimelineOrder(nextVisibleIds)) renderTimeline();
     }
 
-    function handleTimelineDragOver(event) {
-        if (!timelineDragState.draggedId || !isChronologicalSortSelected()) return;
-        const card = event.target && typeof event.target.closest === 'function'
-            ? event.target.closest('.event-card[data-event-id]')
-            : null;
-        if (!card) return;
-        const overId = String(card.dataset.eventId || '').trim();
-        if (!overId || overId === timelineDragState.draggedId) {
-            setTimelineDropIndicator(null, 'before');
+    function sendTimelineEventToExtreme(id, edge) {
+        const cleanId = String(id || '').trim();
+        const cleanEdge = String(edge || '').trim().toLowerCase();
+        if (!cleanId || !isAdminMoveModeEnabled() || (cleanEdge !== 'top' && cleanEdge !== 'bottom')) return;
+        const visibleIds = getVisibleTimelineIds();
+        const currentIndex = visibleIds.indexOf(cleanId);
+        if (currentIndex < 0) return;
+        const nextVisibleIds = visibleIds.filter((entryId) => entryId !== cleanId);
+        if (cleanEdge === 'top') nextVisibleIds.unshift(cleanId);
+        else nextVisibleIds.push(cleanId);
+        clearPendingSwapSelection();
+        if (applyVisibleTimelineOrder(nextVisibleIds)) renderTimeline();
+    }
+
+    function toggleSwapTimelineEvent(id) {
+        const cleanId = String(id || '').trim();
+        if (!cleanId || !isAdminMoveModeEnabled()) return;
+        const visibleIds = getVisibleTimelineIds();
+        if (!visibleIds.includes(cleanId)) return;
+
+        if (!pendingSwapEventId) {
+            pendingSwapEventId = cleanId;
+            renderTimeline();
             return;
         }
-        event.preventDefault();
-        const rect = card.getBoundingClientRect();
-        const placement = event.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
-        timelineDragState.overId = overId;
-        timelineDragState.placement = placement;
-        setTimelineDropIndicator(card, placement);
-        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    }
 
-    function handleTimelineDrop(event) {
-        if (!timelineDragState.draggedId) return;
-        event.preventDefault();
-        const card = event.target && typeof event.target.closest === 'function'
-            ? event.target.closest('.event-card[data-event-id]')
-            : null;
-        const targetId = String(card && card.dataset ? card.dataset.eventId || '' : timelineDragState.overId).trim();
-        if (!targetId || targetId === timelineDragState.draggedId) {
-            clearTimelineDragState();
+        if (pendingSwapEventId === cleanId) {
+            clearPendingSwapSelection();
+            renderTimeline();
             return;
         }
-        const rect = card ? card.getBoundingClientRect() : null;
-        const placement = rect && Number.isFinite(event.clientY)
-            ? (event.clientY > rect.top + rect.height / 2 ? 'after' : 'before')
-            : timelineDragState.placement;
-        reorderTimelineEventsByVisibleOrder(timelineDragState.draggedId, targetId, placement);
-        clearTimelineDragState();
-    }
 
-    function handleTimelineDragEnd() {
-        clearTimelineDragState();
-    }
+        const sourceIndex = visibleIds.indexOf(pendingSwapEventId);
+        const targetIndex = visibleIds.indexOf(cleanId);
+        if (sourceIndex < 0 || targetIndex < 0) {
+            clearPendingSwapSelection();
+            renderTimeline();
+            return;
+        }
 
-    function bindTimelineDragHandlers() {
-        if (timelineDragHandlersBound) return;
-        const container = document.getElementById('timelineList');
-        if (!container) return;
-        timelineDragHandlersBound = true;
-        container.addEventListener('dragstart', handleTimelineDragStart);
-        container.addEventListener('dragover', handleTimelineDragOver);
-        container.addEventListener('drop', handleTimelineDrop);
-        container.addEventListener('dragend', handleTimelineDragEnd);
+        const nextVisibleIds = visibleIds.slice();
+        [nextVisibleIds[sourceIndex], nextVisibleIds[targetIndex]] = [nextVisibleIds[targetIndex], nextVisibleIds[sourceIndex]];
+        clearPendingSwapSelection();
+        if (applyVisibleTimelineOrder(nextVisibleIds)) renderTimeline();
     }
 
     function toggleEventForm() {
@@ -1609,7 +1597,7 @@
         return cleaned.replace(/\s*\n+\s*/g, ' ');
     }
 
-    function buildEventCard(evt, dragEnabled = false) {
+    function buildEventCard(evt, index = 0, total = 0, moveModeEnabled = false) {
         const evtId = escapeJsString(evt.id || '');
         const evtIdAttr = escapeHtml(String(evt.id || ''));
         const heat = parseInt(evt.heatDelta, 10);
@@ -1639,62 +1627,72 @@
         const copyToCampaignButton = isCampaignMetaView()
             ? ''
             : `<button class="btn" data-onclick="copyEventToCampaignTimeline('${evtId}')">Copy to Campaign Timeline</button>`;
-        const dragHandle = dragEnabled
-            ? `<span class="event-drag-handle" draggable="true" data-timeline-drag-handle="${evtIdAttr}" title="Drag to reorder">Drag</span>`
+        const isSwapSource = moveModeEnabled && pendingSwapEventId === String(evt.id || '').trim();
+        const swapLabel = isSwapSource ? 'Cancel Swap' : (pendingSwapEventId ? 'Swap Here' : 'Swap');
+        const moveControls = moveModeEnabled
+            ? `<div class="event-admin-move-controls" aria-label="Admin move controls">
+                    <button class="btn" ${index <= 0 ? 'disabled' : ''} data-onclick="sendTimelineEventToExtreme('${evtId}', 'top')">Top</button>
+                    <button class="btn" ${index <= 0 ? 'disabled' : ''} data-onclick="moveTimelineEvent('${evtId}', -1)">Up</button>
+                    <button class="btn${isSwapSource ? ' is-armed' : ''}" ${total <= 1 ? 'disabled' : ''} data-onclick="toggleSwapTimelineEvent('${evtId}')">${swapLabel}</button>
+                    <button class="btn" ${index >= total - 1 ? 'disabled' : ''} data-onclick="moveTimelineEvent('${evtId}', 1)">Down</button>
+                    <button class="btn" ${index >= total - 1 ? 'disabled' : ''} data-onclick="sendTimelineEventToExtreme('${evtId}', 'bottom')">Bottom</button>
+               </div>`
             : '';
 
         return `
-        <div class="event-card${imageMarkup ? ' has-image' : ''}${dragEnabled ? ' is-draggable' : ''}" data-event-id="${evtIdAttr}">
-            ${imageMarkup}
-            <div class="event-card-content">
-                <div class="event-head">
-                    <div class="event-head-main">
-                        ${dragHandle}
+        <div class="event-card${imageMarkup ? ' has-image' : ''}${moveModeEnabled ? ' has-admin-controls' : ''}" data-event-id="${evtIdAttr}">
+            <div class="event-card-main">
+                ${imageMarkup}
+                <div class="event-card-content">
+                    <div class="event-head">
+                        <div class="event-head-main">
                         <h3><input type="text" value="${escapeHtml(evt.title || '')}" placeholder="Title"
                             data-onchange="updateEventField('${evtId}', 'title', this.value)"></h3>
+                        </div>
+                        <button class="toggle-btn status-toggle status-pill ${statusClass} ${resolved ? 'active' : ''}" type="button"
+                            aria-pressed="${resolved ? 'true' : 'false'}"
+                            data-onclick="toggleResolved('${evtId}', this)">${statusLabel}</button>
                     </div>
-                    <button class="toggle-btn status-toggle status-pill ${statusClass} ${resolved ? 'active' : ''}" type="button"
-                        aria-pressed="${resolved ? 'true' : 'false'}"
-                        data-onclick="toggleResolved('${evtId}', this)">${statusLabel}</button>
-                </div>
-                <div class="event-meta">
-                    <div>
-                        <label>Focus</label>
-                        <input type="text" value="${escapeHtml(evt.focus || '')}" placeholder="District / Guild"
-                            data-onchange="updateEventField('${evtId}', 'focus', this.value)">
+                    <div class="event-meta">
+                        <div>
+                            <label>Focus</label>
+                            <input type="text" value="${escapeHtml(evt.focus || '')}" placeholder="District / Guild"
+                                data-onchange="updateEventField('${evtId}', 'focus', this.value)">
+                        </div>
+                        <div>
+                            <label>Heat Δ</label>
+                            <input type="number" value="${escapeHtml(evt.heatDelta || '')}" placeholder="0"
+                                data-onchange="updateEventField('${evtId}', 'heatDelta', this.value)">
+                        </div>
+                        <div>
+                            <label>Tags</label>
+                            <input type="text" value="${escapeHtml(evt.tags || '')}" placeholder="tags"
+                                data-onchange="updateEventField('${evtId}', 'tags', this.value)">
+                        </div>
+                        <div>
+                            <label>Image URL</label>
+                            <input type="url" value="${escapeHtml(evt.imageUrl || '')}" placeholder="https://..."
+                                data-onchange="updateEventField('${evtId}', 'imageUrl', this.value)">
+                        </div>
                     </div>
-                    <div>
-                        <label>Heat Δ</label>
-                        <input type="number" value="${escapeHtml(evt.heatDelta || '')}" placeholder="0"
-                            data-onchange="updateEventField('${evtId}', 'heatDelta', this.value)">
+                    <div class="event-pill-row">${heatText} ${focusDisplay} ${renderTagPills(evt.tags)}</div>
+                    <div class="event-body">
+                        <textarea placeholder="Highlights" data-onchange="updateEventField('${evtId}', 'highlights', this.value)">${escapeHtml(evt.highlights || '')}</textarea>
+                        <textarea placeholder="Fallout" data-onchange="updateEventField('${evtId}', 'fallout', this.value)">${escapeHtml(evt.fallout || '')}</textarea>
+                        <textarea placeholder="Follow Ups" data-onchange="updateEventField('${evtId}', 'followUp', this.value)">${escapeHtml(evt.followUp || '')}</textarea>
                     </div>
-                    <div>
-                        <label>Tags</label>
-                        <input type="text" value="${escapeHtml(evt.tags || '')}" placeholder="tags"
-                            data-onchange="updateEventField('${evtId}', 'tags', this.value)">
+                    <div class="event-actions">
+                        <small class="event-log-meta">Logged ${evt.created ? new Date(evt.created).toLocaleString() : '—'}</small>
+                        ${attribution ? `<small class="event-log-meta">${attribution}</small>` : ''}
+                        ${procedureShieldButton}
+                        ${leadActionButton}
+                        ${copyToCampaignButton}
+                        <button class="btn" data-onclick="openTimelineEventInBoard('${evtId}')">Board</button>
+                        <button class="btn btn-danger" data-onclick="deleteTimelineEvent('${evtId}')">Delete</button>
                     </div>
-                    <div>
-                        <label>Image URL</label>
-                        <input type="url" value="${escapeHtml(evt.imageUrl || '')}" placeholder="https://..."
-                            data-onchange="updateEventField('${evtId}', 'imageUrl', this.value)">
-                    </div>
-                </div>
-                <div class="event-pill-row">${heatText} ${focusDisplay} ${renderTagPills(evt.tags)}</div>
-                <div class="event-body">
-                    <textarea placeholder="Highlights" data-onchange="updateEventField('${evtId}', 'highlights', this.value)">${escapeHtml(evt.highlights || '')}</textarea>
-                    <textarea placeholder="Fallout" data-onchange="updateEventField('${evtId}', 'fallout', this.value)">${escapeHtml(evt.fallout || '')}</textarea>
-                    <textarea placeholder="Follow Ups" data-onchange="updateEventField('${evtId}', 'followUp', this.value)">${escapeHtml(evt.followUp || '')}</textarea>
-                </div>
-                <div class="event-actions">
-                    <small class="event-log-meta">Logged ${evt.created ? new Date(evt.created).toLocaleString() : '—'}</small>
-                    ${attribution ? `<small class="event-log-meta">${attribution}</small>` : ''}
-                    ${procedureShieldButton}
-                    ${leadActionButton}
-                    ${copyToCampaignButton}
-                    <button class="btn" data-onclick="openTimelineEventInBoard('${evtId}')">Board</button>
-                    <button class="btn btn-danger" data-onclick="deleteTimelineEvent('${evtId}')">Delete</button>
                 </div>
             </div>
+            ${moveControls}
         </div>`;
     }
 
@@ -1830,18 +1828,21 @@
         const container = document.getElementById('timelineList');
         if (!container) return;
         const { filtered } = getFilteredEvents();
-        const dragEnabled = isChronologicalSortSelected();
-        clearTimelineDragState();
+        const moveModeEnabled = isAdminMoveModeEnabled();
+        const visibleIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        if (!moveModeEnabled || (pendingSwapEventId && !visibleIds.includes(pendingSwapEventId))) {
+            clearPendingSwapSelection();
+        }
 
         container.innerHTML = filtered.length
-            ? filtered.map((evt) => buildEventCard(evt, dragEnabled)).join('')
+            ? filtered.map((evt, index) => buildEventCard(evt, index, filtered.length, moveModeEnabled)).join('')
             : '<div class="empty-state">No events logged yet.</div>';
         renderLeadQueue();
     }
 
     function init() {
         getDeleteManager();
-        bindTimelineDragHandlers();
+        syncTimelineAdminUi();
         const autoHeatToggle = document.getElementById('eventAutoHeat');
         if (autoHeatToggle) {
             setButtonPressed(autoHeatToggle, isHeatAutoSyncEnabled());
@@ -1869,6 +1870,9 @@
     window.toggleEventForm = toggleEventForm;
     window.addTimelineEvent = addTimelineEvent;
     window.renderTimeline = renderTimeline;
+    window.moveTimelineEvent = moveTimelineEvent;
+    window.sendTimelineEventToExtreme = sendTimelineEventToExtreme;
+    window.toggleSwapTimelineEvent = toggleSwapTimelineEvent;
     window.updateEventField = updateEventField;
     window.deleteTimelineEvent = deleteTimelineEvent;
     window.copyEventToCampaignTimeline = copyEventToCampaignTimeline;
@@ -1888,6 +1892,9 @@
     window.openLeadOnBoard = openLeadOnBoard;
     window.toggleFilterButton = toggleFilterButton;
     window.toggleAutoHeat = toggleAutoHeat;
+    window.toggleTimelineSecretMode = toggleTimelineSecretMode;
+    window.tryTimelineSecretToggle = tryTimelineSecretToggle;
+    window.toggleAdminMoveMode = toggleAdminMoveMode;
     window.toggleResolved = toggleResolved;
 
     window.addEventListener('load', waitForStore);
@@ -1928,6 +1935,21 @@
         const next = button.getAttribute('aria-pressed') !== 'true';
         setButtonPressed(button, next);
         setHeatAutoSync(next);
+    }
+
+    function toggleAdminMoveMode(button) {
+        if (!button || !isTimelineAdminVisible()) return;
+        const next = button.getAttribute('aria-pressed') !== 'true';
+        const sortEl = document.getElementById('eventSort');
+        if (next && sortEl) {
+            const currentSort = String(sortEl.value || '').trim().toLowerCase();
+            if (currentSort !== 'oldest' && currentSort !== 'newest') {
+                sortEl.value = 'oldest';
+            }
+        }
+        setButtonPressed(button, next);
+        if (!next) clearPendingSwapSelection();
+        renderTimeline();
     }
 
     function toggleResolved(id, button) {

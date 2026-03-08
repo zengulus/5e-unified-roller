@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="css/theme.css?v=20260304f">
     <link rel="stylesheet" href="css/hub.css?v=20260222a">
     <link rel="stylesheet" href="css/player-nav.css?v=20260306a">
-    <link rel="stylesheet" href="css/timeline.css?v=20260309d">
+    <link rel="stylesheet" href="css/timeline.css?v=20260309e">
 </head>
 
 <body data-player-nav="campaign-timeline">
@@ -19,7 +19,7 @@
         <header class="hero-header">
             <div>
                 <p class="hero-eyebrow">Ravnica Task Force</p>
-                <h1>Campaign Timeline</h1>
+                <h1 id="pageTitle" data-onclick="tryTimelineSecretToggle(event)">Campaign Timeline</h1>
                 <p class="hero-subtitle">Campaign-level timeline for cross-case beats, blockers, and coordination state.</p>
             </div>
             <div class="hero-actions">
@@ -86,6 +86,8 @@
                             data-onclick="toggleAutoHeat(this)">Auto-sync Heat</button>
                         <button class="toggle-btn" id="eventHideResolved" type="button" aria-pressed="false"
                             data-onclick="toggleFilterButton(this, renderTimeline)">Hide Resolved</button>
+                        <button class="toggle-btn timeline-admin-only" id="eventAdminMoveMode" type="button" aria-pressed="false"
+                            data-onclick="toggleAdminMoveMode(this)">Admin Move Mode</button>
                     </div>
                     <div class="filter-actions">
                         <button class="btn btn-dp" id="exportRecapBtn" data-onclick="exportTimelineRecap()">Export Recap</button>
@@ -107,7 +109,7 @@
     <script src="js/soft-delete.js"></script>
     <script src="js/vector-field.js"></script>
     <script>window.RTF_VIEW_SCOPE = 'campaign';</script>
-    <script src="js/timeline.js?v=20260309f"></script>
+    <script src="js/timeline.js?v=20260309g"></script>
 </body>
 
 </html>
