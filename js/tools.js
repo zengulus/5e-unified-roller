@@ -1230,7 +1230,7 @@ function buildBoardAdminClueTimelinePayload(node, boardName) {
     const tags = ['clue', 'board', 'clue-discovery'];
     if (sourceTag) tags.push(sourceTag);
     return {
-        title: `CLUE DISCOVERED: ${title}`,
+        title: `Clue: ${title}`,
         focus: String(boardName || '').trim() || 'Case Board',
         heatDelta: '',
         tags: Array.from(new Set(tags)).join(', '),

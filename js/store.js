@@ -693,16 +693,24 @@
             ui: sanitizeLedgerUI(source.ui)
         };
     };
+    const normalizeClueTimelineEventTitle = (title, kind) => {
+        const cleanKind = toTrimmedString(kind, '', 80).trim().toLowerCase();
+        const rawTitle = toTrimmedString(title, '', 240).trim();
+        if (cleanKind !== 'clue-discovered') return rawTitle;
+        const clueTitle = rawTitle.replace(/^(?:clue\s+discovered|clue)\s*:\s*/i, '').trim() || 'Untitled Clue';
+        return `Clue: ${clueTitle}`;
+    };
     const sanitizeEvent = (event, index = 0) => {
         const source = event && typeof event === 'object' ? event : {};
         const { dueAt: _legacyDueAt, entityImpacts: _legacyEntityImpacts, ...sourceWithoutLegacyEventFields } = source;
         const fallbackId = buildEntityId('event', index);
         const createdAt = sanitizeAttributionAt(source.created, new Date().toISOString()) || new Date().toISOString();
         const changedAt = sanitizeAttributionAt(source.lastChangedAt, createdAt) || createdAt;
+        const kind = toTrimmedString(source.kind, '', 80);
         return {
             ...sourceWithoutLegacyEventFields,
             id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
-            title: toTrimmedString(source.title, '', 240),
+            title: normalizeClueTimelineEventTitle(source.title, kind),
             focus: toTrimmedString(source.focus, '', 240),
             heatDelta: toTrimmedString(source.heatDelta, '', 12),
             tags: toTrimmedString(source.tags, '', 2000),
@@ -711,7 +719,7 @@
             fallout: toTrimmedString(source.fallout, '', 6000),
             followUp: toTrimmedString(source.followUp, '', 6000),
             source: toTrimmedString(source.source, '', 80),
-            kind: toTrimmedString(source.kind, '', 80),
+            kind,
             resolved: toBoolean(source.resolved),
             created: createdAt,
             impactSeverity: sanitizeImpactSeverity(source.impactSeverity, 'moderate'),

@@ -320,12 +320,12 @@
 
     const buildClueDiscoveredEventTitle = (value = '') => {
         const clueTitle = String(value || '').trim() || 'Untitled Clue';
-        return `CLUE DISCOVERED: ${clueTitle}`;
+        return `Clue: ${clueTitle}`;
     };
 
     const extractClueTitleFromEventTitle = (value = '') => {
         const raw = String(value || '').trim();
-        const stripped = raw.replace(/^clue\s+discovered\s*:\s*/i, '').trim();
+        const stripped = raw.replace(/^(?:clue\s+discovered|clue)\s*:\s*/i, '').trim();
         return stripped || 'Untitled Clue';
     };
 
@@ -1608,6 +1608,9 @@
     function buildEventCard(evt, index = 0, total = 0, moveModeEnabled = false) {
         const evtId = escapeJsString(evt.id || '');
         const evtIdAttr = escapeHtml(String(evt.id || ''));
+        const titleValue = evt && evt.kind === 'clue-discovered'
+            ? buildClueDiscoveredEventTitle(extractClueTitleFromEventTitle(evt.title || ''))
+            : String(evt && evt.title || '');
         const heat = parseInt(evt.heatDelta, 10);
         const heatClass = heat > 0 ? 'tag-pill-heat-up' : 'tag-pill-heat-down';
         const heatText = !isNaN(heat) && heat !== 0
@@ -1651,7 +1654,7 @@
                 <div class="event-card-content">
                     <div class="event-head">
                         <div class="event-head-main">
-                        <h3><input type="text" value="${escapeHtml(evt.title || '')}" placeholder="Title"
+                        <h3><input type="text" value="${escapeHtml(titleValue)}" placeholder="Title"
                             data-onchange="updateEventField('${evtId}', 'title', this.value)"></h3>
                         </div>
                         <button class="toggle-btn status-toggle status-pill ${statusClass} ${resolved ? 'active' : ''}" type="button"

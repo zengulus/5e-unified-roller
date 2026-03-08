@@ -1556,7 +1556,7 @@ function buildClueTimelineEventSeed(summary) {
     const tags = ['clue', 'board', 'clue-discovery'];
     if (sourceTag) tags.push(sourceTag);
     return {
-        title: `CLUE DISCOVERED: ${clueTitle}`,
+        title: `Clue: ${clueTitle}`,
         focus: getCaseName(),
         tags: Array.from(new Set(tags)).join(', '),
         imageUrl: sanitizeImageUrl(meta.imageUrl || ''),
