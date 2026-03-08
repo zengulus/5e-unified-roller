@@ -87,6 +87,7 @@
     margin-bottom: 25px;
     padding: 18px;
     display: flex;
+    flex-direction: column;
     gap: 14px;
     align-items: flex-start;
     border-radius: 12px;
@@ -107,6 +108,7 @@
 .event-card-content {
     flex: 1;
     min-width: 0;
+    width: 100%;
 }
 
 .event-card::before {
@@ -347,13 +349,13 @@
 
 .event-image-block {
     margin-top: 0;
-    width: 220px;
-    flex: 0 0 220px;
+    width: 100%;
+    flex: 0 0 auto;
 }
 
 .event-image-block img {
-    width: 100%;
-    max-height: 190px;
+    width: min(100%, 420px);
+    max-height: 260px;
     object-fit: cover;
     border-radius: 10px;
     border: 1px solid var(--invest-border-soft);
@@ -614,10 +616,6 @@
 
     .impact-editor-row {
         grid-template-columns: 1fr;
-    }
-
-    .event-card {
-        flex-direction: column;
     }
 
     .event-image-block {

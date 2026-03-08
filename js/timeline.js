@@ -1472,6 +1472,7 @@
 
         return `
         <div class="event-card${imageMarkup ? ' has-image' : ''}${highImpactClass}">
+            ${imageMarkup}
             <div class="event-card-content">
                 <div class="event-head">
                     <h3><input type="text" value="${escapeHtml(evt.title || '')}" placeholder="Title"
@@ -1536,7 +1537,6 @@
                     <button class="btn btn-danger" data-onclick="deleteTimelineEvent('${evtId}')">Delete</button>
                 </div>
             </div>
-            ${imageMarkup}
         </div>`;
     }
 

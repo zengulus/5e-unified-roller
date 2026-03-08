@@ -1221,9 +1221,10 @@ function boardAdminHtmlToText(value) {
         .trim();
 }
 
-function buildBoardAdminClueTimelinePayload(node, boardName) {
+function buildBoardAdminClueTimelinePayload(node, boardName, existingEvent = null) {
     const source = node && typeof node === 'object' ? node : {};
     const meta = source.meta && typeof source.meta === 'object' ? source.meta : {};
+    const existing = existingEvent && typeof existingEvent === 'object' ? existingEvent : {};
     const nodeId = String(source.id || '').trim();
     const title = String(source.title || '').trim() || 'Untitled Clue';
     const notes = boardAdminHtmlToText(source.body || '');
@@ -1243,6 +1244,8 @@ function buildBoardAdminClueTimelinePayload(node, boardName) {
         kind: 'clue-discovered',
         resolved: false,
         certainty: clampBoardAdminPercent(meta.certainty, 50),
+        impactSeverity: String(existing.impactSeverity || 'moderate'),
+        impactScope: String(existing.impactScope || 'local'),
         boardNodeId: nodeId,
         boardLinkType: 'node',
         boardLinkId: nodeId
@@ -1351,8 +1354,8 @@ function syncBoardAdminLinkedTimelineEvents() {
                 node.meta = meta;
             }
 
-            const payload = buildBoardAdminClueTimelinePayload({ ...node, meta }, boardName);
             const existing = existingEventMap.get(eventId);
+            const payload = buildBoardAdminClueTimelinePayload({ ...node, meta }, boardName, existing);
 
             if (!existing) {
                 addBoardAdminTimelineEvent(store, target, {
@@ -1374,6 +1377,8 @@ function syncBoardAdminLinkedTimelineEvents() {
                 source: payload.source,
                 kind: payload.kind,
                 certainty: payload.certainty,
+                impactSeverity: payload.impactSeverity,
+                impactScope: payload.impactScope,
                 boardNodeId: payload.boardNodeId,
                 boardLinkType: payload.boardLinkType,
                 boardLinkId: payload.boardLinkId

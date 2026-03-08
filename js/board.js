@@ -1578,8 +1578,9 @@ function setClueTimelineEventId(nodeEl, eventId) {
     return true;
 }
 
-function buildClueTimelineEventSeed(summary) {
+function buildClueTimelineEventSeed(summary, existingEvent = null) {
     const meta = summary && summary.meta && typeof summary.meta === 'object' ? summary.meta : {};
+    const existing = existingEvent && typeof existingEvent === 'object' ? existingEvent : {};
     const clueTitle = String(summary && summary.title || '').trim() || 'Untitled Clue';
     const clueNotes = String(summary && summary.bodyText || '').trim();
     const sourceSuffix = getSourceDescriptor(meta);
@@ -1595,6 +1596,8 @@ function buildClueTimelineEventSeed(summary) {
         source: 'board',
         kind: 'clue-discovered',
         certainty: clampPercent(meta.certainty, 50),
+        impactSeverity: String(existing.impactSeverity || 'moderate'),
+        impactScope: String(existing.impactScope || 'local'),
         boardNodeId: String(summary && summary.id || '').trim(),
         boardLinkType: 'node',
         boardLinkId: String(summary && summary.id || '').trim()
@@ -1614,7 +1617,7 @@ function syncClueTimelineEvent(nodeEl) {
     const meta = summary.meta && typeof summary.meta === 'object' ? summary.meta : {};
     const eventId = String(meta.clueTimelineEventId || '').trim() || createClueTimelineEventId(summary.id);
     const existing = (getBoardTimelineEvents(store, caseId) || []).find((entry) => String(entry && entry.id || '') === eventId);
-    const seed = buildClueTimelineEventSeed(summary);
+    const seed = buildClueTimelineEventSeed(summary, existing);
 
     setClueTimelineEventId(nodeEl, eventId);
 
@@ -1628,6 +1631,8 @@ function syncClueTimelineEvent(nodeEl) {
             source: seed.source,
             kind: seed.kind,
             certainty: seed.certainty,
+            impactSeverity: seed.impactSeverity,
+            impactScope: seed.impactScope,
             boardNodeId: seed.boardNodeId,
             boardLinkType: seed.boardLinkType,
             boardLinkId: seed.boardLinkId
@@ -1649,6 +1654,8 @@ function syncClueTimelineEvent(nodeEl) {
         kind: seed.kind,
         resolved: false,
         certainty: seed.certainty,
+        impactSeverity: seed.impactSeverity,
+        impactScope: seed.impactScope,
         boardNodeId: seed.boardNodeId,
         boardLinkType: seed.boardLinkType,
         boardLinkId: seed.boardLinkId,
