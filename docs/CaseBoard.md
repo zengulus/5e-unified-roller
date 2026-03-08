@@ -12,7 +12,7 @@ Case-scoped by design. For campaign-level graphing, use [Campaign Board](Campaig
 
 ## Building the Web
 - **Toolbar** – Drag People, Locations, Clues, and other custom node types straight onto the board. The `Notes` popover now offers `Freeform Note`, `Leads`, and `Ledger` options so you can drop structured note nodes without retyping.
-- **Editing Nodes** – Right-click a node and choose `Edit Text` for inline title/body edits. On touch devices, long-press a node to open the same action menu. The edit toolbar now includes sliders for Theory `confidence` and Clue/Theory `reliability` (4-step), while the context menu keeps operational actions like image updates, ledger capture, delete, and "Center & Optimize".
+- **Editing Nodes** – Right-click a node and choose `Edit Text` for inline title/body edits. On touch devices, long-press a node to open the same action menu. The edit toolbar includes a Theory `confidence` slider, while the context menu keeps operational actions like image updates, ledger capture, delete, and "Center & Optimize".
 - **Connections** – Drag from a node edge/port to another node to create a link, then use the connection label controls to set text, toggle arrowheads, or remove the link.
 
 ## Navigation
@@ -35,9 +35,8 @@ Case-scoped by design. For campaign-level graphing, use [Campaign Board](Campaig
 - **Campaign Board** – `campaign-board.html` shares the same interaction model but reads/writes campaign-level meta board + timeline records.
 
 ## Narrative Metadata + Ledger
-- **Certainty / Reliability / Confidence** – Clues expose `certainty`; Clues and Theories expose `reliability`; Theories expose `confidence`. Reliability renders as a bar badge and confidence uses the theory confidence bar, both tinted from the active accent.
-- **Theory Confidence Bridge** – Snapshot consumers can derive certainty from theory confidence when needed.
-- **Add to Ledger** – Context action creates `campaign.ledger` entries with source links (`eventId` or node id), certainty carryover, and case linkage.
+- **Theory Confidence** – Theory nodes expose `confidence`; other judgment calls are expected to live in the node text itself rather than dedicated certainty/reliability controls.
+- **Add to Ledger** – Context action creates `campaign.ledger` entries with source links (`eventId` or node id) and case linkage.
 
 ## Tips
 - Use guild popups to seed consistent iconography/colors that match your campaign; it keeps silhouettes recognizable when the web gets dense.

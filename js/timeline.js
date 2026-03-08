@@ -19,6 +19,12 @@
     let delegatedHandlersBound = false;
     let deleteManager = null;
     let pendingDeepLinkFocus = '';
+    let timelineDragHandlersBound = false;
+    const timelineDragState = {
+        draggedId: '',
+        overId: '',
+        placement: 'before'
+    };
     const sanitizeImageUrl = (url = '') => {
         const candidate = String(url || '').trim();
         if (!candidate) return '';
@@ -134,21 +140,6 @@
     };
     const PREP_PROCEDURE_STATE_KEY = 'rtf_prep_procedure_state_v1';
     const FREE_SHIELD_SESSION_PREFIX = 'rtf_procedure_free_shield_used_v1:';
-    const CERTAINTY_DEFAULT = 50;
-    const IMPACT_SEVERITY_OPTIONS = ['low', 'moderate', 'high', 'critical'];
-    const IMPACT_SCOPE_OPTIONS = ['local', 'district', 'guildwide', 'citywide'];
-    const IMPACT_SEVERITY_LABELS = {
-        low: 'Low',
-        moderate: 'Moderate',
-        high: 'High',
-        critical: 'Critical'
-    };
-    const IMPACT_SCOPE_LABELS = {
-        local: 'Local',
-        district: 'District',
-        guildwide: 'Guildwide',
-        citywide: 'Citywide'
-    };
     const createDefaultLeadVoter = () => `Player-${Math.floor(1000 + Math.random() * 9000)}`;
     const getStoredLeadVoter = () => String(localStorage.getItem(LEAD_VOTER_NAME_KEY) || '').trim().slice(0, 60);
     const getOrCreateLeadVoter = () => {
@@ -157,26 +148,6 @@
         const generated = createDefaultLeadVoter();
         localStorage.setItem(LEAD_VOTER_NAME_KEY, generated);
         return generated;
-    };
-
-    const clampCertainty = (value, fallback = CERTAINTY_DEFAULT) => {
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed)) return fallback;
-        return Math.max(0, Math.min(100, Math.round(parsed)));
-    };
-    const sanitizeImpactSeverity = (value, fallback = 'moderate') => {
-        const clean = String(value || '').trim().toLowerCase();
-        return IMPACT_SEVERITY_OPTIONS.includes(clean) ? clean : fallback;
-    };
-    const sanitizeImpactScope = (value, fallback = 'local') => {
-        const clean = String(value || '').trim().toLowerCase();
-        return IMPACT_SCOPE_OPTIONS.includes(clean) ? clean : fallback;
-    };
-    const getImpactSeverityLabel = (value) => IMPACT_SEVERITY_LABELS[sanitizeImpactSeverity(value, 'moderate')] || 'Moderate';
-    const getImpactScopeLabel = (value) => IMPACT_SCOPE_LABELS[sanitizeImpactScope(value, 'local')] || 'Local';
-    const hasHighImpact = (evt) => {
-        const severity = sanitizeImpactSeverity(evt && evt.impactSeverity, 'moderate');
-        return severity === 'high' || severity === 'critical';
     };
 
     const parseHeatDelta = (value) => {
@@ -260,6 +231,16 @@
         }
         return null;
     };
+    const updateTimelineBoardInStore = (store, board) => {
+        if (!store || !board) return;
+        if (isCampaignMetaView() && typeof store.updateCampaignMetaBoard === 'function') {
+            store.updateCampaignMetaBoard(board);
+            return;
+        }
+        if (typeof store.updateBoard === 'function') {
+            store.updateBoard(board, getActiveCaseId());
+        }
+    };
     const getTimelineOrderScope = () => (isCampaignMetaView()
         ? 'campaign.meta.events.__order'
         : `cases.${getActiveCaseId()}.events.__order`);
@@ -268,11 +249,119 @@
         const mode = String(sortEl && sortEl.value || '').trim().toLowerCase();
         return mode === 'oldest' || mode === 'heat' ? mode : 'newest';
     };
+    const getTimelineSortLabel = (mode) => {
+        if (mode === 'oldest') return 'Earliest to Latest';
+        if (mode === 'heat') return 'By Heat';
+        return 'Latest to Earliest';
+    };
     const isChronologicalSortSelected = () => {
         const mode = getTimelineSortMode();
         return mode === 'oldest' || mode === 'newest';
     };
-    const isMoveModeEnabled = () => isButtonPressed('eventMoveMode') && isChronologicalSortSelected();
+
+    const getClueSourceDescriptor = (meta) => {
+        if (!meta || !meta.sourceType) return '';
+        const type = String(meta.sourceType || '').trim().toLowerCase();
+        if (type === 'player') return ' from player roster';
+        if (type === 'npc') return ' from NPC roster';
+        if (type === 'location') return ' from locations database';
+        if (type === 'timeline-event') return ' from mission timeline';
+        if (type === 'requisition') return ' from requisitions';
+        if (type === 'case') return ' from campaign scope';
+        if (type === 'guild') return ' from guild reference';
+        return '';
+    };
+
+    const boardHtmlToTimelineText = (value = '') => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        const shell = document.createElement('div');
+        shell.innerHTML = raw.replace(/<br\s*\/?>/gi, '\n');
+        const text = typeof shell.innerText === 'string'
+            ? shell.innerText
+            : String(shell.textContent || '');
+        return text
+            .replace(/\r/g, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    };
+
+    const timelineTextToBoardHtml = (value = '') => (
+        escapeHtml(String(value || '').replace(/\r/g, '').trim())
+            .replace(/\n/g, '<br>')
+    );
+
+    const buildClueDiscoveredEventTitle = (value = '') => {
+        const clueTitle = String(value || '').trim() || 'Untitled Clue';
+        return `CLUE DISCOVERED: ${clueTitle}`;
+    };
+
+    const extractClueTitleFromEventTitle = (value = '') => {
+        const raw = String(value || '').trim();
+        const stripped = raw.replace(/^clue\s+discovered\s*:\s*/i, '').trim();
+        return stripped || 'Untitled Clue';
+    };
+
+    const getLinkedClueNodeRecord = (board, evt) => {
+        if (!board || !Array.isArray(board.nodes) || !evt) return null;
+        const boardLinkType = String(evt.boardLinkType || '').trim().toLowerCase();
+        const nodeId = String(evt.boardLinkId || evt.boardNodeId || '').trim();
+        if ((boardLinkType && boardLinkType !== 'node') || !isBoardNodeId(nodeId)) return null;
+        const nodeIndex = board.nodes.findIndex((node) => String(node && node.id || '').trim() === nodeId);
+        if (nodeIndex < 0) return null;
+        const node = board.nodes[nodeIndex];
+        if (String(node && node.type || '').trim().toLowerCase() !== 'clue') return null;
+        const meta = node && node.meta && typeof node.meta === 'object' ? { ...node.meta } : {};
+        return { node, nodeId, nodeIndex, meta };
+    };
+
+    function syncTimelineClueEditToBoard(store, evt, field, value) {
+        const cleanField = String(field || '').trim();
+        if (!['title', 'highlights', 'imageUrl'].includes(cleanField)) return null;
+        const board = getTimelineBoard(store);
+        const linked = getLinkedClueNodeRecord(board, evt);
+        if (!linked) return null;
+
+        let clueTitle = String(linked.node && linked.node.title || '').trim() || 'Untitled Clue';
+        let clueNotes = boardHtmlToTimelineText(linked.node && linked.node.body || '');
+        let imageUrl = sanitizeImageUrl(linked.meta && linked.meta.imageUrl || '');
+
+        if (cleanField === 'title') {
+            clueTitle = extractClueTitleFromEventTitle(value);
+        } else if (cleanField === 'highlights') {
+            clueNotes = String(value || '').trim();
+        } else if (cleanField === 'imageUrl') {
+            imageUrl = sanitizeImageUrl(value || '');
+        }
+
+        const nextMeta = { ...linked.meta };
+        if (imageUrl) nextMeta.imageUrl = imageUrl;
+        else delete nextMeta.imageUrl;
+
+        const nextNode = {
+            ...linked.node,
+            title: clueTitle,
+            body: timelineTextToBoardHtml(clueNotes),
+            meta: Object.keys(nextMeta).length ? nextMeta : null
+        };
+        const nextBoard = {
+            ...board,
+            nodes: board.nodes.slice()
+        };
+        nextBoard.nodes[linked.nodeIndex] = nextNode;
+        updateTimelineBoardInStore(store, nextBoard);
+
+        return {
+            title: buildClueDiscoveredEventTitle(clueTitle),
+            imageUrl,
+            highlights: clueNotes || `${clueTitle}${getClueSourceDescriptor(nextMeta)}.`,
+            source: 'board',
+            kind: 'clue-discovered',
+            boardNodeId: linked.nodeId,
+            boardLinkType: 'node',
+            boardLinkId: linked.nodeId
+        };
+    }
 
     const normalizeLeadType = (value) => {
         const clean = String(value || '').trim().toLowerCase();
@@ -779,37 +868,147 @@
         store.save({ scope: getTimelineOrderScope() });
     }
 
-    function moveTimelineEvent(id, direction) {
-        const cleanId = String(id || '').trim();
-        const step = Number(direction);
+    function clearTimelineDragState() {
+        timelineDragState.draggedId = '';
+        timelineDragState.overId = '';
+        timelineDragState.placement = 'before';
+        const container = document.getElementById('timelineList');
+        if (!container) return;
+        container.querySelectorAll('.event-card.is-dragging, .event-card.drop-before, .event-card.drop-after')
+            .forEach((card) => {
+                card.classList.remove('is-dragging', 'drop-before', 'drop-after');
+            });
+    }
+
+    function setTimelineDropIndicator(card, placement) {
+        const container = document.getElementById('timelineList');
+        if (!container) return;
+        container.querySelectorAll('.event-card.drop-before, .event-card.drop-after')
+            .forEach((entry) => {
+                if (entry !== card) entry.classList.remove('drop-before', 'drop-after');
+            });
+        if (!card) return;
+        card.classList.remove('drop-before', 'drop-after');
+        card.classList.add(placement === 'after' ? 'drop-after' : 'drop-before');
+    }
+
+    function reorderTimelineEventsByVisibleOrder(sourceId, targetId, placement = 'before') {
+        const cleanSourceId = String(sourceId || '').trim();
+        const cleanTargetId = String(targetId || '').trim();
+        const normalizedPlacement = placement === 'after' ? 'after' : 'before';
         const store = getStore();
-        if (!cleanId || !store || !Number.isFinite(step) || step === 0) return;
-
-        const sortEl = document.getElementById('eventSort');
-        if (sortEl) {
-            const currentSort = String(sortEl.value || '').trim().toLowerCase();
-            if (currentSort !== 'oldest' && currentSort !== 'newest') {
-                sortEl.value = 'oldest';
-            }
-        }
-
+        if (!cleanSourceId || !cleanTargetId || cleanSourceId === cleanTargetId || !store || !isChronologicalSortSelected()) return;
         const { filtered } = getFilteredEvents();
-        const filteredIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
-        const currentIndex = filteredIds.indexOf(cleanId);
-        const targetIndex = currentIndex + (step < 0 ? -1 : 1);
-        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= filteredIds.length) return;
-
+        const visibleIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        if (visibleIds.length < 2 || !visibleIds.includes(cleanSourceId) || !visibleIds.includes(cleanTargetId)) return;
         const events = getTimelineEvents(store);
         if (!Array.isArray(events)) return;
-        const sourceIdx = events.findIndex((evt) => String(evt && evt.id || '').trim() === cleanId);
-        const targetId = filteredIds[targetIndex];
-        const destinationIdx = events.findIndex((evt) => String(evt && evt.id || '').trim() === targetId);
-        if (sourceIdx < 0 || destinationIdx < 0 || sourceIdx === destinationIdx) return;
 
-        const [moved] = events.splice(sourceIdx, 1);
-        events.splice(destinationIdx, 0, moved);
+        const reorderedVisibleIds = visibleIds.filter((id) => id !== cleanSourceId);
+        const targetVisibleIdx = reorderedVisibleIds.indexOf(cleanTargetId);
+        if (targetVisibleIdx < 0) return;
+        const insertIdx = normalizedPlacement === 'after' ? targetVisibleIdx + 1 : targetVisibleIdx;
+        reorderedVisibleIds.splice(insertIdx, 0, cleanSourceId);
+
+        const baseVisibleIds = getTimelineSortMode() === 'newest'
+            ? reorderedVisibleIds.slice().reverse()
+            : reorderedVisibleIds.slice();
+        const visibleIdSet = new Set(baseVisibleIds);
+        const eventById = new Map(events.map((evt) => [String(evt && evt.id || '').trim(), evt]));
+        const visibleSlots = [];
+        events.forEach((evt, index) => {
+            const evtId = String(evt && evt.id || '').trim();
+            if (visibleIdSet.has(evtId)) visibleSlots.push(index);
+        });
+        if (visibleSlots.length !== baseVisibleIds.length) return;
+
+        const nextOrder = events.slice();
+        for (let i = 0; i < baseVisibleIds.length; i += 1) {
+            const replacement = eventById.get(baseVisibleIds[i]);
+            if (!replacement) return;
+            nextOrder[visibleSlots[i]] = replacement;
+        }
+
+        events.splice(0, events.length, ...nextOrder);
         persistTimelineEventOrder(store);
         renderTimeline();
+    }
+
+    function handleTimelineDragStart(event) {
+        if (!isChronologicalSortSelected()) return;
+        const handle = event.target && typeof event.target.closest === 'function'
+            ? event.target.closest('[data-timeline-drag-handle]')
+            : null;
+        if (!handle) return;
+        const draggedId = String(handle.dataset.timelineDragHandle || '').trim();
+        if (!draggedId) return;
+        timelineDragState.draggedId = draggedId;
+        timelineDragState.overId = '';
+        timelineDragState.placement = 'before';
+        const card = handle.closest('.event-card');
+        if (card) card.classList.add('is-dragging');
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            try {
+                event.dataTransfer.setData('text/plain', draggedId);
+            } catch (err) {
+                console.warn('Timeline drag data transfer failed', err);
+            }
+        }
+    }
+
+    function handleTimelineDragOver(event) {
+        if (!timelineDragState.draggedId || !isChronologicalSortSelected()) return;
+        const card = event.target && typeof event.target.closest === 'function'
+            ? event.target.closest('.event-card[data-event-id]')
+            : null;
+        if (!card) return;
+        const overId = String(card.dataset.eventId || '').trim();
+        if (!overId || overId === timelineDragState.draggedId) {
+            setTimelineDropIndicator(null, 'before');
+            return;
+        }
+        event.preventDefault();
+        const rect = card.getBoundingClientRect();
+        const placement = event.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+        timelineDragState.overId = overId;
+        timelineDragState.placement = placement;
+        setTimelineDropIndicator(card, placement);
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleTimelineDrop(event) {
+        if (!timelineDragState.draggedId) return;
+        event.preventDefault();
+        const card = event.target && typeof event.target.closest === 'function'
+            ? event.target.closest('.event-card[data-event-id]')
+            : null;
+        const targetId = String(card && card.dataset ? card.dataset.eventId || '' : timelineDragState.overId).trim();
+        if (!targetId || targetId === timelineDragState.draggedId) {
+            clearTimelineDragState();
+            return;
+        }
+        const rect = card ? card.getBoundingClientRect() : null;
+        const placement = rect && Number.isFinite(event.clientY)
+            ? (event.clientY > rect.top + rect.height / 2 ? 'after' : 'before')
+            : timelineDragState.placement;
+        reorderTimelineEventsByVisibleOrder(timelineDragState.draggedId, targetId, placement);
+        clearTimelineDragState();
+    }
+
+    function handleTimelineDragEnd() {
+        clearTimelineDragState();
+    }
+
+    function bindTimelineDragHandlers() {
+        if (timelineDragHandlersBound) return;
+        const container = document.getElementById('timelineList');
+        if (!container) return;
+        timelineDragHandlersBound = true;
+        container.addEventListener('dragstart', handleTimelineDragStart);
+        container.addEventListener('dragover', handleTimelineDragOver);
+        container.addEventListener('drop', handleTimelineDrop);
+        container.addEventListener('dragend', handleTimelineDragEnd);
     }
 
     function toggleEventForm() {
@@ -828,12 +1027,6 @@
         });
         const heat = document.getElementById('eventHeat');
         if (heat) heat.value = '';
-        const certainty = document.getElementById('eventCertainty');
-        if (certainty) certainty.value = String(CERTAINTY_DEFAULT);
-        const severity = document.getElementById('eventImpactSeverity');
-        if (severity) severity.value = 'moderate';
-        const scope = document.getElementById('eventImpactScope');
-        if (scope) scope.value = 'local';
     }
 
     function addTimelineEvent() {
@@ -855,9 +1048,6 @@
             title,
             focus: document.getElementById('eventFocus').value,
             heatDelta: document.getElementById('eventHeat').value,
-            impactSeverity: sanitizeImpactSeverity(document.getElementById('eventImpactSeverity').value, 'moderate'),
-            impactScope: sanitizeImpactScope(document.getElementById('eventImpactScope').value, 'local'),
-            certainty: clampCertainty(document.getElementById('eventCertainty').value, CERTAINTY_DEFAULT),
             tags: document.getElementById('eventTags').value,
             imageUrl,
             highlights: document.getElementById('eventHighlights').value,
@@ -1315,18 +1505,13 @@
             }
             nextValue = clean;
         }
-        if (field === 'certainty') {
-            nextValue = clampCertainty(value, CERTAINTY_DEFAULT);
-        }
-        if (field === 'impactSeverity') {
-            nextValue = sanitizeImpactSeverity(value, 'moderate');
-        }
-        if (field === 'impactScope') {
-            nextValue = sanitizeImpactScope(value, 'local');
-        }
         const existing = (getTimelineEvents(store) || []).find((evt) => evt && evt.id === id);
         const previousHeat = existing ? parseHeatDelta(existing.heatDelta) : 0;
-        updateTimelineEventInStore(store, id, { [field]: nextValue });
+        const linkedCluePatch = existing ? syncTimelineClueEditToBoard(store, existing, field, nextValue) : null;
+        const patch = linkedCluePatch
+            ? { [field]: nextValue, ...linkedCluePatch }
+            : { [field]: nextValue };
+        updateTimelineEventInStore(store, id, patch);
         if (field === 'heatDelta') {
             const nextHeat = parseHeatDelta(nextValue);
             applyHeatDelta(nextHeat - previousHeat, store);
@@ -1398,9 +1583,6 @@
             source: String(sourceEvent.source || 'case-timeline-copy').trim() || 'case-timeline-copy',
             kind: 'copied-from-case',
             resolved: Boolean(sourceEvent.resolved),
-            impactSeverity: String(sourceEvent.impactSeverity || '').trim(),
-            impactScope: String(sourceEvent.impactScope || '').trim(),
-            certainty: clampCertainty(sourceEvent.certainty, CERTAINTY_DEFAULT),
             originCaseId: sourceCaseId,
             originCaseName: sourceCaseName,
             originEventId: cleanId,
@@ -1427,20 +1609,15 @@
         return cleaned.replace(/\s*\n+\s*/g, ' ');
     }
 
-    function buildEventCard(evt, index = 0, total = 0, reorderMode = false) {
+    function buildEventCard(evt, dragEnabled = false) {
         const evtId = escapeJsString(evt.id || '');
+        const evtIdAttr = escapeHtml(String(evt.id || ''));
         const heat = parseInt(evt.heatDelta, 10);
         const heatClass = heat > 0 ? 'tag-pill-heat-up' : 'tag-pill-heat-down';
         const heatText = !isNaN(heat) && heat !== 0
             ? `<span class="tag-pill ${heatClass}">Heat ${heat > 0 ? '+' : ''}${heat}</span>`
             : '';
         const focusDisplay = evt.focus ? `<span class="tag-pill">${escapeHtml(evt.focus)}</span>` : '';
-        const severity = sanitizeImpactSeverity(evt.impactSeverity, 'moderate');
-        const scope = sanitizeImpactScope(evt.impactScope, 'local');
-        const certainty = clampCertainty(evt.certainty, CERTAINTY_DEFAULT);
-        const severityText = `<span class="tag-pill tag-pill-severity severity-${severity}">${escapeHtml(getImpactSeverityLabel(severity))}</span>`;
-        const scopeText = `<span class="tag-pill tag-pill-scope">${escapeHtml(getImpactScopeLabel(scope))}</span>`;
-        const certaintyText = `<span class="tag-pill tag-pill-certainty">Certainty ${certainty}%</span>`;
         const resolved = Boolean(evt.resolved);
         const statusClass = resolved ? 'resolved' : 'pending';
         const statusLabel = resolved ? 'Resolved' : 'Pending';
@@ -1453,7 +1630,6 @@
         const procedureShieldButton = showProcedureShield
             ? `<button class="btn btn-procedure ${freeShieldAvailable ? 'is-free' : ''}" data-onclick="spendProcedureShield('${evtId}')">${freeShieldAvailable ? 'Shield -1 (Free)' : 'Shield -1'}</button>`
             : '';
-        const highImpactClass = (!resolved && hasHighImpact(evt)) ? ' event-high-impact' : '';
         const attribution = (evt.lastChangedBy || evt.lastChangedAt)
             ? `Updated ${evt.lastChangedAt ? new Date(evt.lastChangedAt).toLocaleString() : '—'}${evt.lastChangedBy ? ` by ${escapeHtml(evt.lastChangedBy)}` : ''}`
             : '';
@@ -1463,20 +1639,20 @@
         const copyToCampaignButton = isCampaignMetaView()
             ? ''
             : `<button class="btn" data-onclick="copyEventToCampaignTimeline('${evtId}')">Copy to Campaign Timeline</button>`;
-        const reorderControls = reorderMode
-            ? `<div class="event-reorder-controls">
-                    <button class="btn" ${index <= 0 ? 'disabled' : ''} data-onclick="moveTimelineEvent('${evtId}', -1)">Up</button>
-                    <button class="btn" ${index >= total - 1 ? 'disabled' : ''} data-onclick="moveTimelineEvent('${evtId}', 1)">Down</button>
-               </div>`
+        const dragHandle = dragEnabled
+            ? `<span class="event-drag-handle" draggable="true" data-timeline-drag-handle="${evtIdAttr}" title="Drag to reorder">Drag</span>`
             : '';
 
         return `
-        <div class="event-card${imageMarkup ? ' has-image' : ''}${highImpactClass}">
+        <div class="event-card${imageMarkup ? ' has-image' : ''}${dragEnabled ? ' is-draggable' : ''}" data-event-id="${evtIdAttr}">
             ${imageMarkup}
             <div class="event-card-content">
                 <div class="event-head">
-                    <h3><input type="text" value="${escapeHtml(evt.title || '')}" placeholder="Title"
-                        data-onchange="updateEventField('${evtId}', 'title', this.value)"></h3>
+                    <div class="event-head-main">
+                        ${dragHandle}
+                        <h3><input type="text" value="${escapeHtml(evt.title || '')}" placeholder="Title"
+                            data-onchange="updateEventField('${evtId}', 'title', this.value)"></h3>
+                    </div>
                     <button class="toggle-btn status-toggle status-pill ${statusClass} ${resolved ? 'active' : ''}" type="button"
                         aria-pressed="${resolved ? 'true' : 'false'}"
                         data-onclick="toggleResolved('${evtId}', this)">${statusLabel}</button>
@@ -1493,23 +1669,6 @@
                             data-onchange="updateEventField('${evtId}', 'heatDelta', this.value)">
                     </div>
                     <div>
-                        <label>Severity</label>
-                        <select data-onchange="updateEventField('${evtId}', 'impactSeverity', this.value)">
-                            ${IMPACT_SEVERITY_OPTIONS.map((option) => `<option value="${option}" ${option === severity ? 'selected' : ''}>${escapeHtml(getImpactSeverityLabel(option))}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div>
-                        <label>Scope</label>
-                        <select data-onchange="updateEventField('${evtId}', 'impactScope', this.value)">
-                            ${IMPACT_SCOPE_OPTIONS.map((option) => `<option value="${option}" ${option === scope ? 'selected' : ''}>${escapeHtml(getImpactScopeLabel(option))}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div>
-                        <label>Certainty (0-100)</label>
-                        <input type="number" min="0" max="100" step="1" value="${certainty}"
-                            data-onchange="updateEventField('${evtId}', 'certainty', this.value)">
-                    </div>
-                    <div>
                         <label>Tags</label>
                         <input type="text" value="${escapeHtml(evt.tags || '')}" placeholder="tags"
                             data-onchange="updateEventField('${evtId}', 'tags', this.value)">
@@ -1520,7 +1679,7 @@
                             data-onchange="updateEventField('${evtId}', 'imageUrl', this.value)">
                     </div>
                 </div>
-                <div class="event-pill-row">${heatText} ${severityText} ${scopeText} ${certaintyText} ${focusDisplay} ${renderTagPills(evt.tags)}</div>
+                <div class="event-pill-row">${heatText} ${focusDisplay} ${renderTagPills(evt.tags)}</div>
                 <div class="event-body">
                     <textarea placeholder="Highlights" data-onchange="updateEventField('${evtId}', 'highlights', this.value)">${escapeHtml(evt.highlights || '')}</textarea>
                     <textarea placeholder="Fallout" data-onchange="updateEventField('${evtId}', 'fallout', this.value)">${escapeHtml(evt.fallout || '')}</textarea>
@@ -1529,7 +1688,6 @@
                 <div class="event-actions">
                     <small class="event-log-meta">Logged ${evt.created ? new Date(evt.created).toLocaleString() : '—'}</small>
                     ${attribution ? `<small class="event-log-meta">${attribution}</small>` : ''}
-                    ${reorderControls}
                     ${procedureShieldButton}
                     ${leadActionButton}
                     ${copyToCampaignButton}
@@ -1573,14 +1731,13 @@
 
         const filtered = events.filter(evt => {
             if (manager && manager.isPending(evt.id)) return false;
-            const text = `${evt.id || ''} ${evt.title || ''} ${evt.focus || ''} ${evt.highlights || ''} ${evt.fallout || ''} ${evt.followUp || ''} ${evt.tags || ''} ${evt.impactSeverity || ''} ${evt.impactScope || ''} ${evt.certainty || ''}`.toLowerCase();
+            const text = `${evt.id || ''} ${evt.title || ''} ${evt.focus || ''} ${evt.highlights || ''} ${evt.fallout || ''} ${evt.followUp || ''} ${evt.tags || ''}`.toLowerCase();
             const matchesSearch = search ? text.includes(search) : true;
             const matchesFocus = focusFilter ? evt.focus === focusFilter : true;
             const heat = parseInt(evt.heatDelta, 10);
             const matchesImpact = impactOnly
                 ? (!isNaN(heat) && heat !== 0)
                     || (evt.fallout && evt.fallout.trim())
-                    || hasHighImpact(evt)
                 : true;
             const matchesResolved = hideResolved ? !evt.resolved : true;
             return matchesSearch && matchesFocus && matchesImpact && matchesResolved;
@@ -1616,8 +1773,8 @@
         lines.push('## Active Filters');
         lines.push(`- Search: ${filters.search ? `"${filters.search}"` : 'None'}`);
         lines.push(`- Focus: ${filters.focusFilter || 'All'}`);
-        lines.push(`- Sort: ${filters.sort}`);
-        lines.push(`- Impact only: ${filters.impactOnly ? 'Yes' : 'No'}`);
+        lines.push(`- Sort: ${getTimelineSortLabel(filters.sort)}`);
+        lines.push(`- Heat / Fallout only: ${filters.impactOnly ? 'Yes' : 'No'}`);
         lines.push(`- Hide resolved: ${filters.hideResolved ? 'Yes' : 'No'}`);
         lines.push('');
 
@@ -1626,15 +1783,9 @@
             const focus = normalizeRecapText(evt.focus);
             const heat = parseInt(evt.heatDelta, 10);
             const heatDisplay = Number.isNaN(heat) ? '—' : `${heat > 0 ? '+' : ''}${heat}`;
-            const severity = getImpactSeverityLabel(evt.impactSeverity);
-            const scope = getImpactScopeLabel(evt.impactScope);
-            const certainty = `${clampCertainty(evt.certainty, CERTAINTY_DEFAULT)}%`;
             lines.push(`### ${title}`);
             lines.push(`- Focus: ${focus}`);
             lines.push(`- Heat Δ: ${heatDisplay}`);
-            lines.push(`- Severity: ${severity}`);
-            lines.push(`- Scope: ${scope}`);
-            lines.push(`- Certainty: ${certainty}`);
             lines.push(`- Status: ${evt.resolved ? 'Resolved' : 'Pending'}`);
             lines.push(`- Image: ${normalizeRecapText(evt.imageUrl)}`);
             lines.push(`- Highlights: ${normalizeRecapText(evt.highlights)}`);
@@ -1679,20 +1830,18 @@
         const container = document.getElementById('timelineList');
         if (!container) return;
         const { filtered } = getFilteredEvents();
-        const moveModeButton = document.getElementById('eventMoveMode');
-        if (moveModeButton && !isChronologicalSortSelected() && moveModeButton.getAttribute('aria-pressed') === 'true') {
-            setButtonPressed(moveModeButton, false);
-        }
-        const reorderMode = isMoveModeEnabled();
+        const dragEnabled = isChronologicalSortSelected();
+        clearTimelineDragState();
 
         container.innerHTML = filtered.length
-            ? filtered.map((evt, index) => buildEventCard(evt, index, filtered.length, reorderMode)).join('')
+            ? filtered.map((evt) => buildEventCard(evt, dragEnabled)).join('')
             : '<div class="empty-state">No events logged yet.</div>';
         renderLeadQueue();
     }
 
     function init() {
         getDeleteManager();
+        bindTimelineDragHandlers();
         const autoHeatToggle = document.getElementById('eventAutoHeat');
         if (autoHeatToggle) {
             setButtonPressed(autoHeatToggle, isHeatAutoSyncEnabled());
@@ -1720,7 +1869,6 @@
     window.toggleEventForm = toggleEventForm;
     window.addTimelineEvent = addTimelineEvent;
     window.renderTimeline = renderTimeline;
-    window.moveTimelineEvent = moveTimelineEvent;
     window.updateEventField = updateEventField;
     window.deleteTimelineEvent = deleteTimelineEvent;
     window.copyEventToCampaignTimeline = copyEventToCampaignTimeline;
@@ -1740,7 +1888,6 @@
     window.openLeadOnBoard = openLeadOnBoard;
     window.toggleFilterButton = toggleFilterButton;
     window.toggleAutoHeat = toggleAutoHeat;
-    window.toggleMoveMode = toggleMoveMode;
     window.toggleResolved = toggleResolved;
 
     window.addEventListener('load', waitForStore);
@@ -1781,20 +1928,6 @@
         const next = button.getAttribute('aria-pressed') !== 'true';
         setButtonPressed(button, next);
         setHeatAutoSync(next);
-    }
-
-    function toggleMoveMode(button) {
-        if (!button) return;
-        const next = button.getAttribute('aria-pressed') !== 'true';
-        const sortEl = document.getElementById('eventSort');
-        if (next && sortEl) {
-            const currentSort = String(sortEl.value || '').trim().toLowerCase();
-            if (currentSort !== 'oldest' && currentSort !== 'newest') {
-                sortEl.value = 'oldest';
-            }
-        }
-        setButtonPressed(button, next);
-        renderTimeline();
     }
 
     function toggleResolved(id, button) {

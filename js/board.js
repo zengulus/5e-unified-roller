@@ -1228,44 +1228,13 @@ function syncNodeNarrativeMetaDisplay(nodeEl) {
     if (!nodeEl || !nodeEl.classList) return;
     const type = getNodeTypeFromEl(nodeEl);
     if (!NARRATIVE_META_NODE_TYPES.has(type)) return;
-    const meta = ensureNarrativeNodeMeta(nodeEl);
-    if (!meta) return;
     const slot = nodeEl.querySelector('[data-node-meta-badges]');
     if (!slot) return;
-    const pills = [];
-    if (NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) {
-        const certainty = clampPercent(meta.certainty, 50);
-        pills.push(`<span class="node-meta-pill">Certainty ${certainty}%</span>`);
-    }
-    if (NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) {
-        const reliabilityKey = normalizeReliability(meta.reliability);
-        const reliabilityLabel = getReliabilityLabel(reliabilityKey);
-        const reliabilityPercent = getReliabilityPercent(reliabilityKey);
-        pills.push(`
-            <div class="node-meta-bar node-meta-reliability" data-reliability="${sanitizeText(reliabilityKey)}">
-                <span class="node-meta-bar-label">Reliability</span>
-                <span class="node-meta-bar-value">${sanitizeText(reliabilityLabel)}</span>
-                <div class="node-meta-track">
-                    <div class="node-meta-fill" style="width:${reliabilityPercent}%"></div>
-                </div>
-            </div>
-        `);
-    }
-    slot.innerHTML = pills.join('');
+    slot.innerHTML = '';
 }
 
 function persistLinkedNodeNarrativeMeta(nodeEl) {
-    if (!nodeEl || !window.RTF_STORE) return;
-    const type = getNodeTypeFromEl(nodeEl);
-    if (!NARRATIVE_CERTAINTY_NODE_TYPES.has(type)) return;
-    const meta = ensureNarrativeNodeMeta(nodeEl);
-    if (!meta) return;
-    const store = window.RTF_STORE;
-    if (String(meta.sourceType || '') !== 'timeline-event') return;
-    const eventId = String(meta.eventId || '').trim();
-    if (!eventId) return;
-    const caseId = String(meta.caseId || '').trim();
-    updateBoardTimelineEvent(store, eventId, { certainty: clampPercent(meta.certainty, 50) }, caseId || null);
+    void nodeEl;
 }
 
 function readLeadStorage() {
@@ -1578,9 +1547,8 @@ function setClueTimelineEventId(nodeEl, eventId) {
     return true;
 }
 
-function buildClueTimelineEventSeed(summary, existingEvent = null) {
+function buildClueTimelineEventSeed(summary) {
     const meta = summary && summary.meta && typeof summary.meta === 'object' ? summary.meta : {};
-    const existing = existingEvent && typeof existingEvent === 'object' ? existingEvent : {};
     const clueTitle = String(summary && summary.title || '').trim() || 'Untitled Clue';
     const clueNotes = String(summary && summary.bodyText || '').trim();
     const sourceSuffix = getSourceDescriptor(meta);
@@ -1595,9 +1563,6 @@ function buildClueTimelineEventSeed(summary, existingEvent = null) {
         highlights: clueNotes || `${clueTitle}${sourceSuffix}.`,
         source: 'board',
         kind: 'clue-discovered',
-        certainty: clampPercent(meta.certainty, 50),
-        impactSeverity: String(existing.impactSeverity || 'moderate'),
-        impactScope: String(existing.impactScope || 'local'),
         boardNodeId: String(summary && summary.id || '').trim(),
         boardLinkType: 'node',
         boardLinkId: String(summary && summary.id || '').trim()
@@ -1617,22 +1582,17 @@ function syncClueTimelineEvent(nodeEl) {
     const meta = summary.meta && typeof summary.meta === 'object' ? summary.meta : {};
     const eventId = String(meta.clueTimelineEventId || '').trim() || createClueTimelineEventId(summary.id);
     const existing = (getBoardTimelineEvents(store, caseId) || []).find((entry) => String(entry && entry.id || '') === eventId);
-    const seed = buildClueTimelineEventSeed(summary, existing);
+    const seed = buildClueTimelineEventSeed(summary);
 
     setClueTimelineEventId(nodeEl, eventId);
 
     if (existing) {
         updateBoardTimelineEvent(store, eventId, {
             title: seed.title,
-            focus: seed.focus,
-            tags: seed.tags,
             imageUrl: seed.imageUrl,
             highlights: seed.highlights,
             source: seed.source,
             kind: seed.kind,
-            certainty: seed.certainty,
-            impactSeverity: seed.impactSeverity,
-            impactScope: seed.impactScope,
             boardNodeId: seed.boardNodeId,
             boardLinkType: seed.boardLinkType,
             boardLinkId: seed.boardLinkId
@@ -1653,9 +1613,6 @@ function syncClueTimelineEvent(nodeEl) {
         source: seed.source,
         kind: seed.kind,
         resolved: false,
-        certainty: seed.certainty,
-        impactSeverity: seed.impactSeverity,
-        impactScope: seed.impactScope,
         boardNodeId: seed.boardNodeId,
         boardLinkType: seed.boardLinkType,
         boardLinkId: seed.boardLinkId,
@@ -2490,10 +2447,6 @@ function initFormattingToolbar() {
             <div class="formatting-meta-label">Confidence <span data-meta-value="confidence">50%</span></div>
             <input type="range" class="formatting-meta-slider" min="0" max="100" step="1" value="50" data-meta-slider="confidence">
         </div>
-        <div class="formatting-meta-row" data-meta-row="reliability">
-            <div class="formatting-meta-label">Reliability <span data-meta-value="reliability">Unknown</span></div>
-            <input type="range" class="formatting-meta-slider" min="0" max="${RELIABILITY_ORDER.length - 1}" step="1" value="0" data-meta-slider="reliability">
-        </div>
     `;
     tb.appendChild(meta);
 
@@ -2507,12 +2460,6 @@ function initFormattingToolbar() {
             if (type !== 'theory') return;
             const nextConfidence = clampPercent(rawValue, 50);
             applyNarrativeMetaUpdate(nodeEl, { confidence: nextConfidence });
-            return;
-        }
-        if (kind === 'reliability') {
-            if (!NARRATIVE_RELIABILITY_NODE_TYPES.has(type)) return;
-            const nextReliability = reliabilityFromIndex(rawValue);
-            applyNarrativeMetaUpdate(nodeEl, { reliability: nextReliability });
         }
     };
 
@@ -2535,13 +2482,6 @@ function initFormattingToolbar() {
                 const valueEl = tb.querySelector('[data-meta-value="confidence"]');
                 if (valueEl) valueEl.textContent = `${val}%`;
                 applySliderChange(kind, val);
-                return;
-            }
-            if (kind === 'reliability') {
-                const reliability = reliabilityFromIndex(input.value);
-                const valueEl = tb.querySelector('[data-meta-value="reliability"]');
-                if (valueEl) valueEl.textContent = getReliabilityLabel(reliability);
-                applySliderChange(kind, input.value);
             }
         });
     });
@@ -2554,16 +2494,12 @@ function syncFormattingToolbarMeta(nodeEl) {
     if (!tb) return;
     const metaControls = tb.querySelector('.formatting-meta-controls');
     const confidenceRow = tb.querySelector('[data-meta-row="confidence"]');
-    const reliabilityRow = tb.querySelector('[data-meta-row="reliability"]');
     const confidenceSlider = tb.querySelector('[data-meta-slider="confidence"]');
-    const reliabilitySlider = tb.querySelector('[data-meta-slider="reliability"]');
     const confidenceValue = tb.querySelector('[data-meta-value="confidence"]');
-    const reliabilityValue = tb.querySelector('[data-meta-value="reliability"]');
     if (!nodeEl) {
         tb.dataset.targetNodeId = '';
         if (metaControls) metaControls.style.display = 'none';
         if (confidenceRow) confidenceRow.style.display = 'none';
-        if (reliabilityRow) reliabilityRow.style.display = 'none';
         return;
     }
 
@@ -2580,16 +2516,7 @@ function syncFormattingToolbarMeta(nodeEl) {
         if (confidenceSlider) confidenceSlider.value = String(confidence);
         if (confidenceValue) confidenceValue.textContent = `${confidence}%`;
     }
-
-    const showReliability = NARRATIVE_RELIABILITY_NODE_TYPES.has(type);
-    if (reliabilityRow) reliabilityRow.style.display = showReliability ? '' : 'none';
-    if (showReliability) {
-        const reliability = normalizeReliability(meta.reliability);
-        const reliabilityIdx = reliabilityToIndex(reliability);
-        if (reliabilitySlider) reliabilitySlider.value = String(reliabilityIdx);
-        if (reliabilityValue) reliabilityValue.textContent = getReliabilityLabel(reliability);
-    }
-    if (metaControls) metaControls.style.display = (showConfidence || showReliability) ? 'flex' : 'none';
+    if (metaControls) metaControls.style.display = showConfidence ? 'flex' : 'none';
 }
 
 function getBoardGuildNames() {
@@ -2731,12 +2658,9 @@ function buildLocationNodePayload(location) {
 function buildEventNodePayload(evt) {
     const source = evt && typeof evt === 'object' ? evt : {};
     const heat = parseInt(source.heatDelta, 10);
-    const severity = String(source.impactSeverity || 'moderate');
-    const scope = String(source.impactScope || 'local');
     const lines = [];
     if (source.focus) lines.push(`<strong>Focus:</strong> ${sanitizeText(source.focus)}`);
     if (!isNaN(heat) && heat !== 0) lines.push(`<strong>Heat:</strong> ${heat > 0 ? '+' : ''}${heat}`);
-    lines.push(`<strong>Impact:</strong> ${sanitizeText(severity)} / ${sanitizeText(scope)}`);
     if (source.highlights) lines.push(`<strong>Beats:</strong><br>${sanitizeMultiline(source.highlights)}`);
     if (source.fallout) lines.push(`<strong>Fallout:</strong><br>${sanitizeMultiline(source.fallout)}`);
     if (source.followUp) lines.push(`<strong>Next:</strong> ${sanitizeMultiline(source.followUp)}`);
@@ -2752,9 +2676,7 @@ function buildEventNodePayload(evt) {
                 eventId: source.id || '',
                 heatDelta: !isNaN(heat) ? heat : '',
                 focus: source.focus || '',
-                caseId: source.caseId || '',
-                impactSeverity: severity,
-                impactScope: scope
+                caseId: source.caseId || ''
             }
         }
     };
@@ -5171,7 +5093,6 @@ function openContextMenuAt(node, clientX, clientY, options = {}) {
     const isTheory = type === 'theory';
     const isLedgerNote = type === 'note' && String(meta.sourceType || '').trim().toLowerCase() === 'ledger';
     const supportsNarrativeMeta = NARRATIVE_META_NODE_TYPES.has(type);
-    const supportsCertainty = NARRATIVE_CERTAINTY_NODE_TYPES.has(type);
     if (supportsNarrativeMeta) {
         ensureNarrativeNodeMeta(node);
         syncNodeNarrativeMetaDisplay(node);
@@ -5185,7 +5106,7 @@ function openContextMenuAt(node, clientX, clientY, options = {}) {
     if (setImageItem) {
         setImageItem.style.display = IMAGE_EDITABLE_NODE_TYPES.has(type) ? 'block' : 'none';
     }
-    if (setCertaintyItem) setCertaintyItem.style.display = supportsCertainty ? 'block' : 'none';
+    if (setCertaintyItem) setCertaintyItem.style.display = 'none';
     if (addLedgerItem) addLedgerItem.style.display = (type !== 'group' && !isLedgerNote) ? 'block' : 'none';
     if (theoryConfirmedItem) theoryConfirmedItem.style.display = isTheory ? 'block' : 'none';
     if (theoryDisprovenItem) theoryDisprovenItem.style.display = isTheory ? 'block' : 'none';

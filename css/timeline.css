@@ -130,9 +130,19 @@
     flex-wrap: wrap;
 }
 
+.event-head-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
 .event-head h3 {
     margin: 0;
     font-size: 1.1rem;
+    flex: 1;
+    min-width: 0;
 }
 
 .event-meta {
@@ -170,15 +180,54 @@
     align-items: center;
 }
 
-.event-reorder-controls {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
+.event-card.is-draggable {
+    transition: transform 140ms ease, opacity 140ms ease, box-shadow 140ms ease;
 }
 
-.event-reorder-controls .btn[disabled] {
-    opacity: 0.45;
-    cursor: not-allowed;
+.event-card.is-dragging {
+    opacity: 0.5;
+    transform: scale(0.99);
+}
+
+.event-card.drop-before::after,
+.event-card.drop-after::after {
+    content: '';
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-secondary));
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.event-card.drop-before::after {
+    top: 8px;
+}
+
+.event-card.drop-after::after {
+    bottom: 8px;
+}
+
+.event-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px dashed var(--invest-border-soft);
+    background: color-mix(in srgb, var(--invest-surface-chip) 82%, rgba(255, 255, 255, 0.04));
+    color: var(--invest-text-muted);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: grab;
+    user-select: none;
+}
+
+.event-drag-handle:active {
+    cursor: grabbing;
 }
 
 .tag-pill {

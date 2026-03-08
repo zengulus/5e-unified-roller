@@ -4,10 +4,10 @@ Campaign-level timeline for cross-case beats, blockers, and strategic updates.
 
 ## Scope
 - Uses campaign meta events (`campaign.meta.events`) instead of case events.
-- Shares the same event model as Case Timeline (heat delta, severity/scope, certainty, tags, notes).
+- Shares the same event model as Case Timeline (heat delta, tags, notes, and optional image).
 - Board links target `campaign-board.html` so event-node cross-links stay in campaign scope.
 - Lead Queue actions are intentionally omitted here; lead triage stays case-scoped in `timeline.html`/`leads.html`.
-- Supports the same filtered `Newest` / `Oldest` timeline reordering flow as Case Timeline, so campaign beats can be re-sequenced without losing search/focus filters.
+- Supports the same filtered drag reordering flow as Case Timeline while in `Latest to Earliest` or `Earliest to Latest`, so campaign beats can be re-sequenced without losing search/focus filters.
 
 ## Typical Use
 1. Log multi-case pivots, faction escalations, and blocker decisions.

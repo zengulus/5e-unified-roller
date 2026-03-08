@@ -213,10 +213,10 @@ function renderNarrativePressure() {
     if (!summaryEl || !window.RTF_STORE) return;
     const events = getAllCaseEvents();
     const unresolvedCount = events.filter((evt) => evt && !evt.resolved).length;
-    const highImpactCount = events.filter((evt) => {
+    const activeConsequenceCount = events.filter((evt) => {
         if (!evt || evt.resolved) return false;
-        const severity = String(evt.impactSeverity || '').trim().toLowerCase();
-        return severity === 'high' || severity === 'critical';
+        const heat = parseInt(evt.heatDelta, 10);
+        return (!isNaN(heat) && heat !== 0) || !!String(evt.fallout || '').trim();
     }).length;
     const ledger = window.RTF_STORE.state && window.RTF_STORE.state.campaign && window.RTF_STORE.state.campaign.ledger
         ? window.RTF_STORE.state.campaign.ledger
@@ -230,7 +230,7 @@ function renderNarrativePressure() {
 
     summaryEl.innerHTML = `
         <div>Unresolved timeline events: <strong>${unresolvedCount}</strong></div>
-        <div>High-impact unresolved events: <strong>${highImpactCount}</strong></div>
+        <div>Open heat/fallout events: <strong>${activeConsequenceCount}</strong></div>
         <div>Ledger pinned facts / review queue: <strong>${stableCount} / ${reviewQueueCount}</strong></div>
     `;
 }

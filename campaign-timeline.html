@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="css/theme.css?v=20260304f">
     <link rel="stylesheet" href="css/hub.css?v=20260222a">
     <link rel="stylesheet" href="css/player-nav.css?v=20260306a">
-    <link rel="stylesheet" href="css/timeline.css?v=20260309c">
+    <link rel="stylesheet" href="css/timeline.css?v=20260309d">
 </head>
 
 <body data-player-nav="campaign-timeline">
@@ -48,28 +48,6 @@
                         <input type="number" id="eventHeat" placeholder="0">
                     </div>
                     <div>
-                        <label>Severity</label>
-                        <select id="eventImpactSeverity">
-                            <option value="low">Low</option>
-                            <option value="moderate" selected>Moderate</option>
-                            <option value="high">High</option>
-                            <option value="critical">Critical</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Scope</label>
-                        <select id="eventImpactScope">
-                            <option value="local" selected>Local</option>
-                            <option value="district">District</option>
-                            <option value="guildwide">Guildwide</option>
-                            <option value="citywide">Citywide</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Certainty (0-100)</label>
-                        <input type="number" id="eventCertainty" min="0" max="100" step="1" value="50">
-                    </div>
-                    <div>
                         <label>Tags</label>
                         <input type="text" id="eventTags" placeholder="stakeout, dimir, chase">
                     </div>
@@ -95,9 +73,9 @@
                         <option value="">All Focuses</option>
                     </select>
                     <select id="eventSort" data-onchange="renderTimeline()">
-                        <option value="newest">Newest First</option>
-                        <option value="oldest">Oldest First</option>
-                        <option value="heat">By Heat Impact</option>
+                        <option value="newest">Latest to Earliest</option>
+                        <option value="oldest">Earliest to Latest</option>
+                        <option value="heat">By Heat</option>
                     </select>
                 </div>
                 <div class="filter-row actions">
@@ -108,8 +86,6 @@
                             data-onclick="toggleAutoHeat(this)">Auto-sync Heat</button>
                         <button class="toggle-btn" id="eventHideResolved" type="button" aria-pressed="false"
                             data-onclick="toggleFilterButton(this, renderTimeline)">Hide Resolved</button>
-                        <button class="toggle-btn" id="eventMoveMode" type="button" aria-pressed="false"
-                            data-onclick="toggleMoveMode(this)">Move Up / Down</button>
                     </div>
                     <div class="filter-actions">
                         <button class="btn btn-dp" id="exportRecapBtn" data-onclick="exportTimelineRecap()">Export Recap</button>
@@ -126,12 +102,12 @@
     <script src="js/data-guilds.js"></script>
     <script src="js/data-setting.js"></script>
     <script src="js/data.js"></script>
-    <script src="js/store.js?v=20260306a"></script>
+    <script src="js/store.js?v=20260309e"></script>
     <script src="js/player-nav.js?v=20260306a"></script>
     <script src="js/soft-delete.js"></script>
     <script src="js/vector-field.js"></script>
     <script>window.RTF_VIEW_SCOPE = 'campaign';</script>
-    <script src="js/timeline.js?v=20260309c"></script>
+    <script src="js/timeline.js?v=20260309f"></script>
 </body>
 
 </html>

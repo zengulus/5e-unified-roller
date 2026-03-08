@@ -7259,7 +7259,11 @@
             };
 
             const eventFromSnapshot = (eventEntry) => {
-                const event = sanitizeEvent(eventEntry, 0);
+                const baseEvent = sanitizeEvent(eventEntry, 0);
+                const event = { ...baseEvent };
+                delete event.impactSeverity;
+                delete event.impactScope;
+                delete event.certainty;
                 if (mode === 'full') {
                     return event;
                 }
@@ -7270,9 +7274,6 @@
                     heatDelta: event.heatDelta,
                     focus: event.focus,
                     tags: event.tags,
-                    impactSeverity: event.impactSeverity,
-                    impactScope: event.impactScope,
-                    certainty: event.certainty,
                     lastChangedBy: event.lastChangedBy,
                     lastChangedAt: event.lastChangedAt,
                     highlights: toTrimmedString(event.highlights, '', 800),
@@ -7289,18 +7290,24 @@
                     ...event,
                     caseId: sanitizeCaseId(event.caseId || entry.id, entry.id || activeCaseId)
                 }));
-                const sortedEvents = events.slice().sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
-                const compactEvents = sortedEvents
-                    .sort((left, right) => {
-                        if (!!left.resolved === !!right.resolved) return String(right.created || '').localeCompare(String(left.created || ''));
-                        return left.resolved ? 1 : -1;
-                    })
-                    .slice(0, 25)
-                    .sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
+                const orderedEvents = events.slice();
+                const unresolvedIds = orderedEvents
+                    .filter((event) => !event.resolved)
+                    .slice(-25)
+                    .map((event) => event.id);
+                const remainingSlots = Math.max(0, 25 - unresolvedIds.length);
+                const resolvedIds = remainingSlots > 0
+                    ? orderedEvents
+                        .filter((event) => event.resolved)
+                        .slice(-remainingSlots)
+                        .map((event) => event.id)
+                    : [];
+                const compactEventIds = new Set(unresolvedIds.concat(resolvedIds));
+                const compactEvents = orderedEvents.filter((event) => compactEventIds.has(event.id));
                 return {
                     id: sanitizeCaseId(entry.id, 'case_primary'),
                     name: sanitizeCaseName(entry.name, DEFAULT_CASE_NAME),
-                    events: (mode === 'full' ? sortedEvents : compactEvents).map(eventFromSnapshot),
+                    events: (mode === 'full' ? orderedEvents : compactEvents).map(eventFromSnapshot),
                     boardSummary: {
                         nodes: Array.isArray(board.nodes) ? board.nodes.length : 0,
                         connections: Array.isArray(board.connections) ? board.connections.length : 0,
@@ -7315,8 +7322,10 @@
                 caseName: entry.name
             })) : []);
             const openEvents = allEvents.filter((event) => !event.resolved);
-            const highImpactOpen = openEvents.filter((event) => event.impactSeverity === 'high' || event.impactSeverity === 'critical');
-            const lowCertHighImpact = highImpactOpen.filter((event) => clampPercent(event.certainty, 50) <= 45);
+            const activeConsequences = openEvents.filter((event) => {
+                const heat = parseInt(event.heatDelta, 10);
+                return (!Number.isNaN(heat) && heat !== 0) || !!toTrimmedString(event.fallout, '', 800);
+            });
 
             const ledger = sanitizeLedgerState(campaign.ledger);
             const ledgerSourceEntries = target === 'case'
@@ -7437,7 +7446,7 @@
             if (!pressure.length) pressure.push('World pressure currently stable.');
 
             const immediateComplications = [];
-            if (highImpactOpen.length) immediateComplications.push('High-impact unresolved events are active.');
+            if (activeConsequences.length) immediateComplications.push('Open events with heat or fallout are active.');
             if (!immediateComplications.length) immediateComplications.push('No urgent complications flagged.');
 
             const openThreads = openEvents
@@ -7512,19 +7521,12 @@
                     worldPressure: pressure,
                     immediateComplications,
                     openThreads,
-                    high_impact_open: highImpactOpen.map((event) => ({
+                    active_consequences: activeConsequences.map((event) => ({
                         id: event.id,
                         title: event.title,
                         caseId: event.caseId,
-                        impactSeverity: event.impactSeverity,
-                        impactScope: event.impactScope
-                    })),
-                    low_certainty_high_impact: lowCertHighImpact.map((event) => ({
-                        id: event.id,
-                        title: event.title,
-                        caseId: event.caseId,
-                        certainty: clampPercent(event.certainty, 50),
-                        impactSeverity: event.impactSeverity
+                        heatDelta: event.heatDelta,
+                        fallout: toTrimmedString(event.fallout, '', 240)
                     }))
                 },
                 attributionSummary: {

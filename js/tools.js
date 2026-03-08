@@ -660,9 +660,8 @@ function renderCampaignOverview() {
     const nowCaseLabel = activeCase && activeCase.name ? activeCase.name : (activeCaseId || '—');
     const blockers = (Array.isArray(activeEvents) ? activeEvents : []).filter((evt) => {
         if (!evt || evt.resolved) return false;
-        const severity = String(evt.impactSeverity || '').trim().toLowerCase();
-        const severe = severity === 'high' || severity === 'critical';
-        return severe;
+        const heat = parseInt(evt.heatDelta, 10);
+        return (!isNaN(heat) && heat !== 0) || !!String(evt.fallout || '').trim();
     });
     const rawBlockedLabel = blockers.length
         ? (String(blockers[0].title || blockers[0].focus || '').trim() || `${blockers.length} unresolved blocker(s)`)
@@ -1221,10 +1220,9 @@ function boardAdminHtmlToText(value) {
         .trim();
 }
 
-function buildBoardAdminClueTimelinePayload(node, boardName, existingEvent = null) {
+function buildBoardAdminClueTimelinePayload(node, boardName) {
     const source = node && typeof node === 'object' ? node : {};
     const meta = source.meta && typeof source.meta === 'object' ? source.meta : {};
-    const existing = existingEvent && typeof existingEvent === 'object' ? existingEvent : {};
     const nodeId = String(source.id || '').trim();
     const title = String(source.title || '').trim() || 'Untitled Clue';
     const notes = boardAdminHtmlToText(source.body || '');
@@ -1243,9 +1241,6 @@ function buildBoardAdminClueTimelinePayload(node, boardName, existingEvent = nul
         source: 'board',
         kind: 'clue-discovered',
         resolved: false,
-        certainty: clampBoardAdminPercent(meta.certainty, 50),
-        impactSeverity: String(existing.impactSeverity || 'moderate'),
-        impactScope: String(existing.impactScope || 'local'),
         boardNodeId: nodeId,
         boardLinkType: 'node',
         boardLinkId: nodeId
@@ -1355,7 +1350,7 @@ function syncBoardAdminLinkedTimelineEvents() {
             }
 
             const existing = existingEventMap.get(eventId);
-            const payload = buildBoardAdminClueTimelinePayload({ ...node, meta }, boardName, existing);
+            const payload = buildBoardAdminClueTimelinePayload({ ...node, meta }, boardName);
 
             if (!existing) {
                 addBoardAdminTimelineEvent(store, target, {
@@ -1370,15 +1365,10 @@ function syncBoardAdminLinkedTimelineEvents() {
 
             const patch = {
                 title: payload.title,
-                focus: payload.focus,
-                tags: payload.tags,
                 imageUrl: payload.imageUrl,
                 highlights: payload.highlights,
                 source: payload.source,
                 kind: payload.kind,
-                certainty: payload.certainty,
-                impactSeverity: payload.impactSeverity,
-                impactScope: payload.impactScope,
                 boardNodeId: payload.boardNodeId,
                 boardLinkType: payload.boardLinkType,
                 boardLinkId: payload.boardLinkId
