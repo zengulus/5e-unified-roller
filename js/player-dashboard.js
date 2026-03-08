@@ -85,6 +85,7 @@ const render = () => {
     players.forEach((p, i) => {
         const name = escapeHtml(p.name || '');
         const ac = Number.isFinite(Number(p.ac)) ? Number(p.ac) : 0;
+        const init = Number.isFinite(Number(p.init)) ? Number(p.init) : 0;
         const pp = Number.isFinite(Number(p.pp)) ? Number(p.pp) : 0;
         const dc = Number.isFinite(Number(p.dc)) ? Number(p.dc) : 0;
         const hpValue = escapeHtml(p.hp || 0);
@@ -107,20 +108,26 @@ const render = () => {
     <div class="stat-box">
         <span class="stat-label">AC</span>
         <input type="number" class="stat-val" value="${ac}"
-            data-oninput="updatePlayer(${i}, 'ac', parseInt(this.value, 10))"
-            data-onchange="updatePlayer(${i}, 'ac', parseInt(this.value, 10))">
+            data-oninput="updatePlayer(${i}, 'ac', this.value)"
+            data-onchange="updatePlayer(${i}, 'ac', this.value)">
+    </div>
+    <div class="stat-box">
+        <span class="stat-label">Initiative</span>
+        <input type="number" class="stat-val" value="${init}"
+            data-oninput="updatePlayer(${i}, 'init', this.value)"
+            data-onchange="updatePlayer(${i}, 'init', this.value)">
     </div>
     <div class="stat-box">
         <span class="stat-label">Passive Perc</span>
         <input type="number" class="stat-val${ppClass}" value="${pp}"
-            data-oninput="updatePlayer(${i}, 'pp', parseInt(this.value, 10))"
-            data-onchange="updatePlayer(${i}, 'pp', parseInt(this.value, 10))">
+            data-oninput="updatePlayer(${i}, 'pp', this.value)"
+            data-onchange="updatePlayer(${i}, 'pp', this.value)">
     </div>
     <div class="stat-box">
         <span class="stat-label">Save DC</span>
         <input type="number" class="stat-val" value="${dc}"
-            data-oninput="updatePlayer(${i}, 'dc', parseInt(this.value, 10))"
-            data-onchange="updatePlayer(${i}, 'dc', parseInt(this.value, 10))">
+            data-oninput="updatePlayer(${i}, 'dc', this.value)"
+            data-onchange="updatePlayer(${i}, 'dc', this.value)">
     </div>
 </div>
 
@@ -140,6 +147,7 @@ const addPlayer = () => {
         window.RTF_STORE.addPlayer({
             name: "New Agent",
             ac: 10,
+            init: 0,
             hp: 10,
             pp: 10,
             dc: 10,
@@ -152,13 +160,14 @@ const addPlayer = () => {
     }
 };
 
-const ALLOWED_PLAYER_FIELDS = new Set(['name', 'ac', 'pp', 'dc', 'hp']);
+const ALLOWED_PLAYER_FIELDS = new Set(['name', 'ac', 'init', 'pp', 'dc', 'hp']);
 const sanitizePlayerUpdateValue = (field, rawValue) => {
     if (field === 'name') return String(rawValue || '').slice(0, 160);
     if (field === 'hp') return String(rawValue || '').slice(0, 40);
 
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return 0;
+    if (field === 'init') return Math.max(-99, Math.min(999, Math.round(parsed)));
     return Math.max(0, Math.min(999, Math.round(parsed)));
 };
 

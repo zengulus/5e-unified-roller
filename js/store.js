@@ -5839,6 +5839,7 @@
                 id: playerId,
                 name: toTrimmedString(source.name || 'New Agent', 'New Agent', 160),
                 ac: Math.max(0, Math.min(999, Math.round(toNumber(source.ac, 10)))),
+                init: Math.max(-99, Math.min(999, Math.round(toNumber(source.init, 0)))),
                 hp: safeHp,
                 pp: Math.max(0, Math.min(999, Math.round(toNumber(source.pp, 10)))),
                 dc: Math.max(0, Math.min(999, Math.round(toNumber(source.dc, 10)))),
@@ -6595,6 +6596,7 @@
                         dp: toNumber(entry.dp, 0),
                         hp: entry.hp,
                         ac: toNumber(entry.ac, 0),
+                        init: toNumber(entry.init, 0),
                         pp: toNumber(entry.pp, 0),
                         dc: toNumber(entry.dc, 0)
                     })),

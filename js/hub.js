@@ -292,6 +292,7 @@ function addPlayer() {
         projectName: "",
         projectReward: "+1 Reputation",
         ac: 10,
+        init: 0,
         hp: 10,
         pp: 10,
         dc: 10

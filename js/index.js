@@ -221,6 +221,32 @@ function bindSheetNavButtons() {
 }
 bindSheetNavButtons();
 
+function bindRollerModeButtons() {
+    document.querySelectorAll('.mini-btn[data-mode]').forEach((btn) => {
+        if (btn.dataset.boundNativeClick === '1') return;
+        btn.dataset.boundNativeClick = '1';
+        const mode = String(btn.getAttribute('data-mode') || '').toLowerCase();
+        if (!['dis', 'norm', 'adv'].includes(mode)) return;
+        btn.removeAttribute('data-onclick');
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setMode(mode);
+        });
+    });
+
+    const secretBtn = document.getElementById('btnSecret');
+    if (!secretBtn || secretBtn.dataset.boundNativeClick === '1') return;
+    secretBtn.dataset.boundNativeClick = '1';
+    secretBtn.removeAttribute('data-onclick');
+    secretBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleSecret();
+    });
+}
+bindRollerModeButtons();
+
 function applySheetFaceState(face) {
     if (!data.uiState) data.uiState = {}
 

@@ -1198,8 +1198,8 @@ function renderCombat() {
             const bloodiedClass = (safeMaxHp > 0 && safeHp <= safeMaxHp / 2) ? 'hp-bloodied' : 'hp-healthy';
             hpHtml = `
                     <div class="hp-controls">
-                        <button class="btn-dmg-qs" data-onclick="modHP(${i}, +1)">+1</button>
-                        <button class="btn-dmg-qs" data-onclick="modHP(${i}, +5)">+5</button>
+                        <button class="btn-dmg-qs" data-onclick="modHP(${i}, 1)">+1</button>
+                        <button class="btn-dmg-qs" data-onclick="modHP(${i}, 5)">+5</button>
                         <button class="btn-dmg-qs" data-onclick="modHP(${i}, -1)">-1</button>
                         <button class="btn-dmg-qs" data-onclick="modHP(${i}, -5)">-5</button>
                         <div class="hp-display ${bloodiedClass}" data-onclick="setHP(${i})">${safeHp}</div>

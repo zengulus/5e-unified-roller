@@ -1,10 +1,18 @@
-const CACHE_NAME = 'ravnica-tools-v4';
+const CACHE_NAME = 'ravnica-tools-v5';
 const SHELL_ASSETS = [
     './',
     './tools.html',
     './index.html',
     './hub.html'
 ];
+const LIVE_FETCH_DESTINATIONS = new Set(['document', 'script', 'style', 'worker', 'sharedworker']);
+
+function shouldBypassHttpCache(request, url) {
+    if (!request || !url) return false;
+    if (request.mode === 'navigate') return true;
+    if (LIVE_FETCH_DESTINATIONS.has(request.destination)) return true;
+    return /\.(?:html|css|js|json|webmanifest)$/i.test(url.pathname);
+}
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
@@ -34,7 +42,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
         const cache = await caches.open(CACHE_NAME);
         try {
-            const networkResponse = await fetch(event.request);
+            const fetchOptions = shouldBypassHttpCache(event.request, url)
+                ? { cache: 'no-store' }
+                : undefined;
+            const networkResponse = fetchOptions
+                ? await fetch(event.request, fetchOptions)
+                : await fetch(event.request);
             if (
                 networkResponse &&
                 networkResponse.status === 200 &&
