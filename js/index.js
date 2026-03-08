@@ -5031,6 +5031,8 @@ function escapeJsString(str = '') {
 }
 
 let inventoryDragPayload = null;
+const INVENTORY_DROP_ZONE_SELECTOR = '.inventory-loose-area, .inventory-items, .inventory-children, .inventory-drop-slot';
+const INVENTORY_DRAG_OVER_SELECTOR = '.inventory-loose-area.drag-over, .inventory-items.drag-over, .inventory-children.drag-over, .inventory-drop-slot.drag-over';
 
 function onInventoryItemDragStart(event, itemId) {
     setInventoryDragPayload(event, { type: 'item', id: itemId });
@@ -5049,23 +5051,38 @@ function setInventoryDragPayload(event, payload) {
 }
 
 function onInventoryDragEnd() {
+    clearInventoryDragOverState();
     inventoryDragPayload = null;
+}
+
+function getInventoryDropZone(event) {
+    const target = event && event.target instanceof Element ? event.target : null;
+    if (!target) return null;
+    return target.closest(INVENTORY_DROP_ZONE_SELECTOR);
+}
+
+function clearInventoryDragOverState() {
+    document.querySelectorAll(INVENTORY_DRAG_OVER_SELECTOR).forEach((el) => {
+        el.classList.remove('drag-over');
+    });
 }
 
 function allowInventoryItemDrop(event) {
     const payload = getInventoryDragPayload(event);
     if (!payload || payload.type !== 'item') return;
     event.preventDefault();
-    event.currentTarget.classList.add('drag-over');
+    const zone = getInventoryDropZone(event);
+    if (zone) zone.classList.add('drag-over');
 }
 
 function onInventoryDropLeave(event) {
-    event.currentTarget.classList.remove('drag-over');
+    const zone = getInventoryDropZone(event);
+    if (zone) zone.classList.remove('drag-over');
 }
 
 function onInventoryItemDrop(event, targetId) {
     const payload = getInventoryDragPayload(event);
-    event.currentTarget.classList.remove('drag-over');
+    clearInventoryDragOverState();
     if (!payload || payload.type !== 'item') return;
     event.preventDefault();
     moveItem(payload.id, targetId === 'null' ? null : targetId);
@@ -5076,12 +5093,13 @@ function allowInventoryContainerDrop(event) {
     const payload = getInventoryDragPayload(event);
     if (!payload || payload.type !== 'container') return;
     event.preventDefault();
-    event.currentTarget.classList.add('drag-over');
+    const zone = getInventoryDropZone(event);
+    if (zone) zone.classList.add('drag-over');
 }
 
 function onInventoryContainerDrop(event, parentId, index) {
     const payload = getInventoryDragPayload(event);
-    event.currentTarget.classList.remove('drag-over');
+    clearInventoryDragOverState();
     if (!payload || payload.type !== 'container') return;
     event.preventDefault();
     nestContainer(payload.id, parentId === 'null' ? null : parentId, parseInt(index, 10));
@@ -5090,7 +5108,7 @@ function onInventoryContainerDrop(event, parentId, index) {
 
 function onInventoryContainerNest(event, parentId) {
     const payload = getInventoryDragPayload(event);
-    event.currentTarget.classList.remove('drag-over');
+    clearInventoryDragOverState();
     if (!payload || payload.type !== 'container') return;
     event.preventDefault();
     nestContainer(payload.id, parentId === 'null' ? null : parentId);

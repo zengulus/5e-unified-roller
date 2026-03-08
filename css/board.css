@@ -1207,6 +1207,30 @@ body.show-ports .node .port {
     background: rgba(255, 255, 255, 0.12);
 }
 
+.string-delete-btn {
+    border: 1px solid rgba(255, 120, 120, 0.35);
+    border-radius: 4px;
+    background: rgba(48, 12, 16, 0.9);
+    color: #ffb3b3;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    width: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.string-delete-btn:hover {
+    background: rgba(110, 20, 24, 0.95);
+    color: #fff;
+}
+
 .arrow-btn {
     width: 16px;
     height: 16px;

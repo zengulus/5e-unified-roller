@@ -1065,6 +1065,24 @@ function createConnectionBetweenNodes(fromNodeId, toNodeId, fromPort = null, toP
     return true;
 }
 
+function deleteConnectionById(connectionId, options = {}) {
+    const targetId = String(connectionId || '').trim();
+    if (!targetId) return false;
+
+    const existing = connections.find((conn) => conn && conn.id === targetId);
+    if (!existing) return false;
+
+    const preserveOptimizeSnapshot = !!(options && options.preserveOptimizeSnapshot);
+    const labelEl = document.getElementById('lbl_' + targetId);
+    if (labelEl) labelEl.remove();
+
+    connections = connections.filter((conn) => conn && conn.id !== targetId);
+    saveBoard();
+    loadBoard({ preserveOptimizeSnapshot });
+    updateViewCSS();
+    return true;
+}
+
 function getHeatDeltaFromNode(summary) {
     if (!summary) return null;
     const metaHeat = summary.meta && summary.meta.heatDelta;
@@ -4232,7 +4250,20 @@ function createLabelDOM(conn) {
         controls.append(relationBtn);
     }
 
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'string-delete-btn';
+    deleteBtn.textContent = '×';
+    deleteBtn.title = 'Delete string';
+    deleteBtn.onmousedown = (e) => e.stopPropagation();
+    deleteBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteConnectionById(conn.id, { preserveOptimizeSnapshot: true });
+    };
+
     controls.append(btnR);
+    controls.append(deleteBtn);
     el.append(controls, input);
     syncConnectionArrowButtons(conn, el);
     labelContainer.appendChild(el);
@@ -6175,9 +6206,24 @@ document.addEventListener('dblclick', (e) => {
     }
 
     if (foundConn) {
-        if (!foundConn.label) {
-            foundConn.label = "Note";
-            saveBoard();
+        let labelEl = document.getElementById('lbl_' + foundConn.id);
+        if (!labelEl) labelEl = createLabelDOM(foundConn);
+        if (labelEl) {
+            labelEl.style.display = 'flex';
+            const input = labelEl.querySelector('.label-input');
+            if (input && typeof input.focus === 'function') {
+                requestAnimationFrame(() => {
+                    input.focus();
+                    const selection = window.getSelection ? window.getSelection() : null;
+                    if (selection && typeof document.createRange === 'function') {
+                        const range = document.createRange();
+                        range.selectNodeContents(input);
+                        range.collapse(false);
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    }
+                });
+            }
         }
     } else {
         // RESET FOCUS
