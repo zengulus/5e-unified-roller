@@ -60,6 +60,10 @@ const coarsePointerQuery = (typeof window.matchMedia === 'function')
 let mobileMode = false;
 let mobileHandlersBound = false;
 let keyboardShortcutAlertTimer = null;
+let boardCollabSession = null;
+let boardCollabInitPromise = null;
+let pendingRemoteBoardSnapshot = null;
+let activeBoardEditNodeId = '';
 
 const touchState = {
     dragTouchId: null,
@@ -408,6 +412,180 @@ function hexToRgba(hex, alpha = 1) {
 function getCaseName() {
     const el = document.getElementById('caseName');
     return normalizeCaseName(el ? el.innerText : 'UNNAMED CASE');
+}
+
+function getEmptyBoardPayload() {
+    return sanitizeBoardPayload({
+        name: isCampaignBoardView() ? 'CAMPAIGN META BOARD' : 'UNNAMED CASE',
+        nodes: [],
+        connections: []
+    });
+}
+
+function getBoardCollabRoomId() {
+    if (isCampaignBoardView()) return 'campaign:meta';
+    return `case:${getBoardActiveCaseId(window.RTF_STORE)}`;
+}
+
+function isBoardCollabReady() {
+    return !!(boardCollabSession && typeof boardCollabSession.isActive === 'function' && boardCollabSession.isActive());
+}
+
+function isBoardInteractionBusy() {
+    return !!draggedNode || !!activeBoardEditNodeId;
+}
+
+function getBoardCollabSnapshot() {
+    if (!isBoardCollabReady() || typeof boardCollabSession.getSnapshot !== 'function') return null;
+    try {
+        return sanitizeBoardPayload(boardCollabSession.getSnapshot());
+    } catch (err) {
+        console.warn('Board collaboration snapshot read failed', err);
+        return null;
+    }
+}
+
+function syncBoardCollabDecorations() {
+    if (!isBoardCollabReady() || typeof boardCollabSession.renderRemoteState !== 'function') return;
+    boardCollabSession.renderRemoteState();
+}
+
+function syncBoardCollabSelection(nodeIds = []) {
+    if (!isBoardCollabReady() || typeof boardCollabSession.setSelection !== 'function') return;
+    boardCollabSession.setSelection(nodeIds);
+}
+
+function clearBoardCollabCursor() {
+    if (!isBoardCollabReady() || typeof boardCollabSession.setCursor !== 'function') return;
+    boardCollabSession.setCursor(null);
+}
+
+function syncBoardCollabCursorFromEvent(event) {
+    if (!event || !isBoardCollabReady() || typeof boardCollabSession.setCursor !== 'function') return;
+    const targetEl = getEventTargetElement(event.target);
+    if (targetEl && isBoardUiSafeZone(targetEl)) {
+        boardCollabSession.setCursor(null);
+        return;
+    }
+    const worldPos = screenToWorld(event.clientX, event.clientY);
+    boardCollabSession.setCursor(worldPos);
+}
+
+function syncBoardCollabDragPreview(changes = []) {
+    if (!isBoardCollabReady()) return;
+    if (typeof boardCollabSession.updateNodePositions === 'function') {
+        boardCollabSession.updateNodePositions(changes);
+    }
+    if (typeof boardCollabSession.setDragging === 'function') {
+        if (!Array.isArray(changes) || !changes.length) {
+            boardCollabSession.setDragging(null);
+            return;
+        }
+        const lead = changes[0];
+        boardCollabSession.setDragging({
+            nodeId: lead.id,
+            x: lead.x,
+            y: lead.y
+        });
+    }
+}
+
+function applyPendingRemoteBoardSnapshot() {
+    if (!pendingRemoteBoardSnapshot || isBoardInteractionBusy()) return;
+    const snapshot = pendingRemoteBoardSnapshot;
+    pendingRemoteBoardSnapshot = null;
+    loadBoard({ preserveOptimizeSnapshot: true }, snapshot);
+    updateViewCSS();
+}
+
+function applyBoardCollabPositionChanges(changes = []) {
+    if (!Array.isArray(changes) || !changes.length) return;
+    if (isBoardInteractionBusy()) return;
+
+    changes.forEach((change) => {
+        if (!change || typeof change !== 'object') return;
+        const id = String(change.id || '').trim();
+        if (!id) return;
+        const el = document.getElementById(id);
+        if (!el || el.classList.contains('editing')) return;
+        const nextX = parseInt(change.x, 10);
+        const nextY = parseInt(change.y, 10);
+        if (Number.isFinite(nextX)) el.style.left = `${nextX}px`;
+        if (Number.isFinite(nextY)) el.style.top = `${nextY}px`;
+        updateNodeCache(id);
+    });
+    syncBoardCollabDecorations();
+}
+
+function applyBoardCollabRemoteSnapshot(payload) {
+    const clean = sanitizeBoardPayload(payload || getEmptyBoardPayload());
+    if (isBoardInteractionBusy()) {
+        pendingRemoteBoardSnapshot = clean;
+        return;
+    }
+    pendingRemoteBoardSnapshot = null;
+    loadBoard({ preserveOptimizeSnapshot: true }, clean);
+    updateViewCSS();
+}
+
+async function initBoardCollab() {
+    if (boardCollabInitPromise) return boardCollabInitPromise;
+    if (isExternalBoardMode()) return null;
+    if (!window.RTF_STORE || !window.RTF_BOARD_COLLAB_READY || typeof window.RTF_BOARD_COLLAB_READY.then !== 'function') {
+        return null;
+    }
+
+    boardCollabInitPromise = Promise.resolve(window.RTF_BOARD_COLLAB_READY)
+        .then((api) => {
+            if (!api || typeof api.createSession !== 'function') return null;
+            return api.createSession({
+                store: window.RTF_STORE,
+                roomId: getBoardCollabRoomId(),
+                scope: isCampaignBoardView() ? 'campaign' : 'case',
+                caseId: getBoardActiveCaseId(window.RTF_STORE),
+                getSeedPayload: () => readStoreBoardPayload() || getEmptyBoardPayload(),
+                getCurrentPayload: () => readStoreBoardPayload() || getEmptyBoardPayload(),
+                applySnapshot: (payload) => applyBoardCollabRemoteSnapshot(payload),
+                applyPositionChanges: (changes) => applyBoardCollabPositionChanges(changes),
+                worldToScreen: (point) => ({
+                    x: point.x * view.scale + view.x,
+                    y: point.y * view.scale + view.y
+                })
+            });
+        })
+        .then((session) => {
+            if (!session || (typeof session.isActive === 'function' && !session.isActive())) return null;
+            boardCollabSession = session;
+            syncBoardCollabDecorations();
+            return session;
+        })
+        .catch((err) => {
+            console.warn('Board collaboration init failed', err);
+            return null;
+        });
+
+    return boardCollabInitPromise;
+}
+
+async function refreshBoardCollabRoomIfNeeded() {
+    if (!boardCollabSession) return null;
+    const expectedRoomId = getBoardCollabRoomId();
+    if (boardCollabSession.roomId === expectedRoomId) return boardCollabSession;
+
+    try {
+        if (typeof boardCollabSession.destroy === 'function') {
+            await boardCollabSession.destroy();
+        }
+    } catch (err) {
+        console.warn('Board collaboration room refresh failed', err);
+    }
+
+    boardCollabSession = null;
+    boardCollabInitPromise = null;
+    pendingRemoteBoardSnapshot = null;
+    loadBoard();
+    updateViewCSS();
+    return initBoardCollab();
 }
 
 function sanitizeNodeMeta(meta) {
@@ -1276,6 +1454,8 @@ function writeHostBoardPayload(payload) {
 function readStoreBoardPayload() {
     const hostPayload = readHostBoardPayload();
     if (hostPayload) return hostPayload;
+    const collabPayload = getBoardCollabSnapshot();
+    if (collabPayload) return collabPayload;
     if (!window.RTF_STORE) return null;
     if (isCampaignBoardView() && typeof window.RTF_STORE.getCampaignMetaBoard === 'function') {
         return sanitizeBoardPayload(window.RTF_STORE.getCampaignMetaBoard());
@@ -1876,6 +2056,7 @@ window.addEventListener('load', async () => {
     updateViewCSS();
     initCaseNameTracking();
     window.addEventListener('rtf-store-updated', handleRemoteStoreUpdate);
+    initBoardCollab().catch(() => { });
     requestAnimationFrame(loop);
 });
 
@@ -1886,12 +2067,32 @@ function resizeCanvas() {
     canvas.height = window.innerHeight;
 }
 
+function isBoardExternalUpdateSource(source) {
+    return source === 'remote' || source === 'storage' || source === 'realtime';
+}
+
+function refreshBoardSharedPopups() {
+    renderNotePopup();
+    renderBoardPlayers();
+    renderNPCs();
+    renderLocations();
+    renderBoardEvents();
+    renderBoardCases();
+    renderBoardRequisitions();
+}
+
 function handleRemoteStoreUpdate(event) {
     if (isExternalBoardMode()) return;
     if (!event || !event.detail) return;
-    if (event.detail.source !== 'remote' && event.detail.source !== 'storage') return;
+    if (!isBoardExternalUpdateSource(event.detail.source)) return;
+    if (isBoardCollabReady()) {
+        refreshBoardCollabRoomIfNeeded().catch(() => { });
+        refreshBoardSharedPopups();
+        updateViewCSS();
+        return;
+    }
     loadBoard();
-    renderNotePopup();
+    refreshBoardSharedPopups();
     updateViewCSS();
 }
 
@@ -3517,6 +3718,7 @@ function startDragNode(e, el) {
     if (el.classList.contains('editing') || (e.button !== undefined && e.button !== 0)) return;
     draggedNode = el;
     draggedNodeFollowers = isGroupNodeEl(el) ? collectGroupedFollowerNodes(el) : [];
+    syncBoardCollabSelection([el.id]);
 
     const worldPos = screenToWorld(e.clientX, e.clientY);
     dragStart.x = worldPos.x;
@@ -3558,6 +3760,22 @@ function updateDraggedNodeFromClient(clientX, clientY) {
         cache.y = newY + (cache.relY || 0);
     }
     wakeConnected(draggedNode.id);
+
+    if (isBoardCollabReady()) {
+        const changes = [{ id: draggedNode.id, x: Math.round(newX), y: Math.round(newY) }];
+        if (draggedNodeFollowers.length) {
+            for (let i = 0; i < draggedNodeFollowers.length; i += 1) {
+                const follower = draggedNodeFollowers[i];
+                if (!follower) continue;
+                changes.push({
+                    id: follower.id,
+                    x: Math.round(follower.startX + dx),
+                    y: Math.round(follower.startY + dy)
+                });
+            }
+        }
+        syncBoardCollabDragPreview(changes);
+    }
 }
 
 function finalizeDraggedNode(clientX, clientY, options = {}) {
@@ -3635,6 +3853,8 @@ function finalizeDraggedNode(clientX, clientY, options = {}) {
 
     draggedNode = null;
     draggedNodeFollowers = [];
+    syncBoardCollabDragPreview([]);
+    applyPendingRemoteBoardSnapshot();
 }
 
 function handleTouchStart(event) {
@@ -3757,6 +3977,7 @@ function handleTouchEnd(event) {
 
 document.addEventListener('mousemove', (e) => {
     const worldPos = screenToWorld(e.clientX, e.clientY);
+    syncBoardCollabCursorFromEvent(e);
 
     if (draggedNode) {
         updateDraggedNodeFromClient(e.clientX, e.clientY);
@@ -3773,6 +3994,11 @@ document.addEventListener('mousemove', (e) => {
         panStart = { x: e.clientX, y: e.clientY };
         updateViewCSS();
     }
+});
+
+document.addEventListener('mouseout', (e) => {
+    if (e.relatedTarget) return;
+    clearBoardCollabCursor();
 });
 
 document.addEventListener('mouseup', (e) => {
@@ -3804,6 +4030,7 @@ document.addEventListener('mouseup', (e) => {
         isPanning = false;
         document.body.style.cursor = panMode ? "grab" : "default";
     }
+    applyPendingRemoteBoardSnapshot();
 });
 
 function createNodeMarkup(type, content = {}) {
@@ -4319,6 +4546,7 @@ function updateViewCSS() {
     if (groupContainer) groupContainer.style.transform = t;
     container.style.transform = t;
     labelContainer.style.transform = t;
+    syncBoardCollabDecorations();
 }
 
 function toggleToolbar() {
@@ -4359,6 +4587,8 @@ document.addEventListener('wheel', (e) => {
 
 document.addEventListener('mousedown', (e) => {
     if (isBoardUiSafeZone(e.target)) return;
+    const clickedNode = e.target && typeof e.target.closest === 'function' ? e.target.closest('.node') : null;
+    if (!clickedNode) syncBoardCollabSelection([]);
     if (e.button === 1 || (panMode && e.button === 0 && !e.target.closest('.node'))) {
         isPanning = true;
         panStart = { x: e.clientX, y: e.clientY };
@@ -4378,18 +4608,20 @@ document.addEventListener('keyup', (e) => {
 
 window.addEventListener('blur', () => {
     syncPortPreviewState(false);
+    clearBoardCollabCursor();
 });
 
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) syncPortPreviewState(false);
+    if (document.hidden) clearBoardCollabCursor();
 });
 
-function saveBoard() {
+function buildBoardPayloadFromDom(trackNameChange = true) {
     const caseNameEl = document.getElementById('caseName');
     const caseName = normalizeCaseName(caseNameEl ? caseNameEl.innerText : 'UNNAMED CASE');
     if (caseNameEl && caseNameEl.innerText !== caseName) caseNameEl.innerText = caseName;
 
-    if (!isHydratingBoard && lastSavedCaseName && caseName !== lastSavedCaseName) {
+    if (trackNameChange && !isHydratingBoard && lastSavedCaseName && caseName !== lastSavedCaseName) {
         logBoardTimeline({
             title: isCampaignBoardView() ? 'Campaign Board Renamed' : 'Case File Renamed',
             kind: isCampaignBoardView() ? 'campaign-board-rename' : 'case-rename',
@@ -4423,7 +4655,7 @@ function saveBoard() {
         };
     });
 
-    const data = {
+    return sanitizeBoardPayload({
         name: caseName,
         nodes: nodeData,
         connections: connections.map(c => ({
@@ -4434,10 +4666,27 @@ function saveBoard() {
             colorIndex: clampConnectionColorIndex(c.colorIndex),
             theoryRelation: c.theoryRelation ? normalizeTheoryRelation(c.theoryRelation) : ''
         }))
-    };
-    if (!writeStoreBoardPayload(data)) {
-        localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(sanitizeBoardPayload(data)));
+    });
+}
+
+function persistBoardPayload(payload, options = {}) {
+    const clean = sanitizeBoardPayload(payload || getEmptyBoardPayload());
+    const opts = options && typeof options === 'object' ? options : {};
+    if (isBoardCollabReady() && typeof boardCollabSession.syncSnapshot === 'function') {
+        boardCollabSession.syncSnapshot(clean, { flushNow: !!opts.flushNow }).catch((err) => {
+            console.warn('Board collaboration sync failed', err);
+        });
+        return clean;
     }
+    if (!writeStoreBoardPayload(clean)) {
+        localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(clean));
+    }
+    return clean;
+}
+
+function saveBoard(options = {}) {
+    const data = buildBoardPayloadFromDom(true);
+    return persistBoardPayload(data, options);
 }
 
 function loadBoard(options = {}, payloadOverride = null) {
@@ -4495,12 +4744,21 @@ function loadBoard(options = {}, payloadOverride = null) {
         connections.push(hydrated);
         registerConnection(hydrated);
     });
+
+    syncBoardCollabDecorations();
 }
 
 function clearBoard() {
     if (confirm("Clear board?")) {
         lastOptimizeSnapshot = null;
         updateUndoOptimizeMenuState();
+        if (isBoardCollabReady()) {
+            const emptyPayload = getEmptyBoardPayload();
+            loadBoard({}, emptyPayload);
+            updateViewCSS();
+            saveBoard({ flushNow: true });
+            return;
+        }
         if (isExternalBoardMode()) {
             writeStoreBoardPayload({ name: "My Story", nodes: [], connections: [] });
             loadBoard();
@@ -4577,7 +4835,11 @@ window.togglePopup = function (id) {
     if (!el) return;
     if (id === 'note-popup') renderNotePopup();
     if (id === 'player-popup') renderBoardPlayers();
+    if (id === 'npc-popup') renderNPCs();
+    if (id === 'location-popup') renderLocations();
+    if (id === 'event-popup') renderBoardEvents();
     if (id === 'case-popup') renderBoardCases();
+    if (id === 'req-popup') renderBoardRequisitions();
 
     // Close others
     document.querySelectorAll('.popup-menu').forEach(p => {
@@ -5008,9 +5270,22 @@ function persistLinkedNodeImageUrl(nodeEl, imageUrl = '') {
 function editTargetNode() {
     const el = document.getElementById(contextMenu.dataset.target);
     if (!el) return;
+    if (isBoardCollabReady() && typeof boardCollabSession.getRemoteTextLock === 'function') {
+        const lock = boardCollabSession.getRemoteTextLock(el.id);
+        if (lock) {
+            alert(`${lock.profileName || 'Another player'} is already editing this node.`);
+            contextMenu.style.display = 'none';
+            return;
+        }
+    }
     el.classList.add('editing');
     const t = el.querySelector('.node-title');
     const b = el.querySelector('.node-body');
+    activeBoardEditNodeId = el.id;
+    syncBoardCollabSelection([el.id]);
+    if (isBoardCollabReady() && typeof boardCollabSession.setEditing === 'function') {
+        boardCollabSession.setEditing({ nodeId: el.id, field: 'title' });
+    }
     t.contentEditable = b.contentEditable = true;
     t.focus();
 
@@ -5043,11 +5318,19 @@ function editTargetNode() {
             saveBoard();
         }, 180);
     };
+    const syncEditingField = (field) => {
+        if (!isBoardCollabReady() || typeof boardCollabSession.setEditing !== 'function') return;
+        boardCollabSession.setEditing({ nodeId: el.id, field: field === 'body' ? 'body' : 'title' });
+    };
+    const handleTitleFocus = () => syncEditingField('title');
+    const handleBodyFocus = () => syncEditingField('body');
 
     t.addEventListener('keydown', handleKey);
     b.addEventListener('keydown', handleKey);
     t.addEventListener('input', queueEditAutosave);
     b.addEventListener('input', queueEditAutosave);
+    t.addEventListener('focus', handleTitleFocus);
+    b.addEventListener('focus', handleBodyFocus);
 
     let closed = false;
     let toolbarFocusOutHandler = null;
@@ -5060,6 +5343,8 @@ function editTargetNode() {
         b.removeEventListener('keydown', handleKey);
         t.removeEventListener('input', queueEditAutosave);
         b.removeEventListener('input', queueEditAutosave);
+        t.removeEventListener('focus', handleTitleFocus);
+        b.removeEventListener('focus', handleBodyFocus);
         if (editAutosaveTimer) {
             clearTimeout(editAutosaveTimer);
             editAutosaveTimer = null;
@@ -5069,8 +5354,13 @@ function editTargetNode() {
             tb.style.display = 'none';
             syncFormattingToolbarMeta(null);
         }
+        activeBoardEditNodeId = '';
+        if (isBoardCollabReady() && typeof boardCollabSession.setEditing === 'function') {
+            boardCollabSession.setEditing(null);
+        }
         updateNodeCache(el.id);
         saveBoard();
+        applyPendingRemoteBoardSnapshot();
     };
 
     const end = () => {
@@ -5132,6 +5422,7 @@ function deleteTargetNode() {
         }
         return true;
     });
+    syncBoardCollabSelection([]);
     saveBoard();
     loadBoard();
     contextMenu.style.display = 'none';
@@ -6138,6 +6429,7 @@ function clearBoardFocusMode() {
         el.classList.remove('blurred');
         el.classList.remove('focused');
     });
+    syncBoardCollabSelection([]);
 }
 
 function applyBoardFocusMode(nodeEl) {
@@ -6162,6 +6454,7 @@ function applyBoardFocusMode(nodeEl) {
         if (!neighborEl) return;
         neighborEl.classList.remove('blurred');
     });
+    syncBoardCollabSelection([nodeEl.id]);
 }
 
 // RESTORED HIT TEST
@@ -6248,6 +6541,9 @@ window.RTF_BOARD_EMBED_API = {
         updateViewCSS();
     },
     getSnapshot() {
+        if (isBoardCollabReady()) {
+            return getBoardCollabSnapshot() || buildBoardPayloadFromDom(false);
+        }
         saveBoard();
         const snapshot = readStoreBoardPayload();
         return sanitizeBoardPayload(snapshot || { name: getCaseName(), nodes: [], connections: [] });

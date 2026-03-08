@@ -4,6 +4,7 @@ Campaign-level investigation board for cross-case references, scope artifacts, a
 
 ## Scope
 - Reads/writes campaign meta board state (`campaign.meta.board`) instead of case boards.
+- Uses the shared board room `campaign:meta` for live multiplayer layout, cursors, selections, and advisory text-edit locks.
 - Timeline-event linking uses campaign meta events (`campaign.meta.events`).
 - Supports the same node, connection, popup, and context-menu tooling as Case Board, including the Cases object popup for quick case-reference nodes.
 

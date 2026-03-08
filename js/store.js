@@ -180,6 +180,7 @@
         backendMode: SYNC_BACKEND_LEGACY,
         schema: 'public',
         tableName: 'rtf_campaign_state',
+        boardRoomsTable: 'rtf_board_rooms',
         normalizedCoreTable: 'rtf_campaign_core',
         normalizedHQTable: 'rtf_campaign_hq',
         normalizedCaseStateTable: 'rtf_case_state',
@@ -1627,6 +1628,7 @@
             backendMode: sanitizeSyncBackendMode(source.backendMode),
             schema: sanitizeIdentifier(source.schema, DEFAULT_SYNC_CONFIG.schema),
             tableName: sanitizeIdentifier(source.tableName, DEFAULT_SYNC_CONFIG.tableName),
+            boardRoomsTable: sanitizeIdentifier(source.boardRoomsTable, DEFAULT_SYNC_CONFIG.boardRoomsTable),
             normalizedCoreTable: sanitizeIdentifier(source.normalizedCoreTable, DEFAULT_SYNC_CONFIG.normalizedCoreTable),
             normalizedHQTable: sanitizeIdentifier(source.normalizedHQTable, DEFAULT_SYNC_CONFIG.normalizedHQTable),
             normalizedCaseStateTable: sanitizeIdentifier(source.normalizedCaseStateTable, DEFAULT_SYNC_CONFIG.normalizedCaseStateTable),
@@ -4265,6 +4267,147 @@
             }
         }
 
+        async ensureBoardCollabClient() {
+            const config = sanitizeSyncConfig(this.sync && this.sync.config ? this.sync.config : getMergedSyncConfig());
+            if (!config.enabled) return { ok: false, reason: 'disabled', config };
+            if (!config.supabaseUrl || !config.anonKey || !config.campaignId) {
+                return { ok: false, reason: 'missing-config', config };
+            }
+
+            if (!this.sync.client || !this.syncStatus.connected) {
+                const connected = await this.connectSync();
+                if (!connected.ok) {
+                    return {
+                        ok: false,
+                        reason: connected.reason || 'connect-failed',
+                        error: connected.error || '',
+                        config: sanitizeSyncConfig(this.sync && this.sync.config ? this.sync.config : config)
+                    };
+                }
+            }
+
+            return {
+                ok: true,
+                client: this.sync.client,
+                config: sanitizeSyncConfig(this.sync.config),
+                instanceId: this.sync.instanceId,
+                userId: this.sync.userId || '',
+                profileName: this.sync.config && this.sync.config.profileName ? this.sync.config.profileName : ''
+            };
+        }
+
+        async loadBoardRoomSnapshot(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const roomId = toTrimmedString(opts.roomId, '', 160).trim();
+            if (!roomId) return { ok: false, reason: 'missing-room-id' };
+
+            const ensured = await this.ensureBoardCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+            const caseId = scope === 'campaign' ? '' : sanitizeCaseId(opts.caseId, this.getActiveCaseId());
+            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
+
+            const result = await ensured.client
+                .from(tableName)
+                .select(selectCols)
+                .eq('campaign_id', ensured.config.campaignId)
+                .eq('room_id', roomId)
+                .maybeSingle();
+
+            if (result.error) {
+                return {
+                    ok: false,
+                    reason: 'read-failed',
+                    error: result.error.message || `Failed reading ${tableName}.`
+                };
+            }
+
+            if (!result.data) {
+                return {
+                    ok: true,
+                    snapshot: null,
+                    roomId,
+                    scope,
+                    caseId
+                };
+            }
+
+            return {
+                ok: true,
+                roomId,
+                scope,
+                caseId,
+                snapshot: {
+                    roomId: String(result.data.room_id || roomId),
+                    scope: String(result.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                    caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, caseId || 'case_primary') : '',
+                    payload: sanitizeBoard(result.data.payload),
+                    revision: toNonNegativeInt(result.data.revision, 0),
+                    updatedAt: toIsoString(result.data.updated_at, ''),
+                    updatedBy: toTrimmedString(result.data.updated_by, '', 120),
+                    updatedByName: toTrimmedString(result.data.updated_by_name, '', 120)
+                }
+            };
+        }
+
+        async saveBoardRoomSnapshot(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const roomId = toTrimmedString(opts.roomId, '', 160).trim();
+            if (!roomId) return { ok: false, reason: 'missing-room-id' };
+
+            const ensured = await this.ensureBoardCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+            const caseId = scope === 'campaign' ? null : sanitizeCaseId(opts.caseId, this.getActiveCaseId());
+            const payload = sanitizeBoard(opts.payload);
+            const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
+            const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
+            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+
+            const row = {
+                campaign_id: ensured.config.campaignId,
+                room_id: roomId,
+                board_scope: scope,
+                case_id: caseId,
+                payload,
+                revision,
+                updated_at: updatedAt,
+                updated_by: toTrimmedString(opts.updatedBy, ensured.instanceId, 120),
+                updated_by_user: Object.prototype.hasOwnProperty.call(opts, 'updatedByUser')
+                    ? (opts.updatedByUser || null)
+                    : (ensured.userId || null),
+                updated_by_name: Object.prototype.hasOwnProperty.call(opts, 'updatedByName')
+                    ? (opts.updatedByName || null)
+                    : (ensured.profileName || null)
+            };
+
+            const result = await ensured.client
+                .from(tableName)
+                .upsert(row, { onConflict: 'campaign_id,room_id' })
+                .select('revision,updated_at')
+                .single();
+
+            if (result.error) {
+                return {
+                    ok: false,
+                    reason: 'write-failed',
+                    error: result.error.message || `Failed writing ${tableName}.`
+                };
+            }
+
+            return {
+                ok: true,
+                roomId,
+                scope,
+                caseId: caseId || '',
+                revision: toNonNegativeInt(result.data && result.data.revision, revision),
+                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+            };
+        }
+
         async disconnectSync(reason = 'manual') {
             this.cancelCloudPush();
             this.stopReconcileLoop();
@@ -6528,6 +6671,49 @@
             entry.board = sanitizeBoard(null);
             this.syncActiveCaseLegacyState();
             this.save({ scope: `cases.${entry.id}.board` });
+        }
+
+        mirrorBoardSnapshotToState(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+            const clean = sanitizeBoard(opts.payload);
+            const scopes = [];
+
+            if (scope === 'campaign') {
+                const meta = this.ensureCampaignMetaIntegrity();
+                meta.board = clean;
+                scopes.push('campaign.meta.board');
+            } else {
+                const entry = this.getCaseEntry(opts.caseId, { createIfMissing: true });
+                if (!entry) return false;
+                entry.board = clean;
+                scopes.push(`cases.${entry.id}.board`);
+            }
+
+            this.syncActiveCaseLegacyState();
+
+            try {
+                const now = Date.now();
+                if (!this.state.meta || typeof this.state.meta !== 'object') {
+                    this.state.meta = { version: 1, created: now, updated: now, syncRevision: 0, scopeUpdated: {} };
+                }
+                if (!this.state.meta.scopeUpdated || typeof this.state.meta.scopeUpdated !== 'object') {
+                    this.state.meta.scopeUpdated = {};
+                }
+                this.state.meta.updated = now;
+                scopes.forEach((scopeToken) => {
+                    this.state.meta.scopeUpdated[scopeToken] = now;
+                });
+                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                this.broadcastStoreUpdate('board-collab', {
+                    scopes,
+                    roomId: toTrimmedString(opts.roomId, '', 160).trim()
+                });
+                return true;
+            } catch (err) {
+                console.warn('RTF_STORE: Failed mirroring board collaboration snapshot', err);
+                return false;
+            }
         }
 
         buildLLMSnapshot(options = {}) {

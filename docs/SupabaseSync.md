@@ -6,6 +6,8 @@ The Character Sheet (`index.html`) is intentionally separate and remains local p
 
 Campaign-level meta board/timeline state (`campaign.meta.board`, `campaign.meta.events`) syncs through the same campaign payload path; no legacy table changes are required for that scope expansion.
 
+Realtime board collaboration now uses a dedicated room table plus Supabase Realtime broadcast/presence for `board.html` and `campaign-board.html`. The regular campaign state row still mirrors board snapshots for compatibility, but live board transport no longer depends on the legacy board payload path.
+
 For higher-concurrency deployments, see the hybrid normalized model:
 - `docs/SupabaseSyncNormalized.md`
 - `docs/SupabaseSyncNormalized.sql`
@@ -25,6 +27,22 @@ create table if not exists public.rtf_campaign_state (
 );
 
 alter table public.rtf_campaign_state enable row level security;
+
+create table if not exists public.rtf_board_rooms (
+  campaign_id text not null,
+  room_id text not null,
+  board_scope text not null,
+  case_id text,
+  payload jsonb not null,
+  revision bigint not null default 0,
+  updated_at timestamptz not null default timezone('utc', now()),
+  updated_by text,
+  updated_by_user uuid references auth.users(id) on delete set null,
+  updated_by_name text,
+  primary key (campaign_id, room_id)
+);
+
+alter table public.rtf_board_rooms enable row level security;
 ```
 
 ## 2. Add Baseline Policy
@@ -33,9 +51,17 @@ For fast setup (trusted table/users), allow any authenticated user:
 
 ```sql
 drop policy if exists "rtf_campaign_state_auth_rw" on public.rtf_campaign_state;
+drop policy if exists "rtf_board_rooms_auth_rw" on public.rtf_board_rooms;
 
 create policy "rtf_campaign_state_auth_rw"
 on public.rtf_campaign_state
+for all
+to authenticated
+using (true)
+with check (true);
+
+create policy "rtf_board_rooms_auth_rw"
+on public.rtf_board_rooms
 for all
 to authenticated
 using (true)
@@ -51,6 +77,9 @@ Do this in SQL Editor (not the separate Database Replication/ETL feature):
 ```sql
 alter publication supabase_realtime
 add table public.rtf_campaign_state;
+
+alter publication supabase_realtime
+add table public.rtf_board_rooms;
 ```
 
 If the table is already in the publication, Supabase may return a harmless duplicate-entry style message.
@@ -144,7 +173,8 @@ Accepted aliases are also supported:
 - Reconciliation pulls run every few seconds while connected, and returning to a tab triggers a quick catch-up pull.
 - Realtime presence advertises active peers and soft-lock scopes to reduce accidental overwrite collisions. Soft locks remain advisory for routine row edits.
 - Campaign tools share one cloud row per `campaign_id` (including campaign meta board/timeline payloads).
-- Case Board node layout (`x/y` position) is local-only per client. Node content and links still sync.
+- Case Board and Campaign Board layout (`x/y`) is now shared live per room, with cursors, drag previews, and text-edit locks carried by the board collaboration channel.
+- The board room ids are `case:<case_id>` for case boards and `campaign:meta` for the campaign board.
 - Character sheets are not part of this sync path unless you add a separate sheet sync layer.
 
 ## Related Project

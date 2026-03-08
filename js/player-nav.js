@@ -37,6 +37,7 @@
     const CONNECT_OPTIONAL_TABLE_KEYS = [
         'schema',
         'tableName',
+        'boardRoomsTable',
         'normalizedCoreTable',
         'normalizedHQTable',
         'normalizedCaseStateTable',

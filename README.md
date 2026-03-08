@@ -43,7 +43,14 @@ For simpler player onboarding, share/import a `connect.json` profile (also docum
 For a comprehensive guide on using the player tools, see **[Player Guide](player.md)**.
 
 ## License
-The Unlicense (Public Domain).
+Project-authored code and documentation in this repository are released under [The Unlicense](LICENSE), unless a file or section states otherwise.
+
+This repository also ships third-party and attributed materials that remain under their own licenses:
+* `js/srd-5.2-spells.json` includes SRD 5.2 material under CC BY 4.0.
+* `js/pdf.min.js` and `js/pdf.worker.min.js` are distributed under Apache-2.0.
+* `js/vendor/lib0`, `js/vendor/yjs`, `js/vendor/y-protocols`, and `js/vendor/y-indexeddb` are distributed under MIT.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the shipped third-party notices and license-path mapping.
 
 ## Legal
 This project is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
@@ -57,8 +64,10 @@ This project is unofficial Fan Content permitted under the Fan Content Policy. N
 * Source: [D&D SRD 5.2](https://www.dndbeyond.com/srd)
 * Attribution: This work includes material from the *System Reference Document 5.2 (SRD 5.2)* by Wizards of the Coast LLC, available under the [CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/).
 
-**Third-Party Libraries:**
-* [pdf.js](https://github.com/mozilla/pdf.js) - [Apache-2.0 License](https://www.apache.org/licenses/LICENSE-2.0)
+**Third-Party and Attributed Materials:**
+* [pdf.js](https://github.com/mozilla/pdf.js) (`js/pdf.min.js`, `js/pdf.worker.min.js`) - [Apache-2.0 License](https://www.apache.org/licenses/LICENSE-2.0)
+* `lib0`, `yjs`, `y-protocols`, and `y-indexeddb` under `js/vendor/` - MIT License
+* See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license paths and attribution details.
 
 
 

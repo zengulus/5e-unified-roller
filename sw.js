@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ravnica-tools-v6';
+const CACHE_NAME = 'ravnica-tools-v7';
 const SHELL_ASSETS = [
     './',
     './manifest.json',
@@ -47,6 +47,7 @@ const SHELL_ASSETS = [
     './css/tools.css',
     './css/tourney.css',
     './js/board.js',
+    './js/board-collab.js',
     './js/clocks.js',
     './js/clue.js',
     './js/config.js',

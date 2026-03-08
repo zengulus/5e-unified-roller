@@ -6,6 +6,7 @@ Case-scoped by design. For campaign-level graphing, use [Campaign Board](Campaig
 ## Core Concepts
 - **Case File Meta** – The hero header exposes an editable case name that renders across exports and sessions. Portal, save, and clear buttons live in the same action bar along with pan-mode and background/accent controls.
 - **Shared Data** – The board pulls guilds, NPCs, locations, timeline events, requisitions, and cases from `RTF_STORE`, so popups always reflect the latest campaign state without retyping.
+- **Live Collaboration** – With Supabase sync configured, case boards use a shared board room (`case:<case_id>`) for live node movement, connection changes, cursors, selection outlines, and advisory text-edit locks.
 - **Save Behavior** – Most node/connection edits save immediately, and the hero `💾 Save` button is always available before major layout changes.
 
 ## Building the Web
@@ -21,6 +22,7 @@ Case-scoped by design. For campaign-level graphing, use [Campaign Board](Campaig
 ## Case Context
 - **Active Case Source** – Board reads the currently active case from Tools Hub campaign scope sequencing (or optional active-case override).
 - **Case CRUD Location** – Create, rename, switch, and delete cases from Tools Hub. Board loads/saves against that active case’s board/events scope.
+- **Shared Layout** – Node positions are now canonical for the active case board instead of per-browser local-only.
 
 ## Cross-Link Entry Points
 - **Direct Node Focus** – Opening `board.html?nodeId=<node_id>` centers and flashes an existing node.

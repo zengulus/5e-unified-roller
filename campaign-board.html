@@ -8,7 +8,7 @@
     <title>Campaign Board</title>
     <link rel="stylesheet" href="css/theme.css?v=20260304f">
     <link rel="stylesheet" href="css/player-nav.css?v=20260306a">
-    <link rel="stylesheet" href="css/board.css?v=20260304e">
+    <link rel="stylesheet" href="css/board.css?v=20260309a">
     <meta name="theme-color" content="#1e1e1e">
 </head>
 
@@ -35,7 +35,7 @@
         <div class="hero-actions">
             <div class="hero-action-bar primary">
                 <button class="hero-btn ghost" id="btn-pan" data-onclick="togglePanMode()">🖐️ Pan: OFF</button>
-                <button class="hero-btn ghost" data-onclick="saveBoard()">💾 Save</button>
+                <button class="hero-btn ghost" data-onclick="saveBoard({ flushNow: true })">💾 Save</button>
                 <button class="hero-btn danger" data-onclick="clearBoard()">🗑️ Clear</button>
             </div>
             <div class="hero-action-bar secondary">
@@ -164,13 +164,21 @@
     <script src="js/data.js"></script>
     <script src="js/data-npcs.js"></script>
     <script src="js/data-locations.js"></script>
-    <script src="js/store.js?v=20260306a"></script>
-    <script src="js/player-nav.js?v=20260306a"></script>
+    <script src="js/store.js?v=20260309a"></script>
+    <script src="js/player-nav.js?v=20260309a"></script>
     <script src="js/session-log.js"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script src="js/my-story-board-bridge.js?v=20260224g"></script>
     <script>window.RTF_VIEW_SCOPE = 'campaign';</script>
-    <script src="js/board.js?v=20260305c"></script>
+    <script>
+        window.RTF_BOARD_COLLAB_READY = import('./js/board-collab.js?v=20260309a')
+            .then(() => window.RTF_BOARD_COLLAB || null)
+            .catch((err) => {
+                console.warn('Board collaboration module failed to load', err);
+                return null;
+            });
+    </script>
+    <script src="js/board.js?v=20260309a"></script>
 </body>
 
 </html>

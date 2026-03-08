@@ -1182,6 +1182,7 @@ function normalizeConnectPayload(raw) {
     const optionalMap = [
         ['schema', raw.schema || ''],
         ['tableName', raw.tableName || raw.stateTable || ''],
+        ['boardRoomsTable', raw.boardRoomsTable || raw.boardRoomTable || ''],
         ['normalizedCoreTable', raw.normalizedCoreTable || raw.coreTable || ''],
         ['normalizedHQTable', raw.normalizedHQTable || raw.hqTable || ''],
         ['normalizedCaseStateTable', raw.normalizedCaseStateTable || raw.caseStateTable || ''],
@@ -1792,6 +1793,7 @@ function exportConnectFile() {
     const optionalTableKeys = [
         'schema',
         'tableName',
+        'boardRoomsTable',
         'normalizedCoreTable',
         'normalizedHQTable',
         'normalizedCaseStateTable',
