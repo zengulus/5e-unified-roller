@@ -8,7 +8,7 @@
     <title>Campaign Hub (Tools)</title>
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260306a">
-    <link rel="stylesheet" href="css/tools.css?v=20260305f">
+    <link rel="stylesheet" href="css/tools.css?v=20260309b">
     <link rel="stylesheet" href="css/tools-page.css">
 </head>
 
@@ -186,6 +186,48 @@
             <div id="sync-status" class="sync-status">Cloud sync status: waiting for store...</div>
         </section>
 
+        <section class="sync-panel card tools-hidden" id="board-admin-panel" aria-label="Board Recovery">
+            <h2 class="sync-title">Board Recovery</h2>
+            <p class="sync-desc">
+                Inspect the live board room, restore a recent snapshot, promote this browser&rsquo;s mirrored board, or bust a corrupted room so a clean browser can reseed it.
+            </p>
+            <div class="sync-grid">
+                <div class="sync-field">
+                    <label for="board-admin-scope">Room Scope</label>
+                    <select id="board-admin-scope" data-onchange="refreshBoardAdminPanel()">
+                        <option value="campaign">Campaign Board</option>
+                        <option value="case">Case Board</option>
+                    </select>
+                </div>
+                <div class="sync-field">
+                    <label for="board-admin-case">Case</label>
+                    <select id="board-admin-case" data-onchange="refreshBoardAdminPanel()"></select>
+                </div>
+                <div class="sync-field">
+                    <label>Room ID</label>
+                    <div id="board-admin-room-id" class="sync-inline-value">campaign:meta</div>
+                </div>
+                <div class="sync-field">
+                    <label>Live Snapshot</label>
+                    <div id="board-admin-live-meta" class="sync-inline-value">Waiting for room load...</div>
+                </div>
+            </div>
+            <div class="sync-actions">
+                <button class="sync-btn" data-onclick="refreshBoardAdminPanel()">Refresh Room</button>
+                <button class="sync-btn primary" data-onclick="promoteBoardAdminLocalMirror()">Promote This Browser Mirror</button>
+                <button class="sync-btn" data-onclick="clearBoardAdminLocalCache()">Clear This Browser Cache</button>
+                <button class="sync-btn" data-onclick="bustBoardAdminLiveRoom()">Bust Live Room</button>
+            </div>
+            <div id="board-admin-status" class="case-switcher-status">Board recovery tools initializing...</div>
+            <div class="board-admin-history-wrap">
+                <div class="board-admin-history-head">
+                    <h3 class="context-block-title">Recent Snapshots</h3>
+                    <button class="sync-btn" data-onclick="refreshBoardAdminPanel()">Refresh Snapshots</button>
+                </div>
+                <div id="board-admin-history-list" class="board-admin-history-list">No board snapshots loaded yet.</div>
+            </div>
+        </section>
+
         <section class="sync-panel customize-panel card tools-hidden" id="customize-panel" aria-label="Customise Seed Data">
             <h2 class="sync-title">Customise Seed Data (Fork Tool)</h2>
             <p class="sync-desc">
@@ -232,10 +274,10 @@
     <script src="js/data-guilds.js"></script>
     <script src="js/data-npcs.js"></script>
     <script src="js/data-locations.js"></script>
-    <script src="js/store.js?v=20260306a"></script>
+    <script src="js/store.js?v=20260309b"></script>
     <script src="js/player-nav.js?v=20260306a"></script>
     <script src="js/vector-field.js"></script>
-    <script src="js/tools.js"></script>
+    <script src="js/tools.js?v=20260309b"></script>
 </body>
 
 </html>

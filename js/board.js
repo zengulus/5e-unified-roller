@@ -585,9 +585,6 @@ function syncBoardCollabCursorFromEvent(event) {
 
 function syncBoardCollabDragPreview(changes = []) {
     if (!isBoardCollabReady()) return;
-    if (typeof boardCollabSession.updateNodePositions === 'function') {
-        boardCollabSession.updateNodePositions(changes);
-    }
     if (typeof boardCollabSession.setDragging === 'function') {
         if (!Array.isArray(changes) || !changes.length) {
             boardCollabSession.setDragging(null);
@@ -4858,7 +4855,11 @@ function persistBoardPayload(payload, options = {}) {
     const clean = sanitizeBoardPayload(payload || getEmptyBoardPayload());
     const opts = options && typeof options === 'object' ? options : {};
     if (isBoardCollabReady() && typeof boardCollabSession.syncSnapshot === 'function') {
-        boardCollabSession.syncSnapshot(clean, { flushNow: !!opts.flushNow }).catch((err) => {
+        boardCollabSession.syncSnapshot(clean, {
+            flushNow: !!opts.flushNow,
+            forceHistory: !!opts.forceHistory,
+            historyReason: opts.historyReason || ''
+        }).catch((err) => {
             console.warn('Board collaboration sync failed', err);
         });
         return clean;
@@ -4953,7 +4954,7 @@ function clearBoard() {
     const emptyPayload = getEmptyBoardPayload();
     loadBoard({}, emptyPayload);
     updateViewCSS();
-    saveBoard({ flushNow: true });
+    saveBoard({ flushNow: true, forceHistory: true, historyReason: 'clear' });
     showShortcutAlert(lastClearedBoardPayload ? 'Board cleared. Undo Clear is available.' : 'Board cleared.');
 }
 
@@ -5014,7 +5015,7 @@ function undoClearBoard() {
     updateUndoClearButton();
     loadBoard({}, payload);
     updateViewCSS();
-    saveBoard({ flushNow: true });
+    saveBoard({ flushNow: true, forceHistory: true, historyReason: 'undo-clear' });
     showShortcutAlert('Board restored after clear');
 }
 

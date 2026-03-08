@@ -10,6 +10,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - **Meta Surface Links** – Quick actions for `campaign-timeline.html` and `campaign-board.html`, alongside case-scoped timeline/board links.
 - **Cloud Connect Panel** – Player-facing import for `connect.json` plus a bundled-default shortcut so clients can join without manual key entry.
 - **Cloud Sync Panel (Secret Mode)** – Manual Supabase URL/key/campaign controls, export of `connect.json`, and admin pull/push actions. This panel is intentionally behind Alt+Shift secret mode.
+- **Board Recovery Panel (Secret Mode)** – Inspect the live Campaign/Case board room, restore recent snapshots, promote this browser's mirrored board to live, bust a corrupted room, and clear stale browser board caches before reseeding.
 - **Customise Seed Panel (Secret Mode)** – Hidden fork helper that loads default/store guild + NPC + location data and exports fork-ready `data-guilds*.js`, `data-npcs*.js`, and `data-locations*.js` files.
 - **Card Grid** – Responsive cards link to every HTML tool (player sheet, dashboards, HQ, timeline, etc.). Icons and short blurbs help the table pick the right door quickly.
 - **Ledger Card** – Dedicated jump into `ledger.html` for pinned immutable facts and source-linked narrative evidence.
@@ -20,6 +21,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - Treat campaign scope as the default selector, then use `campaign-timeline.html`/`campaign-board.html` for campaign-level tracking and `timeline.html`/`board.html` for case-level execution.
 - Set the active case (derived from scope sequence, or via optional override) before opening case-scoped tools so edits land in the intended investigation.
 - For multiplayer web deployments, set up Supabase once and use the Cloud Sync panel for realtime-ish shared campaign updates.
+- If a shared board goes bad, use the secret Board Recovery panel before manually poking Supabase rows. Restore a recent snapshot when possible; use `Bust Live Room` only when you want the next clean browser to reseed the room.
 - If you’re forking this repo, use the secret Customise panel to export fresh preload scripts for guilds/NPCs/locations, then drop them into `js/data-guilds.js`, `js/data-npcs.js`, and `js/data-locations.js`.
 - Use the accent picker before a session so all other pages inherit the same neon colorway.
 - Hide DM cards during open-table play so players only see approved utilities.

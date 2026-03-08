@@ -7,6 +7,7 @@ Campaign-level investigation board for cross-case references, scope artifacts, a
 - Uses the shared board room `campaign:meta` for live multiplayer layout, cursors, selections, advisory text-edit locks, and a hero status pill that surfaces live/degraded board state.
 - Timeline-event linking uses campaign meta events (`campaign.meta.events`).
 - Supports the same node, connection, popup, and context-menu tooling as Case Board, including touch long-press actions, `Undo Clear`, and the Cases object popup for quick case-reference nodes.
+- Tools Hub secret mode includes Board Recovery for this room (`campaign:meta`): inspect the live snapshot, restore a recent snapshot, bust the current live room, or clear stale browser cache before reseeding.
 
 ## Typical Use
 1. Create case-reference nodes for scoped investigations and sequence planning.

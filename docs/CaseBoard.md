@@ -7,6 +7,7 @@ Case-scoped by design. For campaign-level graphing, use [Campaign Board](Campaig
 - **Case File Meta** – The hero header exposes an editable case name that renders across exports and sessions. Portal, save, and clear buttons live in the same action bar along with pan-mode and background/accent controls.
 - **Shared Data** – The board pulls guilds, NPCs, locations, timeline events, requisitions, and cases from `RTF_STORE`, so popups always reflect the latest campaign state without retyping.
 - **Live Collaboration** – With Supabase sync configured, case boards use a shared board room (`case:<case_id>`) for live node movement, connection changes, cursors, selection outlines, advisory text-edit locks, and a hero status pill that shows whether the room is live, connecting, or degraded.
+- **Recovery Path** – Tools Hub secret mode now includes Board Recovery for case boards: recent snapshot restore, live-room bust/reset, and local browser cache clearing before reseeding from a clean mirror.
 - **Save Behavior** – Most node/connection edits save immediately, and the hero `💾 Save` button is always available before major layout changes. `🗑️ Clear` now keeps an `Undo Clear` recovery action on the current browser.
 
 ## Building the Web

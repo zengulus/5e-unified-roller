@@ -43,6 +43,23 @@ create table if not exists public.rtf_board_rooms (
 );
 
 alter table public.rtf_board_rooms enable row level security;
+
+create table if not exists public.rtf_board_room_history (
+  id bigint generated always as identity primary key,
+  campaign_id text not null,
+  room_id text not null,
+  board_scope text not null,
+  case_id text,
+  payload jsonb not null,
+  revision bigint not null default 0,
+  reason text not null default 'snapshot',
+  captured_at timestamptz not null default timezone('utc', now()),
+  captured_by text,
+  captured_by_user uuid references auth.users(id) on delete set null,
+  captured_by_name text
+);
+
+alter table public.rtf_board_room_history enable row level security;
 ```
 
 ## 2. Add Baseline Policy
@@ -52,6 +69,7 @@ For fast setup (trusted table/users), allow any authenticated user:
 ```sql
 drop policy if exists "rtf_campaign_state_auth_rw" on public.rtf_campaign_state;
 drop policy if exists "rtf_board_rooms_auth_rw" on public.rtf_board_rooms;
+drop policy if exists "rtf_board_room_history_auth_rw" on public.rtf_board_room_history;
 
 create policy "rtf_campaign_state_auth_rw"
 on public.rtf_campaign_state
@@ -62,6 +80,13 @@ with check (true);
 
 create policy "rtf_board_rooms_auth_rw"
 on public.rtf_board_rooms
+for all
+to authenticated
+using (true)
+with check (true);
+
+create policy "rtf_board_room_history_auth_rw"
+on public.rtf_board_room_history
 for all
 to authenticated
 using (true)
@@ -174,8 +199,19 @@ Accepted aliases are also supported:
 - Realtime presence advertises active peers and soft-lock scopes to reduce accidental overwrite collisions. Soft locks remain advisory for routine row edits.
 - Campaign tools share one cloud row per `campaign_id` (including campaign meta board/timeline payloads).
 - Case Board and Campaign Board layout (`x/y`) is now shared live per room, with cursors, drag previews, and text-edit locks carried by the board collaboration channel.
+- Tools Hub secret mode now includes **Board Recovery** for recent snapshot restore, promoting this browser's mirrored board to live, busting a corrupted live room, and clearing this browser's stale room cache.
 - The board room ids are `case:<case_id>` for case boards and `campaign:meta` for the campaign board.
 - Character sheets are not part of this sync path unless you add a separate sheet sync layer.
+
+## Board Recovery Workflow
+
+When a board room goes bad:
+
+1. Open `tools.html`, toggle secret mode (`Alt+Shift+Click` title), and use **Board Recovery**.
+2. If a recent snapshot is correct, restore it directly from the snapshot list.
+3. If the live room itself is corrupted, click **Bust Live Room**. This archives the current live payload, broadcasts a reset to connected boards, and deletes the live row.
+4. On stale browsers, click **Clear This Browser Cache** so they do not reseed the bad room from local IndexedDB/store mirrors.
+5. Open the correct board in a clean browser, or use **Promote This Browser Mirror** from that browser's Tools Hub, to seed the room again.
 
 ## Related Project
 For a less setting-specific version of this toolset, see [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).

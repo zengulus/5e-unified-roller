@@ -1150,6 +1150,244 @@ function referenceCaseOnBoard(caseId) {
     openCaseReferenceInBoard(cleanCaseId);
 }
 
+function setBoardAdminStatus(message, isError = false) {
+    const el = document.getElementById('board-admin-status');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('is-error', !!isError);
+}
+
+function formatBoardAdminTimestamp(value) {
+    const stamp = Date.parse(value || '');
+    if (!Number.isFinite(stamp)) return 'Unknown time';
+    try {
+        return new Date(stamp).toLocaleString();
+    } catch (err) {
+        return new Date(stamp).toISOString();
+    }
+}
+
+function formatBoardHistoryReason(value) {
+    const clean = String(value || 'snapshot').trim().replace(/[-_]+/g, ' ');
+    if (!clean) return 'Snapshot';
+    return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function getBoardAdminTarget() {
+    const store = window.RTF_STORE;
+    const scopeEl = document.getElementById('board-admin-scope');
+    const caseEl = document.getElementById('board-admin-case');
+    const scope = scopeEl && String(scopeEl.value || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+    const fallbackCaseId = store && typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : '';
+    const caseId = scope === 'campaign' ? '' : String(caseEl && caseEl.value || fallbackCaseId || '').trim();
+    if (store && typeof store.resolveBoardRoomTarget === 'function') {
+        return store.resolveBoardRoomTarget({ scope, caseId });
+    }
+    return {
+        scope,
+        caseId,
+        roomId: scope === 'campaign' ? 'campaign:meta' : `case:${caseId || 'case_primary'}`,
+        label: scope === 'campaign' ? 'Campaign Meta Board' : `Case Board: ${caseId || 'case_primary'}`
+    };
+}
+
+function renderBoardAdminSelectors() {
+    const scopeEl = document.getElementById('board-admin-scope');
+    const caseEl = document.getElementById('board-admin-case');
+    const roomEl = document.getElementById('board-admin-room-id');
+    if (!scopeEl || !caseEl || !roomEl) return;
+
+    const store = window.RTF_STORE;
+    const scope = String(scopeEl.value || 'campaign').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+    const cases = store && typeof store.getCases === 'function' ? store.getCases() : [];
+    const activeCaseId = store && typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : '';
+    const previous = String(caseEl.value || '').trim();
+
+    caseEl.innerHTML = '';
+    cases.forEach((entry) => {
+        if (!entry || !entry.id) return;
+        const option = document.createElement('option');
+        option.value = entry.id;
+        option.textContent = entry.name || entry.id;
+        caseEl.appendChild(option);
+    });
+
+    if (scope === 'case') {
+        const preferred = cases.some((entry) => entry && entry.id === previous)
+            ? previous
+            : (cases.some((entry) => entry && entry.id === activeCaseId) ? activeCaseId : (cases[0] && cases[0].id) || '');
+        if (preferred) caseEl.value = preferred;
+    }
+
+    caseEl.disabled = scope !== 'case' || !cases.length;
+    const target = getBoardAdminTarget();
+    roomEl.textContent = target.roomId;
+}
+
+function renderBoardAdminHistoryList(liveSnapshot, historyEntries) {
+    const listEl = document.getElementById('board-admin-history-list');
+    if (!listEl) return;
+
+    const liveSig = liveSnapshot ? JSON.stringify(liveSnapshot.payload || {}) : '';
+    const liveRevision = liveSnapshot ? Number(liveSnapshot.revision || 0) : 0;
+    const entries = Array.isArray(historyEntries) ? historyEntries : [];
+    if (!entries.length) {
+        listEl.innerHTML = '<div class="board-admin-history-empty">No board snapshots recorded for this room yet.</div>';
+        return;
+    }
+
+    listEl.innerHTML = entries.map((entry) => {
+        const sig = JSON.stringify(entry && entry.payload ? entry.payload : {});
+        const isCurrent = !!liveSnapshot && ((entry.revision && entry.revision === liveRevision) || (sig && sig === liveSig));
+        const title = `${formatBoardHistoryReason(entry.reason)} · ${entry.nodeCount} node${entry.nodeCount === 1 ? '' : 's'} · ${entry.connectionCount} connection${entry.connectionCount === 1 ? '' : 's'}`;
+        const capturedBy = entry.capturedByName || entry.capturedBy || 'Unknown source';
+        const meta = `${formatBoardAdminTimestamp(entry.capturedAt)} · rev ${entry.revision || 0} · ${capturedBy}`;
+        return `
+            <div class="board-admin-history-row${isCurrent ? ' is-current' : ''}">
+                <div class="board-admin-history-main">
+                    <div class="board-admin-history-title">${escapeHtml(title)}</div>
+                    <div class="board-admin-history-meta">${escapeHtml(meta)}</div>
+                </div>
+                <div class="board-admin-history-actions">
+                    <button class="sync-btn" data-onclick="restoreBoardAdminHistory(${Number(entry.id || 0)})">Restore</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function refreshBoardAdminPanel() {
+    renderBoardAdminSelectors();
+    const liveMetaEl = document.getElementById('board-admin-live-meta');
+    const listEl = document.getElementById('board-admin-history-list');
+    const store = window.RTF_STORE;
+    if (!liveMetaEl || !listEl) return;
+
+    if (!store || typeof store.loadBoardRoomSnapshot !== 'function' || typeof store.listBoardRoomHistory !== 'function') {
+        liveMetaEl.textContent = 'Store unavailable';
+        listEl.innerHTML = '<div class="board-admin-history-empty">Board recovery APIs are unavailable in this build.</div>';
+        setBoardAdminStatus('Board recovery APIs are unavailable in this build.', true);
+        return;
+    }
+
+    const target = getBoardAdminTarget();
+    liveMetaEl.textContent = 'Loading live room...';
+    listEl.innerHTML = '<div class="board-admin-history-empty">Loading snapshots...</div>';
+    setBoardAdminStatus(`Loading ${target.label}...`);
+
+    const [live, history] = await Promise.all([
+        store.loadBoardRoomSnapshot(target),
+        store.listBoardRoomHistory({ ...target, limit: 18 })
+    ]);
+
+    if (!live.ok) {
+        liveMetaEl.textContent = 'Live room unavailable';
+        listEl.innerHTML = '<div class="board-admin-history-empty">No snapshot history available.</div>';
+        setBoardAdminStatus(live.error || 'Failed to load the live board room.', true);
+        return;
+    }
+
+    if (!live.snapshot) {
+        liveMetaEl.textContent = 'No live row currently saved';
+    } else {
+        const payload = live.snapshot.payload || {};
+        const nodeCount = Array.isArray(payload.nodes) ? payload.nodes.length : 0;
+        const connectionCount = Array.isArray(payload.connections) ? payload.connections.length : 0;
+        const updatedBy = live.snapshot.updatedByName || live.snapshot.updatedBy || 'Unknown source';
+        liveMetaEl.textContent = `${nodeCount} node${nodeCount === 1 ? '' : 's'} · ${connectionCount} connection${connectionCount === 1 ? '' : 's'} · rev ${live.snapshot.revision || 0} · ${formatBoardAdminTimestamp(live.snapshot.updatedAt)} · ${updatedBy}`;
+    }
+
+    if (!history.ok) {
+        listEl.innerHTML = '<div class="board-admin-history-empty">History could not be loaded.</div>';
+        setBoardAdminStatus(history.error || 'History load failed.', true);
+        return;
+    }
+
+    renderBoardAdminHistoryList(live.snapshot, history.history || []);
+    if (live.snapshot) {
+        setBoardAdminStatus(`${target.label} loaded. Review snapshots before restoring or busting.`);
+    } else {
+        setBoardAdminStatus(`${target.label} has no live room row. Promote a clean browser mirror to reseed it.`);
+    }
+}
+
+async function promoteBoardAdminLocalMirror() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.promoteBoardRoomStateToLive !== 'function') {
+        setBoardAdminStatus('Board promotion is unavailable in this build.', true);
+        return;
+    }
+    const target = getBoardAdminTarget();
+    setBoardAdminStatus(`Promoting this browser mirror for ${target.label}...`);
+    const result = await store.promoteBoardRoomStateToLive(target);
+    if (!result.ok) {
+        setBoardAdminStatus(result.error || 'Failed to promote this browser mirror.', true);
+        return;
+    }
+    setBoardAdminStatus(`Promoted this browser mirror for ${target.label}.`);
+    await refreshBoardAdminPanel();
+}
+
+async function restoreBoardAdminHistory(historyId) {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.restoreBoardRoomHistoryEntry !== 'function') {
+        setBoardAdminStatus('Board snapshot restore is unavailable in this build.', true);
+        return;
+    }
+    const target = getBoardAdminTarget();
+    const cleanId = Number(historyId || 0);
+    if (!cleanId) return;
+    const ok = confirm(`Restore snapshot #${cleanId} to ${target.label}?\n\nThis replaces the live room with that snapshot for everyone in the room.`);
+    if (!ok) return;
+    setBoardAdminStatus(`Restoring snapshot #${cleanId} to ${target.label}...`);
+    const result = await store.restoreBoardRoomHistoryEntry({ ...target, historyId: cleanId });
+    if (!result.ok) {
+        setBoardAdminStatus(result.error || 'Failed to restore board snapshot.', true);
+        return;
+    }
+    setBoardAdminStatus(`Restored snapshot #${cleanId} to ${target.label}.`);
+    await refreshBoardAdminPanel();
+}
+
+async function bustBoardAdminLiveRoom() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.bustBoardRoom !== 'function') {
+        setBoardAdminStatus('Live room bust is unavailable in this build.', true);
+        return;
+    }
+    const target = getBoardAdminTarget();
+    const ok = confirm(`Bust the live room for ${target.label}?\n\nThis archives the current live payload, disconnects live writers, deletes the live row, and requires a clean browser mirror to reseed it.`);
+    if (!ok) return;
+    setBoardAdminStatus(`Busting ${target.label}...`);
+    const result = await store.bustBoardRoom(target);
+    if (!result.ok) {
+        setBoardAdminStatus(result.error || 'Failed to bust the live board room.', true);
+        return;
+    }
+    setBoardAdminStatus(`Live room busted for ${target.label}. Clear stale browser caches, then reseed from a clean browser mirror.`);
+    await refreshBoardAdminPanel();
+}
+
+async function clearBoardAdminLocalCache() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.clearBoardRoomLocalState !== 'function') {
+        setBoardAdminStatus('Local board cache clearing is unavailable in this build.', true);
+        return;
+    }
+    const target = getBoardAdminTarget();
+    const ok = confirm(`Clear this browser's local cached board data for ${target.label}?\n\nThis browser will no longer be able to reseed stale data for that room until it pulls or receives a fresh snapshot.`);
+    if (!ok) return;
+    setBoardAdminStatus(`Clearing this browser cache for ${target.label}...`);
+    const result = await store.clearBoardRoomLocalState(target);
+    if (!result.ok) {
+        setBoardAdminStatus(result.error || 'Failed to clear this browser cache.', true);
+        return;
+    }
+    const suffix = result.cacheError ? ` IndexedDB: ${result.cacheError}` : '';
+    setBoardAdminStatus(`Cleared this browser's mirrored board data for ${target.label}.${suffix}`, !!result.cacheError);
+    await refreshBoardAdminPanel();
+}
+
 function getSyncFormValues() {
     const autoConnectEl = document.getElementById('sync-autoconnect');
     return {
@@ -1183,6 +1421,7 @@ function normalizeConnectPayload(raw) {
         ['schema', raw.schema || ''],
         ['tableName', raw.tableName || raw.stateTable || ''],
         ['boardRoomsTable', raw.boardRoomsTable || raw.boardRoomTable || ''],
+        ['boardHistoryTable', raw.boardHistoryTable || raw.boardRoomHistoryTable || ''],
         ['normalizedCoreTable', raw.normalizedCoreTable || raw.coreTable || ''],
         ['normalizedHQTable', raw.normalizedHQTable || raw.hqTable || ''],
         ['normalizedCaseStateTable', raw.normalizedCaseStateTable || raw.caseStateTable || ''],
@@ -1636,6 +1875,7 @@ function downloadCustomDataFiles() {
 
 function updateSyncPanelVisibility(status) {
     const panel = document.getElementById('sync-panel');
+    const boardAdmin = document.getElementById('board-admin-panel');
     const customize = document.getElementById('customize-panel');
     const quick = document.getElementById('sync-quick');
     if (!panel) return;
@@ -1645,6 +1885,7 @@ function updateSyncPanelVisibility(status) {
 
     // Manual credentials/admin controls stay behind secret mode.
     panel.classList.toggle('tools-hidden', !isSecret);
+    if (boardAdmin) boardAdmin.classList.toggle('tools-hidden', !isSecret);
     if (customize) customize.classList.toggle('tools-hidden', !isSecret);
     // Quick connect is for onboarding only; hide after successful connection.
     if (quick) quick.classList.toggle('tools-hidden', connected);
@@ -1795,6 +2036,7 @@ function exportConnectFile() {
         'schema',
         'tableName',
         'boardRoomsTable',
+        'boardHistoryTable',
         'normalizedCoreTable',
         'normalizedHQTable',
         'normalizedCaseStateTable',
@@ -1853,15 +2095,18 @@ function initSyncPanel() {
     }
     loadCustomizeDefaults();
     applySyncConfigToForm(window.RTF_STORE.getSyncConfig());
+    renderBoardAdminSelectors();
     latestSyncStatus = window.RTF_STORE.getSyncStatus();
     setSyncStatusText(latestSyncStatus);
     setQuickStatusFromSync(latestSyncStatus);
     syncSecretModeUi();
+    refreshBoardAdminPanel().catch(() => { });
     window.RTF_STORE.onSyncStatus((status) => {
         latestSyncStatus = status;
         setSyncStatusText(status);
         setQuickStatusFromSync(status);
         updateSyncPanelVisibility(status);
+        refreshBoardAdminPanel().catch(() => { });
     });
     tryAutoConnectFromBundledDefault();
 }
@@ -1873,12 +2118,15 @@ window.addEventListener('rtf-store-updated', () => {
     renderCaseSwitcher();
     renderCampaignContext();
     renderCampaignOverview();
+    renderBoardAdminSelectors();
+    refreshBoardAdminPanel().catch(() => { });
 });
 window.addEventListener('rtf-sync-status', (event) => {
     latestSyncStatus = event.detail || null;
     setSyncStatusText(latestSyncStatus);
     setQuickStatusFromSync(latestSyncStatus);
     updateSyncPanelVisibility(latestSyncStatus);
+    refreshBoardAdminPanel().catch(() => { });
 });
 window.addEventListener('rtf-sync-conflict', () => {
     const status = window.RTF_STORE && window.RTF_STORE.getSyncStatus ? window.RTF_STORE.getSyncStatus() : latestSyncStatus;

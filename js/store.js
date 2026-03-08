@@ -181,6 +181,7 @@
         schema: 'public',
         tableName: 'rtf_campaign_state',
         boardRoomsTable: 'rtf_board_rooms',
+        boardHistoryTable: 'rtf_board_room_history',
         normalizedCoreTable: 'rtf_campaign_core',
         normalizedHQTable: 'rtf_campaign_hq',
         normalizedCaseStateTable: 'rtf_case_state',
@@ -399,6 +400,49 @@
             connections: Array.isArray(source.connections) ? source.connections : []
         };
     };
+    const sanitizeBoardHistoryReason = (value, fallback = 'snapshot') => {
+        const clean = toTrimmedString(value, fallback, 80).trim().toLowerCase();
+        return clean || fallback;
+    };
+    const buildBoardRoomId = (scope = 'case', caseId = 'case_primary') => {
+        const cleanScope = String(scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+        if (cleanScope === 'campaign') return 'campaign:meta';
+        return `case:${sanitizeCaseId(caseId, 'case_primary')}`;
+    };
+    const buildBoardRoomLabel = (scope = 'case', caseId = '', fallbackName = '') => {
+        const cleanScope = String(scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+        if (cleanScope === 'campaign') return 'Campaign Meta Board';
+        const cleanName = sanitizeCaseName(fallbackName, '');
+        if (cleanName) return `Case Board: ${cleanName}`;
+        return `Case Board: ${sanitizeCaseId(caseId, 'case_primary')}`;
+    };
+    const buildBoardRoomChannelName = (campaignId, roomId) => `rtf-board-${campaignId}-${roomId}`;
+    const deleteIndexedDbDatabase = (name) => new Promise((resolve) => {
+        if (!name || typeof indexedDB === 'undefined' || !indexedDB || typeof indexedDB.deleteDatabase !== 'function') {
+            resolve({ ok: false, reason: 'unavailable' });
+            return;
+        }
+        try {
+            const request = indexedDB.deleteDatabase(name);
+            request.onsuccess = () => resolve({ ok: true });
+            request.onerror = () => resolve({
+                ok: false,
+                reason: 'delete-failed',
+                error: request.error && request.error.message ? request.error.message : 'IndexedDB delete failed.'
+            });
+            request.onblocked = () => resolve({
+                ok: false,
+                reason: 'blocked',
+                error: 'IndexedDB delete blocked by another open tab.'
+            });
+        } catch (err) {
+            resolve({
+                ok: false,
+                reason: 'delete-failed',
+                error: err && err.message ? err.message : 'IndexedDB delete failed.'
+            });
+        }
+    });
     const sanitizeCampaignMeta = (meta) => {
         const source = meta && typeof meta === 'object' ? meta : {};
         const defaults = createDefaultCampaignMetaState();
@@ -1629,6 +1673,7 @@
             schema: sanitizeIdentifier(source.schema, DEFAULT_SYNC_CONFIG.schema),
             tableName: sanitizeIdentifier(source.tableName, DEFAULT_SYNC_CONFIG.tableName),
             boardRoomsTable: sanitizeIdentifier(source.boardRoomsTable, DEFAULT_SYNC_CONFIG.boardRoomsTable),
+            boardHistoryTable: sanitizeIdentifier(source.boardHistoryTable, DEFAULT_SYNC_CONFIG.boardHistoryTable),
             normalizedCoreTable: sanitizeIdentifier(source.normalizedCoreTable, DEFAULT_SYNC_CONFIG.normalizedCoreTable),
             normalizedHQTable: sanitizeIdentifier(source.normalizedHQTable, DEFAULT_SYNC_CONFIG.normalizedHQTable),
             normalizedCaseStateTable: sanitizeIdentifier(source.normalizedCaseStateTable, DEFAULT_SYNC_CONFIG.normalizedCaseStateTable),
@@ -4322,6 +4367,213 @@
             };
         }
 
+        resolveBoardRoomTarget(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
+            const caseId = scope === 'campaign' ? '' : sanitizeCaseId(opts.caseId, this.getActiveCaseId());
+            const roomId = toTrimmedString(opts.roomId, '', 160).trim() || buildBoardRoomId(scope, caseId);
+            const label = scope === 'campaign'
+                ? buildBoardRoomLabel('campaign')
+                : buildBoardRoomLabel(scope, caseId, (this.getCaseEntry(caseId, { createIfMissing: true }) || {}).name || '');
+            return {
+                scope,
+                caseId,
+                roomId,
+                label
+            };
+        }
+
+        getBoardRoomStateSnapshot(options = {}) {
+            const target = this.resolveBoardRoomTarget(options);
+            return target.scope === 'campaign'
+                ? sanitizeBoard(this.getCampaignMetaBoard())
+                : sanitizeBoard(this.getBoard(target.caseId));
+        }
+
+        async sendBoardRoomAdminEvent(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const eventName = toTrimmedString(opts.event, '', 80).trim();
+            if (!eventName) return { ok: false, reason: 'missing-event' };
+
+            const target = this.resolveBoardRoomTarget(opts);
+            const ensured = await this.ensureBoardCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const channelName = buildBoardRoomChannelName(ensured.config.campaignId, target.roomId);
+            const channel = ensured.client.channel(channelName, {
+                config: {
+                    broadcast: { self: true }
+                }
+            });
+
+            try {
+                await new Promise((resolve, reject) => {
+                    let settled = false;
+                    const timeout = setTimeout(() => {
+                        if (!settled) {
+                            settled = true;
+                            reject(new Error('Board admin broadcast timed out.'));
+                        }
+                    }, 10000);
+                    channel.subscribe((status) => {
+                        if (status === 'SUBSCRIBED') {
+                            clearTimeout(timeout);
+                            if (!settled) {
+                                settled = true;
+                                resolve();
+                            }
+                            return;
+                        }
+                        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                            clearTimeout(timeout);
+                            if (!settled) {
+                                settled = true;
+                                reject(new Error(`Board admin channel status: ${status}`));
+                            }
+                        }
+                    });
+                });
+
+                const payload = {
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId,
+                    sentAt: new Date().toISOString(),
+                    sentBy: this.sync.instanceId,
+                    sentByUser: this.sync.userId || null,
+                    sentByName: this.sync.config && this.sync.config.profileName ? this.sync.config.profileName : '',
+                    ...(opts.payload && typeof opts.payload === 'object' ? opts.payload : {})
+                };
+
+                await channel.send({
+                    type: 'broadcast',
+                    event: eventName,
+                    payload
+                });
+
+                return {
+                    ok: true,
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId
+                };
+            } catch (err) {
+                return {
+                    ok: false,
+                    reason: 'broadcast-failed',
+                    error: err && err.message ? err.message : 'Board admin broadcast failed.'
+                };
+            } finally {
+                try {
+                    await ensured.client.removeChannel(channel);
+                } catch (err) { }
+            }
+        }
+
+        async appendBoardRoomHistorySnapshot(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveBoardRoomTarget(opts);
+            const ensured = await this.ensureBoardCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const tableName = ensured.config.boardHistoryTable || DEFAULT_SYNC_CONFIG.boardHistoryTable;
+            const payload = sanitizeBoard(opts.payload);
+            const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
+            const capturedAt = toIsoString(opts.capturedAt, '') || new Date().toISOString();
+            const row = {
+                campaign_id: ensured.config.campaignId,
+                room_id: target.roomId,
+                board_scope: target.scope,
+                case_id: target.scope === 'campaign' ? null : target.caseId,
+                payload,
+                revision,
+                reason: sanitizeBoardHistoryReason(opts.reason, 'snapshot'),
+                captured_at: capturedAt,
+                captured_by: toTrimmedString(opts.capturedBy, ensured.instanceId, 120),
+                captured_by_user: Object.prototype.hasOwnProperty.call(opts, 'capturedByUser')
+                    ? (opts.capturedByUser || null)
+                    : (ensured.userId || null),
+                captured_by_name: Object.prototype.hasOwnProperty.call(opts, 'capturedByName')
+                    ? (opts.capturedByName || null)
+                    : (ensured.profileName || null)
+            };
+
+            const result = await ensured.client
+                .from(tableName)
+                .insert(row)
+                .select('id,captured_at')
+                .single();
+
+            if (result.error) {
+                return {
+                    ok: false,
+                    reason: 'history-write-failed',
+                    error: result.error.message || `Failed writing ${tableName}.`
+                };
+            }
+
+            return {
+                ok: true,
+                id: toNonNegativeInt(result.data && result.data.id, 0),
+                capturedAt: toIsoString(result.data && result.data.captured_at, capturedAt) || capturedAt,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId
+            };
+        }
+
+        async listBoardRoomHistory(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveBoardRoomTarget(opts);
+            const ensured = await this.ensureBoardCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const limit = Math.max(1, Math.min(100, toNonNegativeInt(opts.limit, 25) || 25));
+            const tableName = ensured.config.boardHistoryTable || DEFAULT_SYNC_CONFIG.boardHistoryTable;
+            const selectCols = 'id,room_id,board_scope,case_id,payload,revision,reason,captured_at,captured_by,captured_by_name';
+            const result = await ensured.client
+                .from(tableName)
+                .select(selectCols)
+                .eq('campaign_id', ensured.config.campaignId)
+                .eq('room_id', target.roomId)
+                .order('captured_at', { ascending: false })
+                .limit(limit);
+
+            if (result.error) {
+                return {
+                    ok: false,
+                    reason: 'history-read-failed',
+                    error: result.error.message || `Failed reading ${tableName}.`
+                };
+            }
+
+            const history = Array.isArray(result.data) ? result.data.map((row) => {
+                const payload = sanitizeBoard(row && row.payload ? row.payload : null);
+                return {
+                    id: toNonNegativeInt(row && row.id, 0),
+                    roomId: toTrimmedString(row && row.room_id, target.roomId, 160).trim() || target.roomId,
+                    scope: String(row && row.board_scope || target.scope).trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                    caseId: row && row.case_id ? sanitizeCaseId(row.case_id, target.caseId || 'case_primary') : '',
+                    payload,
+                    revision: toNonNegativeInt(row && row.revision, 0),
+                    reason: sanitizeBoardHistoryReason(row && row.reason, 'snapshot'),
+                    capturedAt: toIsoString(row && row.captured_at, ''),
+                    capturedBy: toTrimmedString(row && row.captured_by, '', 120),
+                    capturedByName: toTrimmedString(row && row.captured_by_name, '', 120),
+                    nodeCount: Array.isArray(payload.nodes) ? payload.nodes.length : 0,
+                    connectionCount: Array.isArray(payload.connections) ? payload.connections.length : 0
+                };
+            }) : [];
+
+            return {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                history
+            };
+        }
+
         async loadBoardRoomSnapshot(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const roomId = toTrimmedString(opts.roomId, '', 160).trim();
@@ -4447,6 +4699,218 @@
                 caseId: caseId || '',
                 revision: toNonNegativeInt(result.data && result.data.revision, revision),
                 updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+            };
+        }
+
+        async restoreBoardRoomHistoryEntry(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveBoardRoomTarget(opts);
+            const historyId = Math.max(0, toNonNegativeInt(opts.historyId, 0) || 0);
+            if (!historyId) return { ok: false, reason: 'missing-history-id' };
+
+            const ensured = await this.ensureBoardCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const tableName = ensured.config.boardHistoryTable || DEFAULT_SYNC_CONFIG.boardHistoryTable;
+            const result = await ensured.client
+                .from(tableName)
+                .select('id,payload,revision,reason,captured_at')
+                .eq('campaign_id', ensured.config.campaignId)
+                .eq('room_id', target.roomId)
+                .eq('id', historyId)
+                .maybeSingle();
+
+            if (result.error) {
+                return {
+                    ok: false,
+                    reason: 'history-read-failed',
+                    error: result.error.message || `Failed reading ${tableName}.`
+                };
+            }
+            if (!result.data) return { ok: false, reason: 'missing-history-entry' };
+
+            return this.promoteBoardRoomStateToLive({
+                ...target,
+                payload: sanitizeBoard(result.data.payload),
+                reason: sanitizeBoardHistoryReason(opts.reason, `restore:${historyId}`),
+                historyReason: sanitizeBoardHistoryReason(opts.historyReason, `restore:${historyId}`)
+            });
+        }
+
+        async promoteBoardRoomStateToLive(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveBoardRoomTarget(opts);
+            const payload = sanitizeBoard(
+                Object.prototype.hasOwnProperty.call(opts, 'payload')
+                    ? opts.payload
+                    : this.getBoardRoomStateSnapshot(target)
+            );
+            const reason = sanitizeBoardHistoryReason(opts.reason || opts.historyReason, 'admin-promote');
+            const stamp = Date.now();
+            const updatedAt = new Date(stamp).toISOString();
+
+            const saved = await this.saveBoardRoomSnapshot({
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                payload,
+                revision: Math.max(stamp, toNonNegativeInt(opts.revision, stamp) || stamp),
+                updatedAt,
+                updatedBy: this.sync.instanceId,
+                updatedByUser: this.sync.userId || null,
+                updatedByName: this.sync.config && this.sync.config.profileName ? this.sync.config.profileName : null
+            });
+            if (!saved.ok) return saved;
+
+            const history = await this.appendBoardRoomHistorySnapshot({
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                payload,
+                revision: saved.revision || stamp,
+                capturedAt: saved.updatedAt || updatedAt,
+                reason
+            });
+
+            this.mirrorBoardSnapshotToState({
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                payload
+            });
+
+            const broadcast = await this.sendBoardRoomAdminEvent({
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                event: 'admin-apply-snapshot',
+                payload: {
+                    payload,
+                    revision: saved.revision || stamp,
+                    updatedAt: saved.updatedAt || updatedAt,
+                    reason
+                }
+            });
+
+            return {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                revision: saved.revision || stamp,
+                updatedAt: saved.updatedAt || updatedAt,
+                historyId: history && history.ok ? history.id : 0,
+                historyError: history && !history.ok ? (history.error || history.reason || '') : '',
+                broadcastOk: !!(broadcast && broadcast.ok),
+                broadcastError: broadcast && !broadcast.ok ? (broadcast.error || broadcast.reason || '') : ''
+            };
+        }
+
+        async bustBoardRoom(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveBoardRoomTarget(opts);
+            const live = await this.loadBoardRoomSnapshot(target);
+            let history = null;
+
+            if (live.ok && live.snapshot) {
+                history = await this.appendBoardRoomHistorySnapshot({
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId,
+                    payload: live.snapshot.payload,
+                    revision: live.snapshot.revision || Date.now(),
+                    capturedAt: live.snapshot.updatedAt || new Date().toISOString(),
+                    reason: sanitizeBoardHistoryReason(opts.historyReason, 'bust')
+                });
+            }
+
+            const broadcast = await this.sendBoardRoomAdminEvent({
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                event: 'admin-bust',
+                payload: {
+                    bustId: `bust_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+                    reason: sanitizeBoardHistoryReason(opts.reason, 'bust')
+                }
+            });
+
+            if (broadcast && broadcast.ok) {
+                await new Promise((resolve) => setTimeout(resolve, 350));
+            }
+
+            const ensured = await this.ensureBoardCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const result = await ensured.client
+                .from(tableName)
+                .delete()
+                .eq('campaign_id', ensured.config.campaignId)
+                .eq('room_id', target.roomId);
+
+            if (result.error) {
+                return {
+                    ok: false,
+                    reason: 'delete-failed',
+                    error: result.error.message || `Failed deleting ${tableName}.`,
+                    historyOk: !!(history && history.ok),
+                    broadcastOk: !!(broadcast && broadcast.ok)
+                };
+            }
+
+            return {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                historyOk: !!(history && history.ok),
+                historyId: history && history.ok ? history.id : 0,
+                historyError: history && !history.ok ? (history.error || history.reason || '') : '',
+                broadcastOk: !!(broadcast && broadcast.ok),
+                broadcastError: broadcast && !broadcast.ok ? (broadcast.error || broadcast.reason || '') : ''
+            };
+        }
+
+        async clearBoardRoomLocalState(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveBoardRoomTarget(opts);
+            const emptyPayload = target.scope === 'campaign'
+                ? sanitizeBoard({
+                    name: (this.getCampaignMetaBoard() && this.getCampaignMetaBoard().name) || DEFAULT_CAMPAIGN_META_BOARD_STATE.name,
+                    nodes: [],
+                    connections: []
+                })
+                : sanitizeBoard({
+                    name: ((this.getCaseEntry(target.caseId, { createIfMissing: true }) || {}).name) || DEFAULT_CASE_NAME,
+                    nodes: [],
+                    connections: []
+                });
+
+            this.mirrorBoardSnapshotToState({
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                payload: emptyPayload
+            });
+
+            if (target.scope !== 'campaign' && target.caseId === this.getActiveCaseId()) {
+                try {
+                    localStorage.removeItem(LEGACY_BOARD_KEY);
+                } catch (err) { }
+            }
+
+            const cfg = sanitizeSyncConfig(this.sync && this.sync.config ? this.sync.config : getMergedSyncConfig());
+            const dbName = cfg.campaignId ? `rtf-board-room-${cfg.campaignId}-${target.roomId}` : '';
+            const deleted = await deleteIndexedDbDatabase(dbName);
+
+            return {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                cacheCleared: !!(deleted && deleted.ok),
+                cacheError: deleted && !deleted.ok ? (deleted.error || deleted.reason || '') : ''
             };
         }
 

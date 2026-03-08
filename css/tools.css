@@ -626,6 +626,92 @@ a {
     line-height: 1.4;
 }
 
+.sync-inline-value {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--input-bg);
+    color: #d7e4ef;
+    padding: 10px 12px;
+    font-size: 0.84rem;
+    line-height: 1.35;
+}
+
+.board-admin-history-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.22);
+}
+
+.board-admin-history-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.board-admin-history-list {
+    display: grid;
+    gap: 8px;
+}
+
+.board-admin-history-row {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.22);
+    padding: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.board-admin-history-row.is-current {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-glow);
+}
+
+.board-admin-history-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.board-admin-history-title {
+    color: #fff;
+    font-size: 0.88rem;
+    font-weight: 800;
+    line-height: 1.3;
+}
+
+.board-admin-history-meta {
+    color: #94a8bb;
+    font-size: 0.77rem;
+    line-height: 1.4;
+}
+
+.board-admin-history-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.board-admin-history-empty {
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    color: #9fb2c6;
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
 .sync-conflict {
     border: 1px solid rgba(255, 120, 80, 0.65);
     border-radius: 8px;
@@ -808,6 +894,14 @@ a {
     .scope-board-ref-actions .sync-btn,
     .campaign-workflow-actions .sync-btn,
     .campaign-overview-actions .sync-btn {
+        width: 100%;
+    }
+
+    .board-admin-history-row {
+        grid-template-columns: 1fr;
+    }
+
+    .board-admin-history-actions .sync-btn {
         width: 100%;
     }
 
