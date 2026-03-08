@@ -10,7 +10,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - **Meta Surface Links** – Quick actions for `campaign-timeline.html` and `campaign-board.html`, alongside case-scoped timeline/board links.
 - **Cloud Connect Panel** – Player-facing import for `connect.json` plus a bundled-default shortcut so clients can join without manual key entry.
 - **Cloud Sync Panel (Secret Mode)** – Manual Supabase URL/key/campaign controls, export of `connect.json`, and admin pull/push actions. This panel is intentionally behind Alt+Shift secret mode.
-- **Board Recovery Panel (Secret Mode)** – Inspect the live Campaign/Case board room, restore recent snapshots, promote this browser's mirrored board to live, bust a corrupted room, and clear stale browser board caches before reseeding.
+- **Board Recovery Panel (Secret Mode)** – Inspect the live Campaign/Case board room, restore recent snapshots, promote this browser's mirrored board to live, bust a corrupted room, clear stale browser board caches before reseeding, and run `Sync Linked Timeline Events` to rebuild clue-linked timeline event notes/deeplinks from persisted board nodes.
 - **Customise Seed Panel (Secret Mode)** – Hidden fork helper that loads default/store guild + NPC + location data and exports fork-ready `data-guilds*.js`, `data-npcs*.js`, and `data-locations*.js` files.
 - **Card Grid** – Responsive cards link to every HTML tool (player sheet, dashboards, HQ, timeline, etc.). Icons and short blurbs help the table pick the right door quickly.
 - **Ledger Card** – Dedicated jump into `ledger.html` for pinned immutable facts and source-linked narrative evidence.

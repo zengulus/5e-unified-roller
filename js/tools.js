@@ -1173,6 +1173,241 @@ function formatBoardHistoryReason(value) {
     return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
+function cloneBoardAdminData(value, fallback = null) {
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch (err) {
+        return fallback;
+    }
+}
+
+function clampBoardAdminPercent(value, fallback = 50) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
+function createBoardAdminClueTimelineEventId(nodeId = '') {
+    const cleanNodeId = String(nodeId || '')
+        .trim()
+        .replace(/[^a-z0-9_-]/gi, '')
+        .slice(0, 60);
+    if (cleanNodeId) return `event_clue_${cleanNodeId}`;
+    return `event_clue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getBoardAdminSourceDescriptor(meta) {
+    if (!meta || !meta.sourceType) return '';
+    const type = String(meta.sourceType || '').trim().toLowerCase();
+    if (type === 'player') return ' from player roster';
+    if (type === 'npc') return ' from NPC roster';
+    if (type === 'location') return ' from locations database';
+    if (type === 'timeline-event') return ' from mission timeline';
+    if (type === 'requisition') return ' from requisitions';
+    if (type === 'case') return ' from campaign scope';
+    if (type === 'guild') return ' from guild reference';
+    return '';
+}
+
+function boardAdminHtmlToText(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const shell = document.createElement('div');
+    shell.innerHTML = raw.replace(/<br\s*\/?>/gi, '\n');
+    const text = typeof shell.innerText === 'string' ? shell.innerText : String(shell.textContent || '');
+    return text
+        .replace(/\r/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function buildBoardAdminClueTimelinePayload(node, boardName) {
+    const source = node && typeof node === 'object' ? node : {};
+    const meta = source.meta && typeof source.meta === 'object' ? source.meta : {};
+    const nodeId = String(source.id || '').trim();
+    const title = String(source.title || '').trim() || 'Untitled Clue';
+    const notes = boardAdminHtmlToText(source.body || '');
+    const sourceTag = String(meta.sourceType || '').trim().toLowerCase();
+    const tags = ['clue', 'board', 'clue-discovery'];
+    if (sourceTag) tags.push(sourceTag);
+    return {
+        title: `Clue: ${title}`,
+        focus: String(boardName || '').trim() || 'Case Board',
+        heatDelta: '',
+        tags: Array.from(new Set(tags)).join(', '),
+        imageUrl: String(meta.imageUrl || '').trim(),
+        highlights: notes || `${title}${getBoardAdminSourceDescriptor(meta)}.`,
+        fallout: '',
+        followUp: '',
+        source: 'board',
+        kind: 'clue-discovered',
+        resolved: false,
+        certainty: clampBoardAdminPercent(meta.certainty, 50),
+        boardNodeId: nodeId,
+        boardLinkType: 'node',
+        boardLinkId: nodeId
+    };
+}
+
+function getBoardAdminBoardState(store, target) {
+    if (!store || !target) return null;
+    if (target.scope === 'campaign') {
+        return typeof store.getCampaignMetaBoard === 'function' ? store.getCampaignMetaBoard() : null;
+    }
+    return typeof store.getBoard === 'function' ? store.getBoard(target.caseId || null) : null;
+}
+
+function getBoardAdminTimelineEvents(store, target) {
+    if (!store || !target) return [];
+    if (target.scope === 'campaign') {
+        return typeof store.getCampaignMetaEvents === 'function' ? store.getCampaignMetaEvents() : [];
+    }
+    return typeof store.getEvents === 'function' ? store.getEvents(target.caseId || null) : [];
+}
+
+function updateBoardAdminTimelineEvent(store, target, eventId, updates) {
+    if (!store || !target || !eventId || !updates) return;
+    if (target.scope === 'campaign') {
+        if (typeof store.updateCampaignMetaEvent === 'function') store.updateCampaignMetaEvent(eventId, updates);
+        return;
+    }
+    if (typeof store.updateEvent === 'function') store.updateEvent(eventId, updates, target.caseId || null);
+}
+
+function addBoardAdminTimelineEvent(store, target, payload) {
+    if (!store || !target || !payload) return '';
+    if (target.scope === 'campaign') {
+        return typeof store.addCampaignMetaEvent === 'function' ? store.addCampaignMetaEvent(payload) : '';
+    }
+    return typeof store.addEvent === 'function' ? store.addEvent(payload, target.caseId || null) : '';
+}
+
+function persistBoardAdminBoardState(store, target, board) {
+    if (!store || !target || !board) return;
+    if (target.scope === 'campaign') {
+        if (typeof store.updateCampaignMetaBoard === 'function') store.updateCampaignMetaBoard(board);
+        return;
+    }
+    if (typeof store.updateBoard === 'function') store.updateBoard(board, target.caseId || null);
+}
+
+function syncBoardAdminLinkedTimelineEvents() {
+    const store = window.RTF_STORE;
+    if (!store) {
+        setBoardAdminStatus('Store unavailable.', true);
+        return;
+    }
+    const target = getBoardAdminTarget();
+    const board = cloneBoardAdminData(getBoardAdminBoardState(store, target), null);
+    if (!board || !Array.isArray(board.nodes)) {
+        setBoardAdminStatus(`Board data unavailable for ${target.label}.`, true);
+        return;
+    }
+
+    const clueNodes = board.nodes.filter((node) =>
+        node
+        && String(node.type || '').trim().toLowerCase() === 'clue'
+        && String(node.id || '').trim()
+    );
+    if (!clueNodes.length) {
+        setBoardAdminStatus(`No clue nodes found on ${target.label}.`);
+        return;
+    }
+
+    const confirmed = confirm(
+        `Sync linked timeline events for ${target.label}?\n\n`
+        + 'This will create missing clue-linked events, refresh clue note text, and repair direct board deeplinks.'
+    );
+    if (!confirmed) return;
+
+    setBoardAdminStatus(`Syncing linked timeline events for ${target.label}...`);
+
+    try {
+        const boardName = String(board.name || '').trim() || target.label;
+        const existingEvents = getBoardAdminTimelineEvents(store, target);
+        const existingEventMap = new Map();
+        (Array.isArray(existingEvents) ? existingEvents : []).forEach((entry) => {
+            const id = String(entry && entry.id || '').trim();
+            if (!id || existingEventMap.has(id)) return;
+            existingEventMap.set(id, entry);
+        });
+
+        let created = 0;
+        let updated = 0;
+        let unchanged = 0;
+        let boardPatched = 0;
+
+        clueNodes.forEach((node) => {
+            const nodeId = String(node.id || '').trim();
+            if (!nodeId) return;
+            const meta = node.meta && typeof node.meta === 'object' ? { ...node.meta } : {};
+            const currentEventId = String(meta.clueTimelineEventId || '').trim();
+            const eventId = currentEventId || createBoardAdminClueTimelineEventId(nodeId);
+            if (currentEventId !== eventId) {
+                meta.clueTimelineEventId = eventId;
+                node.meta = meta;
+                boardPatched += 1;
+            } else if (node.meta !== meta) {
+                node.meta = meta;
+            }
+
+            const payload = buildBoardAdminClueTimelinePayload({ ...node, meta }, boardName);
+            const existing = existingEventMap.get(eventId);
+
+            if (!existing) {
+                addBoardAdminTimelineEvent(store, target, {
+                    id: eventId,
+                    ...payload,
+                    created: new Date().toISOString()
+                });
+                existingEventMap.set(eventId, { id: eventId, ...payload });
+                created += 1;
+                return;
+            }
+
+            const patch = {
+                title: payload.title,
+                focus: payload.focus,
+                tags: payload.tags,
+                imageUrl: payload.imageUrl,
+                highlights: payload.highlights,
+                source: payload.source,
+                kind: payload.kind,
+                certainty: payload.certainty,
+                boardNodeId: payload.boardNodeId,
+                boardLinkType: payload.boardLinkType,
+                boardLinkId: payload.boardLinkId
+            };
+            const changed = Object.keys(patch).some((key) => {
+                const prev = existing && Object.prototype.hasOwnProperty.call(existing, key) ? existing[key] : '';
+                return String(prev ?? '') !== String(patch[key] ?? '');
+            });
+
+            if (!changed) {
+                unchanged += 1;
+                return;
+            }
+
+            updateBoardAdminTimelineEvent(store, target, eventId, patch);
+            existingEventMap.set(eventId, { ...existing, ...patch });
+            updated += 1;
+        });
+
+        if (boardPatched > 0) {
+            persistBoardAdminBoardState(store, target, board);
+        }
+
+        const unchangedText = unchanged > 0 ? ` ${unchanged} already matched.` : '';
+        const boardPatchText = boardPatched > 0 ? ` Repaired ${boardPatched} clue link id${boardPatched === 1 ? '' : 's'} on the board.` : '';
+        setBoardAdminStatus(
+            `Linked timeline sync complete for ${target.label}. `
+            + `Created ${created}, updated ${updated}.${unchangedText}${boardPatchText}`
+        );
+    } catch (err) {
+        setBoardAdminStatus(err && err.message ? err.message : 'Failed to sync linked timeline events.', true);
+    }
+}
+
 function getBoardAdminTarget() {
     const store = window.RTF_STORE;
     const scopeEl = document.getElementById('board-admin-scope');

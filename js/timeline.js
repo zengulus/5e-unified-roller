@@ -725,9 +725,30 @@
     }
 
     function buildBoardLinkForEvent(id) {
+        const cleanId = String(id || '').trim();
         const url = new URL(getBoardPageHref(), window.location.href);
+        if (!cleanId) return url.toString();
+
+        const store = getStore();
+        const evt = store
+            ? (getTimelineEvents(store) || []).find((entry) => String(entry && entry.id || '') === cleanId)
+            : null;
+        const boardLinkType = String(evt && evt.boardLinkType || '').trim().toLowerCase();
+        const boardLinkId = String(evt && (evt.boardLinkId || evt.boardNodeId) || '').trim();
+
+        if ((boardLinkType === 'node' || (!boardLinkType && isBoardNodeId(boardLinkId))) && isBoardNodeId(boardLinkId)) {
+            url.searchParams.set('nodeId', boardLinkId);
+            return url.toString();
+        }
+
+        if (boardLinkType && boardLinkType !== 'node' && boardLinkId) {
+            url.searchParams.set('linkType', boardLinkType);
+            url.searchParams.set('id', boardLinkId);
+            return url.toString();
+        }
+
         url.searchParams.set('linkType', 'timeline-event');
-        url.searchParams.set('id', String(id || '').trim());
+        url.searchParams.set('id', cleanId);
         return url.toString();
     }
 

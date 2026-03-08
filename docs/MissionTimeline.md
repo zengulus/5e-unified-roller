@@ -22,7 +22,7 @@ Case-scoped by design. For campaign-level logging, use [Campaign Timeline](Campa
 
 ## Integrations
 - **Lead Queue** – `Lead Queue` on an event creates/focuses an event lead and opens `leads.html?leadId=<id>`.
-- **Case Board** – `Board` opens `board.html?linkType=timeline-event&id=<event_id>`. Board focuses an existing linked node or spawns one from store data.
+- **Case Board** – `Board` usually opens `board.html?linkType=timeline-event&id=<event_id>`. Auto-generated clue events instead carry a direct `board.html?nodeId=<node_id>` deeplink so the action focuses the exact clue node.
 - **Ledger** – Timeline metadata (`impactSeverity`, `impactScope`, `certainty`) is available for Ledger source-linking and snapshot exports.
 - **Prep & Procedure Clocks** – `Shield -1` reads `rtf_prep_procedure_state_v1`. If prep is full, one free shield is available per active case/session. Otherwise it spends 1 Procedure segment, updates Heat, and logs a shield event.
 - **Deep-Link Filters** – URL query params (`search`, `focus`, and `id`) prefill timeline filters and are then removed from the address bar.

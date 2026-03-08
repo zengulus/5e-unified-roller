@@ -1557,16 +1557,111 @@ function getSourceDescriptor(meta) {
     return '';
 }
 
+function createClueTimelineEventId(nodeId = '') {
+    const cleanNodeId = String(nodeId || '')
+        .trim()
+        .replace(/[^a-z0-9_-]/gi, '')
+        .slice(0, 60);
+    if (cleanNodeId) return `event_clue_${cleanNodeId}`;
+    return `event_clue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function setClueTimelineEventId(nodeEl, eventId) {
+    if (!nodeEl || !eventId) return false;
+    const meta = getNodeMeta(nodeEl) || {};
+    if (String(meta.clueTimelineEventId || '').trim() === String(eventId).trim()) return false;
+    setNodeMeta(nodeEl, stampNodeMeta({
+        ...meta,
+        clueTimelineEventId: String(eventId).trim()
+    }));
+    updateNodeCache(nodeEl.id);
+    return true;
+}
+
+function buildClueTimelineEventSeed(summary) {
+    const meta = summary && summary.meta && typeof summary.meta === 'object' ? summary.meta : {};
+    const clueTitle = String(summary && summary.title || '').trim() || 'Untitled Clue';
+    const clueNotes = String(summary && summary.bodyText || '').trim();
+    const sourceSuffix = getSourceDescriptor(meta);
+    const sourceTag = String(meta.sourceType || '').trim().toLowerCase();
+    const tags = ['clue', 'board', 'clue-discovery'];
+    if (sourceTag) tags.push(sourceTag);
+    return {
+        title: `Clue: ${clueTitle}`,
+        focus: getCaseName(),
+        tags: Array.from(new Set(tags)).join(', '),
+        imageUrl: sanitizeImageUrl(meta.imageUrl || ''),
+        highlights: clueNotes || `${clueTitle}${sourceSuffix}.`,
+        source: 'board',
+        kind: 'clue-discovered',
+        certainty: clampPercent(meta.certainty, 50),
+        boardNodeId: String(summary && summary.id || '').trim(),
+        boardLinkType: 'node',
+        boardLinkId: String(summary && summary.id || '').trim()
+    };
+}
+
+function syncClueTimelineEvent(nodeEl) {
+    if (isExternalBoardMode()) return '';
+    if (!nodeEl || !nodeEl.id || getNodeTypeFromEl(nodeEl) !== 'clue') return '';
+    const store = window.RTF_STORE;
+    if (!store) return '';
+
+    const summary = getNodeSummary(nodeEl.id);
+    if (!summary || summary.type !== 'clue') return '';
+
+    const caseId = getBoardActiveCaseId(store);
+    const meta = summary.meta && typeof summary.meta === 'object' ? summary.meta : {};
+    const eventId = String(meta.clueTimelineEventId || '').trim() || createClueTimelineEventId(summary.id);
+    const existing = (getBoardTimelineEvents(store, caseId) || []).find((entry) => String(entry && entry.id || '') === eventId);
+    const seed = buildClueTimelineEventSeed(summary);
+
+    setClueTimelineEventId(nodeEl, eventId);
+
+    if (existing) {
+        updateBoardTimelineEvent(store, eventId, {
+            title: seed.title,
+            focus: seed.focus,
+            tags: seed.tags,
+            imageUrl: seed.imageUrl,
+            highlights: seed.highlights,
+            source: seed.source,
+            kind: seed.kind,
+            certainty: seed.certainty,
+            boardNodeId: seed.boardNodeId,
+            boardLinkType: seed.boardLinkType,
+            boardLinkId: seed.boardLinkId
+        }, caseId || null);
+        return eventId;
+    }
+
+    addBoardTimelineEvent(store, {
+        id: eventId,
+        title: seed.title,
+        focus: seed.focus,
+        heatDelta: '',
+        tags: seed.tags,
+        imageUrl: seed.imageUrl,
+        highlights: seed.highlights,
+        fallout: '',
+        followUp: '',
+        source: seed.source,
+        kind: seed.kind,
+        resolved: false,
+        certainty: seed.certainty,
+        boardNodeId: seed.boardNodeId,
+        boardLinkType: seed.boardLinkType,
+        boardLinkId: seed.boardLinkId,
+        created: new Date().toISOString()
+    }, caseId || null);
+    return eventId;
+}
+
 function logNodeAddedToBoard(summary) {
     if (!summary || summary.type !== 'clue') return;
-    const sourceSuffix = getSourceDescriptor(summary.meta);
-    const sourceTag = summary.meta && summary.meta.sourceType ? [String(summary.meta.sourceType)] : [];
-    logBoardTimeline({
-        title: 'Clue Discovery Logged',
-        kind: 'clue-discovered',
-        tags: ['clue-discovery', ...sourceTag],
-        highlights: `${summary.title}${sourceSuffix}.`
-    }, { dedupeKey: `board:clue-discovery:${summary.id}` });
+    const nodeEl = document.getElementById(summary.id);
+    if (!nodeEl) return;
+    syncClueTimelineEvent(nodeEl);
 }
 
 function logNodeConnectedToCase(summary, otherSummary) {
@@ -5193,6 +5288,7 @@ function setTargetNodeImageUrl() {
     updateNodeImageMeta(el, trimmed);
     persistLinkedNodeImageUrl(el, trimmed);
     updateNodeCache(el.id);
+    syncClueTimelineEvent(el);
     saveBoard();
     contextMenu.style.display = 'none';
 }
@@ -5234,6 +5330,7 @@ function applyNarrativeMetaUpdate(nodeEl, updates = {}) {
     if (type === 'theory') syncTheoryNodeDisplay(nodeEl);
     else syncNodeNarrativeMetaDisplay(nodeEl);
     updateNodeCache(nodeEl.id);
+    syncClueTimelineEvent(nodeEl);
     saveBoard();
     persistLinkedNodeNarrativeMeta(nodeEl);
     return true;
@@ -5584,6 +5681,7 @@ function editTargetNode() {
     el.classList.add('editing');
     const t = el.querySelector('.node-title');
     const b = el.querySelector('.node-body');
+    const initialEditSummary = getNodeSummary(el.id);
     activeBoardEditNodeId = el.id;
     syncBoardCollabSelection([el.id]);
     if (isBoardCollabReady() && typeof boardCollabSession.setEditing === 'function') {
@@ -5662,6 +5760,16 @@ function editTargetNode() {
             boardCollabSession.setEditing(null);
         }
         updateNodeCache(el.id);
+        const finalSummary = getNodeSummary(el.id);
+        if (
+            String(initialEditSummary && initialEditSummary.type || '') === 'clue'
+            && (
+                String(initialEditSummary && initialEditSummary.title || '').trim() !== String(finalSummary && finalSummary.title || '').trim()
+                || String(initialEditSummary && initialEditSummary.bodyText || '').trim() !== String(finalSummary && finalSummary.bodyText || '').trim()
+            )
+        ) {
+            syncClueTimelineEvent(el);
+        }
         saveBoard();
         applyPendingRemoteBoardSnapshot();
     };
