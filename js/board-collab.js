@@ -521,6 +521,10 @@ class BoardCollabSession {
         }
 
         const currentDocSnapshot = serializeDocSnapshot(this.doc, this.scope, this.caseId);
+        const localDocPayload = sanitizeBoardSnapshot(currentDocSnapshot, {
+            scope: this.scope,
+            caseId: this.caseId
+        });
         const seedPayload = sanitizeBoardSnapshot(
             typeof this.options.getSeedPayload === 'function'
                 ? this.options.getSeedPayload()
@@ -542,9 +546,9 @@ class BoardCollabSession {
 
         if (cloudRow.ok && cloudRow.snapshot) {
             const cloudUpdatedAt = Date.parse(cloudRow.snapshot.updatedAt || '') || cloudRow.snapshot.revision || 0;
-            const localUpdatedAt = Math.max(0, currentDocSnapshot.updatedAt || 0);
+            const localUpdatedAt = Math.max(0, localDocPayload.updatedAt || 0);
             this.lastSavedRevision = Math.max(0, cloudRow.snapshot.revision || 0);
-            if (!hasBoardContent(currentDocSnapshot) || cloudUpdatedAt > localUpdatedAt) {
+            if (!hasBoardContent(localDocPayload) || cloudUpdatedAt > localUpdatedAt) {
                 applySnapshotToDoc(
                     this.doc,
                     cloudRow.snapshot.payload,
@@ -554,7 +558,63 @@ class BoardCollabSession {
                     cloudUpdatedAt || Date.now()
                 );
             }
-        } else if (!hasBoardContent(currentDocSnapshot)) {
+        } else if (cloudRow.ok) {
+            const canonicalSeed = sanitizeBoardSnapshot(
+                hasBoardContent(livePayload)
+                    ? livePayload
+                    : (hasBoardContent(seedPayload) ? seedPayload : localDocPayload),
+                { scope: this.scope, caseId: this.caseId }
+            );
+            const canonicalSeedSig = stableStringify(canonicalSeed);
+            const localDocSig = stableStringify(localDocPayload);
+            const seedStamp = Math.max(Date.now(), canonicalSeed.updatedAt || 0);
+
+            if (!hasBoardContent(localDocPayload) || localDocSig !== canonicalSeedSig) {
+                applySnapshotToDoc(this.doc, canonicalSeed, this.scope, this.caseId, this.originBootstrap, seedStamp);
+            }
+
+            const seeded = await this.store.saveBoardRoomSnapshot({
+                roomId: this.roomId,
+                scope: this.scope,
+                caseId: this.caseId,
+                payload: canonicalSeed,
+                revision: seedStamp,
+                updatedAt: new Date(seedStamp).toISOString(),
+                updatedBy: this.instanceId,
+                updatedByUser: this.userId || null,
+                updatedByName: this.profileName || null,
+                createOnly: true
+            });
+
+            if (!seeded.ok && seeded.reason !== 'exists') {
+                console.warn('RTF_BOARD_COLLAB: Failed seeding board room', seeded.error || seeded.reason);
+            }
+
+            const canonicalRoom = await this.store.loadBoardRoomSnapshot({
+                roomId: this.roomId,
+                scope: this.scope,
+                caseId: this.caseId
+            });
+
+            if (canonicalRoom.ok && canonicalRoom.snapshot) {
+                const roomUpdatedAt = Date.parse(canonicalRoom.snapshot.updatedAt || '') || canonicalRoom.snapshot.revision || seedStamp;
+                const roomPayload = sanitizeBoardSnapshot(canonicalRoom.snapshot.payload, {
+                    scope: this.scope,
+                    caseId: this.caseId
+                });
+                this.lastSavedRevision = Math.max(0, canonicalRoom.snapshot.revision || 0);
+                if (stableStringify(roomPayload) !== stableStringify(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
+                    applySnapshotToDoc(
+                        this.doc,
+                        roomPayload,
+                        this.scope,
+                        this.caseId,
+                        this.originRemoteRestore,
+                        roomUpdatedAt
+                    );
+                }
+            }
+        } else if (!hasBoardContent(localDocPayload)) {
             applySnapshotToDoc(this.doc, seedPayload, this.scope, this.caseId, this.originBootstrap, Date.now());
         }
 

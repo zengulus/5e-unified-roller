@@ -4274,17 +4274,42 @@
                 return { ok: false, reason: 'missing-config', config };
             }
 
-            if (!this.sync.client || !this.syncStatus.connected) {
-                const connected = await this.connectSync();
-                if (!connected.ok) {
-                    return {
-                        ok: false,
-                        reason: connected.reason || 'connect-failed',
-                        error: connected.error || '',
-                        config: sanitizeSyncConfig(this.sync && this.sync.config ? this.sync.config : config)
-                    };
+            try {
+                const supabaseLib = await this.loadSupabaseLibrary();
+                const clientKey = `${config.supabaseUrl}|${config.anonKey}`;
+
+                if (!this.sync.client || this.sync.clientKey !== clientKey) {
+                    await this.disconnectSync('reconfigure');
+                    this.sync.client = supabaseLib.createClient(config.supabaseUrl, config.anonKey, {
+                        auth: {
+                            persistSession: true,
+                            autoRefreshToken: true,
+                            detectSessionInUrl: true
+                        }
+                    });
+                    this.sync.clientKey = clientKey;
+                    this.sync.userId = '';
                 }
+            } catch (err) {
+                return {
+                    ok: false,
+                    reason: 'client-unavailable',
+                    error: err && err.message ? err.message : 'Supabase client unavailable.',
+                    config
+                };
             }
+
+            const authResult = await this.ensureSyncUser();
+            if (!authResult.ok) {
+                return {
+                    ok: false,
+                    reason: 'auth-required',
+                    error: authResult.message || 'Authentication required for board collaboration.',
+                    config
+                };
+            }
+
+            this.sync.userId = authResult.userId || '';
 
             return {
                 ok: true,
@@ -4292,7 +4317,8 @@
                 config: sanitizeSyncConfig(this.sync.config),
                 instanceId: this.sync.instanceId,
                 userId: this.sync.userId || '',
-                profileName: this.sync.config && this.sync.config.profileName ? this.sync.config.profileName : ''
+                profileName: this.sync.config && this.sync.config.profileName ? this.sync.config.profileName : '',
+                syncConnected: !!this.syncStatus.connected
             };
         }
 
@@ -4366,6 +4392,7 @@
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
             const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const createOnly = !!opts.createOnly;
 
             const row = {
                 campaign_id: ensured.config.campaignId,
@@ -4384,13 +4411,28 @@
                     : (ensured.profileName || null)
             };
 
-            const result = await ensured.client
-                .from(tableName)
-                .upsert(row, { onConflict: 'campaign_id,room_id' })
-                .select('revision,updated_at')
-                .single();
+            const query = createOnly
+                ? ensured.client
+                    .from(tableName)
+                    .insert(row)
+                    .select('revision,updated_at')
+                    .single()
+                : ensured.client
+                    .from(tableName)
+                    .upsert(row, { onConflict: 'campaign_id,room_id' })
+                    .select('revision,updated_at')
+                    .single();
+
+            const result = await query;
 
             if (result.error) {
+                if (createOnly && result.error.code === '23505') {
+                    return {
+                        ok: false,
+                        reason: 'exists',
+                        error: result.error.message || `${tableName} row already exists.`
+                    };
+                }
                 return {
                     ok: false,
                     reason: 'write-failed',
