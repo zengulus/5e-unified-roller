@@ -7264,6 +7264,9 @@
                 delete event.impactSeverity;
                 delete event.impactScope;
                 delete event.certainty;
+                delete event.lastChangedBy;
+                delete event.lastChangedAt;
+                delete event.created;
                 if (mode === 'full') {
                     return event;
                 }
@@ -7274,12 +7277,9 @@
                     heatDelta: event.heatDelta,
                     focus: event.focus,
                     tags: event.tags,
-                    lastChangedBy: event.lastChangedBy,
-                    lastChangedAt: event.lastChangedAt,
                     highlights: toTrimmedString(event.highlights, '', 800),
                     fallout: toTrimmedString(event.fallout, '', 800),
-                    followUp: toTrimmedString(event.followUp, '', 800),
-                    created: event.created
+                    followUp: toTrimmedString(event.followUp, '', 800)
                 };
             };
 

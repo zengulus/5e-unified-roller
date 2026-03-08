@@ -895,17 +895,14 @@
         store.save({ scope: getTimelineOrderScope() });
     }
 
-    function getVisibleTimelineIds() {
-        const { filtered } = getFilteredEvents();
-        return filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
-    }
-
-    function applyVisibleTimelineOrder(nextVisibleIds) {
+    function applyCanonicalTimelineOrder(currentCanonicalVisibleIds, nextCanonicalVisibleIds) {
         const store = getStore();
         if (!store || !isChronologicalSortSelected()) return false;
-        const currentVisibleIds = getVisibleTimelineIds();
-        const desiredVisibleIds = Array.isArray(nextVisibleIds)
-            ? nextVisibleIds.map((id) => String(id || '').trim()).filter(Boolean)
+        const currentVisibleIds = Array.isArray(currentCanonicalVisibleIds)
+            ? currentCanonicalVisibleIds.map((id) => String(id || '').trim()).filter(Boolean)
+            : [];
+        const desiredVisibleIds = Array.isArray(nextCanonicalVisibleIds)
+            ? nextCanonicalVisibleIds.map((id) => String(id || '').trim()).filter(Boolean)
             : [];
         if (!currentVisibleIds.length || currentVisibleIds.length !== desiredVisibleIds.length) return false;
         const currentIdSet = new Set(currentVisibleIds);
@@ -914,21 +911,17 @@
 
         const events = getTimelineEvents(store);
         if (!Array.isArray(events)) return false;
-
-        const baseVisibleIds = getTimelineSortMode() === 'newest'
-            ? desiredVisibleIds.slice().reverse()
-            : desiredVisibleIds.slice();
         const eventById = new Map(events.map((evt) => [String(evt && evt.id || '').trim(), evt]));
         const visibleSlots = [];
         events.forEach((evt, index) => {
             const evtId = String(evt && evt.id || '').trim();
             if (currentIdSet.has(evtId)) visibleSlots.push(index);
         });
-        if (visibleSlots.length !== baseVisibleIds.length) return false;
+        if (visibleSlots.length !== desiredVisibleIds.length) return false;
 
         const nextOrder = events.slice();
-        for (let i = 0; i < baseVisibleIds.length; i += 1) {
-            const replacement = eventById.get(baseVisibleIds[i]);
+        for (let i = 0; i < desiredVisibleIds.length; i += 1) {
+            const replacement = eventById.get(desiredVisibleIds[i]);
             if (!replacement) return false;
             nextOrder[visibleSlots[i]] = replacement;
         }
@@ -942,36 +935,48 @@
         const cleanId = String(id || '').trim();
         const step = Number(direction);
         if (!cleanId || !Number.isFinite(step) || step === 0 || !isAdminMoveModeEnabled()) return;
-        const visibleIds = getVisibleTimelineIds();
-        const currentIndex = visibleIds.indexOf(cleanId);
+        const { filtered, canonicalFiltered } = getFilteredEvents();
+        const displayIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        const canonicalIds = canonicalFiltered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        const currentIndex = displayIds.indexOf(cleanId);
         const targetIndex = currentIndex + (step < 0 ? -1 : 1);
-        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= visibleIds.length) return;
-        const nextVisibleIds = visibleIds.slice();
-        const [moved] = nextVisibleIds.splice(currentIndex, 1);
-        nextVisibleIds.splice(targetIndex, 0, moved);
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= displayIds.length) return;
+        const nextDisplayIds = displayIds.slice();
+        const [moved] = nextDisplayIds.splice(currentIndex, 1);
+        nextDisplayIds.splice(targetIndex, 0, moved);
+        const nextCanonicalIds = getTimelineSortMode() === 'newest'
+            ? nextDisplayIds.slice().reverse()
+            : nextDisplayIds.slice();
         clearPendingSwapSelection();
-        if (applyVisibleTimelineOrder(nextVisibleIds)) renderTimeline();
+        if (applyCanonicalTimelineOrder(canonicalIds, nextCanonicalIds)) renderTimeline();
     }
 
     function sendTimelineEventToExtreme(id, edge) {
         const cleanId = String(id || '').trim();
         const cleanEdge = String(edge || '').trim().toLowerCase();
         if (!cleanId || !isAdminMoveModeEnabled() || (cleanEdge !== 'top' && cleanEdge !== 'bottom')) return;
-        const visibleIds = getVisibleTimelineIds();
-        const currentIndex = visibleIds.indexOf(cleanId);
+        const { filtered, canonicalFiltered } = getFilteredEvents();
+        const displayIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        const canonicalIds = canonicalFiltered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        const currentIndex = displayIds.indexOf(cleanId);
         if (currentIndex < 0) return;
-        const nextVisibleIds = visibleIds.filter((entryId) => entryId !== cleanId);
-        if (cleanEdge === 'top') nextVisibleIds.unshift(cleanId);
-        else nextVisibleIds.push(cleanId);
+        const nextDisplayIds = displayIds.filter((entryId) => entryId !== cleanId);
+        if (cleanEdge === 'top') nextDisplayIds.unshift(cleanId);
+        else nextDisplayIds.push(cleanId);
+        const nextCanonicalIds = getTimelineSortMode() === 'newest'
+            ? nextDisplayIds.slice().reverse()
+            : nextDisplayIds.slice();
         clearPendingSwapSelection();
-        if (applyVisibleTimelineOrder(nextVisibleIds)) renderTimeline();
+        if (applyCanonicalTimelineOrder(canonicalIds, nextCanonicalIds)) renderTimeline();
     }
 
     function toggleSwapTimelineEvent(id) {
         const cleanId = String(id || '').trim();
         if (!cleanId || !isAdminMoveModeEnabled()) return;
-        const visibleIds = getVisibleTimelineIds();
-        if (!visibleIds.includes(cleanId)) return;
+        const { filtered, canonicalFiltered } = getFilteredEvents();
+        const displayIds = filtered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        const canonicalIds = canonicalFiltered.map((evt) => String(evt && evt.id || '').trim()).filter(Boolean);
+        if (!displayIds.includes(cleanId)) return;
 
         if (!pendingSwapEventId) {
             pendingSwapEventId = cleanId;
@@ -985,18 +990,21 @@
             return;
         }
 
-        const sourceIndex = visibleIds.indexOf(pendingSwapEventId);
-        const targetIndex = visibleIds.indexOf(cleanId);
+        const sourceIndex = displayIds.indexOf(pendingSwapEventId);
+        const targetIndex = displayIds.indexOf(cleanId);
         if (sourceIndex < 0 || targetIndex < 0) {
             clearPendingSwapSelection();
             renderTimeline();
             return;
         }
 
-        const nextVisibleIds = visibleIds.slice();
-        [nextVisibleIds[sourceIndex], nextVisibleIds[targetIndex]] = [nextVisibleIds[targetIndex], nextVisibleIds[sourceIndex]];
+        const nextDisplayIds = displayIds.slice();
+        [nextDisplayIds[sourceIndex], nextDisplayIds[targetIndex]] = [nextDisplayIds[targetIndex], nextDisplayIds[sourceIndex]];
+        const nextCanonicalIds = getTimelineSortMode() === 'newest'
+            ? nextDisplayIds.slice().reverse()
+            : nextDisplayIds.slice();
         clearPendingSwapSelection();
-        if (applyVisibleTimelineOrder(nextVisibleIds)) renderTimeline();
+        if (applyCanonicalTimelineOrder(canonicalIds, nextCanonicalIds)) renderTimeline();
     }
 
     function toggleEventForm() {
@@ -1618,9 +1626,6 @@
         const procedureShieldButton = showProcedureShield
             ? `<button class="btn btn-procedure ${freeShieldAvailable ? 'is-free' : ''}" data-onclick="spendProcedureShield('${evtId}')">${freeShieldAvailable ? 'Shield -1 (Free)' : 'Shield -1'}</button>`
             : '';
-        const attribution = (evt.lastChangedBy || evt.lastChangedAt)
-            ? `Updated ${evt.lastChangedAt ? new Date(evt.lastChangedAt).toLocaleString() : '—'}${evt.lastChangedBy ? ` by ${escapeHtml(evt.lastChangedBy)}` : ''}`
-            : '';
         const leadActionButton = isCampaignMetaView()
             ? ''
             : `<button class="btn" data-onclick="queueLeadFromEvent('${evtId}')">Lead Queue</button>`;
@@ -1682,8 +1687,6 @@
                         <textarea placeholder="Follow Ups" data-onchange="updateEventField('${evtId}', 'followUp', this.value)">${escapeHtml(evt.followUp || '')}</textarea>
                     </div>
                     <div class="event-actions">
-                        <small class="event-log-meta">Logged ${evt.created ? new Date(evt.created).toLocaleString() : '—'}</small>
-                        ${attribution ? `<small class="event-log-meta">${attribution}</small>` : ''}
                         ${procedureShieldButton}
                         ${leadActionButton}
                         ${copyToCampaignButton}
@@ -1716,7 +1719,7 @@
         const store = getStore();
         const manager = getDeleteManager();
         if (!store) {
-            return { filtered: [], filters: null };
+            return { filtered: [], canonicalFiltered: [], filters: null };
         }
         const events = (getTimelineEvents(store) || []).slice();
         populateFocusFilter(events);
@@ -1727,7 +1730,7 @@
         const impactOnly = isButtonPressed('eventImpactOnly');
         const hideResolved = isButtonPressed('eventHideResolved');
 
-        const filtered = events.filter(evt => {
+        const canonicalFiltered = events.filter(evt => {
             if (manager && manager.isPending(evt.id)) return false;
             const text = `${evt.id || ''} ${evt.title || ''} ${evt.focus || ''} ${evt.highlights || ''} ${evt.fallout || ''} ${evt.followUp || ''} ${evt.tags || ''}`.toLowerCase();
             const matchesSearch = search ? text.includes(search) : true;
@@ -1740,6 +1743,7 @@
             const matchesResolved = hideResolved ? !evt.resolved : true;
             return matchesSearch && matchesFocus && matchesImpact && matchesResolved;
         });
+        const filtered = canonicalFiltered.slice();
 
         if (sort === 'heat') {
             filtered.sort((a, b) => {
@@ -1753,6 +1757,7 @@
 
         return {
             filtered,
+            canonicalFiltered,
             filters: {
                 search,
                 focusFilter,
@@ -1766,8 +1771,6 @@
     function buildExportRecap(events, filters) {
         const lines = [];
         lines.push('# Mission Timeline Recap');
-        lines.push(`Generated: ${new Date().toLocaleString()}`);
-        lines.push('');
         lines.push('## Active Filters');
         lines.push(`- Search: ${filters.search ? `"${filters.search}"` : 'None'}`);
         lines.push(`- Focus: ${filters.focusFilter || 'All'}`);
@@ -1796,11 +1799,10 @@
     }
 
     function triggerRecapDownload(text) {
-        const dateStamp = new Date().toISOString().slice(0, 10);
         const blob = new Blob([text], { type: 'text/markdown' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `mission-timeline-recap-${dateStamp}.md`;
+        link.download = 'mission-timeline-recap.md';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

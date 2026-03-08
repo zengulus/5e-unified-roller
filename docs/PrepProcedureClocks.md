@@ -10,6 +10,7 @@
   - `Log Custom Prep` posts a prep timeline event with player + category metadata and increments the `PREP` clock by 1 (clamped at total).
   - `Log Custom Procedure` posts a procedure timeline event with player + category metadata and increments the `PROCEDURE` clock by 1 (clamped at total).
   - Both custom logs use popover inputs for player (from roster dropdown), category, and optional detail text.
+- Prep/Procedure timeline shares no longer append raw `Snapshot:` lines or logged-at timestamps to the event notes; only the meaningful event content is sent through.
 - Flashback spend actions are in a second row beneath custom logging:
   - `Minor Flashback (-1 Prep)` spends 1 prep token and logs the flashback to timeline.
   - `Major Flashback (-2 Prep)` spends 2 prep tokens and logs the flashback to timeline.

@@ -537,8 +537,8 @@
         return global.RTF_STORE || null;
     }
 
-    function getSnapshotLine(snapshot) {
-        return `Prep ${snapshot.prep.filled}/${snapshot.prep.total} | Procedure ${snapshot.procedure.filled}/${snapshot.procedure.total} | Tokens ${snapshot.tokens.count}/${snapshot.tokens.max}`;
+    function getPrepStateSummary(snapshot) {
+        return `Prep ${snapshot.prep.filled}/${snapshot.prep.total}\nProcedure ${snapshot.procedure.filled}/${snapshot.procedure.total}\nPrep tokens ${snapshot.tokens.count}/${snapshot.tokens.max}`;
     }
 
     function getPopoverNoteValue() {
@@ -583,7 +583,7 @@
             const preset = getFlashbackPreset(ctx.tier);
             const remaining = Math.max(0, snapshot.tokens.count - preset.cost);
             refs.popoverTitle.textContent = `${preset.label} Spend`;
-            refs.popoverBody.textContent = `Spend ${preset.cost} Prep ${pluralizeToken(preset.cost)} to trigger a ${preset.label.toLowerCase()}.\nRemaining after spend: ${remaining}/${snapshot.tokens.max}\nSnapshot: ${getSnapshotLine(snapshot)}`;
+            refs.popoverBody.textContent = `Spend ${preset.cost} Prep ${pluralizeToken(preset.cost)} to trigger a ${preset.label.toLowerCase()}.\nRemaining after spend: ${remaining}/${snapshot.tokens.max}`;
             refs.popoverConfirm.textContent = `Spend ${preset.cost} & Log`;
             if (refs.popoverPlayerWrap) refs.popoverPlayerWrap.classList.remove('is-hidden');
             if (refs.popoverPlayerLabel) refs.popoverPlayerLabel.textContent = `${preset.label} Player`;
@@ -594,7 +594,7 @@
         } else if (isCustomPrep || isCustomProcedure) {
             const typeLabel = isCustomProcedure ? 'Procedure' : 'Prep';
             refs.popoverTitle.textContent = `Log Custom ${typeLabel}`;
-            refs.popoverBody.textContent = `Choose player and category, then add any optional detail for timeline context.\nSnapshot: ${getSnapshotLine(snapshot)}`;
+            refs.popoverBody.textContent = 'Choose player and category, then add any optional detail for timeline context.';
             refs.popoverConfirm.textContent = `Log Custom ${typeLabel}`;
             if (refs.popoverPlayerWrap) refs.popoverPlayerWrap.classList.remove('is-hidden');
             if (refs.popoverCategoryWrap) refs.popoverCategoryWrap.classList.remove('is-hidden');
@@ -608,10 +608,10 @@
         } else if (isExample) {
             refs.popoverTitle.textContent = 'Log Example to Timeline';
             const typeLabel = ctx.example.type === 'procedure' ? 'Procedure' : 'Prep';
-            refs.popoverBody.textContent = `${typeLabel} • ${ctx.example.category} • ${ctx.example.name}\nSnapshot: ${getSnapshotLine(snapshot)}`;
+            refs.popoverBody.textContent = `${typeLabel} • ${ctx.example.category} • ${ctx.example.name}`;
         } else {
-            refs.popoverTitle.textContent = 'Log Prep Snapshot';
-            refs.popoverBody.textContent = `Snapshot: ${getSnapshotLine(snapshot)}`;
+            refs.popoverTitle.textContent = 'Log Prep Update';
+            refs.popoverBody.textContent = `Share the current prep and procedure state to the timeline.\n${getPrepStateSummary(snapshot)}`;
         }
 
         refs.popoverBackdrop.classList.remove('is-hidden');
@@ -645,19 +645,16 @@
 
     function buildTimelineEntryFromState(snapshot) {
         const prep = snapshot.prep;
-        const procedure = snapshot.procedure;
-        const tokens = snapshot.tokens;
-        const stamp = new Date().toLocaleString();
 
         return {
             id: `event_prep_${Date.now()}`,
-            title: `Prep Log ${prep.filled}/${prep.total}`,
+            title: `Prep Update ${prep.filled}/${prep.total}`,
             focus: 'Prep & Procedure Clocks',
             heatDelta: '',
             tags: 'prep, procedure, clocks, timeline',
-            highlights: `Snapshot: Prep ${prep.filled}/${prep.total} | Procedure ${procedure.filled}/${procedure.total} | Tokens ${tokens.count}/${tokens.max}`,
+            highlights: getPrepStateSummary(snapshot),
             fallout: '',
-            followUp: `Snapshot recorded at ${stamp}.`,
+            followUp: '',
             source: 'prep-procedure',
             kind: 'prep-log',
             resolved: false,
@@ -667,16 +664,15 @@
 
     function buildExampleTimelineEntry(snapshot, example) {
         const typeLabel = example.type === 'procedure' ? 'Procedure' : 'Prep';
-        const stamp = new Date().toLocaleString();
         return {
             id: `event_example_${Date.now()}`,
             title: `${typeLabel}: ${example.name}`,
             focus: 'Prep & Procedure Clocks',
             heatDelta: '',
             tags: `example, ${example.type}, ${String(example.category || '').toLowerCase()}, procedure, clocks`,
-            highlights: `Example: ${example.name} | Category: ${example.category}\nSnapshot: ${getSnapshotLine(snapshot)}`,
+            highlights: `Example: ${example.name}\nCategory: ${example.category}`,
             fallout: '',
-            followUp: `Example logged at ${stamp}.`,
+            followUp: '',
             source: 'prep-procedure',
             kind: 'prep-example-log',
             resolved: false,
@@ -685,10 +681,8 @@
     }
 
     function buildFlashbackTimelineEntry(snapshot, preset, note, remainingTokens, playerName) {
-        const stamp = new Date().toLocaleString();
         const safeNote = String(note || '').trim();
         const safePlayer = normalizePlayerName(playerName || '');
-        const noteLine = safeNote ? `Flashback note: ${safeNote}` : 'Flashback note: (none)';
         const playerLine = safePlayer ? `Player: ${safePlayer}` : 'Player: (unassigned)';
         const tokenLine = `Prep tokens: ${snapshot.tokens.count} -> ${remainingTokens}`;
 
@@ -698,9 +692,9 @@
             focus: 'Prep & Procedure Clocks',
             heatDelta: '',
             tags: `flashback, prep-token, ${preset.tier}, prep, procedure`,
-            highlights: `${preset.label} used by spending ${preset.cost} Prep ${pluralizeToken(preset.cost)}.\n${playerLine}\n${tokenLine}\nSnapshot: ${getSnapshotLine(snapshot)}`,
+            highlights: `${preset.label} used by spending ${preset.cost} Prep ${pluralizeToken(preset.cost)}.\n${playerLine}\n${tokenLine}`,
             fallout: '',
-            followUp: `${noteLine}\nLogged at ${stamp}.`,
+            followUp: safeNote,
             source: 'prep-procedure',
             kind: 'prep-flashback',
             resolved: false,
@@ -750,7 +744,6 @@
         const safePlayer = normalizePlayerName(playerName);
         const safeCategory = normalizeCategory(category, PREP_CATEGORIES[0]);
         const safeNote = String(note || '').trim();
-        const stamp = new Date().toLocaleString();
 
         return {
             id: `event_custom_${safeType}_${Date.now()}`,
@@ -758,9 +751,9 @@
             focus: 'Prep & Procedure Clocks',
             heatDelta: '',
             tags: `custom, ${safeType}, ${String(safeCategory).toLowerCase()}, prep-procedure`,
-            highlights: `Player: ${safePlayer}\nCategory: ${safeCategory}\nSnapshot: ${getSnapshotLine(snapshot)}`,
+            highlights: `Player: ${safePlayer}\nCategory: ${safeCategory}`,
             fallout: '',
-            followUp: `${safeNote ? safeNote : 'No additional details.'}\nLogged at ${stamp}.`,
+            followUp: safeNote,
             source: 'prep-procedure',
             kind: `custom-${safeType}-log`,
             resolved: false,
@@ -834,7 +827,7 @@
             setStatus(`Example logged to timeline (${caseLabel}).`, 'success');
             return;
         }
-        setStatus(`Prep snapshot logged to timeline (${caseLabel}).`, 'success');
+        setStatus(`Prep update logged to timeline (${caseLabel}).`, 'success');
     }
 
     function confirmPopoverAction() {
