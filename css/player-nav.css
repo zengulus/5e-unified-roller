@@ -241,6 +241,23 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-secondary) 26%, transparent);
 }
 
+.hero-actions.has-hero-menu .hero-menu-connect-field {
+    display: grid;
+    gap: 6px;
+}
+
+.hero-actions.has-hero-menu .hero-menu-connect-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: color-mix(in srgb, #d8e1f1 76%, var(--accent-secondary) 24%);
+    text-transform: uppercase;
+}
+
+.hero-actions.has-hero-menu .hero-menu-connect-input {
+    width: 100%;
+}
+
 .hero-actions.has-hero-menu .hero-menu-nav-hint {
     font-size: 0.72rem;
     color: color-mix(in srgb, #d3dbec 74%, var(--accent-secondary) 26%);

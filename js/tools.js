@@ -1201,14 +1201,10 @@ function normalizeConnectPayload(raw) {
     return payload;
 }
 
-function promptRequiredConnectPlayerName() {
-    while (true) {
-        const entered = prompt('Enter your player name for sync tracking (required):', '');
-        if (entered === null) return '';
-        const cleanName = entered.trim();
-        if (cleanName) return cleanName;
-        alert('Player name is required to connect.');
-    }
+function resolveConnectProfileName(fallback = '') {
+    const field = document.getElementById('sync-profile');
+    const fieldValue = field ? String(field.value || '').trim() : '';
+    return String(fieldValue || fallback || '').trim();
 }
 
 async function applyConnectProfile(raw, opts = {}) {
@@ -1217,9 +1213,14 @@ async function applyConnectProfile(raw, opts = {}) {
     const payload = normalizeConnectPayload(raw);
     if (!payload) return { ok: false, error: 'Invalid connect.json format.' };
     const suppliedProfileName = typeof options.profileName === 'string' ? options.profileName.trim() : '';
-    const profileName = suppliedProfileName || promptRequiredConnectPlayerName();
-    if (!profileName) return { ok: false, error: 'Player name is required to connect.' };
-    payload.profileName = profileName;
+    const currentConfig = (window.RTF_STORE && typeof window.RTF_STORE.getSyncConfig === 'function')
+        ? window.RTF_STORE.getSyncConfig()
+        : null;
+    payload.profileName = resolveConnectProfileName(
+        suppliedProfileName
+        || String(payload.profileName || '').trim()
+        || String(currentConfig && currentConfig.profileName || '').trim()
+    );
     setAutoConnectCancelledPreference(payload.autoConnect === false);
 
     window.RTF_STORE.setSyncConfig(payload, { reconnect: false });

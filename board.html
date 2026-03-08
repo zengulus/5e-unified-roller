@@ -16,7 +16,7 @@
     <canvas id="vector-cloud"></canvas>
 
     <div id="mobile-warning" class="mobile-only-warning">
-        Mobile mode: drag nodes with one finger, pinch to zoom, tap tools to spawn nodes.
+        Mobile mode: drag nodes with one finger, pinch to zoom, tap tools to spawn nodes, and long-press a node for actions.
     </div>
 
     <!-- Canvas for drawing physics strings -->
@@ -31,12 +31,17 @@
             <h1>Case Board</h1>
             <p class="hero-subtitle">A case-level whiteboard for tracking clues, NPCs, and faction threads with physics-assisted connections.</p>
             <div class="hero-meta">Case File <strong id="caseName" contenteditable="true">UNNAMED</strong></div>
+            <div id="board-collab-status" class="board-collab-status" data-state="local" title="Board is running locally on this device.">
+                <span class="board-collab-status-dot" aria-hidden="true"></span>
+                <span id="board-collab-status-label">Local board</span>
+            </div>
         </div>
         <div class="hero-actions">
             <div class="hero-action-bar primary">
                 <button class="hero-btn ghost" id="btn-pan" data-onclick="togglePanMode()">🖐️ Pan: OFF</button>
                 <button class="hero-btn ghost" data-onclick="saveBoard({ flushNow: true })">💾 Save</button>
                 <button class="hero-btn danger" data-onclick="clearBoard()">🗑️ Clear</button>
+                <button class="hero-btn ghost" id="btn-undo-clear" data-onclick="undoClearBoard()" hidden>↩ Undo Clear</button>
             </div>
             <div class="hero-action-bar secondary">
                 <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>

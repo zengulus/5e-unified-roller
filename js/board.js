@@ -64,9 +64,18 @@ let boardCollabSession = null;
 let boardCollabInitPromise = null;
 let pendingRemoteBoardSnapshot = null;
 let activeBoardEditNodeId = '';
+let lastClearedBoardPayload = null;
+const MOBILE_NODE_ACTION_HOLD_MS = 420;
+const MOBILE_DRAG_START_THRESHOLD_PX = 10;
 
 const touchState = {
     dragTouchId: null,
+    pressTouchId: null,
+    pressNodeId: '',
+    pressClientX: 0,
+    pressClientY: 0,
+    longPressTimer: null,
+    longPressTriggered: false,
     panTouchId: null,
     pinchIds: null,
     pinchDist: 0,
@@ -316,6 +325,109 @@ function showShortcutAlert(message) {
     }, SHORTCUT_ALERT_VISIBLE_MS);
 }
 
+function setBoardCollabStatus(status = {}) {
+    const root = document.getElementById('board-collab-status');
+    const labelEl = document.getElementById('board-collab-status-label');
+    if (!root || !labelEl) return;
+
+    const source = status && typeof status === 'object' ? status : {};
+    const state = source.state === 'live'
+        ? 'live'
+        : (source.state === 'connecting'
+            ? 'connecting'
+            : (source.state === 'degraded' ? 'degraded' : 'local'));
+    const peerCount = Number.isFinite(source.peerCount) ? Math.max(0, source.peerCount) : 0;
+    const detail = String(source.detail || '').trim();
+    let label = 'Local board';
+
+    if (state === 'live') {
+        label = peerCount > 0 ? `Live board | ${peerCount} ${peerCount === 1 ? 'peer' : 'peers'}` : 'Live board';
+    } else if (state === 'connecting') {
+        label = 'Connecting live board';
+    } else if (state === 'degraded') {
+        label = 'Live board unavailable';
+    }
+
+    root.dataset.state = state;
+    root.title = detail || label;
+    root.setAttribute('aria-label', detail || label);
+    labelEl.textContent = label;
+}
+
+function syncBoardCollabStatusFromSession() {
+    if (boardCollabSession && typeof boardCollabSession.getStatus === 'function') {
+        setBoardCollabStatus(boardCollabSession.getStatus());
+        return;
+    }
+    setBoardCollabStatus({
+        state: 'local',
+        detail: 'Board is running locally on this device.',
+        peerCount: 0
+    });
+}
+
+function updateUndoClearButton() {
+    const btn = document.getElementById('btn-undo-clear');
+    if (!btn) return;
+    btn.hidden = !lastClearedBoardPayload;
+}
+
+function clearPendingNodeTouchPress() {
+    if (touchState.longPressTimer) {
+        clearTimeout(touchState.longPressTimer);
+        touchState.longPressTimer = null;
+    }
+    touchState.pressTouchId = null;
+    touchState.pressNodeId = '';
+    touchState.pressClientX = 0;
+    touchState.pressClientY = 0;
+    touchState.longPressTriggered = false;
+}
+
+function beginPendingNodeTouchPress(node, touch) {
+    clearPendingNodeTouchPress();
+    if (!node || !touch) return;
+    touchState.pressTouchId = touch.identifier;
+    touchState.pressNodeId = node.id;
+    touchState.pressClientX = touch.clientX;
+    touchState.pressClientY = touch.clientY;
+    touchState.lastClientX = touch.clientX;
+    touchState.lastClientY = touch.clientY;
+    touchState.longPressTimer = setTimeout(() => {
+        const nodeEl = document.getElementById(touchState.pressNodeId);
+        if (!nodeEl || draggedNode || isPanning || touchState.dragTouchId !== null) return;
+        touchState.longPressTriggered = true;
+        openContextMenuAt(nodeEl, touchState.lastClientX, touchState.lastClientY);
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            try {
+                navigator.vibrate(16);
+            } catch (err) { }
+        }
+    }, MOBILE_NODE_ACTION_HOLD_MS);
+}
+
+function finalizeNodeTouchPressAsDrag(touch) {
+    const nodeEl = touchState.pressNodeId ? document.getElementById(touchState.pressNodeId) : null;
+    if (!nodeEl || !touch) {
+        clearPendingNodeTouchPress();
+        return false;
+    }
+    if (touchState.longPressTimer) {
+        clearTimeout(touchState.longPressTimer);
+        touchState.longPressTimer = null;
+    }
+    startDragNode({ button: 0, clientX: touch.clientX, clientY: touch.clientY }, nodeEl);
+    touchState.dragTouchId = touch.identifier;
+    touchState.lastClientX = touch.clientX;
+    touchState.lastClientY = touch.clientY;
+    touchState.pressTouchId = null;
+    touchState.pressNodeId = '';
+    touchState.pressClientX = 0;
+    touchState.pressClientY = 0;
+    touchState.longPressTriggered = false;
+    return true;
+}
+
 function normalizeCaseName(name) {
     const cleaned = String(name || '').replace(/\s+/g, ' ').trim();
     return cleaned || 'UNNAMED CASE';
@@ -530,10 +642,28 @@ function applyBoardCollabRemoteSnapshot(payload) {
 
 async function initBoardCollab() {
     if (boardCollabInitPromise) return boardCollabInitPromise;
-    if (isExternalBoardMode()) return null;
-    if (!window.RTF_STORE || !window.RTF_BOARD_COLLAB_READY || typeof window.RTF_BOARD_COLLAB_READY.then !== 'function') {
+    if (isExternalBoardMode()) {
+        setBoardCollabStatus({
+            state: 'local',
+            detail: 'Embedded board is running locally on this page.',
+            peerCount: 0
+        });
         return null;
     }
+    if (!window.RTF_STORE || !window.RTF_BOARD_COLLAB_READY || typeof window.RTF_BOARD_COLLAB_READY.then !== 'function') {
+        setBoardCollabStatus({
+            state: 'local',
+            detail: 'Shared sync is off. Board changes stay on this device.',
+            peerCount: 0
+        });
+        return null;
+    }
+
+    setBoardCollabStatus({
+        state: 'connecting',
+        detail: 'Connecting live board...',
+        peerCount: 0
+    });
 
     boardCollabInitPromise = Promise.resolve(window.RTF_BOARD_COLLAB_READY)
         .then((api) => {
@@ -547,6 +677,7 @@ async function initBoardCollab() {
                 getCurrentPayload: () => readStoreBoardPayload() || getEmptyBoardPayload(),
                 applySnapshot: (payload) => applyBoardCollabRemoteSnapshot(payload),
                 applyPositionChanges: (changes) => applyBoardCollabPositionChanges(changes),
+                onStatusChange: (status) => setBoardCollabStatus(status),
                 worldToScreen: (point) => ({
                     x: point.x * view.scale + view.x,
                     y: point.y * view.scale + view.y
@@ -554,13 +685,26 @@ async function initBoardCollab() {
             });
         })
         .then((session) => {
-            if (!session || (typeof session.isActive === 'function' && !session.isActive())) return null;
+            if (!session || (typeof session.isActive === 'function' && !session.isActive())) {
+                setBoardCollabStatus({
+                    state: 'local',
+                    detail: 'Shared sync is off. Board changes stay on this device.',
+                    peerCount: 0
+                });
+                return null;
+            }
             boardCollabSession = session;
+            syncBoardCollabStatusFromSession();
             syncBoardCollabDecorations();
             return session;
         })
         .catch((err) => {
             console.warn('Board collaboration init failed', err);
+            setBoardCollabStatus({
+                state: 'degraded',
+                detail: 'Live board unavailable. Local board still works.',
+                peerCount: 0
+            });
             return null;
         });
 
@@ -571,6 +715,12 @@ async function refreshBoardCollabRoomIfNeeded() {
     if (!boardCollabSession) return null;
     const expectedRoomId = getBoardCollabRoomId();
     if (boardCollabSession.roomId === expectedRoomId) return boardCollabSession;
+
+    setBoardCollabStatus({
+        state: 'connecting',
+        detail: 'Switching live board room...',
+        peerCount: 0
+    });
 
     try {
         if (typeof boardCollabSession.destroy === 'function') {
@@ -2052,6 +2202,8 @@ window.addEventListener('load', async () => {
     if (panBtn) panBtn.title = `Shortcut: ${SHORTCUT_KEYS.pan}`;
     initToolbars();
     loadBoard();
+    updateUndoClearButton();
+    syncBoardCollabStatusFromSession();
     applyBoardCrossLinkFromUrl();
     updateViewCSS();
     initCaseNameTracking();
@@ -3862,6 +4014,7 @@ function handleTouchStart(event) {
     if (!event.touches || !event.touches.length) return;
 
     if (event.touches.length >= 2) {
+        clearPendingNodeTouchPress();
         if (draggedNode || isTouchUIArea(event.target)) return;
         const touchA = event.touches[0];
         const touchB = event.touches[1];
@@ -3880,10 +4033,7 @@ function handleTouchStart(event) {
     const node = target && typeof target.closest === 'function' ? target.closest('.node') : null;
 
     if (node && !node.classList.contains('editing') && !isEditableTouchTarget(target)) {
-        startDragNode({ button: 0, clientX: touch.clientX, clientY: touch.clientY }, node);
-        touchState.dragTouchId = touch.identifier;
-        touchState.lastClientX = touch.clientX;
-        touchState.lastClientY = touch.clientY;
+        beginPendingNodeTouchPress(node, touch);
         event.preventDefault();
         return;
     }
@@ -3934,6 +4084,32 @@ function handleTouchMove(event) {
         return;
     }
 
+    if (touchState.pressTouchId !== null) {
+        const touch = findTouchByIdentifier(event.touches, touchState.pressTouchId);
+        if (!touch) return;
+        touchState.lastClientX = touch.clientX;
+        touchState.lastClientY = touch.clientY;
+
+        if (touchState.longPressTriggered) {
+            event.preventDefault();
+            return;
+        }
+
+        const travel = Math.hypot(
+            touch.clientX - touchState.pressClientX,
+            touch.clientY - touchState.pressClientY
+        );
+        if (travel >= MOBILE_DRAG_START_THRESHOLD_PX) {
+            if (finalizeNodeTouchPressAsDrag(touch)) {
+                event.preventDefault();
+                return;
+            }
+        }
+
+        event.preventDefault();
+        return;
+    }
+
     if (touchState.panTouchId !== null && isPanning) {
         const touch = findTouchByIdentifier(event.touches, touchState.panTouchId);
         if (!touch) return;
@@ -3962,6 +4138,15 @@ function handleTouchEnd(event) {
             finalizeDraggedNode(endX, endY, { allowConnection: true });
             touchState.dragTouchId = null;
             event.preventDefault();
+        }
+    }
+
+    if (touchState.pressTouchId !== null) {
+        const stillPressed = findTouchByIdentifier(event.touches, touchState.pressTouchId);
+        if (!stillPressed) {
+            const consumed = touchState.longPressTriggered;
+            clearPendingNodeTouchPress();
+            if (consumed) event.preventDefault();
         }
     }
 
@@ -4749,40 +4934,35 @@ function loadBoard(options = {}, payloadOverride = null) {
 }
 
 function clearBoard() {
-    if (confirm("Clear board?")) {
-        lastOptimizeSnapshot = null;
-        updateUndoOptimizeMenuState();
-        if (isBoardCollabReady()) {
-            const emptyPayload = getEmptyBoardPayload();
-            loadBoard({}, emptyPayload);
-            updateViewCSS();
-            saveBoard({ flushNow: true });
-            return;
-        }
-        if (isExternalBoardMode()) {
-            writeStoreBoardPayload({ name: "My Story", nodes: [], connections: [] });
-            loadBoard();
-            updateViewCSS();
-            return;
-        }
-        if (window.RTF_STORE && isCampaignBoardView() && typeof window.RTF_STORE.clearCampaignMetaBoard === 'function') {
-            window.RTF_STORE.clearCampaignMetaBoard();
-        } else if (window.RTF_STORE && typeof window.RTF_STORE.clearBoard === 'function') {
-            window.RTF_STORE.clearBoard();
-        } else if (!writeStoreBoardPayload({ name: isCampaignBoardView() ? "CAMPAIGN META BOARD" : "UNNAMED CASE", nodes: [], connections: [] })) {
-            localStorage.removeItem(LEGACY_BOARD_KEY);
-        }
-        localStorage.removeItem(LEGACY_BOARD_KEY);
-        location.reload();
-    }
+    const beforeClear = buildBoardPayloadFromDom(true);
+    const hasContent = !!(
+        (beforeClear.nodes && beforeClear.nodes.length)
+        || (beforeClear.connections && beforeClear.connections.length)
+    );
+    const isSharedBoard = !!(boardCollabSession && typeof boardCollabSession.isActive === 'function' && boardCollabSession.isActive());
+    const message = isSharedBoard
+        ? 'Clear this shared board for everyone in the room?\n\nUndo Clear stays available on this browser until you replace it.'
+        : 'Clear this board?\n\nUndo Clear stays available on this browser until you replace it.';
+    if (!confirm(message)) return;
+
+    lastOptimizeSnapshot = null;
+    updateUndoOptimizeMenuState();
+    lastClearedBoardPayload = hasContent ? sanitizeBoardPayload(beforeClear) : null;
+    updateUndoClearButton();
+
+    const emptyPayload = getEmptyBoardPayload();
+    loadBoard({}, emptyPayload);
+    updateViewCSS();
+    saveBoard({ flushNow: true });
+    showShortcutAlert(lastClearedBoardPayload ? 'Board cleared. Undo Clear is available.' : 'Board cleared.');
 }
 
-function showContextMenu(e, node) {
-    e.preventDefault();
+function openContextMenuAt(node, clientX, clientY, options = {}) {
+    if (!node) return;
+    const opts = options && typeof options === 'object' ? options : {};
     contextMenu.style.display = 'block';
-    contextMenu.style.left = e.clientX + 'px';
-    contextMenu.style.top = e.clientY + 'px';
     contextMenu.dataset.target = node.id;
+    syncBoardCollabSelection([node.id]);
 
     const type = getNodeTypeFromEl(node);
     const meta = getNodeMeta(node) || {};
@@ -4810,9 +4990,32 @@ function showContextMenu(e, node) {
     if (createLeadItem) createLeadItem.style.display = isCampaignBoardView() ? 'none' : 'block';
     const draftItem = document.getElementById('menu-draft-encounter');
     if (draftItem) {
-        draftItem.style.display = e.shiftKey ? 'block' : 'none';
+        draftItem.style.display = opts.shiftKey ? 'block' : 'none';
     }
     updateUndoOptimizeMenuState();
+
+    const pad = 12;
+    const rect = contextMenu.getBoundingClientRect();
+    const left = Math.max(pad, Math.min(clientX, window.innerWidth - rect.width - pad));
+    const top = Math.max(pad, Math.min(clientY, window.innerHeight - rect.height - pad));
+    contextMenu.style.left = `${left}px`;
+    contextMenu.style.top = `${top}px`;
+}
+
+function showContextMenu(e, node) {
+    e.preventDefault();
+    openContextMenuAt(node, e.clientX, e.clientY, { shiftKey: !!e.shiftKey });
+}
+
+function undoClearBoard() {
+    if (!lastClearedBoardPayload) return;
+    const payload = sanitizeBoardPayload(lastClearedBoardPayload);
+    lastClearedBoardPayload = null;
+    updateUndoClearButton();
+    loadBoard({}, payload);
+    updateViewCSS();
+    saveBoard({ flushNow: true });
+    showShortcutAlert('Board restored after clear');
 }
 
 function updateUndoOptimizeMenuState() {

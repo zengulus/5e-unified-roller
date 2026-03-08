@@ -80,17 +80,15 @@
         return payload;
     }
 
-    function promptForConnectProfileName(existing = '') {
-        const initial = String(existing || '').trim();
-        if (initial) return initial;
+    function getPlayerNavConnectProfileField() {
+        const input = document.getElementById('player-nav-connect-profile');
+        return input instanceof HTMLInputElement ? input : null;
+    }
 
-        while (true) {
-            const entered = prompt('Enter your player name for sync tracking (required):', '');
-            if (entered === null) return '';
-            const clean = String(entered || '').trim();
-            if (clean) return clean;
-            alert('Player name is required to connect.');
-        }
+    function resolveConnectProfileName(existing = '') {
+        const field = getPlayerNavConnectProfileField();
+        const fieldValue = field ? String(field.value || '').trim() : '';
+        return fieldValue || String(existing || '').trim();
     }
 
     async function applyConnectProfile(raw, options = {}) {
@@ -103,10 +101,15 @@
 
         const opts = options && typeof options === 'object' ? options : {};
         const currentConfig = (typeof store.getSyncConfig === 'function') ? store.getSyncConfig() : {};
-        const requestedName = String(opts.profileName || currentConfig.profileName || '').trim();
-        const profileName = promptForConnectProfileName(requestedName);
-        if (!profileName) return { ok: false, error: 'Player name is required to connect.' };
-        payload.profileName = profileName;
+        const requestedName = String(
+            opts.profileName
+            || payload.profileName
+            || currentConfig.profileName
+            || ''
+        ).trim();
+        payload.profileName = resolveConnectProfileName(requestedName);
+        const profileField = getPlayerNavConnectProfileField();
+        if (profileField) profileField.value = payload.profileName;
 
         store.setSyncConfig(payload, { reconnect: false });
         const result = await store.connectSync();
@@ -203,6 +206,32 @@
         const bar = document.createElement('div');
         bar.className = 'hero-action-bar secondary';
         bar.dataset.playerNavConnectBar = '1';
+
+        const profileField = document.createElement('label');
+        profileField.className = 'hero-menu-connect-field';
+
+        const profileLabel = document.createElement('span');
+        profileLabel.className = 'hero-menu-connect-label';
+        profileLabel.textContent = 'Shared name (optional)';
+
+        const profileInput = document.createElement('input');
+        profileInput.type = 'text';
+        profileInput.id = 'player-nav-connect-profile';
+        profileInput.className = 'hero-menu-search-input hero-menu-connect-input';
+        profileInput.placeholder = 'Name shown on live boards';
+        profileInput.autocomplete = 'off';
+
+        const store = getStore();
+        const config = store && typeof store.getSyncConfig === 'function' ? store.getSyncConfig() : null;
+        profileInput.value = String(config && config.profileName || '').trim();
+        profileInput.addEventListener('change', () => {
+            const currentStore = getStore();
+            if (!currentStore || typeof currentStore.setSyncConfig !== 'function') return;
+            currentStore.setSyncConfig({ profileName: String(profileInput.value || '').trim() }, { reconnect: false });
+        });
+
+        profileField.append(profileLabel, profileInput);
+        bar.appendChild(profileField);
 
         const mkBtn = (label, handler) => {
             const btn = document.createElement('button');

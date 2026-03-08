@@ -133,6 +133,81 @@ body.board-embedded-my-story canvas#vector-cloud {
     cursor: text;
 }
 
+.board-collab-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(8, 11, 17, 0.82);
+    color: #eef3ff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    max-width: min(100%, 420px);
+}
+
+.board-collab-status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    flex: 0 0 9px;
+    background: #8ea1bd;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 12px rgba(142, 161, 189, 0.32);
+}
+
+.board-collab-status[data-state='live'] {
+    border-color: rgba(121, 216, 139, 0.34);
+    background: color-mix(in srgb, #09150d 80%, rgba(121, 216, 139, 0.24));
+}
+
+.board-collab-status[data-state='live'] .board-collab-status-dot {
+    background: #79d88b;
+    box-shadow: 0 0 0 1px rgba(121, 216, 139, 0.2), 0 0 14px rgba(121, 216, 139, 0.44);
+}
+
+.board-collab-status[data-state='connecting'] {
+    border-color: rgba(246, 191, 99, 0.34);
+    background: color-mix(in srgb, #181208 80%, rgba(246, 191, 99, 0.24));
+}
+
+.board-collab-status[data-state='connecting'] .board-collab-status-dot {
+    background: #f6bf63;
+    box-shadow: 0 0 0 1px rgba(246, 191, 99, 0.2), 0 0 14px rgba(246, 191, 99, 0.44);
+    animation: board-collab-pulse 1.6s ease-in-out infinite;
+}
+
+.board-collab-status[data-state='degraded'] {
+    border-color: rgba(255, 143, 115, 0.34);
+    background: color-mix(in srgb, #1b1011 80%, rgba(255, 143, 115, 0.24));
+}
+
+.board-collab-status[data-state='degraded'] .board-collab-status-dot {
+    background: #ff8f73;
+    box-shadow: 0 0 0 1px rgba(255, 143, 115, 0.2), 0 0 14px rgba(255, 143, 115, 0.44);
+}
+
+.board-collab-status[data-state='local'] .board-collab-status-dot {
+    background: #83b6ff;
+    box-shadow: 0 0 0 1px rgba(131, 182, 255, 0.18), 0 0 14px rgba(131, 182, 255, 0.4);
+}
+
+@keyframes board-collab-pulse {
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 0.9;
+    }
+
+    50% {
+        transform: scale(1.18);
+        opacity: 1;
+    }
+}
+
 .board-accent-picker-input {
     position: absolute;
     opacity: 0;
@@ -1752,6 +1827,13 @@ body.focus-active .header-overlay {
         margin-top: 8px;
         font-size: 0.68rem;
         letter-spacing: 0.1em;
+    }
+
+    .board-collab-status {
+        margin-top: 8px;
+        font-size: 0.64rem;
+        padding: 6px 9px;
+        letter-spacing: 0.06em;
     }
 
     .board-hero .hero-actions {

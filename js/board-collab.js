@@ -437,6 +437,13 @@ class BoardCollabSession {
         this.pendingFlushPromise = null;
         this.pendingSnapshot = null;
         this.remotePresence = new Map();
+        this.status = {
+            state: 'local',
+            detail: 'Shared sync is unavailable on this page.',
+            peerCount: 0,
+            connected: false,
+            ready: false
+        };
 
         this.originBootstrap = { kind: 'board-collab-bootstrap' };
         this.originLocalSnapshot = { kind: 'board-collab-local-snapshot' };
@@ -463,11 +470,29 @@ class BoardCollabSession {
 
     async init() {
         if (!this.roomId || !this.store || typeof this.store.ensureBoardCollabClient !== 'function') {
+            this.updateStatus({
+                state: 'local',
+                detail: 'Shared sync is unavailable on this page.',
+                peerCount: 0
+            });
             return this;
         }
 
+        this.updateStatus({
+            state: 'connecting',
+            detail: 'Connecting live board...',
+            peerCount: 0
+        });
+
         const ensured = await this.store.ensureBoardCollabClient();
-        if (!ensured.ok || !ensured.client) return this;
+        if (!ensured.ok || !ensured.client) {
+            this.updateStatus({
+                state: 'local',
+                detail: 'Shared sync is off. Board changes stay on this device.',
+                peerCount: 0
+            });
+            return this;
+        }
 
         this.client = ensured.client;
         this.instanceId = toTrimmedString(ensured.instanceId, '', 120).trim();
@@ -548,15 +573,44 @@ class BoardCollabSession {
             await this.connectChannel(ensured.config);
         } catch (err) {
             console.warn('RTF_BOARD_COLLAB: Channel connect failed', err);
+            this.updateStatus({
+                state: 'degraded',
+                detail: 'Live board unavailable. Local board still works.',
+                peerCount: this.remotePresence.size
+            });
         }
 
         this.ready = true;
+        this.updateStatus({
+            state: this.connected ? 'live' : 'degraded',
+            detail: this.connected ? 'Live board connected.' : 'Live board unavailable. Local board still works.',
+            peerCount: this.remotePresence.size
+        });
         this.scheduleMirror();
         this.scheduleCloudFlush();
         this.renderRemoteState();
         document.addEventListener('visibilitychange', this.handleVisibilityChange);
         window.addEventListener('beforeunload', this.handleBeforeUnload);
         return this;
+    }
+
+    updateStatus(next = {}) {
+        const patch = next && typeof next === 'object' ? next : {};
+        const peerCount = Number.isFinite(patch.peerCount) ? Math.max(0, patch.peerCount) : this.remotePresence.size;
+        this.status = {
+            ...this.status,
+            ...patch,
+            peerCount,
+            connected: !!this.connected,
+            ready: !!this.ready
+        };
+        if (typeof this.options.onStatusChange === 'function') {
+            try {
+                this.options.onStatusChange({ ...this.status });
+            } catch (err) {
+                console.warn('RTF_BOARD_COLLAB: Status callback failed', err);
+            }
+        }
     }
 
     buildLocalUserState() {
@@ -602,23 +656,60 @@ class BoardCollabSession {
         channel.on('presence', { event: 'join' }, onPresence);
         channel.on('presence', { event: 'leave' }, onPresence);
 
+        this.updateStatus({
+            state: 'connecting',
+            detail: 'Joining live board room...',
+            peerCount: this.remotePresence.size
+        });
+
         await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Board collaboration channel timed out.')), 10000);
+            let settled = false;
+            const timeout = setTimeout(() => {
+                this.connected = false;
+                this.updateStatus({
+                    state: 'degraded',
+                    detail: 'Live board timed out while joining.',
+                    peerCount: this.remotePresence.size
+                });
+                if (!settled) {
+                    settled = true;
+                    reject(new Error('Board collaboration channel timed out.'));
+                }
+            }, 10000);
             channel.subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
                     clearTimeout(timeout);
-                    resolve();
+                    this.connected = true;
+                    this.updateStatus({
+                        state: 'live',
+                        detail: 'Live board connected.',
+                        peerCount: this.remotePresence.size
+                    });
+                    if (!settled) {
+                        settled = true;
+                        resolve();
+                    }
                     return;
                 }
                 if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
                     clearTimeout(timeout);
-                    reject(new Error(`Board collaboration channel status: ${status}`));
+                    this.connected = false;
+                    this.updateStatus({
+                        state: 'degraded',
+                        detail: status === 'CLOSED'
+                            ? 'Live board disconnected.'
+                            : 'Live board is unavailable right now.',
+                        peerCount: this.remotePresence.size
+                    });
+                    if (!settled) {
+                        settled = true;
+                        reject(new Error(`Board collaboration channel status: ${status}`));
+                    }
                 }
             });
         });
 
         this.channel = channel;
-        this.connected = true;
         await this.refreshPresenceTracking();
         this.broadcastLocalAwareness();
         this.sendSyncStep1();
@@ -724,6 +815,14 @@ class BoardCollabSession {
         });
 
         this.remotePresence = peers;
+        this.updateStatus({
+            peerCount: peers.size,
+            detail: this.connected
+                ? (peers.size
+                    ? `Live board connected with ${peers.size} other ${peers.size === 1 ? 'player' : 'players'}.`
+                    : 'Live board connected. Only you are here.')
+                : this.status.detail
+        });
         this.renderRemoteState();
     }
 
@@ -844,6 +943,15 @@ class BoardCollabSession {
             scope: this.scope,
             caseId: this.caseId
         });
+    }
+
+    getStatus() {
+        return {
+            ...this.status,
+            peerCount: this.remotePresence.size,
+            connected: !!this.connected,
+            ready: !!this.ready
+        };
     }
 
     isActive() {
@@ -1095,6 +1203,14 @@ class BoardCollabSession {
         try {
             this.awareness.setLocalState(null);
         } catch (err) { }
+
+        this.connected = false;
+        this.ready = false;
+        this.updateStatus({
+            state: 'local',
+            detail: 'Live board disconnected.',
+            peerCount: 0
+        });
 
         if (this.channel && this.client) {
             try {
