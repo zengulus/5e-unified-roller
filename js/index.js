@@ -687,7 +687,7 @@ function normalizeQuickActionCode(value) {
 
 function isSupportedQuickActionCode(code) {
     const normalized = normalizeQuickActionCode(code);
-    return /^(rollInitiative|rollDie|rollCheck|rollSave|rollSkill|rollAttack|rollDamage|rollHitDie|rollDeathSave|rollResRecharge|rollCustom|castSpell)\s*\(/.test(normalized);
+    return /^(rollInitiative|rollDie|rollCheck|rollSave|rollSkill|rollAttack|rollDamage|rollHitDie|rollDeathSave|rollResRecharge|rollCustom|castSpell|castSpellRitual)\s*\(/.test(normalized);
 }
 
 function getQuickActionMetaForCode(code, fallbackLabel = '') {
@@ -806,6 +806,13 @@ function getQuickActionMetaForCode(code, fallbackLabel = '') {
         };
     }
 
+    if (/^castSpellRitual\(\s*\d+\s*\)$/.test(normalized)) {
+        return {
+            label: fallback || 'Ritual Cast',
+            summary: 'Ritual cast from spellbook'
+        };
+    }
+
     return {
         label: fallback || 'Quick Action',
         summary: 'Pinned roll action'
@@ -897,17 +904,24 @@ function sanitizeQuickActionEntry(entry, idx = 0) {
     const kind = row.kind === 'spell' ? 'spell' : 'code';
 
     if (kind === 'spell') {
+        const castMode = row.castMode === 'ritual' ? 'ritual' : 'normal';
         const spellName = sanitizeString(row.spellName || row.label || '', '', 180).trim();
         const spellIndex = Math.round(sanitizeNumber(row.spellIndex, -1, -1, 999));
-        const defaultLabel = spellName ? `Cast: ${spellName}` : `Spell ${Math.max(1, spellIndex + 1)}`;
+        const defaultLabel = spellName
+            ? `${castMode === 'ritual' ? 'Ritual: ' : 'Cast: '}${spellName}`
+            : `${castMode === 'ritual' ? 'Ritual' : 'Spell'} ${Math.max(1, spellIndex + 1)}`;
         const label = sanitizeString(row.label || defaultLabel, defaultLabel, 120).trim() || defaultLabel;
-        const summary = sanitizeString(row.summary || 'Cast spell from spellbook', 'Cast spell from spellbook', 220).trim()
-            || 'Cast spell from spellbook';
+        const defaultSummary = castMode === 'ritual'
+            ? 'Ritual cast from spellbook'
+            : 'Cast spell from spellbook';
+        const summary = sanitizeString(row.summary || defaultSummary, defaultSummary, 220).trim()
+            || defaultSummary;
         const signatureKey = normalizeSpellLookupName(spellName || label) || `idx${spellIndex}`;
         return {
             id,
             kind: 'spell',
-            signature: `spell:${signatureKey}`,
+            castMode,
+            signature: `spell:${castMode}:${signatureKey}`,
             spellName,
             spellIndex,
             label,
@@ -2886,6 +2900,17 @@ function getPactSpellSlotEntry() {
     };
 }
 
+function getAvailableSpellSlotLevels(minLevel = 1) {
+    normalizeSpellSlots();
+    const startLevel = Math.max(1, Math.min(9, parseInt(minLevel, 10) || 1));
+    const levels = [];
+    for (let level = startLevel; level <= 9; level += 1) {
+        const slot = data.spells[level - 1];
+        if (slot && slot.max > 0) levels.push(level);
+    }
+    return levels;
+}
+
 function resetSpellSlotsForRest(options = {}) {
     normalizeSpellSlots();
     const pactOnly = !!options.pactOnly;
@@ -3415,8 +3440,17 @@ function renderSpells() {
     const list = document.getElementById('spellSlotsList');
     if (!list) return;
     list.innerHTML = '';
+    const visibleLevels = getAvailableSpellSlotLevels();
 
-    data.spells.forEach((slot, idx) => {
+    if (!visibleLevels.length) {
+        list.innerHTML = '<div class="spellbook-empty">No spell slots available.</div>';
+        renderSpellbook();
+        return;
+    }
+
+    visibleLevels.forEach((level) => {
+        const idx = level - 1;
+        const slot = data.spells[idx];
         let bubblesHtml = '';
 
         for (let i = 0; i < slot.max; i++) {
@@ -3465,28 +3499,30 @@ function normalizeSpellbookCastLevel(spellLevel, castLevel) {
     return parsed >= baseLevel ? parsed : 0;
 }
 
-function resolveSpellCastSlotLevel(spellLevel, castLevel) {
+function normalizeAvailableSpellCastLevel(spellLevel, castLevel) {
     const baseLevel = Math.max(0, Math.min(9, parseInt(spellLevel, 10) || 0));
     if (baseLevel <= 0) return 0;
     const normalized = normalizeSpellbookCastLevel(baseLevel, castLevel);
+    if (normalized === 0) return 0;
+    return getAvailableSpellSlotLevels(baseLevel).includes(normalized) ? normalized : 0;
+}
+
+function resolveSpellCastSlotLevel(spellLevel, castLevel) {
+    const baseLevel = Math.max(0, Math.min(9, parseInt(spellLevel, 10) || 0));
+    if (baseLevel <= 0) return 0;
+    const normalized = normalizeAvailableSpellCastLevel(baseLevel, castLevel);
     return normalized === 0 ? baseLevel : normalized;
 }
 
 function spellCastLevelOptionsMarkup(spellLevel, selectedCastLevel = 0) {
     const baseLevel = Math.max(0, Math.min(9, parseInt(spellLevel, 10) || 0));
     if (baseLevel <= 0) return '<option value="0" selected>None</option>';
-
-    if ((data.meta.casterType || 'none') === 'pact') {
-        const pactLevel = getPactSpellSlotLevel(getCasterLevel());
-        const selected = parseInt(selectedCastLevel, 10) === pactLevel ? pactLevel : 0;
-        return `<option value="0"${selected === 0 ? ' selected' : ''}>None</option><option value="${pactLevel}"${selected === pactLevel ? ' selected' : ''}>Slot L${pactLevel}</option>`;
-    }
-
-    const normalized = normalizeSpellbookCastLevel(baseLevel, selectedCastLevel);
+    const normalized = normalizeAvailableSpellCastLevel(baseLevel, selectedCastLevel);
+    const availableLevels = getAvailableSpellSlotLevels(baseLevel);
     let options = `<option value="0"${normalized === 0 ? ' selected' : ''}>None</option>`;
-    for (let level = baseLevel; level <= 9; level += 1) {
+    availableLevels.forEach((level) => {
         options += `<option value="${level}"${normalized === level ? ' selected' : ''}>Slot L${level}</option>`;
-    }
+    });
     return options;
 }
 
@@ -3741,6 +3777,12 @@ function resolveSpellCastProfile(spell) {
     };
 }
 
+function canRitualCastSpell(spell) {
+    const safeSpell = sanitizeSpellbookEntry(spell);
+    const level = Math.max(0, Math.min(9, parseInt(safeSpell.lvl, 10) || 0));
+    return !!safeSpell.ritual && level > 0;
+}
+
 function waitMs(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, Math.max(0, parseInt(ms, 10) || 0));
@@ -3943,6 +3985,13 @@ function renderSpellbook() {
             ? `<div class="spellbook-flag-row">${flagMarkupItems.join('')}</div>`
             : '';
 
+        const ritualButtonMarkup = canRitualCastSpell(spell)
+            ? `<button type="button" class="spellbook-cast-btn spellbook-cast-btn-ritual"
+                data-onclick="castSpellRitual(${idx})"
+                data-quick-label="Ritual: ${safeName}"
+                title="Ritual cast: no spell slot spent, no upcast">Ritual</button>`
+            : '';
+
         const textAreaMarkupItems = [];
         if (!hideEmptyFields || String(spell.description || '').trim()) {
             textAreaMarkupItems.push(`<div class="spellbook-textarea-group spellbook-description">
@@ -3993,7 +4042,11 @@ function renderSpellbook() {
                     </label>
                     <div class="spellbook-cast-field spellbook-cast-field-action">
                         <span class="spellbook-cast-label">Action</span>
-                        <button type="button" class="spellbook-cast-btn" data-onclick="castSpell(${idx})">Cast</button>
+                        <div class="spellbook-cast-button-stack">
+                            <button type="button" class="spellbook-cast-btn" data-onclick="castSpell(${idx})"
+                                data-quick-label="Cast: ${safeName}">Cast</button>
+                            ${ritualButtonMarkup}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -4086,28 +4139,47 @@ function deleteSpellbookEntry(idx) {
 }
 
 async function castSpell(idx) {
+    return castSpellWithMode(idx, { ritual: false });
+}
+
+async function castSpellRitual(idx) {
+    return castSpellWithMode(idx, { ritual: true });
+}
+
+async function castSpellWithMode(idx, options = {}) {
     if (!Array.isArray(data.spellbook) || !data.spellbook[idx]) return;
+    const opts = options && typeof options === 'object' ? options : {};
+    const ritual = !!opts.ritual;
     const spell = sanitizeSpellbookEntry(data.spellbook[idx]);
     data.spellbook[idx] = spell;
     const name = (spell.name || '').trim() || `Spell ${idx + 1}`;
     const level = Math.max(0, Math.min(9, parseInt(spell.lvl, 10) || 0));
-    const castProfile = resolveSpellCastProfile(spell);
+    if (ritual && !canRitualCastSpell(spell)) {
+        showLog(`Ritual Blocked: ${name}`, 'Spell is not marked as ritual');
+        return;
+    }
+
+    const spellForCast = ritual ? { ...spell, castLvl: 0 } : spell;
+    const castProfile = resolveSpellCastProfile(spellForCast);
     const saveAttr = castProfile.saveAttr;
     const hasAttackRoll = castProfile.hasAttackRoll;
     const damageFormula = castProfile.damageFormula;
     const arbitraryFormula = castProfile.arbitraryFormula;
     const noAttackNoSave = !hasAttackRoll && saveAttr === 'none';
 
-    const castSlotChoice = normalizeSpellbookCastLevel(level, spell.castLvl);
-    const consumeResult = consumeSpellSlotForCast(level, castSlotChoice);
-    if (!consumeResult.ok) {
-        showLog(`Cast Blocked: ${name}`, consumeResult.summary);
-        return;
-    }
-    const slotSummary = consumeResult.summary;
+    let slotSummary = 'Ritual cast (+10 min, no slot spent)';
+    if (!ritual) {
+        const castSlotChoice = normalizeSpellbookCastLevel(level, spell.castLvl);
+        const consumeResult = consumeSpellSlotForCast(level, castSlotChoice);
+        if (!consumeResult.ok) {
+            showLog(`Cast Blocked: ${name}`, consumeResult.summary);
+            return;
+        }
+        slotSummary = consumeResult.summary;
 
-    save();
-    renderSpells();
+        save();
+        renderSpells();
+    }
 
     const dc = getSpellSaveDC();
     const attackBonus = getSpellAttackBonus();
@@ -4120,10 +4192,16 @@ async function castSpell(idx) {
         if (formulaForNameRoll) castSummaryParts.push(`Roll ${formulaForNameRoll}`);
     }
     if (!hasAttackRoll && saveAttr === 'none' && !damageFormula && !arbitraryFormula) castSummaryParts.push('No roll detected');
-    showLog(`Cast: ${name}`, castSummaryParts.join(' | '));
+    showLog(`${ritual ? 'Ritual Cast' : 'Cast'}: ${name}`, castSummaryParts.join(' | '));
 
     const spellContext = String(spell.description || '').trim();
-    await sendToDiscord(`Cast ${name}`, `Casting: ${castSummaryParts.join(' | ')}`, `**Slot Spent**`, 'check', spellContext);
+    await sendToDiscord(
+        `${ritual ? 'Ritual Cast' : 'Cast'} ${name}`,
+        `Casting: ${castSummaryParts.join(' | ')}`,
+        ritual ? '**No Slot Spent**' : '**Slot Spent**',
+        'check',
+        spellContext
+    );
     const shouldPostDiscord = !!(data.meta.discordActive && data.meta.webhook);
     let hasPostedStepMessage = false;
 
@@ -4329,10 +4407,17 @@ function getQuickActionPresentation(action) {
         const liveName = liveSpell && liveSpell.name ? liveSpell.name.trim() : '';
         const fallbackName = String(action.spellName || action.label || '').trim();
         const displayName = liveName || fallbackName || 'Spell';
+        const castMode = action.castMode === 'ritual' ? 'ritual' : 'normal';
+        const ritualAvailable = castMode !== 'ritual' || canRitualCastSpell(liveSpell);
+        const available = found && ritualAvailable;
         return {
-            available: found,
-            label: `Cast: ${displayName}`,
-            summary: found ? 'Cast spell from spellbook' : 'Spell missing (remove or re-add)',
+            available,
+            label: `${castMode === 'ritual' ? 'Ritual: ' : 'Cast: '}${displayName}`,
+            summary: !found
+                ? 'Spell missing (remove or re-add)'
+                : (!ritualAvailable
+                    ? 'Spell is no longer marked as ritual'
+                    : (castMode === 'ritual' ? 'Ritual cast from spellbook' : 'Cast spell from spellbook')),
             spellIdx
         };
     }
@@ -4434,7 +4519,8 @@ async function runQuickAction(id) {
             showLog('Quick Action', 'Spell Missing');
             return;
         }
-        await castSpell(spellIdx);
+        if (action.castMode === 'ritual') await castSpellRitual(spellIdx);
+        else await castSpell(spellIdx);
         return;
     }
 
@@ -4463,20 +4549,22 @@ function buildQuickActionFromControl(control) {
     if (!isSupportedQuickActionCode(code)) return null;
 
     const controlLabel = String(control.getAttribute('data-quick-label') || control.textContent || '').replace(/\s+/g, ' ').trim();
-    const spellMatch = code.match(/^castSpell\(\s*(\d+)\s*\)$/);
+    const spellMatch = code.match(/^(castSpell|castSpellRitual)\(\s*(\d+)\s*\)$/);
     if (spellMatch) {
-        const idx = parseInt(spellMatch[1], 10);
+        const castMode = spellMatch[1] === 'castSpellRitual' ? 'ritual' : 'normal';
+        const idx = parseInt(spellMatch[2], 10);
         const spell = Array.isArray(data.spellbook) && data.spellbook[idx] ? sanitizeSpellbookEntry(data.spellbook[idx]) : null;
         const spellName = (spell && spell.name ? spell.name : controlLabel || `Spell ${idx + 1}`).trim();
-        const signatureKey = normalizeSpellLookupName(spellName) || `idx${idx}`;
         return sanitizeQuickActionEntry({
             id: generateQuickActionId(),
             kind: 'spell',
-            signature: `spell:${signatureKey}`,
+            castMode,
             spellName,
             spellIndex: idx,
-            label: `Cast: ${spellName}`,
-            summary: 'Cast spell from spellbook'
+            label: `${castMode === 'ritual' ? 'Ritual: ' : 'Cast: '}${spellName}`,
+            summary: castMode === 'ritual'
+                ? 'Ritual cast from spellbook'
+                : 'Cast spell from spellbook'
         });
     }
 

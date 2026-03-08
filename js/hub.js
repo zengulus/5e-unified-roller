@@ -41,6 +41,12 @@ function buildPlayerScope(playerId) {
     return `${PLAYER_SCOPE_PREFIX}.${id}`;
 }
 
+function buildPlayerMutationScopes(playerId, includeOrder = false) {
+    const scopes = [buildPlayerScope(playerId)];
+    if (includeOrder) scopes.push(`${PLAYER_SCOPE_PREFIX}.__order`);
+    return scopes;
+}
+
 function getDelegatedHandlerFn(code) {
     if (!delegatedHandlerCache.has(code)) {
         delegatedHandlerCache.set(code, window.RTF_DELEGATED_HANDLER.compile(code));
@@ -291,7 +297,7 @@ function addPlayer() {
         dc: 10
     };
     c.players.push(player);
-    save(buildPlayerScope(player.id));
+    save(buildPlayerMutationScopes(player.id, true));
 }
 
 function modDP(idx, amt) {
@@ -333,7 +339,7 @@ function deletePlayer(idx) {
     if (!player) return;
     const playerId = player.id;
     campaign.players.splice(idx, 1);
-    save(buildPlayerScope(playerId));
+    save(buildPlayerMutationScopes(playerId, true));
 }
 
 function renderClockPie(value, total = 4, extraClass = '') {

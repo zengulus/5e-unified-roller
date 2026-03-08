@@ -2783,7 +2783,7 @@
         applyScopeAttribution(scopes) {
             const stamp = this.getMutationStamp();
             normalizeScopeList(scopes).forEach((scope) => {
-                const campaignMatch = scope.match(/^campaign\.(npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
+                const campaignMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
                 if (campaignMatch) {
                     const key = campaignMatch[1];
                     const scopeId = campaignMatch[2] || '';
@@ -5848,7 +5848,12 @@
                 projectReward: toTrimmedString(source.projectReward, '', 240)
             });
             const scope = buildPlayerEntityScope(playerId);
-            this.save({ scope: scope || 'campaign.players' });
+            this.save({
+                scope: [
+                    scope || CAMPAIGN_ENTITY_SCOPE_PREFIXES.players,
+                    buildEntityOrderScope(CAMPAIGN_ENTITY_SCOPE_PREFIXES.players)
+                ]
+            });
         }
 
         addNPC(npc) {

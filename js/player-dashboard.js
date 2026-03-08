@@ -20,6 +20,11 @@ const buildPlayerScope = (playerId) => {
     if (!id || id === '__order') return PLAYER_SCOPE_PREFIX;
     return `${PLAYER_SCOPE_PREFIX}.${id}`;
 };
+const buildPlayerMutationScopes = (playerId, includeOrder = false) => {
+    const scopes = [buildPlayerScope(playerId)];
+    if (includeOrder) scopes.push(`${PLAYER_SCOPE_PREFIX}.__order`);
+    return scopes;
+};
 
 const getDelegatedHandlerFn = (code) => {
     if (!delegatedHandlerCache.has(code)) {
@@ -93,6 +98,7 @@ const render = () => {
         card.innerHTML = `
 <div class="card-header">
     <input type="text" class="input-name" value="${name}"
+        data-oninput="updatePlayer(${i}, 'name', this.value)"
         data-onchange="updatePlayer(${i}, 'name', this.value)" placeholder="AGENT NAME">
         <button class="btn btn-del" data-onclick="deletePlayer(${i})">&times;</button>
 </div>
@@ -101,23 +107,27 @@ const render = () => {
     <div class="stat-box">
         <span class="stat-label">AC</span>
         <input type="number" class="stat-val" value="${ac}"
-            data-onchange="updatePlayer(${i}, 'ac', parseInt(this.value))">
+            data-oninput="updatePlayer(${i}, 'ac', parseInt(this.value, 10))"
+            data-onchange="updatePlayer(${i}, 'ac', parseInt(this.value, 10))">
     </div>
     <div class="stat-box">
         <span class="stat-label">Passive Perc</span>
         <input type="number" class="stat-val${ppClass}" value="${pp}"
-            data-onchange="updatePlayer(${i}, 'pp', parseInt(this.value))">
+            data-oninput="updatePlayer(${i}, 'pp', parseInt(this.value, 10))"
+            data-onchange="updatePlayer(${i}, 'pp', parseInt(this.value, 10))">
     </div>
     <div class="stat-box">
         <span class="stat-label">Save DC</span>
         <input type="number" class="stat-val" value="${dc}"
-            data-onchange="updatePlayer(${i}, 'dc', parseInt(this.value))">
+            data-oninput="updatePlayer(${i}, 'dc', parseInt(this.value, 10))"
+            data-onchange="updatePlayer(${i}, 'dc', parseInt(this.value, 10))">
     </div>
 </div>
 
 <div class="stat-box player-hp-box${hpBoxClass}">
     <span class="stat-label${hpLabelClass}">Hit Points</span>
     <input type="text" class="stat-val" value="${hpValue}"
+        data-oninput="updatePlayer(${i}, 'hp', this.value)"
         data-onchange="updatePlayer(${i}, 'hp', this.value)" placeholder="Max/Curr">
 </div>
     `;
@@ -173,7 +183,7 @@ const deletePlayer = (idx) => {
             if (!Array.isArray(players) || !Number.isInteger(idx) || idx < 0 || idx >= players.length) return;
             const playerId = players[idx] && players[idx].id;
             players.splice(idx, 1);
-            window.RTF_STORE.save({ scope: buildPlayerScope(playerId) });
+            window.RTF_STORE.save({ scope: buildPlayerMutationScopes(playerId, true) });
             render();
         }
     }

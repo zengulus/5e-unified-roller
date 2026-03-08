@@ -2578,6 +2578,12 @@ button {
     justify-content: space-between;
 }
 
+.spellbook-cast-button-stack {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+}
+
 .spellbook-name {
     width: 100%;
 }
@@ -2658,6 +2664,16 @@ button {
 .spellbook-cast-btn:hover {
     transform: translateY(-1px);
     box-shadow: var(--btn-glow);
+}
+
+.spellbook-cast-btn-ritual {
+    background: transparent;
+    color: var(--accent);
+    border-style: dashed;
+}
+
+.spellbook-cast-btn-ritual:hover {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .spellbook-meta {
