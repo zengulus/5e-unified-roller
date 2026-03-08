@@ -348,9 +348,14 @@ function setBoardCollabStatus(status = {}) {
         label = 'Live board unavailable';
     }
 
+    const retryable = state === 'local' || state === 'degraded';
+    const actionHint = retryable ? ' Click to retry live connection.' : '';
     root.dataset.state = state;
-    root.title = detail || label;
-    root.setAttribute('aria-label', detail || label);
+    root.dataset.retryable = retryable ? 'true' : 'false';
+    root.title = `${detail || label}${actionHint}`.trim();
+    root.setAttribute('aria-label', `${detail || label}${actionHint}`.trim());
+    root.setAttribute('role', retryable ? 'button' : 'status');
+    root.tabIndex = retryable ? 0 : -1;
     labelEl.textContent = label;
 }
 
@@ -363,6 +368,99 @@ function syncBoardCollabStatusFromSession() {
         state: 'local',
         detail: 'Board is running locally on this device.',
         peerCount: 0
+    });
+}
+
+async function retryBoardCollabConnection() {
+    if (isExternalBoardMode()) return null;
+
+    const statusRoot = document.getElementById('board-collab-status');
+    const currentState = statusRoot ? String(statusRoot.dataset.state || 'local') : 'local';
+    if (currentState === 'connecting') {
+        showShortcutAlert('Live board is already trying to connect.');
+        return null;
+    }
+
+    const store = window.RTF_STORE;
+    const syncConfig = store && typeof store.getSyncConfig === 'function'
+        ? store.getSyncConfig()
+        : null;
+    const hasConfig = !!(syncConfig
+        && syncConfig.enabled
+        && syncConfig.supabaseUrl
+        && syncConfig.anonKey
+        && syncConfig.campaignId);
+
+    if (!hasConfig) {
+        setBoardCollabStatus({
+            state: 'local',
+            detail: 'Shared sync is not configured for this browser. Set it up in Tools Hub, then retry.',
+            peerCount: 0
+        });
+        showShortcutAlert('Cloud sync is not configured on this browser.');
+        return null;
+    }
+
+    setBoardCollabStatus({
+        state: 'connecting',
+        detail: 'Retrying live board connection...',
+        peerCount: 0
+    });
+
+    if (boardCollabSession && typeof boardCollabSession.destroy === 'function') {
+        try {
+            await boardCollabSession.destroy();
+        } catch (err) {
+            console.warn('Board collaboration retry cleanup failed', err);
+        }
+    }
+
+    boardCollabSession = null;
+    boardCollabInitPromise = null;
+    pendingRemoteBoardSnapshot = null;
+
+    if (store && typeof store.connectSync === 'function') {
+        try {
+            await store.connectSync();
+        } catch (err) {
+            console.warn('Board collaboration retry sync connect failed', err);
+        }
+    }
+
+    const session = await initBoardCollab();
+    if (!session || (typeof session.isActive === 'function' && !session.isActive())) {
+        const latestStatus = session && typeof session.getStatus === 'function'
+            ? session.getStatus()
+            : null;
+        showShortcutAlert((latestStatus && latestStatus.detail) || 'Live board is still unavailable.');
+        return null;
+    }
+
+    showShortcutAlert('Live board connection restored.');
+    return session;
+}
+
+function bindBoardCollabStatusActions() {
+    const root = document.getElementById('board-collab-status');
+    if (!root || root.dataset.bound === '1') return;
+    root.dataset.bound = '1';
+
+    root.addEventListener('click', () => {
+        if (root.dataset.retryable !== 'true') return;
+        retryBoardCollabConnection().catch((err) => {
+            console.warn('Board collaboration retry failed', err);
+            showShortcutAlert('Live board reconnect failed.');
+        });
+    });
+
+    root.addEventListener('keydown', (event) => {
+        if (root.dataset.retryable !== 'true') return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        retryBoardCollabConnection().catch((err) => {
+            console.warn('Board collaboration retry failed', err);
+            showShortcutAlert('Live board reconnect failed.');
+        });
     });
 }
 
@@ -2201,6 +2299,7 @@ window.addEventListener('load', async () => {
     loadBoard();
     updateUndoClearButton();
     syncBoardCollabStatusFromSession();
+    bindBoardCollabStatusActions();
     applyBoardCrossLinkFromUrl();
     updateViewCSS();
     initCaseNameTracking();

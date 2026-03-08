@@ -150,6 +150,19 @@ body.board-embedded-my-story canvas#vector-cloud {
     max-width: min(100%, 420px);
 }
 
+.board-collab-status[data-retryable='true'] {
+    cursor: pointer;
+}
+
+.board-collab-status[data-retryable='true']:hover {
+    border-color: rgba(131, 182, 255, 0.42);
+}
+
+.board-collab-status[data-retryable='true']:focus-visible {
+    outline: 2px solid rgba(131, 182, 255, 0.72);
+    outline-offset: 2px;
+}
+
 .board-collab-status-dot {
     width: 9px;
     height: 9px;
