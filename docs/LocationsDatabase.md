@@ -6,7 +6,7 @@ Lightweight CRM for districts, safehouses, and notable fronts. Uses the same car
 - **Hero Header** – Portal link, accent/BG controls, and a `+ Add Location` button that reveals the inline form.
 - **Location Form** – Name, district/guild select, description, and notes fields. Perfect for logging sensory cues, contacts, or mission hooks tied to the space.
 - **Filter Bar** – Text search plus district dropdown. Filters update live so you can find "Precinct Four" locations or everything tagged `Dimir` instantly.
-- **Location Cards** – Each entry shows name, district, description, notes, image URL, and quick actions (open on board, copy deep link, delete). Image URL is editable in place; other fields are currently view-only after creation.
+- **Location Cards** – Each entry shows name, district, description, notes, image URL, and quick actions (open on board, copy deep link, delete). Fields stay editable in place after creation, so you can refine details as the table learns more.
 
 ## Tips
 - Mirror district names from the Case Timeline tags so cross-referencing is painless.

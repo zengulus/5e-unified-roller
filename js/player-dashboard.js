@@ -69,6 +69,61 @@ const bindDelegatedDataHandlers = () => {
     });
 };
 
+const PLAYER_LOW_HP_THRESHOLD = 10;
+const PLAYER_PASSIVE_PERCEPTION_STRONG_THRESHOLD = 15;
+
+const readSignedIntegers = (value) => {
+    const matches = String(value ?? '').match(/-?\d+/g);
+    if (!matches) return [];
+    return matches
+        .map((entry) => Number.parseInt(entry, 10))
+        .filter((entry) => Number.isFinite(entry));
+};
+
+const getTrackedPlayerHpValue = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+
+    if (raw.includes('/')) {
+        const currentSegment = raw.split('/').slice(1).join('/');
+        const currentValues = readSignedIntegers(currentSegment);
+        if (currentValues.length) {
+            return currentValues.reduce((sum, entry) => sum + entry, 0);
+        }
+    }
+
+    const values = readSignedIntegers(raw);
+    if (!values.length) return null;
+    return values.reduce((sum, entry) => sum + entry, 0);
+};
+
+const getPlayerCardState = (player) => {
+    const pp = Number.isFinite(Number(player && player.pp)) ? Number(player.pp) : 0;
+    const trackedHp = getTrackedPlayerHpValue(player && player.hp);
+    return {
+        ppStrong: pp >= PLAYER_PASSIVE_PERCEPTION_STRONG_THRESHOLD,
+        hpLow: Number.isFinite(trackedHp) && trackedHp < PLAYER_LOW_HP_THRESHOLD
+    };
+};
+
+const getPlayerCardAtIndex = (idx) => {
+    const grid = document.getElementById('playerGrid');
+    if (!grid || !Number.isInteger(idx) || idx < 0) return null;
+    return grid.children[idx] instanceof HTMLElement ? grid.children[idx] : null;
+};
+
+const applyPlayerCardState = (card, player) => {
+    if (!card || !player) return;
+    const state = getPlayerCardState(player);
+    const ppInput = card.querySelector('[data-player-field="pp"]');
+    const hpBox = card.querySelector('[data-player-hp-box]');
+    const hpLabel = card.querySelector('[data-player-hp-label]');
+
+    if (ppInput) ppInput.classList.toggle('player-pp-strong', state.ppStrong);
+    if (hpBox) hpBox.classList.toggle('player-hp-low', state.hpLow);
+    if (hpLabel) hpLabel.classList.toggle('player-hp-label-low', state.hpLow);
+};
+
 const render = () => {
     const grid = document.getElementById('playerGrid');
     const empty = document.getElementById('emptyState');
@@ -88,12 +143,12 @@ const render = () => {
         const init = Number.isFinite(Number(p.init)) ? Number(p.init) : 0;
         const pp = Number.isFinite(Number(p.pp)) ? Number(p.pp) : 0;
         const dc = Number.isFinite(Number(p.dc)) ? Number(p.dc) : 0;
-        const hpValue = escapeHtml(p.hp || 0);
-        const hpNum = parseInt(p.hp, 10);
-        const hpLow = !isNaN(hpNum) && hpNum < 10;
-        const ppClass = pp >= 15 ? ' player-pp-strong' : '';
-        const hpBoxClass = hpLow ? ' player-hp-low' : '';
-        const hpLabelClass = hpLow ? ' player-hp-label-low' : '';
+        const hpRawValue = p && Object.prototype.hasOwnProperty.call(p, 'hp') ? p.hp : '';
+        const hpValue = escapeHtml(hpRawValue === 0 ? '0' : (hpRawValue || ''));
+        const state = getPlayerCardState(p);
+        const ppClass = state.ppStrong ? ' player-pp-strong' : '';
+        const hpBoxClass = state.hpLow ? ' player-hp-low' : '';
+        const hpLabelClass = state.hpLow ? ' player-hp-label-low' : '';
         const card = document.createElement('div');
         card.className = 'card';
         card.innerHTML = `
@@ -119,7 +174,7 @@ const render = () => {
     </div>
     <div class="stat-box">
         <span class="stat-label">Passive Perc</span>
-        <input type="number" class="stat-val${ppClass}" value="${pp}"
+        <input type="number" class="stat-val${ppClass}" data-player-field="pp" value="${pp}"
             data-oninput="updatePlayer(${i}, 'pp', this.value)"
             data-onchange="updatePlayer(${i}, 'pp', this.value)">
     </div>
@@ -131,8 +186,8 @@ const render = () => {
     </div>
 </div>
 
-<div class="stat-box player-hp-box${hpBoxClass}">
-    <span class="stat-label${hpLabelClass}">Hit Points</span>
+<div class="stat-box player-hp-box${hpBoxClass}" data-player-hp-box="1">
+    <span class="stat-label${hpLabelClass}" data-player-hp-label="1">Hit Points</span>
     <input type="text" class="stat-val" value="${hpValue}"
         data-oninput="updatePlayer(${i}, 'hp', this.value)"
         data-onchange="updatePlayer(${i}, 'hp', this.value)" placeholder="Max/Curr">
@@ -181,7 +236,7 @@ const updatePlayer = (idx, field, val) => {
 
         players[idx][field] = sanitizePlayerUpdateValue(field, val);
         window.RTF_STORE.save({ scope: buildPlayerScope(players[idx].id) });
-        // render(); // Optional: re-render if needed, but input handles display
+        applyPlayerCardState(getPlayerCardAtIndex(idx), players[idx]);
     }
 };
 
@@ -214,6 +269,7 @@ window.addEventListener('load', () => {
 });
 
 window.addEventListener('rtf-store-updated', (event) => {
-    if (!event || !event.detail || event.detail.source !== 'remote') return;
+    if (!event || !event.detail) return;
+    if (event.detail.source !== 'remote' && event.detail.source !== 'storage') return;
     render();
 });

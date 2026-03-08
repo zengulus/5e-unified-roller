@@ -88,7 +88,7 @@ function bindDelegatedDataHandlers() {
 bindDelegatedDataHandlers();
 
 let editingNPCId = '';
-let editingPreloadedImageOnly = false;
+let editingPreloadedIdentityLocked = false;
 let pendingLinkNPCId = '';
 const TRUST_LABELS = ['Hostile', 'Wary', 'Neutral', 'Trusted', 'Loyal'];
 const STIGMA_LABELS = ['Clean', 'Rumored', 'Noticed', 'Marked', 'Burned'];
@@ -143,6 +143,16 @@ const buildNPCSignature = (npc) => {
         normalizeNPCField(npc.leverage),
         normalizeNPCField(npc.notes)
     ].join('|');
+};
+const buildNPCSearchText = (npc) => {
+    if (!npc || typeof npc !== 'object') return '';
+    return [
+        npc.name,
+        npc.guild,
+        npc.wants,
+        npc.leverage,
+        npc.notes
+    ].map(normalizeNPCField).join(' ');
 };
 
 const PRELOADED_NPC_SIGNATURES = new Set(
@@ -228,23 +238,23 @@ function applyPendingNpcDeepLinkFocus() {
     });
 }
 
-function setFormImageOnlyMode(imageOnly) {
-    const ids = ['npcName', 'npcGuild', 'npcWants', 'npcLeverage', 'npcNotes', 'npcTrust', 'npcStigma'];
+function setFormIdentityLockMode(identityLocked) {
+    const ids = ['npcName', 'npcGuild'];
     ids.forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.disabled = !!imageOnly;
+        el.disabled = !!identityLocked;
     });
 }
 
-function setFormMode(isEditing, imageOnly = false) {
+function setFormMode(isEditing, identityLocked = false) {
     const saveBtn = document.getElementById('npcSaveBtn');
     const cancelBtn = document.getElementById('npcCancelBtn');
     if (saveBtn) saveBtn.textContent = isEditing
-        ? (imageOnly ? 'Update NPC Image' : 'Update NPC')
+        ? (identityLocked ? 'Update NPC Intel' : 'Update NPC')
         : 'Save NPC';
     if (cancelBtn) cancelBtn.classList.toggle('roster-hidden', !isEditing);
-    setFormImageOnlyMode(isEditing && imageOnly);
+    setFormIdentityLockMode(isEditing && identityLocked);
 }
 
 function clearNPCForm() {
@@ -304,14 +314,14 @@ function toggleNPCForm() {
         setFormMode(false);
     } else if (!willOpen && editingNPCId) {
         editingNPCId = '';
-        editingPreloadedImageOnly = false;
+        editingPreloadedIdentityLocked = false;
         setFormMode(false);
     }
 }
 
 function cancelNPCEdit() {
     editingNPCId = '';
-    editingPreloadedImageOnly = false;
+    editingPreloadedIdentityLocked = false;
     clearNPCForm();
     setFormMode(false);
     const form = document.getElementById('npcForm');
@@ -329,7 +339,7 @@ function addNPC() {
     const trust = clampTrackLevel(document.getElementById('npcTrust').value, 2);
     const stigma = clampTrackLevel(document.getElementById('npcStigma').value, 0);
 
-    if (!name && !editingPreloadedImageOnly) { alert("Name Required"); return; }
+    if (!name && !editingPreloadedIdentityLocked) { alert("Name Required"); return; }
     if (imageRaw && !imageUrl) { alert("Please provide a valid image URL."); return; }
 
     const c = getCampaign();
@@ -342,16 +352,21 @@ function addNPC() {
         if (!target) {
             alert("Could not find NPC to edit.");
             editingNPCId = '';
-            editingPreloadedImageOnly = false;
+            editingPreloadedIdentityLocked = false;
             setFormMode(false);
             return;
         }
         const targetId = String(target.id || editingNPCId || '').trim();
         scopeToSave = buildNPCScope(targetId);
-        if (isPreloadedNPC(target) || editingPreloadedImageOnly) {
+        if (isPreloadedNPC(target) || editingPreloadedIdentityLocked) {
             c.npcs[index] = {
                 ...target,
+                wants,
+                leverage,
                 imageUrl,
+                notes,
+                trust,
+                stigma,
                 __rtfSource: 'preloaded'
             };
         } else {
@@ -395,7 +410,7 @@ function editNPC(npcId) {
     const isPreloaded = isPreloadedNPC(npc);
 
     editingNPCId = String(npcId || '');
-    editingPreloadedImageOnly = isPreloaded;
+    editingPreloadedIdentityLocked = isPreloaded;
     ensureGuildOptions();
     fillNPCForm(npc);
     setFormMode(true, isPreloaded);
@@ -403,7 +418,7 @@ function editNPC(npcId) {
     const form = document.getElementById('npcForm');
     if (form) form.classList.remove('roster-hidden');
     const focusTarget = isPreloaded
-        ? document.getElementById('npcImageUrl')
+        ? document.getElementById('npcWants')
         : document.getElementById('npcName');
     if (focusTarget) focusTarget.focus();
 }
@@ -478,9 +493,8 @@ function render() {
     }
 
     const filtered = list.filter(npc => {
-        const name = String(npc.name || '');
         const guild = String(npc.guild || '');
-        const matchesName = name.toLowerCase().includes(search);
+        const matchesName = buildNPCSearchText(npc).includes(search);
         const matchesGuild = !guildFilterKey || normalizeGuildFilterKey(guild) === guildFilterKey;
         return matchesName && matchesGuild;
     });
@@ -496,7 +510,7 @@ function render() {
             : '';
         const locked = isPreloadedNPC(npc);
         const editButton = locked
-            ? `<button class="btn roster-npc-edit-btn" data-onclick="editNPC('${npcIdArg}')" title="Set NPC image (preloaded details are locked)">🖼️</button>`
+            ? `<button class="btn roster-npc-edit-btn" data-onclick="editNPC('${npcIdArg}')" title="Update notes, leverage, or image (name and guild are locked)">📝</button>`
             : `<button class="btn roster-npc-edit-btn" data-onclick="editNPC('${npcIdArg}')" title="Edit NPC">✏️</button>`;
         const rowClass = imageMarkup ? 'has-image' : 'no-image';
 

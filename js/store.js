@@ -13,6 +13,8 @@
     const PREP_PROCEDURE_STATE_KEY = 'rtf_prep_procedure_state_v1';
     const CLOCKS_STORAGE_KEY = 'rtf_clocks_page_v1';
     const HEAT_SYNC_KEY = 'rtf_timeline_auto_heat';
+    const HQ_LOCAL_STORAGE_KEY = 'task_force_hq_v1';
+    const AUTO_CONNECT_CANCEL_KEY = 'rtf_sync_autoconnect_cancelled';
     const SUPABASE_CDN_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
     const STORE_DEBUG = false;
 
@@ -35,6 +37,7 @@
         if (!STORE_DEBUG) return;
         console.log(...args);
     };
+    const isExternalStoreUpdateSource = (value) => value === 'remote' || value === 'storage';
 
     const dedupeGuildNames = (source) => {
         const seen = new Set();
@@ -621,10 +624,10 @@
             id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
             caseId: sanitizeCaseId(source.caseId, 'case_primary'),
             statement: toTrimmedString(source.statement, '', 1200).trim(),
-            status: 'stable',
+            status: sanitizeLedgerStatus(source.status, 'stable'),
             sourceType: sanitizeLedgerSourceType(source.sourceType, 'other'),
             sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
-            certainty: 100,
+            certainty: clampPercent(source.certainty, 100),
             tags: toTrimmedString(source.tags, '', 1200),
             notes: toTrimmedString(source.notes, '', 4000),
             lastChangedBy: sanitizeAttributionBy(source.lastChangedBy, ''),
@@ -2943,6 +2946,74 @@
             });
         }
 
+        resetCampaignData() {
+            this.cancelCloudPush();
+            this.clearSyncConfig({ disconnect: false });
+            this.disconnectSync('disabled').catch(() => { });
+
+            this.state = sanitizeState(DEFAULT_STATE);
+            this.ensureCampaignEntityIds(false);
+            this.syncActiveCaseLegacyState();
+            this.state.meta.updated = Date.now();
+            this.state.meta.syncRevision = 0;
+            this.state.meta.scopeUpdated = {};
+
+            this.sync.localDirtyScopes = new Set();
+            this.sync.scopeBaselines = new Map();
+            this.sync.lastSyncedState = sanitizeState(this.state);
+            this.sync.lastKnownRemoteRevision = 0;
+            this.sync.lastCloudStateSig = '';
+            this.sync.lastRemoteSeenAt = 0;
+            this.sync.lastPushAt = 0;
+            this.sync.lastPullAt = 0;
+            this.sync.pendingConflict = null;
+            this.sync.localSoftLocks = new Map();
+            this.sync.remoteSoftLocks = new Map();
+            this.sync.remotePeers = new Map();
+
+            [
+                LEGACY_HUB_KEY,
+                LEGACY_BOARD_KEY,
+                LEAD_STORAGE_KEY,
+                PREP_PROCEDURE_STATE_KEY,
+                CLOCKS_STORAGE_KEY,
+                DIRTY_SCOPES_KEY,
+                SCOPE_BASELINES_KEY,
+                HEAT_SYNC_KEY,
+                HQ_LOCAL_STORAGE_KEY,
+                AUTO_CONNECT_CANCEL_KEY
+            ].forEach((key) => {
+                try {
+                    localStorage.removeItem(key);
+                } catch (err) {
+                    console.warn(`RTF_STORE: Failed clearing ${key}`, err);
+                }
+            });
+
+            try {
+                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+            } catch (err) {
+                console.error('RTF_STORE: Failed resetting campaign data', err);
+                return false;
+            }
+
+            this.updateSyncStatus({
+                mode: 'disabled',
+                enabled: false,
+                connected: false,
+                campaignId: '',
+                profileName: '',
+                backendMode: this.sync.config.backendMode,
+                pendingPush: false,
+                lastPushAt: null,
+                lastPullAt: null,
+                lastError: '',
+                message: 'Cloud sync is disabled.'
+            });
+            this.broadcastStoreUpdate('local', { scopes: [SYNC_SCOPE_GLOBAL], reason: 'reset' });
+            return true;
+        }
+
         // Sync Configuration + Status
         getSyncConfig() {
             return deepClone(this.sync.config);
@@ -3872,7 +3943,7 @@
 
             const broadcastSource = opts.broadcastSource || (retainedDirtyScopes.length ? 'local' : 'remote');
             this.broadcastStoreUpdate(broadcastSource, {
-                source: reason,
+                reason,
                 scopes: retainedDirtyScopes,
                 updatedAt: remoteUpdatedAt,
                 updatedBy: remoteRow.updatedBy || '',
@@ -5788,8 +5859,7 @@
             if (this.sync.pendingConflict && remoteRevision >= toNonNegativeInt(this.sync.pendingConflict.remoteRevision, 0)) {
                 this.sync.pendingConflict = null;
             }
-            this.broadcastStoreUpdate('remote', {
-                source: meta.source || 'remote',
+            this.broadcastStoreUpdate(meta.source || 'remote', {
                 updatedAt: remoteUpdated,
                 updatedBy: meta.updatedBy || '',
                 revision: toNonNegativeInt(this.state.meta.syncRevision, 0)
@@ -5798,17 +5868,18 @@
         }
 
         broadcastStoreUpdate(source = 'local', meta = {}) {
+            const payload = meta && typeof meta === 'object' ? meta : {};
             const detail = {
+                ...payload,
                 source,
-                timestamp: Date.now(),
-                ...(meta || {})
+                timestamp: Date.now()
             };
 
             if (typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
                 global.dispatchEvent(new CustomEvent(STORE_UPDATED_EVENT, { detail }));
             }
 
-            if (source === 'remote') this.refreshKnownViews();
+            if (isExternalStoreUpdateSource(source)) this.refreshKnownViews();
         }
 
         refreshKnownViews() {

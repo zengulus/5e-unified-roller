@@ -63,6 +63,22 @@ function clampTrackLevel(value, fallback) {
     return Math.max(0, Math.min(4, parsed));
 }
 
+function normalizeLocationField(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function buildLocationSearchText(location) {
+    if (!location || typeof location !== 'object') return '';
+    return [
+        location.name,
+        location.district,
+        location.desc,
+        location.notes,
+        location.connections,
+        location.properties
+    ].map(normalizeLocationField).join(' ');
+}
+
 function getDelegatedHandlerFn(code) {
     if (!delegatedHandlerCache.has(code)) {
         delegatedHandlerCache.set(code, window.RTF_DELEGATED_HANDLER.compile(code));
@@ -349,9 +365,8 @@ function render() {
     }
 
     const filtered = list.filter(loc => {
-        const name = String(loc.name || '');
         const district = String(loc.district || '');
-        const matchesName = name.toLowerCase().includes(search);
+        const matchesName = buildLocationSearchText(loc).includes(search);
         const matchesDistrict = !districtFilter || district === districtFilter;
         return matchesName && matchesDistrict;
     });

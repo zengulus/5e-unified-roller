@@ -249,11 +249,28 @@ function saveCase() {
 }
 
 function resetAll() {
-    if (confirm("Reset everything? This will wipe the Unified Store.")) {
-        localStorage.removeItem('ravnica_unified_v1');
-        localStorage.removeItem('invBoardData');
-        location.reload();
+    if (!confirm("Reset campaign data? This clears the shared store, sync config, lead queue, prep/procedure, and clocks.")) return;
+
+    if (window.RTF_STORE && typeof window.RTF_STORE.resetCampaignData === 'function') {
+        window.RTF_STORE.resetCampaignData();
+    } else {
+        [
+            'ravnica_unified_v1',
+            'ravnicaHubV3_2',
+            'invBoardData',
+            'ravnica_sync_config_v1',
+            'ravnica_sync_dirty_scopes_v1',
+            'ravnica_sync_scope_baselines_v1',
+            'rtf_lead_queue_v1',
+            'rtf_prep_procedure_state_v1',
+            'rtf_clocks_page_v1',
+            'rtf_timeline_auto_heat',
+            'task_force_hq_v1',
+            'rtf_sync_autoconnect_cancelled'
+        ].forEach((key) => localStorage.removeItem(key));
     }
+
+    location.reload();
 }
 
 function modRep(g, amt) {

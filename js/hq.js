@@ -158,7 +158,8 @@
     }
 
     function handleStoreUpdated(event) {
-        if (!event || !event.detail || event.detail.source !== 'remote') return;
+        if (!event || !event.detail) return;
+        if (event.detail.source !== 'remote' && event.detail.source !== 'storage') return;
         if (!hasStoreBridge) return;
         state = sanitizeState(store.getHQLayout());
         refreshAssigneeLists();
