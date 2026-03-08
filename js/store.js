@@ -700,6 +700,28 @@
         const clueTitle = rawTitle.replace(/^(?:clue\s+discovered|clue)\s*:\s*/i, '').trim() || 'Untitled Clue';
         return `Clue: ${clueTitle}`;
     };
+    const sanitizeEventSortOrder = (value, fallback = 0) => {
+        const parsed = parseInt(value, 10);
+        if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+        const fallbackParsed = parseInt(fallback, 10);
+        return Number.isFinite(fallbackParsed) && fallbackParsed >= 0 ? fallbackParsed : 0;
+    };
+    const compareEventsByStoredOrder = (left, right) => {
+        const leftHasOrder = Number.isFinite(parseInt(left && left.sortOrder, 10));
+        const rightHasOrder = Number.isFinite(parseInt(right && right.sortOrder, 10));
+        if (leftHasOrder && rightHasOrder) {
+            const orderDiff = sanitizeEventSortOrder(left.sortOrder, 0) - sanitizeEventSortOrder(right.sortOrder, 0);
+            if (orderDiff) return orderDiff;
+        } else if (leftHasOrder !== rightHasOrder) {
+            return leftHasOrder ? -1 : 1;
+        }
+
+        const leftCreated = Date.parse(left && left.created || '') || 0;
+        const rightCreated = Date.parse(right && right.created || '') || 0;
+        if (leftCreated !== rightCreated) return leftCreated - rightCreated;
+
+        return String(left && left.id || '').localeCompare(String(right && right.id || ''));
+    };
     const sanitizeEvent = (event, index = 0) => {
         const source = event && typeof event === 'object' ? event : {};
         const { dueAt: _legacyDueAt, entityImpacts: _legacyEntityImpacts, ...sourceWithoutLegacyEventFields } = source;
@@ -727,7 +749,8 @@
             certainty: clampPercent(source.certainty, 50),
             lastChangedBy: sanitizeAttributionBy(source.lastChangedBy, ''),
             lastChangedAt: changedAt,
-            caseId: sanitizeCaseId(source.caseId, 'case_primary')
+            caseId: sanitizeCaseId(source.caseId, 'case_primary'),
+            sortOrder: sanitizeEventSortOrder(source.sortOrder, index)
         };
     };
     const sanitizeEventList = (events) => (
@@ -3621,7 +3644,7 @@
                     caseOrder.push(caseId);
                 }
                 const entry = caseMap.get(caseId);
-                entry.events = sanitizeEventList(events);
+                entry.events = sanitizeEventList(events.slice().sort(compareEventsByStoredOrder));
             });
 
             let activeCaseId = '';

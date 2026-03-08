@@ -895,6 +895,19 @@
         store.save({ scope: getTimelineOrderScope() });
     }
 
+    function stampTimelineEventSortOrder(events) {
+        if (!Array.isArray(events)) return false;
+        let changed = false;
+        events.forEach((evt, index) => {
+            if (!evt || typeof evt !== 'object') return;
+            const current = parseInt(evt.sortOrder, 10);
+            if (current === index) return;
+            evt.sortOrder = index;
+            changed = true;
+        });
+        return changed;
+    }
+
     function applyCanonicalTimelineOrder(currentCanonicalVisibleIds, nextCanonicalVisibleIds) {
         const store = getStore();
         if (!store || !isChronologicalSortSelected()) return false;
@@ -927,6 +940,7 @@
         }
 
         events.splice(0, events.length, ...nextOrder);
+        stampTimelineEventSortOrder(events);
         persistTimelineEventOrder(store);
         return true;
     }

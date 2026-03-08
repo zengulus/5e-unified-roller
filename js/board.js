@@ -3665,7 +3665,15 @@ function updateLabelPos(conn, basePtr, alpha) {
     const y = physicsBuffer[ptr + 1];
 
     let el = document.getElementById('lbl_' + conn.id);
-    const isEditing = el && el.querySelector('.label-input') === document.activeElement;
+    const labelInput = el ? el.querySelector('.label-input') : null;
+    const isEditing = !!(
+        el
+        && (
+            labelInput === document.activeElement
+            || el.dataset.editing === 'true'
+            || el.dataset.pendingFocus === 'true'
+        )
+    );
     const hasCustomColor = clampConnectionColorIndex(conn.colorIndex) !== 0;
 
     if ((conn.label || isEditing || hasCustomColor) && alpha > 0.1) {
@@ -4684,6 +4692,8 @@ function createLabelDOM(conn) {
     const el = document.createElement('div');
     el.id = 'lbl_' + conn.id;
     el.className = 'string-label';
+    el.dataset.editing = 'false';
+    el.dataset.pendingFocus = 'false';
     el.style.position = 'absolute';
     el.style.left = '0'; el.style.top = '0';
 
@@ -4712,6 +4722,14 @@ function createLabelDOM(conn) {
     input.className = 'label-input';
     input.contentEditable = true;
     input.innerText = conn.label || "";
+    input.onfocus = () => {
+        el.dataset.pendingFocus = 'false';
+        el.dataset.editing = 'true';
+    };
+    input.onblur = () => {
+        el.dataset.pendingFocus = 'false';
+        el.dataset.editing = 'false';
+    };
     input.oninput = (e) => {
         const previousLabel = (conn.label || '').trim();
         const nextLabel = (e.target.innerText || '').trim();
@@ -4740,6 +4758,7 @@ function createLabelDOM(conn) {
         saveBoard();
     };
     input.onmousedown = (e) => e.stopPropagation();
+    input.onkeydown = (e) => e.stopPropagation();
 
     const btnR = document.createElement('div');
     btnR.className = `arrow-btn arrow-right ${conn.arrowRight ? 'active' : ''}`;
@@ -6843,6 +6862,7 @@ document.addEventListener('dblclick', (e) => {
         if (!labelEl) labelEl = createLabelDOM(foundConn);
         if (labelEl) {
             labelEl.style.display = 'flex';
+            labelEl.dataset.pendingFocus = 'true';
             const input = labelEl.querySelector('.label-input');
             if (input && typeof input.focus === 'function') {
                 requestAnimationFrame(() => {
@@ -6856,6 +6876,8 @@ document.addEventListener('dblclick', (e) => {
                         selection.addRange(range);
                     }
                 });
+            } else {
+                labelEl.dataset.pendingFocus = 'false';
             }
         }
     } else {
