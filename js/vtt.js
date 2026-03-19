@@ -368,6 +368,65 @@
         return null;
     };
 
+    const findTokenByIdAcrossScenes = (state, tokenId) => {
+        if (!state || !Array.isArray(state.scenes)) return null;
+        const targetId = String(tokenId || '').trim();
+        if (!targetId) return null;
+        for (const scene of state.scenes) {
+            if (!scene || !Array.isArray(scene.tokens)) continue;
+            const found = scene.tokens.find((token) => String(token && token.id || '') === targetId);
+            if (found) return found;
+        }
+        return null;
+    };
+
+    const getVisibleTokensForRole = (scene, role = localRole) => {
+        if (!scene || !Array.isArray(scene.tokens)) return [];
+        if (role === 'dm') return scene.tokens;
+        return scene.tokens.filter((token) => !token.hidden);
+    };
+
+    const getVisibleSceneTokenForEntry = (entry, state = vttState, role = localRole) => {
+        if (!entry) return null;
+        const scene = getActiveScene(state);
+        const visibleTokens = getVisibleTokensForRole(scene, role);
+        if (!visibleTokens.length) return null;
+        const linkedId = String(entry.linkedTokenId || '').trim();
+        if (linkedId) {
+            const linkedToken = visibleTokens.find((token) => token.id === linkedId);
+            if (linkedToken) return linkedToken;
+        }
+        const sourceType = String(entry.sourceType || '').trim();
+        const sourceId = String(entry.sourceId || '').trim();
+        if (!sourceType || !sourceId) return null;
+        return visibleTokens.find((token) =>
+            String(token && token.sourceType || '') === sourceType
+            && String(token && token.sourceId || '') === sourceId
+        ) || null;
+    };
+
+    const syncTokenSelectionFromEntry = (entryId, state = vttState, role = localRole) => {
+        const entry = getEntryById(entryId, state);
+        const token = getVisibleSceneTokenForEntry(entry, state, role);
+        selectedTokenId = token ? token.id : '';
+        return token;
+    };
+
+    const findEntryForToken = (tokenId, state = vttState) => {
+        const token = getTokenById(tokenId, state);
+        if (!token) return null;
+        const entries = state && state.initiative && Array.isArray(state.initiative.entries) ? state.initiative.entries : [];
+        return entries.find((entry) =>
+            entry.linkedTokenId === token.id
+            || (
+                token.sourceType
+                && token.sourceId
+                && String(entry && entry.sourceType || '') === String(token.sourceType || '')
+                && String(entry && entry.sourceId || '') === String(token.sourceId || '')
+            )
+        ) || null;
+    };
+
     const sortInitiativeEntries = (entries) => {
         entries.sort((left, right) =>
             (right.total - left.total)
@@ -390,13 +449,15 @@
 
     const normalizeSelections = () => {
         const scene = getActiveScene();
-        const tokens = scene && Array.isArray(scene.tokens) ? scene.tokens : [];
+        const tokens = getVisibleTokensForRole(scene);
         const entries = vttState && vttState.initiative && Array.isArray(vttState.initiative.entries) ? vttState.initiative.entries : [];
-        if (!tokens.some((token) => token.id === selectedTokenId)) {
-            selectedTokenId = tokens[0] ? tokens[0].id : '';
-        }
         if (!entries.some((entry) => entry.id === selectedEntryId)) {
             selectedEntryId = entries[0] ? entries[0].id : '';
+        }
+        if (selectedEntryId) {
+            syncTokenSelectionFromEntry(selectedEntryId, vttState, localRole);
+        } else if (!tokens.some((token) => token.id === selectedTokenId)) {
+            selectedTokenId = tokens[0] ? tokens[0].id : '';
         }
         if (body) body.dataset.vttRole = localRole;
     };
@@ -547,6 +608,11 @@
     const renderTokenInspector = () => {
         const token = getTokenById(selectedTokenId);
         if (!selectionPillEl || !tokenInspectorEl) return;
+        if (!isDM() && token && token.hidden) {
+            selectionPillEl.textContent = 'No Token';
+            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token on the map to inspect it.</div>';
+            return;
+        }
         selectionPillEl.textContent = token ? token.label : 'No Token';
         if (!token) {
             tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a token on the map to inspect it.</div>';
@@ -634,7 +700,7 @@
         const initiative = vttState && vttState.initiative ? vttState.initiative : { entries: [], round: 1, activeEntryId: '' };
         roundPillEl.textContent = `Round ${initiative.round || 1}`;
         if (!Array.isArray(initiative.entries) || !initiative.entries.length) {
-            initiativeListEl.innerHTML = '<div class="vtt-empty">No combatants yet. Add a token to initiative or roll from the Character Sheet in the same browser.</div>';
+            initiativeListEl.innerHTML = '<div class="vtt-empty">No combatants yet. Add a token to initiative or roll from the Character Sheet.</div>';
             return;
         }
 
@@ -755,12 +821,15 @@
             `).join('')
             : '';
 
-        const visibleTokens = Array.isArray(scene.tokens)
-            ? scene.tokens.filter((token) => isDM() || !token.hidden)
-            : [];
+        const visibleTokens = getVisibleTokensForRole(scene);
+        const initiative = vttState && vttState.initiative ? vttState.initiative : { activeEntryId: '' };
+        const activeTurnToken = getVisibleSceneTokenForEntry(getEntryById(initiative.activeEntryId), vttState, localRole);
+        const focusedEntryToken = getVisibleSceneTokenForEntry(getEntryById(selectedEntryId), vttState, localRole);
+        const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
+        const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => `
-            <div class="vtt-token${token.id === selectedTokenId ? ' is-selected' : ''}${token.hidden ? ' is-hidden' : ''}"
+            <div class="vtt-token${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}"
                 data-token-id="${escapeHtml(token.id)}"
                 data-id="${escapeHtml(token.id)}"
                 data-action="select-token"
@@ -827,13 +896,18 @@
             const idx = entries.findIndex((entry) => entry.id === selectedEntryId);
             if (idx < 0) return;
             mutator(entries[idx], draft);
-            const linkedToken = entries[idx].linkedTokenId
-                ? findTokenAcrossScenes(draft, entries[idx].sourceType, entries[idx].sourceId)
-                : null;
-            if (linkedToken && String(linkedToken.id || '') === String(entries[idx].linkedTokenId || '')) {
+            const linkedToken = findTokenByIdAcrossScenes(draft, entries[idx].linkedTokenId)
+                || (
+                    entries[idx].sourceType && entries[idx].sourceId
+                        ? findTokenAcrossScenes(draft, entries[idx].sourceType, entries[idx].sourceId)
+                        : null
+                );
+            if (linkedToken) {
+                entries[idx].linkedTokenId = linkedToken.id;
                 linkedToken.hpCurrent = entries[idx].hpCurrent;
                 linkedToken.hpMax = entries[idx].hpMax;
                 linkedToken.ac = entries[idx].ac;
+                linkedToken.label = entries[idx].name || linkedToken.label;
                 linkedToken.passivePerception = entries[idx].passivePerception;
                 linkedToken.defences = normalizeDefences(entries[idx].defences);
             }
@@ -869,7 +943,26 @@
         if (!store || !vttState) return;
         const now = Date.now();
         if (!force && now - lastDragSyncAt < DRAG_SYNC_INTERVAL_MS) return;
-        const saved = store.updateVTTState(vttState, getActiveCaseId());
+        const draft = deepClone(store.getVTTState(getActiveCaseId()));
+        const localToken = dragState ? getTokenById(dragState.tokenId, vttState) : null;
+        const scene = getActiveScene(draft);
+        const idx = scene && Array.isArray(scene.tokens)
+            ? scene.tokens.findIndex((token) => token.id === (dragState && dragState.tokenId))
+            : -1;
+
+        if (!localToken || !scene || idx < 0) {
+            vttState = deepClone(draft);
+            lastDragSyncAt = now;
+            return;
+        }
+
+        scene.tokens[idx] = {
+            ...scene.tokens[idx],
+            x: localToken.x,
+            y: localToken.y
+        };
+
+        const saved = store.updateVTTState(draft, getActiveCaseId());
         vttState = deepClone(saved);
         lastDragSyncAt = now;
     };
@@ -1036,6 +1129,10 @@
 
         if (action === 'select-token') {
             selectedTokenId = id;
+            const linkedEntry = findEntryForToken(id);
+            selectedEntryId = linkedEntry ? linkedEntry.id : '';
+            renderInitiativeList();
+            renderInitiativeDetail();
             renderTokenInspector();
             renderStage();
             return;
@@ -1082,8 +1179,11 @@
 
         if (action === 'select-entry') {
             selectedEntryId = id;
+            syncTokenSelectionFromEntry(id);
             renderInitiativeList();
             renderInitiativeDetail();
+            renderTokenInspector();
+            renderStage();
             return;
         }
 

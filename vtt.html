@@ -9,12 +9,10 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260320b">
+    <link rel="stylesheet" href="css/vtt.css?v=20260320c">
 </head>
 
 <body data-player-nav="vtt">
-    <canvas id="vector-cloud"></canvas>
-
     <header class="hero-header vtt-topbar">
         <div class="vtt-topbar-group">
             <button class="hero-btn ghost" data-action="toggle-settings" id="vtt-settings-toggle"
@@ -32,7 +30,6 @@
             <button class="hero-btn ghost" data-action="zoom-in">+</button>
             <button class="hero-btn ghost" data-action="fit-view">Fit</button>
             <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
-            <button class="hero-btn ghost" id="btn-bg-style" data-onclick="cycleBgStyle()">🌌 BG: Field</button>
             <input type="color" id="accent-picker-input" class="vtt-accent-picker-input"
                 data-onchange="setAccentColor(this.value)">
         </div>
@@ -128,14 +125,14 @@
                     <h2>Initiative</h2>
                     <span class="vtt-panel-pill" id="vtt-round-pill">Round 1</span>
                 </div>
-                <div class="vtt-initiative-toolbar">
+                <div class="vtt-initiative-toolbar" data-dm-only="1">
                     <button class="vtt-chip-btn" data-action="prev-turn">Prev</button>
                     <button class="vtt-chip-btn strong" data-action="next-turn">Next</button>
                 </div>
                 <div class="vtt-initiative-list" id="vtt-initiative-list"></div>
             </section>
 
-            <section class="vtt-panel" id="vtt-initiative-detail-panel"></section>
+            <section class="vtt-panel" id="vtt-initiative-detail-panel" data-dm-only="1"></section>
         </aside>
     </main>
 
@@ -144,7 +141,7 @@
     <script src="js/store.js?v=20260320a"></script>
     <script src="js/player-nav.js?v=20260320b"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
-    <script src="js/vtt.js?v=20260320b"></script>
+    <script src="js/vtt.js?v=20260320d"></script>
 </body>
 
 </html>

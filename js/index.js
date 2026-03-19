@@ -3196,6 +3196,111 @@ function queueInitiativeForTracker(payload) {
     }
 }
 
+function normalizeVTTInitiativeDefences(defences) {
+    const source = defences && typeof defences === 'object' ? defences : {};
+    return stats.reduce((out, stat) => {
+        const raw = source[stat];
+        out[stat] = raw === null || raw === undefined || raw === ''
+            ? null
+            : Math.max(0, Math.min(99, Math.round(sanitizeNumber(raw, 0, 0, 99))));
+        return out;
+    }, {});
+}
+
+function pushInitiativeToSharedVTT(payload) {
+    const packet = payload && typeof payload === 'object' ? payload : null;
+    const store = window.RTF_STORE;
+    if (!packet || !store || typeof store.getVTTState !== 'function' || typeof store.updateVTTState !== 'function') {
+        return false;
+    }
+
+    try {
+        const caseId = typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : null;
+        const draft = JSON.parse(JSON.stringify(store.getVTTState(caseId)));
+        if (!draft || !draft.initiative || !Array.isArray(draft.initiative.entries)) return false;
+
+        const sourceType = sanitizeString(packet.source || packet.sourceType || 'sheet', 'sheet', 40).trim() || 'sheet';
+        const sourceId = sanitizeString(packet.sourceId, '', 120).trim();
+        const name = sanitizeString(packet.name, 'Unnamed PC', 160).trim() || 'Unnamed PC';
+        const total = Math.round(sanitizeNumber(packet.total, 0, -999, 999));
+        const tie = Math.max(0, Math.min(99, Math.round(sanitizeNumber(packet.tie, 10, 0, 99))));
+        const ac = packet.ac === null || packet.ac === undefined || packet.ac === ''
+            ? null
+            : Math.max(0, Math.min(99, Math.round(sanitizeNumber(packet.ac, 0, 0, 99))));
+        const hpCurrent = packet.hp === null || packet.hp === undefined || packet.hp === ''
+            ? null
+            : Math.max(0, Math.min(999999, Math.round(sanitizeNumber(packet.hp, 0, 0, 999999))));
+        const hpMax = packet.maxHp === null || packet.maxHp === undefined || packet.maxHp === ''
+            ? null
+            : Math.max(0, Math.min(999999, Math.round(sanitizeNumber(packet.maxHp, 0, 0, 999999))));
+        const passivePerception = packet.passivePerception === null || packet.passivePerception === undefined || packet.passivePerception === ''
+            ? null
+            : Math.max(0, Math.min(99, Math.round(sanitizeNumber(packet.passivePerception, 10, 0, 99))));
+        const nextDefences = normalizeVTTInitiativeDefences(packet.defences);
+        const entries = draft.initiative.entries;
+        const safeNameLower = name.toLowerCase();
+        let matchedBySource = false;
+
+        const existingIdx = entries.findIndex((entry) => {
+            const sameSource = !!(sourceId
+                && String(entry && entry.sourceType || '') === sourceType
+                && String(entry && entry.sourceId || '') === sourceId);
+            if (sameSource) {
+                matchedBySource = true;
+                return true;
+            }
+            return String(entry && entry.name || '').trim().toLowerCase() === safeNameLower;
+        });
+
+        const base = existingIdx >= 0 && entries[existingIdx] && typeof entries[existingIdx] === 'object'
+            ? entries[existingIdx]
+            : {};
+        const hasPacketDefences = Object.values(nextDefences).some((value) => value !== null);
+        const nextEntry = {
+            id: existingIdx >= 0 && base.id
+                ? String(base.id)
+                : `init_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            name,
+            linkedTokenId: sanitizeString(base.linkedTokenId, '', 120).trim(),
+            side: sanitizeString(base.side, 'player', 20).trim().toLowerCase() || 'player',
+            imageUrl: String(base.imageUrl || '').trim(),
+            sourceType: matchedBySource || existingIdx < 0
+                ? sourceType
+                : (sanitizeString(base.sourceType, sourceType, 40).trim() || sourceType),
+            sourceId: matchedBySource || existingIdx < 0
+                ? sourceId
+                : sanitizeString(base.sourceId, '', 120).trim(),
+            total,
+            tie,
+            hpCurrent: hpCurrent !== null ? hpCurrent : (base.hpCurrent ?? null),
+            hpMax: hpMax !== null ? hpMax : (base.hpMax ?? null),
+            ac: ac !== null ? ac : (base.ac ?? null),
+            passivePerception: passivePerception !== null ? passivePerception : (base.passivePerception ?? null),
+            defences: hasPacketDefences ? nextDefences : normalizeVTTInitiativeDefences(base.defences),
+            reactionUsed: !!base.reactionUsed,
+            concentrating: !!base.concentrating,
+            hidden: !!base.hidden,
+            conditions: Array.isArray(base.conditions) ? base.conditions.slice(0, 24) : []
+        };
+
+        if (existingIdx >= 0) entries[existingIdx] = nextEntry;
+        else entries.push(nextEntry);
+
+        entries.sort((left, right) =>
+            (Number(right && right.total || 0) - Number(left && left.total || 0))
+            || (Number(right && right.tie || 0) - Number(left && left.tie || 0))
+            || String(left && left.name || '').localeCompare(String(right && right.name || ''))
+        );
+        if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
+
+        store.updateVTTState(draft, caseId);
+        return true;
+    } catch (err) {
+        console.warn('Could not push initiative packet into shared VTT state.', err);
+        return false;
+    }
+}
+
 function getComputedSkillBonus(skill) {
     const safeSkill = String(skill || '').trim().toLowerCase();
     const defaultStat = skillsMap[safeSkill];
@@ -3271,7 +3376,7 @@ function rollInitiative() {
     const acValue = Number.isFinite(acParsed) ? Math.max(0, Math.min(99, acParsed)) : null;
     const passivePerception = Math.max(0, Math.min(99, 10 + getComputedSkillBonus('perception')));
     const defences = getComputedDefences();
-    queueInitiativeForTracker({
+    const initiativePacket = {
         rollId: `init_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         source: 'sheet',
         sourceId,
@@ -3286,7 +3391,10 @@ function rollInitiative() {
         detail: sanitizeString(formulaText, '', 240),
         finalScore: sanitizeString(finalScore, '', 24),
         ts: Date.now()
-    });
+    };
+    if (!pushInitiativeToSharedVTT(initiativePacket)) {
+        queueInitiativeForTracker(initiativePacket);
+    }
     if (consumedInsp) consumeInspiration();
 }
 
