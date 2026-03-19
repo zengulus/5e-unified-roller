@@ -3196,6 +3196,29 @@ function queueInitiativeForTracker(payload) {
     }
 }
 
+function getComputedSkillBonus(skill) {
+    const safeSkill = String(skill || '').trim().toLowerCase();
+    const defaultStat = skillsMap[safeSkill];
+    if (!defaultStat || !data || !data.stats) return 0;
+    const activeStat = (data.skillOverrides && data.skillOverrides[safeSkill]) ? data.skillOverrides[safeSkill] : defaultStat;
+    const statRow = data.stats[activeStat] || { val: 10 };
+    const mod = getMod(statRow.val);
+    const profLevel = Math.max(0, Math.min(2, parseInt(data.skills && data.skills[safeSkill], 10) || 0));
+    const misc = getSkillMiscBonus(safeSkill);
+    const pb = getPB(data && data.meta ? data.meta.level : 1);
+    return mod + (profLevel * pb) + misc;
+}
+
+function getComputedDefences() {
+    const pb = getPB(data && data.meta ? data.meta.level : 1);
+    return stats.reduce((out, stat) => {
+        const statRow = data && data.stats && data.stats[stat] ? data.stats[stat] : { val: 10, save: false };
+        const saveBonus = getMod(statRow.val) + (statRow.save ? pb : 0);
+        out[stat] = Math.max(0, Math.min(99, 11 + saveBonus));
+        return out;
+    }, {});
+}
+
 function rollInitiative() {
     const initStr = document.getElementById('initBonus').value.trim();
     const miscStr = document.getElementById('globalMisc').value.trim();
@@ -3246,6 +3269,8 @@ function rollInitiative() {
     const acDisplayEl = document.getElementById('acTotalDisplay');
     const acParsed = parseInt(acDisplayEl ? String(acDisplayEl.textContent || '').trim() : '', 10);
     const acValue = Number.isFinite(acParsed) ? Math.max(0, Math.min(99, acParsed)) : null;
+    const passivePerception = Math.max(0, Math.min(99, 10 + getComputedSkillBonus('perception')));
+    const defences = getComputedDefences();
     queueInitiativeForTracker({
         rollId: `init_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         source: 'sheet',
@@ -3254,6 +3279,8 @@ function rollInitiative() {
         total: Math.round(sanitizeNumber(total, 0, -999, 999)),
         tie: dexScore,
         ac: acValue,
+        passivePerception,
+        defences,
         hp: hpCurrent,
         maxHp: hpMax,
         detail: sanitizeString(formulaText, '', 240),

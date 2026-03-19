@@ -103,6 +103,8 @@
         nodes: [],
         connections: []
     };
+    const VTT_TOKEN_SIDES = new Set(['player', 'ally', 'enemy', 'neutral']);
+    const VTT_DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const DEFAULT_CAMPAIGN_META_BOARD_STATE = {
         name: 'CAMPAIGN META BOARD',
         nodes: [],
@@ -146,7 +148,8 @@
                     name: DEFAULT_CASE_NAME,
                     board: { ...DEFAULT_BOARD_STATE },
                     events: [],
-                    leads: []
+                    leads: [],
+                    vtt: createDefaultVTTState()
                 }
             ]
         },
@@ -389,6 +392,177 @@
             encounters: Array.isArray(source.encounters) ? source.encounters : [],
             ledger: sanitizeLedgerState(source.ledger),
             case: sanitizeCase(source.case)
+        };
+    };
+
+    const sanitizeVTTDefences = (value) => {
+        const source = value && typeof value === 'object' ? value : {};
+        const out = {};
+        VTT_DEFENCE_KEYS.forEach((key) => {
+            const raw = source[key];
+            if (raw === null || raw === undefined || raw === '') {
+                out[key] = null;
+                return;
+            }
+            out[key] = Math.max(0, Math.min(99, Math.round(toNumber(raw, 0))));
+        });
+        return out;
+    };
+
+    const sanitizeVTTVision = (vision) => {
+        const source = vision && typeof vision === 'object' ? vision : {};
+        return {
+            enabled: source.enabled !== undefined ? !!source.enabled : true,
+            facingDeg: Math.round(toNumber(source.facingDeg, 0)),
+            arcDeg: Math.max(0, Math.min(360, Math.round(toNumber(source.arcDeg, 90)))),
+            baseRangeCells: Math.max(0, Math.min(999, Math.round(toNumber(source.baseRangeCells, 6)))),
+            passivePerception: Math.max(0, Math.min(99, Math.round(toNumber(source.passivePerception, 10))))
+        };
+    };
+
+    const sanitizeVTTConditions = (conditions) => (
+        Array.isArray(conditions)
+            ? conditions
+                .map((entry) => toTrimmedString(entry, '', 80).trim())
+                .filter(Boolean)
+                .slice(0, 24)
+            : []
+    );
+
+    const sanitizeVTTGrid = (grid) => {
+        const source = grid && typeof grid === 'object' ? grid : {};
+        return {
+            cellPx: Math.max(24, Math.min(240, Math.round(toNumber(source.cellPx, 70)))),
+            offsetX: Math.round(toNumber(source.offsetX, 0)),
+            offsetY: Math.round(toNumber(source.offsetY, 0)),
+            cellDistance: Math.max(1, Math.min(1000, Math.round(toNumber(source.cellDistance, 5))))
+        };
+    };
+
+    const sanitizeVTTToken = (token, idx = 0) => {
+        const source = token && typeof token === 'object' ? token : {};
+        const id = toTrimmedString(source.id, `token_${idx + 1}`, 120).trim() || `token_${idx + 1}`;
+        const cleanSide = toTrimmedString(source.side, 'neutral', 20).trim().toLowerCase();
+        const hasHpCurrent = source.hpCurrent !== null && source.hpCurrent !== undefined && source.hpCurrent !== '';
+        const hasHpMax = source.hpMax !== null && source.hpMax !== undefined && source.hpMax !== '';
+        const hasAc = source.ac !== null && source.ac !== undefined && source.ac !== '';
+        const hasPassivePerception = source.passivePerception !== null && source.passivePerception !== undefined && source.passivePerception !== '';
+        const hasStealthDc = source.stealthDc !== null && source.stealthDc !== undefined && source.stealthDc !== '';
+        return {
+            id,
+            label: toTrimmedString(source.label, `Token ${idx + 1}`, 160).trim() || `Token ${idx + 1}`,
+            side: VTT_TOKEN_SIDES.has(cleanSide) ? cleanSide : 'neutral',
+            imageUrl: toImageUrl(source.imageUrl),
+            x: Math.round(toNumber(source.x, idx * 2)),
+            y: Math.round(toNumber(source.y, 0)),
+            w: Math.max(1, Math.round(toNumber(source.w, 1))),
+            h: Math.max(1, Math.round(toNumber(source.h, 1))),
+            sourceType: toTrimmedString(source.sourceType, '', 40).trim(),
+            sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
+            hpCurrent: hasHpCurrent ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpCurrent, 0)))) : null,
+            hpMax: hasHpMax ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpMax, 0)))) : null,
+            ac: hasAc ? Math.max(0, Math.min(99, Math.round(toNumber(source.ac, 0)))) : null,
+            passivePerception: hasPassivePerception ? Math.max(0, Math.min(99, Math.round(toNumber(source.passivePerception, 10)))) : null,
+            defences: sanitizeVTTDefences(source.defences),
+            conditions: sanitizeVTTConditions(source.conditions),
+            hidden: !!source.hidden,
+            stealthDc: hasStealthDc ? Math.max(0, Math.min(99, Math.round(toNumber(source.stealthDc, 10)))) : null,
+            vision: sanitizeVTTVision(source.vision)
+        };
+    };
+
+    const sanitizeVTTFogMask = (mask, idx = 0) => {
+        const source = mask && typeof mask === 'object' ? mask : {};
+        return {
+            id: toTrimmedString(source.id, `fog_${idx + 1}`, 120).trim() || `fog_${idx + 1}`,
+            x: Math.round(toNumber(source.x, 0)),
+            y: Math.round(toNumber(source.y, 0)),
+            w: Math.max(1, Math.round(toNumber(source.w, 1))),
+            h: Math.max(1, Math.round(toNumber(source.h, 1)))
+        };
+    };
+
+    const sanitizeVTTScene = (scene, idx = 0) => {
+        const source = scene && typeof scene === 'object' ? scene : {};
+        const id = toTrimmedString(source.id, `scene_${idx + 1}`, 120).trim() || `scene_${idx + 1}`;
+        return {
+            id,
+            name: toTrimmedString(source.name, `Scene ${idx + 1}`, 160).trim() || `Scene ${idx + 1}`,
+            mapImageUrl: toImageUrl(source.mapImageUrl),
+            grid: sanitizeVTTGrid(source.grid),
+            tokens: Array.isArray(source.tokens) ? source.tokens.map((tokenEntry, tokenIdx) => sanitizeVTTToken(tokenEntry, tokenIdx)) : [],
+            fog: Array.isArray(source.fog) ? source.fog.map((maskEntry, maskIdx) => sanitizeVTTFogMask(maskEntry, maskIdx)) : []
+        };
+    };
+
+    const sanitizeVTTInitiativeEntry = (entry, idx = 0) => {
+        const source = entry && typeof entry === 'object' ? entry : {};
+        const id = toTrimmedString(source.id, `init_${idx + 1}`, 120).trim() || `init_${idx + 1}`;
+        const cleanSide = toTrimmedString(source.side, 'neutral', 20).trim().toLowerCase();
+        const hasHpCurrent = source.hpCurrent !== null && source.hpCurrent !== undefined && source.hpCurrent !== '';
+        const hasHpMax = source.hpMax !== null && source.hpMax !== undefined && source.hpMax !== '';
+        const hasAc = source.ac !== null && source.ac !== undefined && source.ac !== '';
+        const hasPassivePerception = source.passivePerception !== null && source.passivePerception !== undefined && source.passivePerception !== '';
+        return {
+            id,
+            name: toTrimmedString(source.name, `Combatant ${idx + 1}`, 160).trim() || `Combatant ${idx + 1}`,
+            linkedTokenId: toTrimmedString(source.linkedTokenId, '', 120).trim(),
+            side: VTT_TOKEN_SIDES.has(cleanSide) ? cleanSide : 'neutral',
+            imageUrl: toImageUrl(source.imageUrl),
+            sourceType: toTrimmedString(source.sourceType, '', 40).trim(),
+            sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
+            total: Math.max(-999, Math.min(999, Math.round(toNumber(source.total, 0)))),
+            tie: Math.max(0, Math.min(99, Math.round(toNumber(source.tie, 10)))),
+            hpCurrent: hasHpCurrent ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpCurrent, 0)))) : null,
+            hpMax: hasHpMax ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpMax, 0)))) : null,
+            ac: hasAc ? Math.max(0, Math.min(99, Math.round(toNumber(source.ac, 0)))) : null,
+            passivePerception: hasPassivePerception ? Math.max(0, Math.min(99, Math.round(toNumber(source.passivePerception, 10)))) : null,
+            defences: sanitizeVTTDefences(source.defences),
+            reactionUsed: !!source.reactionUsed,
+            concentrating: !!source.concentrating,
+            hidden: !!source.hidden,
+            conditions: sanitizeVTTConditions(source.conditions)
+        };
+    };
+
+    const createDefaultVTTState = () => ({
+        activeSceneId: 'scene_1',
+        scenes: [
+            {
+                id: 'scene_1',
+                name: 'Scene 1',
+                mapImageUrl: '',
+                grid: sanitizeVTTGrid(null),
+                tokens: [],
+                fog: []
+            }
+        ],
+        initiative: {
+            entries: [],
+            round: 1,
+            activeEntryId: ''
+        }
+    });
+
+    const sanitizeVTTState = (value) => {
+        const base = createDefaultVTTState();
+        const source = value && typeof value === 'object' ? value : {};
+        const scenes = Array.isArray(source.scenes) && source.scenes.length
+            ? source.scenes.map((sceneEntry, idx) => sanitizeVTTScene(sceneEntry, idx))
+            : base.scenes;
+        const activeSceneIdRaw = toTrimmedString(source.activeSceneId, scenes[0] && scenes[0].id ? scenes[0].id : 'scene_1', 120).trim();
+        const entries = Array.isArray(source.initiative && source.initiative.entries)
+            ? source.initiative.entries.map((entry, idx) => sanitizeVTTInitiativeEntry(entry, idx))
+            : [];
+        const activeEntryIdRaw = toTrimmedString(source.initiative && source.initiative.activeEntryId, '', 120).trim();
+        return {
+            activeSceneId: scenes.some((scene) => scene.id === activeSceneIdRaw) ? activeSceneIdRaw : scenes[0].id,
+            scenes,
+            initiative: {
+                entries,
+                round: Math.max(1, Math.min(100000, Math.round(toNumber(source.initiative && source.initiative.round, 1)))),
+                activeEntryId: entries.some((entry) => entry.id === activeEntryIdRaw) ? activeEntryIdRaw : ''
+            }
         };
     };
 
@@ -818,7 +992,8 @@
             name: legacyCaseTitle,
             board: sanitizeBoard(board),
             events: sanitizeEventList(baseCampaign.events),
-            leads: []
+            leads: [],
+            vtt: createDefaultVTTState()
         };
 
         const listRaw = Array.isArray(source.items) ? source.items
@@ -845,7 +1020,8 @@
                 name: sanitizeCaseName(row.name, fallbackName),
                 board: sanitizeBoard(row.board),
                 events: sanitizeEventList(row.events),
-                leads: sanitizeLeadList(row.leads)
+                leads: sanitizeLeadList(row.leads),
+                vtt: sanitizeVTTState(row.vtt)
             };
             items.push(normalized);
         });
@@ -856,7 +1032,8 @@
                 name: legacyCaseTitle,
                 board: sanitizeBoard(null),
                 events: [],
-                leads: []
+                leads: [],
+                vtt: createDefaultVTTState()
             });
         }
 
@@ -1269,6 +1446,7 @@
             map.set(`cases.${entry.id}.board`, stripBoardNodeLocalFields(entry.board));
             addEntityScopesToSnapshot(map, buildCaseEventsScopePrefix(entry.id), sanitizeEventList(entry.events));
             map.set(`cases.${entry.id}.leads`, sanitizeLeadList(entry.leads));
+            map.set(`cases.${entry.id}.vtt`, sanitizeVTTState(entry.vtt));
         });
         return map;
     };
@@ -1342,7 +1520,8 @@
                 name: sanitizeCaseName(caseId, DEFAULT_CASE_NAME),
                 board: sanitizeBoard(null),
                 events: [],
-                leads: []
+                leads: [],
+                vtt: createDefaultVTTState()
             };
         }
         targetState.cases.items.push(targetCase);
@@ -1372,7 +1551,8 @@
                 name: sanitizeCaseName(entry.name, DEFAULT_CASE_NAME),
                 board: sanitizeBoard(null),
                 events: [],
-                leads: []
+                leads: [],
+                vtt: createDefaultVTTState()
             });
         });
 
@@ -1382,7 +1562,8 @@
                 name: DEFAULT_CASE_NAME,
                 board: sanitizeBoard(null),
                 events: [],
-                leads: []
+                leads: [],
+                vtt: createDefaultVTTState()
             });
         }
 
@@ -1505,7 +1686,7 @@
             return;
         }
 
-        const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name|leads)$/);
+        const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name|leads|vtt)$/);
         if (caseFieldMatch) {
             const caseId = caseFieldMatch[1];
             const field = caseFieldMatch[2];
@@ -1515,12 +1696,14 @@
                 name: targetCase.name || DEFAULT_CASE_NAME,
                 board: sanitizeBoard(null),
                 events: [],
-                leads: []
+                leads: [],
+                vtt: createDefaultVTTState()
             };
             if (field === 'board') targetCase.board = deepClone(sourceCase.board);
             if (field === 'events') targetCase.events = deepClone(sourceCase.events);
             if (field === 'name') targetCase.name = sanitizeCaseName(sourceCase.name, targetCase.name || DEFAULT_CASE_NAME);
             if (field === 'leads') targetCase.leads = sanitizeLeadList(sourceCase.leads);
+            if (field === 'vtt') targetCase.vtt = sanitizeVTTState(sourceCase.vtt);
             return;
         }
 
@@ -1534,6 +1717,7 @@
             targetCase.board = deepClone(sourceCase.board);
             targetCase.events = deepClone(sourceCase.events);
             targetCase.leads = sanitizeLeadList(sourceCase.leads);
+            targetCase.vtt = sanitizeVTTState(sourceCase.vtt);
             return;
         }
 
@@ -2155,7 +2339,8 @@
                     name: prettyName,
                     board: sanitizeBoard({ name: prettyName }),
                     events: [],
-                    leads: []
+                    leads: [],
+                    vtt: createDefaultVTTState()
                 };
                 cases.items.push(entry);
             }
@@ -2165,6 +2350,7 @@
             if (!entry.board || typeof entry.board !== 'object') entry.board = sanitizeBoard(null);
             if (!Array.isArray(entry.events)) entry.events = [];
             if (!Array.isArray(entry.leads)) entry.leads = [];
+            entry.vtt = sanitizeVTTState(entry.vtt);
             return entry || null;
         }
 
@@ -2609,7 +2795,8 @@
                 name: cleanName,
                 board: sanitizeBoard({ name: cleanName }),
                 events: [],
-                leads: []
+                leads: [],
+                vtt: createDefaultVTTState()
             };
             cases.items.push(entry);
             cases.activeCaseId = id;
@@ -3598,7 +3785,8 @@
                     name: caseName,
                     board: sanitizeBoard({ name: caseName }),
                     events: [],
-                    leads: sanitizeLeadList(payload.leads)
+                    leads: sanitizeLeadList(payload.leads),
+                    vtt: sanitizeVTTState(payload.vtt)
                 });
             });
 
@@ -3610,7 +3798,8 @@
                         name: DEFAULT_CASE_NAME,
                         board: sanitizeBoard(null),
                         events: [],
-                        leads: []
+                        leads: [],
+                        vtt: createDefaultVTTState()
                     });
                     caseOrder.push(caseId);
                 }
@@ -3639,7 +3828,8 @@
                         name: DEFAULT_CASE_NAME,
                         board: sanitizeBoard(null),
                         events: [],
-                        leads: []
+                        leads: [],
+                        vtt: createDefaultVTTState()
                     });
                     caseOrder.push(caseId);
                 }
@@ -5339,13 +5529,13 @@
                     addCaseEventScopeId(caseId, scopeId);
                     return;
                 }
-                const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name|leads)$/);
+                const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name|leads|vtt)$/);
                 if (caseFieldMatch) {
                     const caseId = sanitizeCaseId(caseFieldMatch[1], 'case_primary');
                     const field = caseFieldMatch[2];
                     if (field === 'board') plan.caseBoards.add(caseId);
                     if (field === 'events') plan.caseEvents.add(caseId);
-                    if (field === 'name' || field === 'leads') plan.writeCaseState = true;
+                    if (field === 'name' || field === 'leads' || field === 'vtt') plan.writeCaseState = true;
                     return;
                 }
                 const caseWholeMatch = scope.match(/^cases\.([a-z0-9_-]+)$/);
@@ -5576,7 +5766,8 @@
                     sort_order: idx,
                     payload: {
                         name: caseName,
-                        leads: sanitizeLeadList(entry && entry.leads)
+                        leads: sanitizeLeadList(entry && entry.leads),
+                        vtt: sanitizeVTTState(entry && entry.vtt)
                     },
                     ...writeMeta
                 };
@@ -5588,7 +5779,7 @@
                     case_name: DEFAULT_CASE_NAME,
                     is_active: true,
                     sort_order: 0,
-                    payload: { name: DEFAULT_CASE_NAME, leads: [] },
+                    payload: { name: DEFAULT_CASE_NAME, leads: [], vtt: createDefaultVTTState() },
                     ...writeMeta
                 });
             }
@@ -7184,6 +7375,21 @@
                 const scope = buildEncounterEntityScope(id);
                 this.save({ scope: scope || 'campaign.encounters' });
             }
+        }
+
+        getVTTState(caseId = null) {
+            const entry = this.getCaseEntry(caseId, { createIfMissing: true });
+            if (!entry) return sanitizeVTTState(null);
+            entry.vtt = sanitizeVTTState(entry.vtt);
+            return entry.vtt;
+        }
+
+        updateVTTState(vttState, caseId = null) {
+            const entry = this.getCaseEntry(caseId, { createIfMissing: true });
+            if (!entry) return sanitizeVTTState(null);
+            entry.vtt = sanitizeVTTState(vttState);
+            this.save({ scope: `cases.${entry.id}.vtt` });
+            return entry.vtt;
         }
 
         getBoard(caseId = null) {
