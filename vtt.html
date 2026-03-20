@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321d">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321g">
 </head>
 
 <body data-player-nav="vtt">
@@ -40,8 +40,16 @@
             <section class="vtt-panel" data-dm-only="1">
                 <div class="vtt-panel-head">
                     <h2>Scene</h2>
-                    <span class="vtt-panel-pill" id="vtt-active-scene-label">Scene 1</span>
+                    <div class="vtt-panel-head-actions">
+                        <span class="vtt-panel-pill" id="vtt-active-scene-label">Scene 1</span>
+                        <button class="vtt-chip-btn" data-action="create-scene">New Scene</button>
+                    </div>
                 </div>
+                <label class="vtt-field">
+                    <span>Scene Name</span>
+                    <input type="text" id="scene-name" data-scene-field="name" placeholder="Scene name">
+                </label>
+                <div class="vtt-scene-list" id="vtt-scene-list"></div>
                 <label class="vtt-field">
                     <span>Map Image URL</span>
                     <input type="text" id="scene-map-url" data-scene-field="mapImageUrl" placeholder="https://...">
@@ -150,10 +158,18 @@
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
-    <script src="js/store.js?v=20260321a"></script>
+    <script src="js/store.js?v=20260321b"></script>
     <script src="js/player-nav.js?v=20260320c"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
-    <script src="js/vtt.js?v=20260321d"></script>
+    <script>
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260321a')
+            .then(() => window.RTF_VTT_COLLAB || null)
+            .catch((err) => {
+                console.warn('VTT collaboration module failed to load', err);
+                return null;
+            });
+    </script>
+    <script src="js/vtt.js?v=20260321g"></script>
 </body>
 
 </html>

@@ -8,6 +8,31 @@
     const DRAG_SYNC_INTERVAL_MS = 120;
     const SIDE_OPTIONS = ['player', 'ally', 'enemy', 'neutral'];
     const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+    const SCENE_VIEW_SHARED = 'shared';
+    const SCENE_VIEW_LOCAL = 'local';
+    const DEFAULT_VTT_STATE = {
+        activeSceneId: 'scene_1',
+        scenes: [
+            {
+                id: 'scene_1',
+                name: 'Scene 1',
+                mapImageUrl: '',
+                grid: {
+                    cellPx: 70,
+                    offsetX: 0,
+                    offsetY: 0,
+                    cellDistance: 5
+                },
+                tokens: [],
+                fog: []
+            }
+        ],
+        initiative: {
+            entries: [],
+            round: 1,
+            activeEntryId: ''
+        }
+    };
 
     let vttState = null;
     let selectedTokenId = '';
@@ -15,19 +40,25 @@
     let localRole = 'dm';
     let uiState = {
         settingsCollapsed: false,
-        initiativeCollapsed: false
+        initiativeCollapsed: false,
+        sceneViewMode: SCENE_VIEW_SHARED,
+        localSceneId: ''
     };
     let npcSearchOpen = false;
     let npcSearchQuery = '';
     let previewTokenId = '';
     let localView = { x: 40, y: 40, zoom: 1 };
     let worldSize = { ...DEFAULT_WORLD_SIZE };
+    let mapSize = { width: 0, height: 0 };
     let mapLoadState = { url: '', loaded: false };
     let dragState = null;
     let panState = null;
     let lastDragSyncAt = 0;
     let fitViewOnNextMapLoad = true;
     let unsubscribeSyncStatus = null;
+    let vttCollabSession = null;
+    let vttCollabInitPromise = null;
+    let pendingRemoteVTTSnapshot = null;
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
@@ -51,6 +82,7 @@
     const tokenInspectorEl = document.getElementById('vtt-token-inspector');
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
+    const sceneListEl = document.getElementById('vtt-scene-list');
     const playerSpawnListEl = document.getElementById('vtt-player-spawn-list');
     const npcSearchToggleEl = document.getElementById('vtt-npc-search-toggle');
     const npcSearchPopoverEl = document.getElementById('vtt-npc-search-popover');
@@ -92,6 +124,30 @@
         if (!words.length) return '?';
         return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join('');
     };
+    const buildSceneRecord = (scenes, sourceScene = null) => {
+        const source = sourceScene && typeof sourceScene === 'object' ? sourceScene : null;
+        const nextSceneNumber = (Array.isArray(scenes) ? scenes.length : 0) + 1;
+        const nextName = source
+            ? `${String(source.name || 'Scene').trim() || 'Scene'} Copy`
+            : `Scene ${nextSceneNumber}`;
+        const clonedTokens = deepClone(Array.isArray(source && source.tokens) ? source.tokens : []).map((token) => ({
+            ...token,
+            id: buildId('token')
+        }));
+        return {
+            id: buildId('scene'),
+            name: nextName,
+            mapImageUrl: source ? String(source.mapImageUrl || '') : '',
+            grid: deepClone(source && source.grid ? source.grid : {
+                cellPx: 70,
+                offsetX: 0,
+                offsetY: 0,
+                cellDistance: 5
+            }),
+            tokens: clonedTokens,
+            fog: deepClone(Array.isArray(source && source.fog) ? source.fog : [])
+        };
+    };
     const serializeConditions = (conditions) => (Array.isArray(conditions) ? conditions.join(', ') : '');
     const parseConditions = (value) => String(value || '')
         .split(',')
@@ -112,9 +168,18 @@
         if (!store || typeof store.getActiveCaseId !== 'function') return 'case_primary';
         return String(store.getActiveCaseId() || 'case_primary');
     };
+    const getVTTCollabRoomId = (caseId = getActiveCaseId()) => {
+        const store = getStore();
+        if (store && typeof store.resolveVTTRoomTarget === 'function') {
+            const target = store.resolveVTTRoomTarget({ caseId });
+            return String(target && target.roomId || '').trim() || `vtt:case:${String(caseId || 'case_primary').trim() || 'case_primary'}`;
+        }
+        return `vtt:case:${String(caseId || 'case_primary').trim() || 'case_primary'}`;
+    };
     const getRoleStorageKey = () => `${ROLE_STORAGE_PREFIX}${getActiveCaseId()}`;
     const getUIPrefsStorageKey = () => `${UI_PREFS_STORAGE_PREFIX}${getActiveCaseId()}`;
     const getProcessedInitStorageKey = () => `${PROCESSED_INIT_STORAGE_PREFIX}${getActiveCaseId()}`;
+    const isVTTCollabReady = () => !!(vttCollabSession && typeof vttCollabSession.isActive === 'function' && vttCollabSession.isActive());
     const isDM = () => localRole === 'dm';
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
         npcSearchOpen = false;
@@ -142,12 +207,16 @@
             const parsed = raw ? JSON.parse(raw) : {};
             uiState = {
                 settingsCollapsed: !!(parsed && parsed.settingsCollapsed),
-                initiativeCollapsed: !!(parsed && parsed.initiativeCollapsed)
+                initiativeCollapsed: !!(parsed && parsed.initiativeCollapsed),
+                sceneViewMode: parsed && parsed.sceneViewMode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED,
+                localSceneId: String(parsed && parsed.localSceneId || '').trim()
             };
         } catch (err) {
             uiState = {
                 settingsCollapsed: false,
-                initiativeCollapsed: false
+                initiativeCollapsed: false,
+                sceneViewMode: SCENE_VIEW_SHARED,
+                localSceneId: ''
             };
         }
         applyUIPreferences();
@@ -172,7 +241,36 @@
 
     const getActiveScene = (state = vttState) => {
         if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return null;
-        return state.scenes.find((scene) => scene.id === state.activeSceneId) || state.scenes[0] || null;
+        const viewedSceneId = getViewedSceneId(state);
+        return state.scenes.find((scene) => scene.id === viewedSceneId) || state.scenes[0] || null;
+    };
+
+    const getSharedSceneId = (state = vttState) => {
+        if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return '';
+        const preferredId = String(state.activeSceneId || '').trim();
+        return state.scenes.some((scene) => scene.id === preferredId)
+            ? preferredId
+            : String(state.scenes[0] && state.scenes[0].id || '').trim();
+    };
+
+    const isUsingLocalSceneView = (state = vttState, role = localRole) => {
+        if (role !== 'dm' || !state || !Array.isArray(state.scenes) || !state.scenes.length) return false;
+        if (uiState.sceneViewMode !== SCENE_VIEW_LOCAL) return false;
+        const localSceneId = String(uiState.localSceneId || '').trim();
+        return !!localSceneId && state.scenes.some((scene) => scene.id === localSceneId);
+    };
+
+    const getViewedSceneId = (state = vttState, role = localRole) => {
+        const sharedSceneId = getSharedSceneId(state);
+        if (!sharedSceneId) return '';
+        if (!isUsingLocalSceneView(state, role)) return sharedSceneId;
+        return String(uiState.localSceneId || '').trim() || sharedSceneId;
+    };
+
+    const setSceneViewPreference = (mode, sceneId = '') => {
+        uiState.sceneViewMode = mode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED;
+        uiState.localSceneId = uiState.sceneViewMode === SCENE_VIEW_LOCAL ? String(sceneId || '').trim() : '';
+        persistUIPreferences();
     };
 
     const getTokenById = (tokenId, state = vttState) => {
@@ -454,13 +552,39 @@
         );
     };
 
-    const withDraft = (mutator, options = {}) => {
+    const readSharedVTTSnapshot = () => {
         const store = getStore();
-        if (!store) return;
-        const draft = deepClone(store.getVTTState(getActiveCaseId()));
+        if (!store) return null;
+        if (isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function') {
+            try {
+                return deepClone(vttCollabSession.getSnapshot());
+            } catch (err) {
+                console.warn('VTT collaboration snapshot read failed', err);
+            }
+        }
+        return deepClone(store.getVTTState(getActiveCaseId()));
+    };
+
+    const persistSharedVTTSnapshot = (payload, options = {}) => {
+        const store = getStore();
+        if (!store) return null;
+        if (isVTTCollabReady() && typeof vttCollabSession.syncSnapshot === 'function') {
+            Promise.resolve(vttCollabSession.syncSnapshot(payload, options)).catch((err) => {
+                console.warn('VTT collaboration snapshot sync failed', err);
+            });
+            return typeof vttCollabSession.getSnapshot === 'function'
+                ? deepClone(vttCollabSession.getSnapshot())
+                : deepClone(payload);
+        }
+        return deepClone(store.updateVTTState(payload, getActiveCaseId()));
+    };
+
+    const withDraft = (mutator, options = {}) => {
+        const draft = readSharedVTTSnapshot();
+        if (!draft) return;
         mutator(draft);
-        const saved = store.updateVTTState(draft, getActiveCaseId());
-        vttState = deepClone(saved);
+        const saved = persistSharedVTTSnapshot(draft, options);
+        vttState = deepClone(saved || draft);
         normalizeSelections();
         if (options.fitView) fitViewOnNextMapLoad = true;
         render();
@@ -470,6 +594,15 @@
         const scene = getActiveScene();
         const tokens = getVisibleTokensForRole(scene);
         const entries = vttState && vttState.initiative && Array.isArray(vttState.initiative.entries) ? vttState.initiative.entries : [];
+        if (isDM() && uiState.sceneViewMode === SCENE_VIEW_LOCAL) {
+            const viewedSceneId = getViewedSceneId(vttState, localRole);
+            const sharedSceneId = getSharedSceneId(vttState);
+            if (!viewedSceneId || viewedSceneId === sharedSceneId) {
+                uiState.sceneViewMode = SCENE_VIEW_SHARED;
+                uiState.localSceneId = '';
+                persistUIPreferences();
+            }
+        }
         if (!entries.some((entry) => entry.id === selectedEntryId)) {
             selectedEntryId = entries[0] ? entries[0].id : '';
         }
@@ -481,14 +614,32 @@
         if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
             previewTokenId = '';
         }
-        if (body) body.dataset.vttRole = localRole;
+        if (body) {
+            body.dataset.vttRole = localRole;
+            body.dataset.sceneViewMode = isUsingLocalSceneView(vttState, localRole) ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED;
+        }
+    };
+
+    const getLoadedMapSizeForScene = (scene) => {
+        if (!scene || !scene.mapImageUrl) return { width: 0, height: 0 };
+        if (mapLoadState.url !== scene.mapImageUrl || !mapLoadState.loaded) return { width: 0, height: 0 };
+        return {
+            width: Math.max(0, Math.round(mapSize.width || 0)),
+            height: Math.max(0, Math.round(mapSize.height || 0))
+        };
     };
 
     const getWorldSizeForScene = (scene) => {
         if (!scene) return { ...DEFAULT_WORLD_SIZE };
         const grid = scene.grid || { cellPx: 70, offsetX: 0, offsetY: 0 };
-        let width = mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded ? worldSize.width : DEFAULT_WORLD_SIZE.width;
-        let height = mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded ? worldSize.height : DEFAULT_WORLD_SIZE.height;
+        const loadedMapSize = getLoadedMapSizeForScene(scene);
+        let width = loadedMapSize.width || 0;
+        let height = loadedMapSize.height || 0;
+        const hasTokens = Array.isArray(scene.tokens) && scene.tokens.length;
+        if ((scene.mapImageUrl && !loadedMapSize.width) || (!scene.mapImageUrl && !hasTokens)) {
+            width = Math.max(width, DEFAULT_WORLD_SIZE.width);
+            height = Math.max(height, DEFAULT_WORLD_SIZE.height);
+        }
         if (Array.isArray(scene.tokens) && scene.tokens.length) {
             scene.tokens.forEach((token) => {
                 width = Math.max(width, grid.offsetX + (token.x + token.w + 4) * grid.cellPx);
@@ -496,8 +647,8 @@
             });
         }
         return {
-            width: Math.max(960, Math.round(width)),
-            height: Math.max(720, Math.round(height))
+            width: Math.max(1, Math.round(width)),
+            height: Math.max(1, Math.round(height))
         };
     };
 
@@ -586,41 +737,335 @@
         render();
     };
 
-    const updateSyncChip = (status) => {
+    const setSyncChipState = ({ state = 'local', label = 'Local', detail = '', retryable = false } = {}) => {
         if (!syncChipEl) return;
+        syncChipEl.dataset.state = state;
+        syncChipEl.dataset.retryable = retryable ? 'true' : 'false';
+        syncChipEl.textContent = label;
+        syncChipEl.title = detail || label;
+        syncChipEl.setAttribute('aria-label', detail || label);
+        syncChipEl.setAttribute('role', retryable ? 'button' : 'status');
+        syncChipEl.tabIndex = retryable ? 0 : -1;
+    };
+
+    const updateStoreSyncChip = (status) => {
+        if (vttCollabSession || vttCollabInitPromise) return;
         const source = status && status.connected
             ? (status.pendingPush ? 'Syncing' : 'Shared')
             : 'Local';
-        syncChipEl.textContent = source;
+        const detail = source === 'Syncing'
+            ? 'Shared VTT sync is pushing updates.'
+            : (source === 'Shared'
+                ? 'Shared VTT sync is connected through the store.'
+                : 'VTT is running locally on this browser.');
+        setSyncChipState({
+            state: source.toLowerCase(),
+            label: source,
+            detail,
+            retryable: false
+        });
+    };
+
+    const setVTTCollabStatus = (status = {}) => {
+        const source = status && typeof status === 'object' ? status : {};
+        const state = source.state === 'live'
+            ? 'live'
+            : (source.state === 'connecting'
+                ? 'connecting'
+                : (source.state === 'degraded' ? 'degraded' : 'local'));
+        const peerCount = Number.isFinite(source.peerCount) ? Math.max(0, source.peerCount) : 0;
+        let label = 'Local';
+        if (state === 'live') {
+            label = peerCount > 0 ? `Live · ${peerCount}` : 'Live';
+        } else if (state === 'connecting') {
+            label = 'Live...';
+        } else if (state === 'degraded') {
+            label = 'Live Off';
+        }
+        setSyncChipState({
+            state,
+            label,
+            detail: String(source.detail || '').trim() || label,
+            retryable: state === 'local' || state === 'degraded'
+        });
+    };
+
+    const hasLiveVTTConfig = () => {
+        const store = getStore();
+        if (!store || typeof store.getSyncConfig !== 'function') return false;
+        const config = store.getSyncConfig();
+        return !!(config
+            && config.enabled
+            && config.supabaseUrl
+            && config.anonKey
+            && config.campaignId);
+    };
+
+    const applyVTTCollabSnapshot = (payload) => {
+        const store = getStore();
+        const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
+            ? store.normalizeVTTStateSnapshot(payload)
+            : deepClone(payload);
+        if (dragState) {
+            pendingRemoteVTTSnapshot = clean;
+            return;
+        }
+        pendingRemoteVTTSnapshot = null;
+        vttState = deepClone(clean);
+        normalizeSelections();
+        render();
+    };
+
+    const applyPendingRemoteVTTSnapshot = () => {
+        if (dragState || !pendingRemoteVTTSnapshot) return false;
+        vttState = deepClone(pendingRemoteVTTSnapshot);
+        pendingRemoteVTTSnapshot = null;
+        normalizeSelections();
+        render();
+        return true;
+    };
+
+    const applyVTTCollabPositionChanges = (changes = [], meta = {}) => {
+        if (dragState) {
+            if (meta && meta.snapshot) {
+                const store = getStore();
+                pendingRemoteVTTSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
+                    ? store.normalizeVTTStateSnapshot(meta.snapshot)
+                    : deepClone(meta.snapshot);
+            }
+            return;
+        }
+        if (meta && meta.snapshot) {
+            const store = getStore();
+            vttState = deepClone(
+                store && typeof store.normalizeVTTStateSnapshot === 'function'
+                    ? store.normalizeVTTStateSnapshot(meta.snapshot)
+                    : meta.snapshot
+            );
+            normalizeSelections();
+            renderStage();
+            return;
+        }
+        if (!vttState) return;
+        const sceneMap = new Map(
+            Array.isArray(vttState.scenes)
+                ? vttState.scenes.map((scene) => [scene.id, scene])
+                : []
+        );
+        let mutated = false;
+        (Array.isArray(changes) ? changes : []).forEach((change) => {
+            const scene = sceneMap.get(String(change && change.sceneId || '').trim());
+            if (!scene || !Array.isArray(scene.tokens)) return;
+            const token = scene.tokens.find((entry) => entry && entry.id === String(change && change.tokenId || '').trim());
+            if (!token) return;
+            const nextX = Math.max(0, Math.round(toNumber(change.x, token.x)));
+            const nextY = Math.max(0, Math.round(toNumber(change.y, token.y)));
+            if (token.x === nextX && token.y === nextY) return;
+            token.x = nextX;
+            token.y = nextY;
+            mutated = true;
+        });
+        if (!mutated) return;
+        normalizeSelections();
+        renderStage();
+    };
+
+    const initVTTCollab = async () => {
+        if (vttCollabInitPromise) return vttCollabInitPromise;
+        const store = getStore();
+        if (!store || !window.RTF_VTT_COLLAB_READY || typeof window.RTF_VTT_COLLAB_READY.then !== 'function') {
+            setVTTCollabStatus({
+                state: 'local',
+                detail: 'Shared sync is off. VTT changes stay on this device.',
+                peerCount: 0
+            });
+            return null;
+        }
+        if (!hasLiveVTTConfig()) {
+            updateStoreSyncChip(store && typeof store.getSyncStatus === 'function' ? store.getSyncStatus() : { connected: false });
+            return null;
+        }
+
+        setVTTCollabStatus({
+            state: 'connecting',
+            detail: 'Connecting live VTT...',
+            peerCount: 0
+        });
+
+        vttCollabInitPromise = Promise.resolve(window.RTF_VTT_COLLAB_READY)
+            .then((api) => {
+                if (!api || typeof api.createSession !== 'function') return null;
+                return api.createSession({
+                    store,
+                    roomId: getVTTCollabRoomId(),
+                    caseId: getActiveCaseId(),
+                    getSeedPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
+                    getCurrentPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
+                    applySnapshot: (payload) => applyVTTCollabSnapshot(payload),
+                    applyPositionChanges: (changes, meta) => applyVTTCollabPositionChanges(changes, meta),
+                    onStatusChange: (status) => setVTTCollabStatus(status)
+                });
+            })
+            .then((session) => {
+                if (!session || (typeof session.isActive === 'function' && !session.isActive())) {
+                    vttCollabSession = null;
+                    updateStoreSyncChip(store && typeof store.getSyncStatus === 'function' ? store.getSyncStatus() : { connected: false });
+                    return null;
+                }
+                vttCollabSession = session;
+                setVTTCollabStatus(session.getStatus ? session.getStatus() : {
+                    state: 'live',
+                    detail: 'Live VTT connected.',
+                    peerCount: 0
+                });
+                return session;
+            })
+            .catch((err) => {
+                console.warn('VTT collaboration init failed', err);
+                vttCollabSession = null;
+                setVTTCollabStatus({
+                    state: 'degraded',
+                    detail: 'Live VTT unavailable. Shared VTT mirror still works.',
+                    peerCount: 0
+                });
+                return null;
+            });
+
+        return vttCollabInitPromise;
+    };
+
+    const refreshVTTCollabRoomIfNeeded = async () => {
+        if (!vttCollabSession) return initVTTCollab();
+        const expectedCaseId = getActiveCaseId();
+        const expectedRoomId = getVTTCollabRoomId(expectedCaseId);
+        if (vttCollabSession.roomId === expectedRoomId && vttCollabSession.caseId === expectedCaseId) {
+            return vttCollabSession;
+        }
+
+        setVTTCollabStatus({
+            state: 'connecting',
+            detail: 'Switching live VTT room...',
+            peerCount: 0
+        });
+
+        try {
+            if (typeof vttCollabSession.destroy === 'function') {
+                await vttCollabSession.destroy();
+            }
+        } catch (err) {
+            console.warn('VTT collaboration room refresh failed', err);
+        }
+
+        vttCollabSession = null;
+        vttCollabInitPromise = null;
+        pendingRemoteVTTSnapshot = null;
+        const store = getStore();
+        if (store) {
+            vttState = deepClone(store.getVTTState(expectedCaseId));
+            normalizeSelections();
+            render();
+        }
+        return initVTTCollab();
+    };
+
+    const retryVTTCollabConnection = async () => {
+        if (!hasLiveVTTConfig()) {
+            setVTTCollabStatus({
+                state: 'local',
+                detail: 'Shared sync is not configured for live VTT on this browser.',
+                peerCount: 0
+            });
+            return null;
+        }
+        if (syncChipEl && String(syncChipEl.dataset.state || '') === 'connecting') {
+            return null;
+        }
+
+        setVTTCollabStatus({
+            state: 'connecting',
+            detail: 'Retrying live VTT connection...',
+            peerCount: 0
+        });
+
+        if (vttCollabSession && typeof vttCollabSession.destroy === 'function') {
+            try {
+                await vttCollabSession.destroy();
+            } catch (err) {
+                console.warn('VTT collaboration retry cleanup failed', err);
+            }
+        }
+
+        vttCollabSession = null;
+        vttCollabInitPromise = null;
+        pendingRemoteVTTSnapshot = null;
+
+        const store = getStore();
+        if (store && typeof store.connectSync === 'function') {
+            try {
+                await store.connectSync();
+            } catch (err) {
+                console.warn('VTT collaboration retry sync connect failed', err);
+            }
+        }
+
+        return initVTTCollab();
+    };
+
+    const bindSyncChipActions = () => {
+        if (!syncChipEl || syncChipEl.dataset.bound === '1') return;
+        syncChipEl.dataset.bound = '1';
+
+        syncChipEl.addEventListener('click', () => {
+            if (syncChipEl.dataset.retryable !== 'true') return;
+            retryVTTCollabConnection().catch((err) => {
+                console.warn('VTT collaboration retry failed', err);
+            });
+        });
+
+        syncChipEl.addEventListener('keydown', (event) => {
+            if (syncChipEl.dataset.retryable !== 'true') return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            retryVTTCollabConnection().catch((err) => {
+                console.warn('VTT collaboration retry failed', err);
+            });
+        });
     };
 
     const loadMapForScene = (scene) => {
         if (!scene || !mapImageEl) return;
         if (!scene.mapImageUrl) {
+            mapSize = { width: 0, height: 0 };
             mapLoadState = { url: '', loaded: false };
             worldSize = getWorldSizeForScene(scene);
             mapImageEl.removeAttribute('src');
             mapImageEl.style.display = 'none';
-            if (fitViewOnNextMapLoad) fitViewToWorld();
+            if (fitViewOnNextMapLoad) {
+                fitViewOnNextMapLoad = false;
+                fitViewToWorld();
+            }
             return;
         }
 
         if (mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) return;
 
+        mapSize = { width: 0, height: 0 };
         mapLoadState = { url: scene.mapImageUrl, loaded: false };
         mapImageEl.src = scene.mapImageUrl;
-        mapImageEl.style.display = 'block';
+        mapImageEl.style.display = 'none';
         const probe = new Image();
         const requestedUrl = scene.mapImageUrl;
         probe.onload = () => {
             if (!vttState) return;
             const active = getActiveScene();
             if (!active || active.mapImageUrl !== requestedUrl) return;
-            worldSize = {
-                width: Math.max(DEFAULT_WORLD_SIZE.width, probe.naturalWidth || DEFAULT_WORLD_SIZE.width),
-                height: Math.max(DEFAULT_WORLD_SIZE.height, probe.naturalHeight || DEFAULT_WORLD_SIZE.height)
+            mapSize = {
+                width: Math.max(1, Math.round(probe.naturalWidth || 1)),
+                height: Math.max(1, Math.round(probe.naturalHeight || 1))
             };
             mapLoadState = { url: requestedUrl, loaded: true };
+            worldSize = getWorldSizeForScene(active);
+            mapImageEl.style.display = 'block';
             if (fitViewOnNextMapLoad) {
                 fitViewOnNextMapLoad = false;
                 fitViewToWorld();
@@ -630,8 +1075,11 @@
         probe.onerror = () => {
             const active = getActiveScene();
             if (!active || active.mapImageUrl !== requestedUrl) return;
+            mapSize = { width: 0, height: 0 };
             worldSize = getWorldSizeForScene(active);
             mapLoadState = { url: requestedUrl, loaded: false };
+            mapImageEl.removeAttribute('src');
+            mapImageEl.style.display = 'none';
             if (fitViewOnNextMapLoad) {
                 fitViewOnNextMapLoad = false;
                 fitViewToWorld();
@@ -683,6 +1131,37 @@
                     </button>
                 `).join('')
                 : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`;
+    };
+
+    const renderSceneList = () => {
+        if (!sceneListEl) return;
+        const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
+        const sharedSceneId = getSharedSceneId(vttState);
+        const viewedSceneId = getViewedSceneId(vttState, localRole);
+        const usingLocalView = isUsingLocalSceneView(vttState, localRole);
+        sceneListEl.innerHTML = scenes.length
+            ? scenes.map((scene) => {
+                const tokenCount = Array.isArray(scene.tokens) ? scene.tokens.length : 0;
+                return `
+                    <div class="vtt-scene-row${scene.id === viewedSceneId ? ' is-viewed' : ''}${scene.id === sharedSceneId ? ' is-shared' : ''}">
+                        <div class="vtt-scene-load">
+                            <span class="vtt-scene-row-name">${escapeHtml(scene.name || 'Scene')}</span>
+                            <span class="vtt-scene-row-meta">${scene.mapImageUrl ? 'Map linked' : 'No map'} · ${tokenCount} token${tokenCount === 1 ? '' : 's'}</span>
+                            <div class="vtt-scene-tag-row">
+                                ${scene.id === viewedSceneId ? `<span class="vtt-scene-tag">${usingLocalView ? 'DM View' : 'Viewing'}</span>` : ''}
+                                ${scene.id === sharedSceneId ? '<span class="vtt-scene-tag">Everyone</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="vtt-scene-row-actions">
+                            <button class="vtt-chip-btn" data-action="view-scene-local" data-id="${escapeHtml(scene.id)}"${scene.id === viewedSceneId ? ' disabled' : ''}>DM Only</button>
+                            <button class="vtt-chip-btn strong" data-action="show-scene-everyone" data-id="${escapeHtml(scene.id)}"${scene.id === sharedSceneId ? ' disabled' : ''}>Everyone</button>
+                            <button class="vtt-chip-btn" data-action="duplicate-scene" data-id="${escapeHtml(scene.id)}">Clone</button>
+                            <button class="vtt-chip-btn" data-action="delete-scene" data-id="${escapeHtml(scene.id)}"${scenes.length <= 1 ? ' disabled' : ''}>Delete</button>
+                        </div>
+                    </div>
+                `;
+            }).join('')
+            : '<div class="vtt-empty">No scenes yet.</div>';
     };
 
     const renderTokenInspector = () => {
@@ -884,15 +1363,21 @@
         const scene = getActiveScene();
         if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !tokenLayerEl) return;
 
+        loadMapForScene(scene);
         worldSize = getWorldSizeForScene(scene);
-        mapWorldEl.style.width = `${worldSize.width}px`;
-        mapWorldEl.style.height = `${worldSize.height}px`;
+        const mapDisplaySize = getLoadedMapSizeForScene(scene);
+        mapWorldEl.style.width = `${mapDisplaySize.width}px`;
+        mapWorldEl.style.height = `${mapDisplaySize.height}px`;
         worldEl.style.width = `${worldSize.width}px`;
         worldEl.style.height = `${worldSize.height}px`;
-        applyWorldTransform();
+        if (fitViewOnNextMapLoad && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
+            fitViewOnNextMapLoad = false;
+            fitViewToWorld();
+        } else {
+            applyWorldTransform();
+        }
 
-        loadMapForScene(scene);
-        mapImageEl.style.display = scene.mapImageUrl ? 'block' : 'none';
+        mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
 
         renderStageGrid(scene);
 
@@ -932,15 +1417,18 @@
         const scene = getActiveScene();
         if (!scene) return;
         applyUIPreferences();
+        renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
         if (roleToggleEl) roleToggleEl.textContent = `Role: ${isDM() ? 'DM' : 'Player'}`;
-        if (activeSceneLabelEl) activeSceneLabelEl.textContent = scene.name || 'Scene';
+        if (activeSceneLabelEl) activeSceneLabelEl.textContent = isUsingLocalSceneView(vttState, localRole) ? 'DM Only View' : 'Shared View';
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
+        const sceneNameEl = document.getElementById('scene-name');
         const mapUrlEl = document.getElementById('scene-map-url');
         const cellEl = document.getElementById('scene-grid-cell');
         const distanceEl = document.getElementById('scene-grid-distance');
         const offsetXEl = document.getElementById('scene-grid-offset-x');
         const offsetYEl = document.getElementById('scene-grid-offset-y');
+        if (sceneNameEl && document.activeElement !== sceneNameEl) sceneNameEl.value = scene.name || '';
         if (mapUrlEl && document.activeElement !== mapUrlEl) mapUrlEl.value = scene.mapImageUrl || '';
         if (cellEl && document.activeElement !== cellEl) cellEl.value = String(scene.grid.cellPx || 70);
         if (distanceEl && document.activeElement !== distanceEl) distanceEl.value = String(scene.grid.cellDistance || 5);
@@ -1028,21 +1516,44 @@
         if (!store || !vttState) return;
         const now = Date.now();
         if (!force && now - lastDragSyncAt < DRAG_SYNC_INTERVAL_MS) return;
-        const draft = deepClone(store.getVTTState(getActiveCaseId()));
         const localToken = dragState ? getTokenById(dragState.tokenId, vttState) : null;
-        const scene = getActiveScene(draft);
-        const idx = scene && Array.isArray(scene.tokens)
-            ? scene.tokens.findIndex((token) => token.id === (dragState && dragState.tokenId))
-            : -1;
+        const scene = getActiveScene(vttState);
 
-        if (!localToken || !scene || idx < 0) {
+        if (!localToken || !scene) {
+            vttState = readSharedVTTSnapshot() || deepClone(vttState);
+            lastDragSyncAt = now;
+            return;
+        }
+
+        if (isVTTCollabReady() && typeof vttCollabSession.updateTokenPositions === 'function') {
+            Promise.resolve(vttCollabSession.updateTokenPositions([{
+                sceneId: scene.id,
+                tokenId: localToken.id,
+                x: localToken.x,
+                y: localToken.y
+            }], { flushNow: force })).catch((err) => {
+                console.warn('VTT collaboration drag sync failed', err);
+            });
+            if (typeof vttCollabSession.getSnapshot === 'function') {
+                vttState = deepClone(vttCollabSession.getSnapshot());
+            }
+            lastDragSyncAt = now;
+            return;
+        }
+
+        const draft = deepClone(store.getVTTState(getActiveCaseId()));
+        const draftScene = getActiveScene(draft);
+        const idx = draftScene && Array.isArray(draftScene.tokens)
+            ? draftScene.tokens.findIndex((token) => token.id === (dragState && dragState.tokenId))
+            : -1;
+        if (!draftScene || idx < 0) {
             vttState = deepClone(draft);
             lastDragSyncAt = now;
             return;
         }
 
-        scene.tokens[idx] = {
-            ...scene.tokens[idx],
+        draftScene.tokens[idx] = {
+            ...draftScene.tokens[idx],
             x: localToken.x,
             y: localToken.y
         };
@@ -1149,6 +1660,81 @@
         }
 
         if (!isDM() && action !== 'select-token' && action !== 'select-entry') return;
+
+        if (action === 'create-scene') {
+            const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : []);
+            setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+            withDraft((draft) => {
+                if (!Array.isArray(draft.scenes)) draft.scenes = [];
+                draft.scenes.push(nextScene);
+                previewTokenId = '';
+            }, { fitView: true });
+            return;
+        }
+
+        if (action === 'view-scene-local') {
+            setSceneViewPreference(SCENE_VIEW_LOCAL, id);
+            previewTokenId = '';
+            fitViewOnNextMapLoad = true;
+            render();
+            return;
+        }
+
+        if (action === 'show-scene-everyone') {
+            setSceneViewPreference(SCENE_VIEW_SHARED);
+            withDraft((draft) => {
+                const scene = Array.isArray(draft.scenes)
+                    ? draft.scenes.find((entry) => entry.id === id)
+                    : null;
+                if (!scene) return;
+                draft.activeSceneId = scene.id;
+                previewTokenId = '';
+            }, { fitView: true });
+            return;
+        }
+
+        if (action === 'duplicate-scene') {
+            const sourceScene = Array.isArray(vttState && vttState.scenes)
+                ? vttState.scenes.find((entry) => entry.id === id) || getActiveScene(vttState)
+                : null;
+            const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
+            setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+            withDraft((draft) => {
+                if (!Array.isArray(draft.scenes)) draft.scenes = [];
+                draft.scenes.push(nextScene);
+                previewTokenId = '';
+            }, { fitView: true });
+            return;
+        }
+
+        if (action === 'delete-scene') {
+            const viewedSceneId = getViewedSceneId(vttState, localRole);
+            const sharedSceneId = getSharedSceneId(vttState);
+            withDraft((draft) => {
+                if (!Array.isArray(draft.scenes) || draft.scenes.length <= 1) return;
+                const idx = draft.scenes.findIndex((entry) => entry.id === id);
+                if (idx < 0) return;
+                const wasActive = draft.activeSceneId === id;
+                const wasViewed = viewedSceneId === id;
+                draft.scenes.splice(idx, 1);
+                if (!draft.scenes.length) {
+                    const nextScene = buildSceneRecord(draft.scenes);
+                    draft.scenes.push(nextScene);
+                }
+                if (wasActive) {
+                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
+                    draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
+                }
+                if (wasViewed && !wasActive) {
+                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
+                    setSceneViewPreference(SCENE_VIEW_LOCAL, fallbackScene ? fallbackScene.id : getSharedSceneId(draft));
+                } else if (wasActive || id === sharedSceneId) {
+                    setSceneViewPreference(SCENE_VIEW_SHARED);
+                }
+                previewTokenId = '';
+            }, { fitView: true });
+            return;
+        }
 
         if (action === 'nudge-grid') {
             const axis = actionEl.dataset.axis === 'y' ? 'offsetY' : 'offsetX';
@@ -1335,7 +1921,15 @@
             withDraft((draft) => {
                 const scene = getActiveScene(draft);
                 if (!scene) return;
-                scene[field] = field === 'mapImageUrl' ? String(target.value || '').trim() : target.value;
+                if (field === 'mapImageUrl') {
+                    scene[field] = String(target.value || '').trim();
+                    return;
+                }
+                if (field === 'name') {
+                    scene[field] = String(target.value || '').trim() || 'Scene';
+                    return;
+                }
+                scene[field] = target.value;
             }, { fitView: field === 'mapImageUrl' });
             return;
         }
@@ -1430,8 +2024,6 @@
     };
 
     const processInitiativeQueue = () => {
-        const store = getStore();
-        if (!store) return;
         let parsed = [];
         try {
             const raw = localStorage.getItem(TRACKER_INITIATIVE_QUEUE_KEY);
@@ -1446,7 +2038,8 @@
         const pendingEntries = parsed.map(sanitizeQueueEntry).filter(Boolean).filter((entry) => !processed.has(entry.rollId));
         if (!pendingEntries.length) return;
 
-        const draft = deepClone(store.getVTTState(getActiveCaseId()));
+        const draft = readSharedVTTSnapshot();
+        if (!draft) return;
         let mutated = false;
         const newlyProcessed = [];
 
@@ -1520,18 +2113,25 @@
         if (!draft.initiative.activeEntryId && draft.initiative.entries[0]) {
             draft.initiative.activeEntryId = draft.initiative.entries[0].id;
         }
-        const saved = store.updateVTTState(draft, getActiveCaseId());
-        vttState = deepClone(saved);
+        const saved = persistSharedVTTSnapshot(draft, { reason: 'initiative-queue' });
+        vttState = deepClone(saved || draft);
         markProcessedRollIds(newlyProcessed);
         normalizeSelections();
         render();
     };
 
     const handleStoreUpdate = () => {
-        if (dragState) return;
         const store = getStore();
         if (!store) return;
-        vttState = deepClone(store.getVTTState(getActiveCaseId()));
+        const activeCaseId = getActiveCaseId();
+        if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
+            refreshVTTCollabRoomIfNeeded().catch((err) => {
+                console.warn('VTT collaboration room refresh failed', err);
+            });
+            return;
+        }
+        if (isVTTCollabReady() || dragState) return;
+        vttState = deepClone(store.getVTTState(activeCaseId));
         normalizeSelections();
         render();
     };
@@ -1609,11 +2209,13 @@
     };
 
     const handlePointerUp = () => {
+        let appliedRemoteSnapshot = false;
         if (dragState) {
             syncDraggedState(true);
             lastDragSyncAt = 0;
             dragState = null;
-            render();
+            appliedRemoteSnapshot = applyPendingRemoteVTTSnapshot();
+            if (!appliedRemoteSnapshot) render();
         }
 
         if (panState) {
@@ -1680,6 +2282,7 @@
     };
 
     const bindEvents = () => {
+        bindSyncChipActions();
         document.addEventListener('click', (event) => {
             const actionEl = event.target instanceof Element ? event.target.closest('[data-action]') : null;
             if (!actionEl) return;
@@ -1719,11 +2322,14 @@
         normalizeSelections();
         render();
         processInitiativeQueue();
+        initVTTCollab().catch((err) => {
+            console.warn('VTT collaboration init failed', err);
+        });
 
         if (typeof store.onSyncStatus === 'function') {
-            unsubscribeSyncStatus = store.onSyncStatus(updateSyncChip);
+            unsubscribeSyncStatus = store.onSyncStatus(updateStoreSyncChip);
         } else {
-            updateSyncChip({ connected: false });
+            updateStoreSyncChip({ connected: false });
         }
 
         fitViewToWorld();

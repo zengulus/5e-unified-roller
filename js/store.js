@@ -295,6 +295,28 @@
 
         return '';
     };
+    const toSharedVTTMediaUrl = (value) => {
+        const candidate = toTrimmedString(value, '', 4000).trim();
+        if (!candidate) return '';
+
+        if (/^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+$/i.test(candidate)) {
+            return candidate;
+        }
+
+        try {
+            const baseHref = global.location && typeof global.location.href === 'string'
+                ? global.location.href
+                : undefined;
+            const parsed = baseHref ? new URL(candidate, baseHref) : new URL(candidate);
+            if (parsed.protocol === 'https:') {
+                return parsed.href;
+            }
+        } catch (err) {
+            return '';
+        }
+
+        return '';
+    };
 
     const toBoolean = (value) => !!value;
 
@@ -477,7 +499,7 @@
             id,
             label: toTrimmedString(source.label, `Token ${idx + 1}`, 160).trim() || `Token ${idx + 1}`,
             side: VTT_TOKEN_SIDES.has(cleanSide) ? cleanSide : 'neutral',
-            imageUrl: toImageUrl(source.imageUrl),
+            imageUrl: toSharedVTTMediaUrl(source.imageUrl),
             x: Math.round(toNumber(source.x, idx * 2)),
             y: Math.round(toNumber(source.y, 0)),
             w: Math.max(1, Math.round(toNumber(source.w, 1))),
@@ -513,7 +535,7 @@
         return {
             id,
             name: toTrimmedString(source.name, `Scene ${idx + 1}`, 160).trim() || `Scene ${idx + 1}`,
-            mapImageUrl: toImageUrl(source.mapImageUrl),
+            mapImageUrl: toSharedVTTMediaUrl(source.mapImageUrl),
             grid: sanitizeVTTGrid(source.grid),
             tokens: Array.isArray(source.tokens) ? source.tokens.map((tokenEntry, tokenIdx) => sanitizeVTTToken(tokenEntry, tokenIdx)) : [],
             fog: Array.isArray(source.fog) ? source.fog.map((maskEntry, maskIdx) => sanitizeVTTFogMask(maskEntry, maskIdx)) : []
@@ -533,7 +555,7 @@
             name: toTrimmedString(source.name, `Combatant ${idx + 1}`, 160).trim() || `Combatant ${idx + 1}`,
             linkedTokenId: toTrimmedString(source.linkedTokenId, '', 120).trim(),
             side: VTT_TOKEN_SIDES.has(cleanSide) ? cleanSide : 'neutral',
-            imageUrl: toImageUrl(source.imageUrl),
+            imageUrl: toSharedVTTMediaUrl(source.imageUrl),
             sourceType: toTrimmedString(source.sourceType, '', 40).trim(),
             sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
             total: Math.max(-999, Math.min(999, Math.round(toNumber(source.total, 0)))),
@@ -597,6 +619,8 @@
         return `Case Board: ${sanitizeCaseId(caseId, 'case_primary')}`;
     };
     const buildBoardRoomChannelName = (campaignId, roomId) => `rtf-board-${campaignId}-${roomId}`;
+    const buildVTTRoomId = (caseId = 'case_primary') => `vtt:case:${sanitizeCaseId(caseId, 'case_primary')}`;
+    const buildVTTRoomChannelName = (campaignId, roomId) => `rtf-vtt-${campaignId}-${roomId}`;
     const deleteIndexedDbDatabase = (name) => new Promise((resolve) => {
         if (!name || typeof indexedDB === 'undefined' || !indexedDB || typeof indexedDB.deleteDatabase !== 'function') {
             resolve({ ok: false, reason: 'unavailable' });
@@ -4594,6 +4618,10 @@
             };
         }
 
+        async ensureRealtimeCollabClient() {
+            return this.ensureBoardCollabClient();
+        }
+
         resolveBoardRoomTarget(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
@@ -4615,6 +4643,143 @@
             return target.scope === 'campaign'
                 ? sanitizeBoard(this.getCampaignMetaBoard())
                 : sanitizeBoard(this.getBoard(target.caseId));
+        }
+
+        resolveVTTRoomTarget(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const caseId = sanitizeCaseId(opts.caseId, this.getActiveCaseId());
+            const roomId = toTrimmedString(opts.roomId, '', 160).trim() || buildVTTRoomId(caseId);
+            return {
+                scope: 'case',
+                caseId,
+                roomId,
+                label: `Case VTT: ${(this.getCaseEntry(caseId, { createIfMissing: true }) || {}).name || caseId}`
+            };
+        }
+
+        getVTTRoomStateSnapshot(options = {}) {
+            const target = this.resolveVTTRoomTarget(options);
+            return sanitizeVTTState(this.getVTTState(target.caseId));
+        }
+
+        async loadVTTRoomSnapshot(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveVTTRoomTarget(opts);
+            const ensured = await this.ensureRealtimeCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
+
+            const result = await ensured.client
+                .from(tableName)
+                .select(selectCols)
+                .eq('campaign_id', ensured.config.campaignId)
+                .eq('room_id', target.roomId)
+                .maybeSingle();
+
+            if (result.error) {
+                return {
+                    ok: false,
+                    reason: 'read-failed',
+                    error: result.error.message || `Failed reading ${tableName}.`
+                };
+            }
+
+            if (!result.data) {
+                return {
+                    ok: true,
+                    snapshot: null,
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId
+                };
+            }
+
+            return {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                snapshot: {
+                    roomId: String(result.data.room_id || target.roomId),
+                    scope: 'case',
+                    caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId,
+                    payload: sanitizeVTTState(result.data.payload),
+                    revision: toNonNegativeInt(result.data.revision, 0),
+                    updatedAt: toIsoString(result.data.updated_at, ''),
+                    updatedBy: toTrimmedString(result.data.updated_by, '', 120),
+                    updatedByName: toTrimmedString(result.data.updated_by_name, '', 120)
+                }
+            };
+        }
+
+        async saveVTTRoomSnapshot(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveVTTRoomTarget(opts);
+            const ensured = await this.ensureRealtimeCollabClient();
+            if (!ensured.ok) return ensured;
+
+            const payload = sanitizeVTTState(opts.payload);
+            const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
+            const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
+            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const createOnly = !!opts.createOnly;
+
+            const row = {
+                campaign_id: ensured.config.campaignId,
+                room_id: target.roomId,
+                board_scope: target.scope,
+                case_id: target.caseId,
+                payload,
+                revision,
+                updated_at: updatedAt,
+                updated_by: toTrimmedString(opts.updatedBy, ensured.instanceId, 120),
+                updated_by_user: Object.prototype.hasOwnProperty.call(opts, 'updatedByUser')
+                    ? (opts.updatedByUser || null)
+                    : (ensured.userId || null),
+                updated_by_name: Object.prototype.hasOwnProperty.call(opts, 'updatedByName')
+                    ? (opts.updatedByName || null)
+                    : (ensured.profileName || null)
+            };
+
+            const query = createOnly
+                ? ensured.client
+                    .from(tableName)
+                    .insert(row)
+                    .select('revision,updated_at')
+                    .single()
+                : ensured.client
+                    .from(tableName)
+                    .upsert(row, { onConflict: 'campaign_id,room_id' })
+                    .select('revision,updated_at')
+                    .single();
+
+            const result = await query;
+
+            if (result.error) {
+                if (createOnly && result.error.code === '23505') {
+                    return {
+                        ok: false,
+                        reason: 'exists',
+                        error: result.error.message || `${tableName} row already exists.`
+                    };
+                }
+                return {
+                    ok: false,
+                    reason: 'write-failed',
+                    error: result.error.message || `Failed writing ${tableName}.`
+                };
+            }
+
+            return {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                revision: toNonNegativeInt(result.data && result.data.revision, revision),
+                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+            };
         }
 
         async sendBoardRoomAdminEvent(options = {}) {
@@ -7390,6 +7555,10 @@
             return entry.vtt;
         }
 
+        normalizeVTTStateSnapshot(vttState) {
+            return sanitizeVTTState(vttState);
+        }
+
         updateVTTState(vttState, caseId = null) {
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return sanitizeVTTState(null);
@@ -7461,6 +7630,40 @@
                 return true;
             } catch (err) {
                 console.warn('RTF_STORE: Failed mirroring board collaboration snapshot', err);
+                return false;
+            }
+        }
+
+        mirrorVTTSnapshotToState(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveVTTRoomTarget(opts);
+            const clean = sanitizeVTTState(opts.payload);
+            const entry = this.getCaseEntry(target.caseId, { createIfMissing: true });
+            if (!entry) return false;
+
+            entry.vtt = clean;
+            const scopes = [`cases.${entry.id}.vtt`];
+
+            try {
+                const now = Date.now();
+                if (!this.state.meta || typeof this.state.meta !== 'object') {
+                    this.state.meta = { version: 1, created: now, updated: now, syncRevision: 0, scopeUpdated: {} };
+                }
+                if (!this.state.meta.scopeUpdated || typeof this.state.meta.scopeUpdated !== 'object') {
+                    this.state.meta.scopeUpdated = {};
+                }
+                this.state.meta.updated = now;
+                scopes.forEach((scopeToken) => {
+                    this.state.meta.scopeUpdated[scopeToken] = now;
+                });
+                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                this.broadcastStoreUpdate('vtt-collab', {
+                    scopes,
+                    roomId: target.roomId
+                });
+                return true;
+            } catch (err) {
+                console.warn('RTF_STORE: Failed mirroring VTT collaboration snapshot', err);
                 return false;
             }
         }
