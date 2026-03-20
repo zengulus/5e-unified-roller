@@ -14,7 +14,10 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     position: sticky;
     top: 0;
     z-index: 24;
-    align-items: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
     gap: 0.85rem;
     padding: 0.85rem 1rem;
     margin-bottom: 1rem;
@@ -33,6 +36,7 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
 }
 
 .vtt-topbar-group-right {
+    margin-left: auto;
     justify-content: flex-end;
 }
 
@@ -45,6 +49,7 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
+    min-height: 38px;
     padding: 0.28rem 0.3rem 0.28rem 0.15rem;
     color: rgba(230, 236, 245, 0.82);
     font-size: 0.84rem;
@@ -63,6 +68,7 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
 .vtt-sync-chip {
     display: inline-flex;
     align-items: center;
+    min-height: 38px;
     padding: 0.28rem 0.75rem;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 999px;
@@ -167,8 +173,25 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
 .vtt-panel-head-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     justify-content: flex-end;
     gap: 0.5rem;
+}
+
+.vtt-panel-body {
+    min-width: 0;
+}
+
+body[data-scene-panel-collapsed="1"] #vtt-scene-panel .vtt-panel-body,
+body[data-spawn-panel-collapsed="1"] #vtt-spawn-panel .vtt-panel-body,
+body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-body {
+    display: none;
+}
+
+body[data-scene-panel-collapsed="1"] #vtt-scene-panel .vtt-panel-head,
+body[data-spawn-panel-collapsed="1"] #vtt-spawn-panel .vtt-panel-head,
+body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
+    margin-bottom: 0;
 }
 
 .vtt-panel-head-actions .vtt-panel-pill {
@@ -608,6 +631,7 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     display: none;
     user-select: none;
     pointer-events: none;
+    image-rendering: auto;
 }
 
 .vtt-grid-layer,
@@ -765,9 +789,11 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
 }
 
 .vtt-token-initials {
-    font-size: 1.1rem;
+    font-size: calc(1.1rem * var(--vtt-token-font-scale, 1));
     font-weight: 700;
     letter-spacing: 0.06em;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: antialiased;
 }
 
 .vtt-token-subtitle {
@@ -782,13 +808,15 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     background: rgba(4, 8, 15, 0.88);
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.24);
     color: rgba(244, 249, 255, 0.96);
-    font-size: 0.66rem;
+    font-size: calc(0.66rem * var(--vtt-token-font-scale, 1));
     line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     transform: translateX(-50%);
     pointer-events: none;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: antialiased;
 }
 
 body[data-token-names-hidden="1"] .vtt-token-subtitle {
@@ -949,6 +977,7 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
     }
 
     .vtt-topbar-group-right {
+        margin-left: 0;
         width: 100%;
         justify-content: flex-start;
     }

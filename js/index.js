@@ -3187,6 +3187,10 @@ function queueInitiativeForTracker(payload) {
         queue = [];
     }
 
+    const rollId = String(packet.rollId || '').trim();
+    if (rollId) {
+        queue = queue.filter((entry) => String(entry && entry.rollId || '').trim() !== rollId);
+    }
     queue.push(packet);
     if (queue.length > 200) queue = queue.slice(queue.length - 200);
     try {
@@ -3392,9 +3396,8 @@ function rollInitiative() {
         finalScore: sanitizeString(finalScore, '', 24),
         ts: Date.now()
     };
-    if (!pushInitiativeToSharedVTT(initiativePacket)) {
-        queueInitiativeForTracker(initiativePacket);
-    }
+    queueInitiativeForTracker(initiativePacket);
+    pushInitiativeToSharedVTT(initiativePacket);
     if (consumedInsp) consumeInspiration();
 }
 

@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321l">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321n">
 </head>
 
 <body data-player-nav="vtt">
@@ -38,59 +38,63 @@
 
     <main class="vtt-shell">
         <aside class="vtt-sidebar" id="vtt-settings-panel">
-            <section class="vtt-panel" data-dm-only="1">
+            <section class="vtt-panel" data-dm-only="1" id="vtt-scene-panel">
                 <div class="vtt-panel-head">
                     <h2>Scene</h2>
                     <div class="vtt-panel-head-actions">
                         <span class="vtt-panel-pill" id="vtt-active-scene-label">Scene 1</span>
+                        <button class="vtt-chip-btn" data-action="toggle-scene-panel" id="vtt-scene-panel-toggle" aria-controls="vtt-scene-panel-body" aria-expanded="true">Hide</button>
                         <button class="vtt-chip-btn" data-action="create-scene">New Scene</button>
                     </div>
                 </div>
-                <label class="vtt-field">
-                    <span>Scene Name</span>
-                    <input type="text" id="scene-name" data-scene-field="name" placeholder="Scene name">
-                </label>
-                <div class="vtt-scene-list" id="vtt-scene-list"></div>
-                <label class="vtt-field">
-                    <span>Map Image URL</span>
-                    <input type="text" id="scene-map-url" data-scene-field="mapImageUrl" placeholder="https://...">
-                </label>
-                <div class="vtt-field-grid">
+                <div class="vtt-panel-body" id="vtt-scene-panel-body">
                     <label class="vtt-field">
-                        <span>Map Scale</span>
-                        <input type="number" id="scene-map-scale" data-scene-scale-field="mapScale" min="25" max="400" step="1">
+                        <span>Scene Name</span>
+                        <input type="text" id="scene-name" data-scene-field="name" placeholder="Scene name">
                     </label>
+                    <div class="vtt-scene-list" id="vtt-scene-list"></div>
                     <label class="vtt-field">
-                        <span>Distance / Cell</span>
-                        <input type="number" id="scene-grid-distance" data-scene-grid-field="cellDistance" min="1" max="1000">
+                        <span>Map Image URL</span>
+                        <input type="text" id="scene-map-url" data-scene-field="mapImageUrl" placeholder="https://...">
                     </label>
-                    <label class="vtt-field">
-                        <span>Offset X</span>
-                        <input type="number" id="scene-grid-offset-x" data-scene-grid-field="offsetX">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Offset Y</span>
-                        <input type="number" id="scene-grid-offset-y" data-scene-grid-field="offsetY">
-                    </label>
+                    <div class="vtt-field-grid">
+                        <label class="vtt-field">
+                            <span>Map Scale</span>
+                            <input type="number" id="scene-map-scale" data-scene-scale-field="mapScale" min="25" max="400" step="1">
+                        </label>
+                        <label class="vtt-field">
+                            <span>Distance / Cell</span>
+                            <input type="number" id="scene-grid-distance" data-scene-grid-field="cellDistance" min="1" max="1000">
+                        </label>
+                        <label class="vtt-field">
+                            <span>Offset X</span>
+                            <input type="number" id="scene-grid-offset-x" data-scene-grid-field="offsetX">
+                        </label>
+                        <label class="vtt-field">
+                            <span>Offset Y</span>
+                            <input type="number" id="scene-grid-offset-y" data-scene-grid-field="offsetY">
+                        </label>
+                    </div>
+                    <div class="vtt-chip-row">
+                        <button class="vtt-chip-btn" data-action="step-map-scale" data-delta="-5">Scale -</button>
+                        <button class="vtt-chip-btn" data-action="step-map-scale" data-delta="5">Scale +</button>
+                        <button class="vtt-chip-btn" data-action="reset-grid-offset">Reset Offset</button>
+                    </div>
+                    <div class="vtt-chip-row">
+                        <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="x" data-delta="-1">X-</button>
+                        <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="x" data-delta="1">X+</button>
+                        <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="y" data-delta="-1">Y-</button>
+                        <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="y" data-delta="1">Y+</button>
+                    </div>
+                    <div class="vtt-detail-note">Calibrate fast: adjust map scale until tokens feel right, then nudge X and Y until the grid lands on the image.</div>
                 </div>
-                <div class="vtt-chip-row">
-                    <button class="vtt-chip-btn" data-action="step-map-scale" data-delta="-5">Scale -</button>
-                    <button class="vtt-chip-btn" data-action="step-map-scale" data-delta="5">Scale +</button>
-                    <button class="vtt-chip-btn" data-action="reset-grid-offset">Reset Offset</button>
-                </div>
-                <div class="vtt-chip-row">
-                    <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="x" data-delta="-1">X-</button>
-                    <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="x" data-delta="1">X+</button>
-                    <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="y" data-delta="-1">Y-</button>
-                    <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="y" data-delta="1">Y+</button>
-                </div>
-                <div class="vtt-detail-note">Calibrate fast: adjust map scale until tokens feel right, then nudge X and Y until the grid lands on the image.</div>
             </section>
 
-            <section class="vtt-panel" data-dm-only="1">
+            <section class="vtt-panel" data-dm-only="1" id="vtt-spawn-panel">
                 <div class="vtt-panel-head">
                     <h2>Spawn</h2>
                     <div class="vtt-panel-head-actions">
+                        <button class="vtt-chip-btn" data-action="toggle-spawn-panel" id="vtt-spawn-panel-toggle" aria-controls="vtt-spawn-panel-body" aria-expanded="true">Hide</button>
                         <button class="vtt-chip-btn" data-action="add-custom-token">Custom Token</button>
                         <div class="vtt-popover-anchor">
                             <button class="vtt-chip-btn" data-action="toggle-npc-search" id="vtt-npc-search-toggle"
@@ -105,18 +109,25 @@
                         </div>
                     </div>
                 </div>
-                <div class="vtt-roster-block">
-                    <div class="vtt-subhead">Players</div>
-                    <div class="vtt-roster-list" id="vtt-player-spawn-list"></div>
+                <div class="vtt-panel-body" id="vtt-spawn-panel-body">
+                    <div class="vtt-roster-block">
+                        <div class="vtt-subhead">Players</div>
+                        <div class="vtt-roster-list" id="vtt-player-spawn-list"></div>
+                    </div>
                 </div>
             </section>
 
-            <section class="vtt-panel">
+            <section class="vtt-panel" id="vtt-inspector-panel">
                 <div class="vtt-panel-head">
                     <h2>Token Inspector</h2>
-                    <span class="vtt-panel-pill" id="vtt-selection-pill">No Token</span>
+                    <div class="vtt-panel-head-actions">
+                        <span class="vtt-panel-pill" id="vtt-selection-pill">No Token</span>
+                        <button class="vtt-chip-btn" data-action="toggle-inspector-panel" id="vtt-inspector-panel-toggle" aria-controls="vtt-inspector-panel-body" aria-expanded="true">Hide</button>
+                    </div>
                 </div>
-                <div id="vtt-token-inspector"></div>
+                <div class="vtt-panel-body" id="vtt-inspector-panel-body">
+                    <div id="vtt-token-inspector"></div>
+                </div>
             </section>
         </aside>
 
@@ -159,7 +170,7 @@
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
-    <script src="js/store.js?v=20260321c"></script>
+    <script src="js/store.js?v=20260321d"></script>
     <script src="js/player-nav.js?v=20260320c"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
@@ -170,7 +181,7 @@
                 return null;
             });
     </script>
-    <script src="js/vtt.js?v=20260321l"></script>
+    <script src="js/vtt.js?v=20260321o"></script>
 </body>
 
 </html>

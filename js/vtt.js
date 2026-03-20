@@ -6,6 +6,7 @@
     const STORE_UPDATED_EVENT = 'rtf-store-updated';
     const DEFAULT_WORLD_SIZE = { width: 2400, height: 1600 };
     const DRAG_SYNC_INTERVAL_MS = 120;
+    const TOKEN_DOUBLE_CLICK_MS = 320;
     const SIDE_OPTIONS = ['player', 'ally', 'enemy', 'neutral'];
     const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const SCENE_VIEW_SHARED = 'shared';
@@ -46,6 +47,9 @@
     let uiState = {
         settingsCollapsed: false,
         initiativeCollapsed: false,
+        scenePanelCollapsed: false,
+        spawnPanelCollapsed: false,
+        inspectorPanelCollapsed: false,
         showTokenNames: true,
         sceneViewMode: SCENE_VIEW_SHARED,
         localSceneId: ''
@@ -65,6 +69,8 @@
     let vttCollabSession = null;
     let vttCollabInitPromise = null;
     let pendingRemoteVTTSnapshot = null;
+    let lastTokenPointerDownId = '';
+    let lastTokenPointerDownAt = 0;
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
@@ -79,6 +85,9 @@
     const syncChipEl = document.getElementById('vtt-sync-chip');
     const settingsToggleEl = document.getElementById('vtt-settings-toggle');
     const initiativeToggleEl = document.getElementById('vtt-initiative-toggle');
+    const scenePanelToggleEl = document.getElementById('vtt-scene-panel-toggle');
+    const spawnPanelToggleEl = document.getElementById('vtt-spawn-panel-toggle');
+    const inspectorPanelToggleEl = document.getElementById('vtt-inspector-panel-toggle');
     const roleToggleEl = document.getElementById('vtt-role-toggle');
     const tokenNamesToggleEl = document.getElementById('vtt-token-names-toggle');
     const zoomResetEl = document.querySelector('[data-action="zoom-reset"]');
@@ -221,6 +230,9 @@
         if (body) {
             body.dataset.settingsCollapsed = uiState.settingsCollapsed ? '1' : '0';
             body.dataset.initiativeCollapsed = uiState.initiativeCollapsed ? '1' : '0';
+            body.dataset.scenePanelCollapsed = uiState.scenePanelCollapsed ? '1' : '0';
+            body.dataset.spawnPanelCollapsed = uiState.spawnPanelCollapsed ? '1' : '0';
+            body.dataset.inspectorPanelCollapsed = uiState.inspectorPanelCollapsed ? '1' : '0';
             body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
         }
         if (settingsToggleEl) {
@@ -230,6 +242,18 @@
         if (initiativeToggleEl) {
             initiativeToggleEl.textContent = uiState.initiativeCollapsed ? 'Show Initiative' : 'Hide Initiative';
             initiativeToggleEl.setAttribute('aria-expanded', uiState.initiativeCollapsed ? 'false' : 'true');
+        }
+        if (scenePanelToggleEl) {
+            scenePanelToggleEl.textContent = uiState.scenePanelCollapsed ? 'Show' : 'Hide';
+            scenePanelToggleEl.setAttribute('aria-expanded', uiState.scenePanelCollapsed ? 'false' : 'true');
+        }
+        if (spawnPanelToggleEl) {
+            spawnPanelToggleEl.textContent = uiState.spawnPanelCollapsed ? 'Show' : 'Hide';
+            spawnPanelToggleEl.setAttribute('aria-expanded', uiState.spawnPanelCollapsed ? 'false' : 'true');
+        }
+        if (inspectorPanelToggleEl) {
+            inspectorPanelToggleEl.textContent = uiState.inspectorPanelCollapsed ? 'Show' : 'Hide';
+            inspectorPanelToggleEl.setAttribute('aria-expanded', uiState.inspectorPanelCollapsed ? 'false' : 'true');
         }
         if (tokenNamesToggleEl) {
             tokenNamesToggleEl.textContent = uiState.showTokenNames ? 'Hide Names' : 'Show Names';
@@ -244,6 +268,9 @@
             uiState = {
                 settingsCollapsed: !!(parsed && parsed.settingsCollapsed),
                 initiativeCollapsed: !!(parsed && parsed.initiativeCollapsed),
+                scenePanelCollapsed: !!(parsed && parsed.scenePanelCollapsed),
+                spawnPanelCollapsed: !!(parsed && parsed.spawnPanelCollapsed),
+                inspectorPanelCollapsed: !!(parsed && parsed.inspectorPanelCollapsed),
                 showTokenNames: parsed && parsed.showTokenNames !== undefined ? !!parsed.showTokenNames : true,
                 sceneViewMode: parsed && parsed.sceneViewMode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED,
                 localSceneId: String(parsed && parsed.localSceneId || '').trim()
@@ -252,6 +279,9 @@
             uiState = {
                 settingsCollapsed: false,
                 initiativeCollapsed: false,
+                scenePanelCollapsed: false,
+                spawnPanelCollapsed: false,
+                inspectorPanelCollapsed: false,
                 showTokenNames: true,
                 sceneViewMode: SCENE_VIEW_SHARED,
                 localSceneId: ''
@@ -700,16 +730,48 @@
         };
     };
 
-    const applyWorldTransform = () => {
+    const scaleForZoom = (value) => Math.max(0, Math.round(value * localView.zoom * 1000) / 1000);
+
+    const applyRenderedWorldGeometry = (scene = getActiveScene()) => {
+        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !tokenLayerEl) return;
+        const mapDisplaySize = getLoadedMapSizeForScene(scene);
+        const scaledMapWidth = scaleForZoom(mapDisplaySize.width || 0);
+        const scaledMapHeight = scaleForZoom(mapDisplaySize.height || 0);
+        mapWorldEl.style.width = `${scaledMapWidth}px`;
+        mapWorldEl.style.height = `${scaledMapHeight}px`;
+        mapImageEl.style.width = `${scaledMapWidth}px`;
+        mapImageEl.style.height = `${scaledMapHeight}px`;
+        worldEl.style.width = `${scaleForZoom(worldSize.width)}px`;
+        worldEl.style.height = `${scaleForZoom(worldSize.height)}px`;
+
+        fogLayerEl.querySelectorAll('.vtt-fog-mask').forEach((maskEl) => {
+            if (!(maskEl instanceof HTMLElement)) return;
+            maskEl.style.left = `${scaleForZoom(toNumber(maskEl.dataset.worldLeft, 0))}px`;
+            maskEl.style.top = `${scaleForZoom(toNumber(maskEl.dataset.worldTop, 0))}px`;
+            maskEl.style.width = `${scaleForZoom(toNumber(maskEl.dataset.worldWidth, 0))}px`;
+            maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
+        });
+
+        tokenLayerEl.querySelectorAll('.vtt-token').forEach((tokenEl) => {
+            if (!(tokenEl instanceof HTMLElement)) return;
+            tokenEl.style.left = `${scaleForZoom(toNumber(tokenEl.dataset.worldLeft, 0))}px`;
+            tokenEl.style.top = `${scaleForZoom(toNumber(tokenEl.dataset.worldTop, 0))}px`;
+            tokenEl.style.width = `${scaleForZoom(toNumber(tokenEl.dataset.worldWidth, 0))}px`;
+            tokenEl.style.height = `${scaleForZoom(toNumber(tokenEl.dataset.worldHeight, 0))}px`;
+            tokenEl.style.setProperty('--vtt-token-font-scale', String(clamp(localView.zoom, 0.9, 1.9)));
+        });
+    };
+
+    const applyWorldTransform = (scene = getActiveScene()) => {
         if (zoomResetEl) {
             zoomResetEl.textContent = `${Math.round(localView.zoom * 100)}%`;
         }
         if (mapWorldEl) {
-            mapWorldEl.style.transform = `translate(${localView.x}px, ${localView.y}px) scale(${localView.zoom})`;
+            mapWorldEl.style.transform = `translate(${localView.x}px, ${localView.y}px)`;
         }
         if (!worldEl) return;
-        worldEl.style.transform = `translate(${localView.x}px, ${localView.y}px) scale(${localView.zoom})`;
-        renderStageGrid();
+        worldEl.style.transform = `translate(${localView.x}px, ${localView.y}px)`;
+        renderStageGrid(scene);
     };
 
     const setZoomAtPoint = (nextZoom, clientX, clientY) => {
@@ -724,6 +786,7 @@
         localView.zoom = clampedZoom;
         localView.x = Math.round(stageX - worldX * clampedZoom);
         localView.y = Math.round(stageY - worldY * clampedZoom);
+        applyRenderedWorldGeometry();
         applyWorldTransform();
     };
 
@@ -758,6 +821,7 @@
         localView.zoom = zoom;
         localView.x = Math.round((rect.width - worldSize.width * zoom) / 2);
         localView.y = Math.round((rect.height - worldSize.height * zoom) / 2);
+        applyRenderedWorldGeometry();
         applyWorldTransform();
     };
 
@@ -1447,26 +1511,15 @@
         loadMapForScene(scene);
         worldSize = getWorldSizeForScene(scene);
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
-        mapWorldEl.style.width = `${mapDisplaySize.width}px`;
-        mapWorldEl.style.height = `${mapDisplaySize.height}px`;
-        mapImageEl.style.width = `${mapDisplaySize.width}px`;
-        mapImageEl.style.height = `${mapDisplaySize.height}px`;
-        worldEl.style.width = `${worldSize.width}px`;
-        worldEl.style.height = `${worldSize.height}px`;
-        if (fitViewOnNextMapLoad && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
-            fitViewOnNextMapLoad = false;
-            fitViewToWorld();
-        } else {
-            applyWorldTransform();
-        }
-
         mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
-
-        renderStageGrid(scene);
 
         fogLayerEl.innerHTML = Array.isArray(scene.fog)
             ? scene.fog.map((mask) => `
-                <div class="vtt-fog-mask" style="left:${mask.x}px;top:${mask.y}px;width:${mask.w}px;height:${mask.h}px;"></div>
+                <div class="vtt-fog-mask"
+                    data-world-left="${escapeHtml(String(mask.x))}"
+                    data-world-top="${escapeHtml(String(mask.y))}"
+                    data-world-width="${escapeHtml(String(mask.w))}"
+                    data-world-height="${escapeHtml(String(mask.h))}"></div>
             `).join('')
             : '';
 
@@ -1483,7 +1536,11 @@
                 data-id="${escapeHtml(token.id)}"
                 data-action="select-token"
                 data-side="${escapeHtml(token.side || 'neutral')}"
-                style="left:${scene.grid.offsetX + token.x * scene.grid.cellPx}px;top:${scene.grid.offsetY + token.y * scene.grid.cellPx}px;width:${token.w * scene.grid.cellPx}px;height:${token.h * scene.grid.cellPx}px;--vtt-token-grayscale:${getTokenGrayscale(token)};">
+                data-world-left="${escapeHtml(String(scene.grid.offsetX + token.x * scene.grid.cellPx))}"
+                data-world-top="${escapeHtml(String(scene.grid.offsetY + token.y * scene.grid.cellPx))}"
+                data-world-width="${escapeHtml(String(token.w * scene.grid.cellPx))}"
+                data-world-height="${escapeHtml(String(token.h * scene.grid.cellPx))}"
+                style="--vtt-token-grayscale:${getTokenGrayscale(token)};">
                 <div class="vtt-token-face">
                     ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
                 </div>
@@ -1491,6 +1548,14 @@
                 <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
             </div>
         `).join('');
+
+        applyRenderedWorldGeometry(scene);
+        if (fitViewOnNextMapLoad && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
+            fitViewOnNextMapLoad = false;
+            fitViewToWorld();
+        } else {
+            applyWorldTransform(scene);
+        }
     };
 
     const renderSceneControls = () => {
@@ -1498,7 +1563,7 @@
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
         const usingLocalView = isUsingLocalSceneView(vttState, localRole);
-        const baseStageMeta = 'Drag empty space to pan. Scroll to zoom. Drag tokens freely. Double-click a token to snap it to the grid. Right-click a token image to preview it.';
+        const baseStageMeta = 'Drag empty space to pan. Two-finger scroll pans. Pinch or Ctrl-scroll zooms. Drag tokens freely. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.';
         applyUIPreferences();
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
@@ -1618,6 +1683,25 @@
         });
     };
 
+    const moveSelectedTokenByCells = (deltaX, deltaY) => {
+        if (!selectedTokenId) return false;
+        const token = getTokenById(selectedTokenId);
+        if (!token) return false;
+        const nextX = Math.max(0, snapTokenCoordinate(token.x, token.x) + deltaX);
+        const nextY = Math.max(0, snapTokenCoordinate(token.y, token.y) + deltaY);
+        if (token.x === nextX && token.y === nextY) return false;
+
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.tokens)) return;
+            const draftToken = scene.tokens.find((entry) => entry && entry.id === selectedTokenId);
+            if (!draftToken) return;
+            draftToken.x = nextX;
+            draftToken.y = nextY;
+        });
+        return true;
+    };
+
     const syncDraggedState = (force = false) => {
         const store = getStore();
         if (!store || !vttState) return;
@@ -1733,6 +1817,18 @@
         }
         if (action === 'toggle-initiative') {
             toggleUIPreference('initiativeCollapsed');
+            return;
+        }
+        if (action === 'toggle-scene-panel') {
+            toggleUIPreference('scenePanelCollapsed');
+            return;
+        }
+        if (action === 'toggle-spawn-panel') {
+            toggleUIPreference('spawnPanelCollapsed');
+            return;
+        }
+        if (action === 'toggle-inspector-panel') {
+            toggleUIPreference('inspectorPanelCollapsed');
             return;
         }
         if (action === 'toggle-token-names') {
@@ -2068,7 +2164,7 @@
     const handleFieldChange = (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
-        if (event.type === 'input' && (target instanceof HTMLInputElement) && target.type === 'text') return;
+        if (event.type === 'input' && target instanceof HTMLInputElement) return;
         if (event.type === 'input' && target instanceof HTMLTextAreaElement) return;
 
         if (target instanceof HTMLSelectElement && target.dataset.scenePicker) {
@@ -2357,6 +2453,23 @@
             if (!isDM()) return;
             const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
             if (!token || !scene) return;
+            const now = Date.now();
+            const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
+            lastTokenPointerDownId = token.id;
+            lastTokenPointerDownAt = now;
+            selectedTokenId = token.id;
+            const linkedEntry = findEntryForToken(token.id);
+            selectedEntryId = linkedEntry ? linkedEntry.id : '';
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderTokenInspector();
+            if (isDoublePress) {
+                lastTokenPointerDownId = '';
+                lastTokenPointerDownAt = 0;
+                event.preventDefault();
+                snapTokenToGrid(token.id);
+                return;
+            }
             const worldPoint = screenToWorld(event.clientX, event.clientY);
             const anchorX = (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x;
             const anchorY = (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y;
@@ -2366,12 +2479,13 @@
                 anchorY
             };
             lastDragSyncAt = 0;
-            selectedTokenId = token.id;
-            renderTokenInspector();
             renderStage();
             event.preventDefault();
             return;
         }
+
+        lastTokenPointerDownId = '';
+        lastTokenPointerDownAt = 0;
 
         panState = {
             startClientX: event.clientX,
@@ -2388,6 +2502,8 @@
             if (!scene) return;
             const token = getTokenById(dragState.tokenId);
             if (!token) return;
+            lastTokenPointerDownId = '';
+            lastTokenPointerDownAt = 0;
             const worldPoint = screenToWorld(event.clientX, event.clientY);
             token.x = normalizeTokenCoordinate((worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - dragState.anchorX, token.x);
             token.y = normalizeTokenCoordinate((worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - dragState.anchorY, token.y);
@@ -2439,6 +2555,12 @@
     const handleStageWheel = (event) => {
         if (!stageEl) return;
         event.preventDefault();
+        if (!event.ctrlKey && !event.metaKey) {
+            localView.x = Math.round(localView.x - event.deltaX);
+            localView.y = Math.round(localView.y - event.deltaY);
+            applyWorldTransform();
+            return;
+        }
         const factor = Math.exp(-event.deltaY * 0.0015);
         const nextZoom = clampZoom(localView.zoom * factor);
         if (nextZoom === localView.zoom) return;
@@ -2476,15 +2598,29 @@
         renderStage();
     };
 
-    const handleStageDoubleClick = (event) => {
-        if (!(event.target instanceof Element)) return;
-        if (!isDM() || dragState) return;
-        const tokenEl = event.target.closest('.vtt-token');
-        if (!tokenEl) return;
-        const tokenId = String(tokenEl.getAttribute('data-token-id') || '').trim();
-        if (!tokenId) return;
+    const handleDocumentKeyDown = (event) => {
+        if (!isDM() || !selectedTokenId || event.defaultPrevented) return;
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const target = event.target;
+        if (
+            target instanceof HTMLInputElement
+            || target instanceof HTMLTextAreaElement
+            || target instanceof HTMLSelectElement
+            || (target instanceof HTMLElement && target.isContentEditable)
+        ) {
+            return;
+        }
+
+        let deltaX = 0;
+        let deltaY = 0;
+        if (event.key === 'ArrowLeft') deltaX = -1;
+        else if (event.key === 'ArrowRight') deltaX = 1;
+        else if (event.key === 'ArrowUp') deltaY = -1;
+        else if (event.key === 'ArrowDown') deltaY = 1;
+        else return;
+
+        if (!moveSelectedTokenByCells(deltaX, deltaY)) return;
         event.preventDefault();
-        snapTokenToGrid(tokenId);
     };
 
     const bindEvents = () => {
@@ -2495,11 +2631,11 @@
             handleAction(actionEl);
         });
         document.addEventListener('pointerdown', handleDocumentPointerDown);
+        document.addEventListener('keydown', handleDocumentKeyDown);
         document.addEventListener('input', handleFieldChange);
         document.addEventListener('change', handleFieldChange);
         if (npcSearchInputEl) npcSearchInputEl.addEventListener('input', handleNPCSearchInput);
         if (stageEl) stageEl.addEventListener('pointerdown', handleStagePointerDown);
-        if (stageEl) stageEl.addEventListener('dblclick', handleStageDoubleClick);
         if (stageEl) stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
         document.addEventListener('pointermove', handlePointerMove);
@@ -2528,9 +2664,10 @@
         vttState = deepClone(store.getVTTState(getActiveCaseId()));
         normalizeSelections();
         render();
-        processInitiativeQueue();
         initVTTCollab().catch((err) => {
             console.warn('VTT collaboration init failed', err);
+        }).finally(() => {
+            processInitiativeQueue();
         });
 
         if (typeof store.onSyncStatus === 'function') {

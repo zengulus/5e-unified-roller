@@ -16,6 +16,7 @@
     const HQ_LOCAL_STORAGE_KEY = 'task_force_hq_v1';
     const AUTO_CONNECT_CANCEL_KEY = 'rtf_sync_autoconnect_cancelled';
     const SUPABASE_CDN_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+    const SHARED_SUPABASE_CLIENT_CACHE_KEY = '__RTF_SHARED_SUPABASE_CLIENT_CACHE__';
     const STORE_DEBUG = false;
 
     const FALLBACK_GUILDS = [
@@ -38,6 +39,27 @@
         console.log(...args);
     };
     const isExternalStoreUpdateSource = (value) => value === 'remote' || value === 'storage';
+    const getSharedSupabaseClientCache = () => {
+        if (global[SHARED_SUPABASE_CLIENT_CACHE_KEY] instanceof Map) return global[SHARED_SUPABASE_CLIENT_CACHE_KEY];
+        const cache = new Map();
+        global[SHARED_SUPABASE_CLIENT_CACHE_KEY] = cache;
+        return cache;
+    };
+    const buildSupabaseClientOptions = () => ({
+        auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true
+        }
+    });
+    const getSharedSupabaseClient = (supabaseLib, supabaseUrl, anonKey) => {
+        const cache = getSharedSupabaseClientCache();
+        const clientKey = `${supabaseUrl}|${anonKey}`;
+        if (cache.has(clientKey)) return cache.get(clientKey);
+        const client = supabaseLib.createClient(supabaseUrl, anonKey, buildSupabaseClientOptions());
+        cache.set(clientKey, client);
+        return client;
+    };
 
     const dedupeGuildNames = (source) => {
         const seen = new Set();
@@ -4527,20 +4549,7 @@
             });
 
             try {
-                const supabaseLib = await this.loadSupabaseLibrary();
-                const clientKey = `${config.supabaseUrl}|${config.anonKey}`;
-
-                if (!this.sync.client || this.sync.clientKey !== clientKey) {
-                    await this.disconnectSync('reconfigure');
-                    this.sync.client = supabaseLib.createClient(config.supabaseUrl, config.anonKey, {
-                        auth: {
-                            persistSession: true,
-                            autoRefreshToken: true,
-                            detectSessionInUrl: true
-                        }
-                    });
-                    this.sync.clientKey = clientKey;
-                }
+                await this.ensureSupabaseClient(config);
 
                 const authResult = await this.ensureSyncUser();
                 if (!authResult.ok) {
@@ -4607,21 +4616,7 @@
             }
 
             try {
-                const supabaseLib = await this.loadSupabaseLibrary();
-                const clientKey = `${config.supabaseUrl}|${config.anonKey}`;
-
-                if (!this.sync.client || this.sync.clientKey !== clientKey) {
-                    await this.disconnectSync('reconfigure');
-                    this.sync.client = supabaseLib.createClient(config.supabaseUrl, config.anonKey, {
-                        auth: {
-                            persistSession: true,
-                            autoRefreshToken: true,
-                            detectSessionInUrl: true
-                        }
-                    });
-                    this.sync.clientKey = clientKey;
-                    this.sync.userId = '';
-                }
+                await this.ensureSupabaseClient(config);
             } catch (err) {
                 return {
                     ok: false,
@@ -4651,6 +4646,33 @@
                 userId: this.sync.userId || '',
                 profileName: this.sync.config && this.sync.config.profileName ? this.sync.config.profileName : '',
                 syncConnected: !!this.syncStatus.connected
+            };
+        }
+
+        async ensureSupabaseClient(config) {
+            const cleanConfig = sanitizeSyncConfig(config);
+            const clientKey = `${cleanConfig.supabaseUrl}|${cleanConfig.anonKey}`;
+            const previousClientKey = this.sync.clientKey;
+
+            if (this.sync.client && this.sync.clientKey === clientKey) {
+                return {
+                    client: this.sync.client,
+                    clientKey
+                };
+            }
+
+            if (this.sync.channel && this.sync.clientKey && this.sync.clientKey !== clientKey) {
+                await this.disconnectSync('reconfigure');
+            }
+
+            const supabaseLib = await this.loadSupabaseLibrary();
+            this.sync.client = getSharedSupabaseClient(supabaseLib, cleanConfig.supabaseUrl, cleanConfig.anonKey);
+            this.sync.clientKey = clientKey;
+            if (!this.sync.userId || (previousClientKey && previousClientKey !== clientKey)) this.sync.userId = '';
+
+            return {
+                client: this.sync.client,
+                clientKey
             };
         }
 
