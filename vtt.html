@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321a">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321d">
 </head>
 
 <body data-player-nav="vtt">
@@ -81,15 +81,24 @@
             <section class="vtt-panel" data-dm-only="1">
                 <div class="vtt-panel-head">
                     <h2>Spawn</h2>
-                    <button class="vtt-chip-btn" data-action="add-custom-token">Custom Token</button>
+                    <div class="vtt-panel-head-actions">
+                        <button class="vtt-chip-btn" data-action="add-custom-token">Custom Token</button>
+                        <div class="vtt-popover-anchor">
+                            <button class="vtt-chip-btn" data-action="toggle-npc-search" id="vtt-npc-search-toggle"
+                                aria-controls="vtt-npc-search-popover" aria-expanded="false">NPC Search</button>
+                            <div class="vtt-popover" id="vtt-npc-search-popover" hidden>
+                                <label class="vtt-field vtt-field-tight">
+                                    <span>Search NPCs</span>
+                                    <input type="text" id="vtt-npc-search-input" placeholder="Name or guild">
+                                </label>
+                                <div class="vtt-popover-results vtt-roster-list" id="vtt-npc-search-list"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="vtt-roster-block">
                     <div class="vtt-subhead">Players</div>
                     <div class="vtt-roster-list" id="vtt-player-spawn-list"></div>
-                </div>
-                <div class="vtt-roster-block">
-                    <div class="vtt-subhead">NPCs</div>
-                    <div class="vtt-roster-list" id="vtt-npc-spawn-list"></div>
                 </div>
             </section>
 
@@ -106,12 +115,15 @@
             <div class="vtt-stage-toolbar">
                 <div>
                     <strong id="vtt-stage-title">Scene 1</strong>
-                    <span class="vtt-stage-meta" id="vtt-stage-meta">Drag empty space to pan. Scroll or use buttons to zoom.</span>
+                    <span class="vtt-stage-meta" id="vtt-stage-meta">Drag empty space to pan. Scroll to zoom. Right-click a token image to preview it.</span>
                 </div>
             </div>
             <div class="vtt-stage" id="vtt-stage">
-                <div class="vtt-world" id="vtt-world">
+                <div class="vtt-map-world" id="vtt-map-world">
                     <img id="vtt-map-image" class="vtt-map-image" alt="">
+                </div>
+                <div class="vtt-stage-grid" id="vtt-stage-grid"></div>
+                <div class="vtt-world" id="vtt-world">
                     <div class="vtt-grid-layer" id="vtt-grid-layer"></div>
                     <div class="vtt-fog-layer" id="vtt-fog-layer"></div>
                     <div class="vtt-token-layer" id="vtt-token-layer"></div>
@@ -141,7 +153,7 @@
     <script src="js/store.js?v=20260321a"></script>
     <script src="js/player-nav.js?v=20260320c"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
-    <script src="js/vtt.js?v=20260321a"></script>
+    <script src="js/vtt.js?v=20260321d"></script>
 </body>
 
 </html>

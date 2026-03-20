@@ -17,6 +17,9 @@
         settingsCollapsed: false,
         initiativeCollapsed: false
     };
+    let npcSearchOpen = false;
+    let npcSearchQuery = '';
+    let previewTokenId = '';
     let localView = { x: 40, y: 40, zoom: 1 };
     let worldSize = { ...DEFAULT_WORLD_SIZE };
     let mapLoadState = { url: '', loaded: false };
@@ -28,7 +31,9 @@
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
+    const mapWorldEl = document.getElementById('vtt-map-world');
     const worldEl = document.getElementById('vtt-world');
+    const stageGridEl = document.getElementById('vtt-stage-grid');
     const mapImageEl = document.getElementById('vtt-map-image');
     const gridLayerEl = document.getElementById('vtt-grid-layer');
     const fogLayerEl = document.getElementById('vtt-fog-layer');
@@ -38,6 +43,7 @@
     const settingsToggleEl = document.getElementById('vtt-settings-toggle');
     const initiativeToggleEl = document.getElementById('vtt-initiative-toggle');
     const roleToggleEl = document.getElementById('vtt-role-toggle');
+    const zoomResetEl = document.querySelector('[data-action="zoom-reset"]');
     const activeSceneLabelEl = document.getElementById('vtt-active-scene-label');
     const stageTitleEl = document.getElementById('vtt-stage-title');
     const roundPillEl = document.getElementById('vtt-round-pill');
@@ -46,7 +52,10 @@
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
     const playerSpawnListEl = document.getElementById('vtt-player-spawn-list');
-    const npcSpawnListEl = document.getElementById('vtt-npc-spawn-list');
+    const npcSearchToggleEl = document.getElementById('vtt-npc-search-toggle');
+    const npcSearchPopoverEl = document.getElementById('vtt-npc-search-popover');
+    const npcSearchInputEl = document.getElementById('vtt-npc-search-input');
+    const npcSearchListEl = document.getElementById('vtt-npc-search-list');
 
     const escapeHtml = (value = '') => String(value)
         .replace(/&/g, '&amp;')
@@ -61,6 +70,12 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     };
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const clampZoom = (value) => clamp(Math.round(value * 1000) / 1000, 0.25, 2.2);
+    const positiveModulo = (value, divisor) => {
+        if (!divisor) return 0;
+        const result = value % divisor;
+        return result < 0 ? result + divisor : result;
+    };
     const toImageUrl = (value) => {
         const raw = String(value || '').trim();
         if (!raw) return '';
@@ -101,6 +116,10 @@
     const getUIPrefsStorageKey = () => `${UI_PREFS_STORAGE_PREFIX}${getActiveCaseId()}`;
     const getProcessedInitStorageKey = () => `${PROCESSED_INIT_STORAGE_PREFIX}${getActiveCaseId()}`;
     const isDM = () => localRole === 'dm';
+    const closeNPCSearch = ({ clearQuery = false } = {}) => {
+        npcSearchOpen = false;
+        if (clearQuery) npcSearchQuery = '';
+    };
 
     const applyUIPreferences = () => {
         if (body) {
@@ -459,6 +478,9 @@
         } else if (!tokens.some((token) => token.id === selectedTokenId)) {
             selectedTokenId = tokens[0] ? tokens[0].id : '';
         }
+        if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
+            previewTokenId = '';
+        }
         if (body) body.dataset.vttRole = localRole;
     };
 
@@ -480,8 +502,45 @@
     };
 
     const applyWorldTransform = () => {
+        if (zoomResetEl) {
+            zoomResetEl.textContent = `${Math.round(localView.zoom * 100)}%`;
+        }
+        if (mapWorldEl) {
+            mapWorldEl.style.transform = `translate(${localView.x}px, ${localView.y}px) scale(${localView.zoom})`;
+        }
         if (!worldEl) return;
         worldEl.style.transform = `translate(${localView.x}px, ${localView.y}px) scale(${localView.zoom})`;
+        renderStageGrid();
+    };
+
+    const setZoomAtPoint = (nextZoom, clientX, clientY) => {
+        if (!stageEl) return;
+        const rect = stageEl.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const clampedZoom = clampZoom(nextZoom);
+        const stageX = clientX - rect.left;
+        const stageY = clientY - rect.top;
+        const worldX = (stageX - localView.x) / localView.zoom;
+        const worldY = (stageY - localView.y) / localView.zoom;
+        localView.zoom = clampedZoom;
+        localView.x = Math.round(stageX - worldX * clampedZoom);
+        localView.y = Math.round(stageY - worldY * clampedZoom);
+        applyWorldTransform();
+    };
+
+    const setZoomAroundStageCenter = (nextZoom) => {
+        if (!stageEl) return;
+        const rect = stageEl.getBoundingClientRect();
+        setZoomAtPoint(nextZoom, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    };
+
+    const renderStageGrid = (scene = getActiveScene()) => {
+        if (!stageGridEl || !scene || !scene.grid) return;
+        const cellSize = Math.max(8, Math.round(scene.grid.cellPx * localView.zoom * 1000) / 1000);
+        const offsetX = positiveModulo(localView.x + scene.grid.offsetX * localView.zoom, cellSize);
+        const offsetY = positiveModulo(localView.y + scene.grid.offsetY * localView.zoom, cellSize);
+        stageGridEl.style.backgroundSize = `${cellSize}px ${cellSize}px`;
+        stageGridEl.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
     };
 
     const fitViewToWorld = () => {
@@ -520,6 +579,9 @@
     const setRolePreference = (role) => {
         localRole = role === 'player' ? 'player' : 'dm';
         localStorage.setItem(getRoleStorageKey(), localRole);
+        if (localRole !== 'dm') {
+            closeNPCSearch();
+        }
         if (body) body.dataset.vttRole = localRole;
         render();
     };
@@ -591,18 +653,36 @@
                 `).join('')
                 : '<div class="vtt-empty">No players in the shared store yet.</div>';
         }
+    };
 
-        if (npcSpawnListEl) {
-            const npcs = getNPCs();
-            npcSpawnListEl.innerHTML = npcs.length
+    const renderNPCSearchPopover = () => {
+        if (!npcSearchToggleEl || !npcSearchPopoverEl || !npcSearchListEl) return;
+        const isOpen = npcSearchOpen && isDM();
+        npcSearchToggleEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        npcSearchPopoverEl.hidden = !isOpen;
+
+        if (npcSearchInputEl && document.activeElement !== npcSearchInputEl) {
+            npcSearchInputEl.value = npcSearchQuery;
+        }
+
+        if (!isOpen) return;
+
+        const query = npcSearchQuery.trim().toLowerCase();
+        const npcs = getNPCs().filter((npc) => {
+            if (!query) return true;
+            const name = String(npc && npc.name || '').toLowerCase();
+            const guild = String(npc && npc.guild || '').toLowerCase();
+            return name.includes(query) || guild.includes(query);
+        });
+
+        npcSearchListEl.innerHTML = npcs.length
                 ? npcs.map((npc) => `
                     <button class="vtt-token-spawn" data-action="spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
                         <span class="vtt-token-spawn-meta">${escapeHtml(npc.guild || 'No guild')}</span>
                     </button>
                 `).join('')
-                : '<div class="vtt-empty">No NPCs in the shared store yet.</div>';
-        }
+                : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`;
     };
 
     const renderTokenInspector = () => {
@@ -802,9 +882,11 @@
 
     const renderStage = () => {
         const scene = getActiveScene();
-        if (!scene || !worldEl || !gridLayerEl || !fogLayerEl || !tokenLayerEl) return;
+        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !tokenLayerEl) return;
 
         worldSize = getWorldSizeForScene(scene);
+        mapWorldEl.style.width = `${worldSize.width}px`;
+        mapWorldEl.style.height = `${worldSize.height}px`;
         worldEl.style.width = `${worldSize.width}px`;
         worldEl.style.height = `${worldSize.height}px`;
         applyWorldTransform();
@@ -812,8 +894,7 @@
         loadMapForScene(scene);
         mapImageEl.style.display = scene.mapImageUrl ? 'block' : 'none';
 
-        gridLayerEl.style.backgroundSize = `${scene.grid.cellPx}px ${scene.grid.cellPx}px`;
-        gridLayerEl.style.backgroundPosition = `${scene.grid.offsetX}px ${scene.grid.offsetY}px`;
+        renderStageGrid(scene);
 
         fogLayerEl.innerHTML = Array.isArray(scene.fog)
             ? scene.fog.map((mask) => `
@@ -829,17 +910,20 @@
         const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => `
-            <div class="vtt-token${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}"
+            <div class="vtt-token${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}"
                 data-token-id="${escapeHtml(token.id)}"
                 data-id="${escapeHtml(token.id)}"
                 data-action="select-token"
                 data-side="${escapeHtml(token.side || 'neutral')}"
                 style="left:${scene.grid.offsetX + token.x * scene.grid.cellPx}px;top:${scene.grid.offsetY + token.y * scene.grid.cellPx}px;width:${token.w * scene.grid.cellPx}px;height:${token.h * scene.grid.cellPx}px;">
-                ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
-                <div class="vtt-token-badge">
-                    <span class="vtt-token-label">${escapeHtml(token.label || 'Token')}</span>
-                    <span class="vtt-token-hp">${escapeHtml(token.hpCurrent !== null && token.hpCurrent !== undefined ? String(token.hpCurrent) : '-')}</span>
+                <div class="vtt-token-face">
+                    ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
+                    <div class="vtt-token-badge">
+                        <span class="vtt-token-label">${escapeHtml(token.label || 'Token')}</span>
+                        <span class="vtt-token-hp">${escapeHtml(token.hpCurrent !== null && token.hpCurrent !== undefined ? String(token.hpCurrent) : '-')}</span>
+                    </div>
                 </div>
+                ${token.imageUrl ? `<div class="vtt-token-hover-card"><img class="vtt-token-hover-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false"></div>` : ''}
             </div>
         `).join('');
     };
@@ -868,6 +952,7 @@
         normalizeSelections();
         renderSceneControls();
         renderSpawnLists();
+        renderNPCSearchPopover();
         renderStage();
         renderTokenInspector();
         renderInitiativeList();
@@ -1034,22 +1119,32 @@
         }
 
         if (action === 'zoom-in') {
-            localView.zoom = clamp(localView.zoom + 0.12, 0.25, 2.2);
-            applyWorldTransform();
+            setZoomAroundStageCenter(localView.zoom + 0.12);
             return;
         }
         if (action === 'zoom-out') {
-            localView.zoom = clamp(localView.zoom - 0.12, 0.25, 2.2);
-            applyWorldTransform();
+            setZoomAroundStageCenter(localView.zoom - 0.12);
             return;
         }
         if (action === 'zoom-reset') {
-            localView.zoom = 1;
-            applyWorldTransform();
+            setZoomAroundStageCenter(1);
             return;
         }
         if (action === 'fit-view') {
             fitViewToWorld();
+            return;
+        }
+
+        if (action === 'toggle-npc-search') {
+            if (!isDM()) return;
+            npcSearchOpen = !npcSearchOpen;
+            renderNPCSearchPopover();
+            if (npcSearchOpen && npcSearchInputEl) {
+                window.requestAnimationFrame(() => {
+                    npcSearchInputEl.focus();
+                    npcSearchInputEl.select();
+                });
+            }
             return;
         }
 
@@ -1087,6 +1182,7 @@
         }
 
         if (action === 'add-custom-token') {
+            closeNPCSearch();
             withDraft((draft) => {
                 const scene = getActiveScene(draft);
                 if (!scene) return;
@@ -1102,6 +1198,7 @@
         if (action === 'spawn-player') {
             const player = getPlayers().find((entry) => String(entry && entry.id || '') === id);
             if (!player) return;
+            closeNPCSearch();
             withDraft((draft) => {
                 const scene = getActiveScene(draft);
                 if (!scene) return;
@@ -1116,6 +1213,7 @@
         if (action === 'spawn-npc') {
             const npc = getNPCs().find((entry) => String(entry && entry.id || '') === id);
             if (!npc) return;
+            closeNPCSearch({ clearQuery: true });
             withDraft((draft) => {
                 const scene = getActiveScene(draft);
                 if (!scene) return;
@@ -1148,6 +1246,7 @@
                     return { ...entry, linkedTokenId: '' };
                 });
                 if (selectedTokenId === id) selectedTokenId = '';
+                if (previewTokenId === id) previewTokenId = '';
             });
             return;
         }
@@ -1216,6 +1315,13 @@
                 entry.concentrating = !entry.concentrating;
             });
         }
+    };
+
+    const handleNPCSearchInput = (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || target !== npcSearchInputEl) return;
+        npcSearchQuery = target.value || '';
+        renderNPCSearchPopover();
     };
 
     const handleFieldChange = (event) => {
@@ -1452,7 +1558,8 @@
 
         const tokenEl = event.target.closest('.vtt-token');
         const scene = getActiveScene();
-        if (tokenEl && isDM()) {
+        if (tokenEl) {
+            if (!isDM()) return;
             const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
             if (!token || !scene) return;
             const worldPoint = screenToWorld(event.clientX, event.clientY);
@@ -1515,15 +1622,76 @@
         }
     };
 
+    const handleDocumentPointerDown = (event) => {
+        if (!(event.target instanceof Element)) return;
+        let needsRender = false;
+
+        if (npcSearchOpen && !event.target.closest('.vtt-popover-anchor')) {
+            closeNPCSearch();
+            needsRender = true;
+        }
+
+        if (previewTokenId && !event.target.closest('.vtt-token')) {
+            previewTokenId = '';
+            needsRender = true;
+        }
+
+        if (needsRender) render();
+    };
+
+    const handleStageWheel = (event) => {
+        if (!stageEl) return;
+        event.preventDefault();
+        const factor = Math.exp(-event.deltaY * 0.0015);
+        const nextZoom = clampZoom(localView.zoom * factor);
+        if (nextZoom === localView.zoom) return;
+        setZoomAtPoint(nextZoom, event.clientX, event.clientY);
+    };
+
+    const handleStageContextMenu = (event) => {
+        if (!(event.target instanceof Element)) return;
+        const tokenEl = event.target.closest('.vtt-token');
+        if (!tokenEl) {
+            if (previewTokenId) {
+                previewTokenId = '';
+                renderStage();
+            }
+            return;
+        }
+
+        const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
+        if (!token || !token.imageUrl) {
+            if (previewTokenId) {
+                previewTokenId = '';
+                renderStage();
+            }
+            return;
+        }
+
+        event.preventDefault();
+        previewTokenId = previewTokenId === token.id ? '' : token.id;
+        selectedTokenId = token.id;
+        const linkedEntry = findEntryForToken(token.id);
+        selectedEntryId = linkedEntry ? linkedEntry.id : '';
+        renderInitiativeList();
+        renderInitiativeDetail();
+        renderTokenInspector();
+        renderStage();
+    };
+
     const bindEvents = () => {
         document.addEventListener('click', (event) => {
             const actionEl = event.target instanceof Element ? event.target.closest('[data-action]') : null;
             if (!actionEl) return;
             handleAction(actionEl);
         });
+        document.addEventListener('pointerdown', handleDocumentPointerDown);
         document.addEventListener('input', handleFieldChange);
         document.addEventListener('change', handleFieldChange);
+        if (npcSearchInputEl) npcSearchInputEl.addEventListener('input', handleNPCSearchInput);
         if (stageEl) stageEl.addEventListener('pointerdown', handleStagePointerDown);
+        if (stageEl) stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
+        if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         window.addEventListener(STORE_UPDATED_EVENT, handleStoreUpdate);
