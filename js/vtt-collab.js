@@ -1,5 +1,6 @@
 const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 1000;
+const DEFAULT_VTT_CELL_PX = 70;
 const PEER_COLORS = [
     '#ff8a65',
     '#4db6ac',
@@ -67,8 +68,9 @@ const fallbackSnapshot = () => ({
             id: 'scene_1',
             name: 'Scene 1',
             mapImageUrl: '',
+            mapScale: 1,
             grid: {
-                cellPx: 70,
+                cellPx: DEFAULT_VTT_CELL_PX,
                 offsetX: 0,
                 offsetY: 0,
                 cellDistance: 5

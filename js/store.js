@@ -103,6 +103,9 @@
         nodes: [],
         connections: []
     };
+    const DEFAULT_VTT_CELL_PX = 70;
+    const MIN_VTT_MAP_SCALE = 0.25;
+    const MAX_VTT_MAP_SCALE = 4;
     function createDefaultVTTState() {
         return {
             activeSceneId: 'scene_1',
@@ -111,8 +114,9 @@
                     id: 'scene_1',
                     name: 'Scene 1',
                     mapImageUrl: '',
+                    mapScale: 1,
                     grid: {
-                        cellPx: 70,
+                        cellPx: DEFAULT_VTT_CELL_PX,
                         offsetX: 0,
                         offsetY: 0,
                         cellDistance: 5
@@ -326,6 +330,12 @@
         return Math.max(0, Math.min(100, Math.round(parsed)));
     };
 
+    const clampMapScale = (value, fallback = 1) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return Math.max(MIN_VTT_MAP_SCALE, Math.min(MAX_VTT_MAP_SCALE, fallback));
+        return Math.max(MIN_VTT_MAP_SCALE, Math.min(MAX_VTT_MAP_SCALE, Math.round(parsed * 1000) / 1000));
+    };
+
     const normalizeEnumToken = (value) => String(value || '').trim().toLowerCase();
     const sanitizeImpactSeverity = (value, fallback = 'moderate') => {
         const token = normalizeEnumToken(value);
@@ -479,7 +489,7 @@
     const sanitizeVTTGrid = (grid) => {
         const source = grid && typeof grid === 'object' ? grid : {};
         return {
-            cellPx: Math.max(24, Math.min(240, Math.round(toNumber(source.cellPx, 70)))),
+            cellPx: Math.max(24, Math.min(240, Math.round(toNumber(source.cellPx, DEFAULT_VTT_CELL_PX)))),
             offsetX: Math.round(toNumber(source.offsetX, 0)),
             offsetY: Math.round(toNumber(source.offsetY, 0)),
             cellDistance: Math.max(1, Math.min(1000, Math.round(toNumber(source.cellDistance, 5))))
@@ -532,13 +542,33 @@
     const sanitizeVTTScene = (scene, idx = 0) => {
         const source = scene && typeof scene === 'object' ? scene : {};
         const id = toTrimmedString(source.id, `scene_${idx + 1}`, 120).trim() || `scene_${idx + 1}`;
+        const legacyGrid = sanitizeVTTGrid(source.grid);
+        const legacyScaleFactor = clampMapScale(DEFAULT_VTT_CELL_PX / Math.max(24, legacyGrid.cellPx || DEFAULT_VTT_CELL_PX), 1);
+        const baseScale = clampMapScale(source.mapScale, 1);
         return {
             id,
             name: toTrimmedString(source.name, `Scene ${idx + 1}`, 160).trim() || `Scene ${idx + 1}`,
             mapImageUrl: toSharedVTTMediaUrl(source.mapImageUrl),
-            grid: sanitizeVTTGrid(source.grid),
+            mapScale: clampMapScale(baseScale * legacyScaleFactor, legacyScaleFactor),
+            grid: {
+                cellPx: DEFAULT_VTT_CELL_PX,
+                offsetX: Math.round(legacyGrid.offsetX * legacyScaleFactor),
+                offsetY: Math.round(legacyGrid.offsetY * legacyScaleFactor),
+                cellDistance: legacyGrid.cellDistance
+            },
             tokens: Array.isArray(source.tokens) ? source.tokens.map((tokenEntry, tokenIdx) => sanitizeVTTToken(tokenEntry, tokenIdx)) : [],
-            fog: Array.isArray(source.fog) ? source.fog.map((maskEntry, maskIdx) => sanitizeVTTFogMask(maskEntry, maskIdx)) : []
+            fog: Array.isArray(source.fog)
+                ? source.fog.map((maskEntry, maskIdx) => {
+                    const mask = sanitizeVTTFogMask(maskEntry, maskIdx);
+                    return {
+                        ...mask,
+                        x: Math.round(mask.x * legacyScaleFactor),
+                        y: Math.round(mask.y * legacyScaleFactor),
+                        w: Math.max(1, Math.round(mask.w * legacyScaleFactor)),
+                        h: Math.max(1, Math.round(mask.h * legacyScaleFactor))
+                    };
+                })
+                : []
         };
     };
 

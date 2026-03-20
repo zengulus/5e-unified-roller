@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321g">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321h">
 </head>
 
 <body data-player-nav="vtt">
@@ -56,11 +56,11 @@
                 </label>
                 <div class="vtt-field-grid">
                     <label class="vtt-field">
-                        <span>Grid Cell PX</span>
-                        <input type="number" id="scene-grid-cell" data-scene-grid-field="cellPx" min="24" max="240">
+                        <span>Map Scale</span>
+                        <input type="number" id="scene-map-scale" data-scene-scale-field="mapScale" min="25" max="400" step="1">
                     </label>
                     <label class="vtt-field">
-                        <span>Cell Distance</span>
+                        <span>Distance / Cell</span>
                         <input type="number" id="scene-grid-distance" data-scene-grid-field="cellDistance" min="1" max="1000">
                     </label>
                     <label class="vtt-field">
@@ -73,8 +73,8 @@
                     </label>
                 </div>
                 <div class="vtt-chip-row">
-                    <button class="vtt-chip-btn" data-action="step-grid-cell" data-delta="-4">Cell -</button>
-                    <button class="vtt-chip-btn" data-action="step-grid-cell" data-delta="4">Cell +</button>
+                    <button class="vtt-chip-btn" data-action="step-map-scale" data-delta="-5">Scale -</button>
+                    <button class="vtt-chip-btn" data-action="step-map-scale" data-delta="5">Scale +</button>
                     <button class="vtt-chip-btn" data-action="reset-grid-offset">Reset Offset</button>
                 </div>
                 <div class="vtt-chip-row">
@@ -83,7 +83,7 @@
                     <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="y" data-delta="-1">Y-</button>
                     <button class="vtt-chip-btn" data-action="nudge-grid" data-axis="y" data-delta="1">Y+</button>
                 </div>
-                <div class="vtt-detail-note">Calibrate fast: adjust cell size, then nudge X and Y until the grid lands on the map.</div>
+                <div class="vtt-detail-note">Calibrate fast: adjust map scale until tokens feel right, then nudge X and Y until the grid lands on the image.</div>
             </section>
 
             <section class="vtt-panel" data-dm-only="1">
@@ -162,14 +162,14 @@
     <script src="js/player-nav.js?v=20260320c"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
-        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260321a')
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260321b')
             .then(() => window.RTF_VTT_COLLAB || null)
             .catch((err) => {
                 console.warn('VTT collaboration module failed to load', err);
                 return null;
             });
     </script>
-    <script src="js/vtt.js?v=20260321g"></script>
+    <script src="js/vtt.js?v=20260321h"></script>
 </body>
 
 </html>

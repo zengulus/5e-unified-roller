@@ -171,6 +171,13 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     gap: 0.5rem;
 }
 
+.vtt-panel-head-actions .vtt-panel-pill {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .vtt-panel-head h2 {
     margin: 0;
     font-size: 0.95rem;
@@ -284,6 +291,11 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.35);
 }
 
+.vtt-chip-btn.danger {
+    border-color: rgba(255, 120, 120, 0.3);
+    color: rgba(255, 220, 220, 0.94);
+}
+
 .vtt-roster-block + .vtt-roster-block {
     margin-top: 1rem;
 }
@@ -292,6 +304,97 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     display: grid;
     gap: 0.55rem;
     margin-bottom: 0.9rem;
+}
+
+.vtt-scene-manager {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.vtt-scene-select-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.vtt-scene-select-field {
+    margin-bottom: 0;
+}
+
+.vtt-scene-select-field select {
+    font-weight: 600;
+}
+
+.vtt-scene-summary-card {
+    display: grid;
+    gap: 0.7rem;
+    padding: 0.82rem 0.88rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+        rgba(11, 16, 26, 0.84);
+}
+
+.vtt-scene-summary-card.is-dm-local {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.3);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb, 78, 205, 196), 0.14);
+}
+
+.vtt-scene-summary-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.vtt-scene-summary-top .vtt-scene-tag-row {
+    margin-top: 0;
+    justify-content: flex-end;
+}
+
+.vtt-scene-summary-copy {
+    display: grid;
+    gap: 0.18rem;
+    min-width: 0;
+}
+
+.vtt-scene-summary-eyebrow {
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(220, 229, 241, 0.62);
+}
+
+.vtt-scene-summary-title {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.98rem;
+    color: #f7fbff;
+}
+
+.vtt-scene-summary-meta {
+    font-size: 0.76rem;
+    color: rgba(220, 229, 241, 0.72);
+}
+
+.vtt-scene-summary-note {
+    padding: 0.72rem 0.78rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 0.9rem;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(230, 238, 247, 0.82);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.vtt-scene-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .vtt-scene-row {
@@ -848,6 +951,14 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
     .vtt-sidebar,
     .vtt-initiative-panel {
         width: calc(100vw - 1.5rem);
+    }
+
+    .vtt-scene-select-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vtt-scene-summary-top {
+        flex-direction: column;
     }
 
     .vtt-sidebar {

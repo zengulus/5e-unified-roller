@@ -10,6 +10,9 @@
     const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
+    const DEFAULT_VTT_CELL_PX = 70;
+    const MIN_VTT_MAP_SCALE = 0.25;
+    const MAX_VTT_MAP_SCALE = 4;
     const DEFAULT_VTT_STATE = {
         activeSceneId: 'scene_1',
         scenes: [
@@ -17,8 +20,9 @@
                 id: 'scene_1',
                 name: 'Scene 1',
                 mapImageUrl: '',
+                mapScale: 1,
                 grid: {
-                    cellPx: 70,
+                    cellPx: DEFAULT_VTT_CELL_PX,
                     offsetX: 0,
                     offsetY: 0,
                     cellDistance: 5
@@ -77,6 +81,7 @@
     const zoomResetEl = document.querySelector('[data-action="zoom-reset"]');
     const activeSceneLabelEl = document.getElementById('vtt-active-scene-label');
     const stageTitleEl = document.getElementById('vtt-stage-title');
+    const stageMetaEl = document.getElementById('vtt-stage-meta');
     const roundPillEl = document.getElementById('vtt-round-pill');
     const selectionPillEl = document.getElementById('vtt-selection-pill');
     const tokenInspectorEl = document.getElementById('vtt-token-inspector');
@@ -102,6 +107,11 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     };
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const clampMapScale = (value, fallback = 1) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return clamp(Math.round(fallback * 1000) / 1000, MIN_VTT_MAP_SCALE, MAX_VTT_MAP_SCALE);
+        return clamp(Math.round(parsed * 1000) / 1000, MIN_VTT_MAP_SCALE, MAX_VTT_MAP_SCALE);
+    };
     const clampZoom = (value) => clamp(Math.round(value * 1000) / 1000, 0.25, 2.2);
     const positiveModulo = (value, divisor) => {
         if (!divisor) return 0;
@@ -138,8 +148,9 @@
             id: buildId('scene'),
             name: nextName,
             mapImageUrl: source ? String(source.mapImageUrl || '') : '',
+            mapScale: source ? clampMapScale(source.mapScale, 1) : 1,
             grid: deepClone(source && source.grid ? source.grid : {
-                cellPx: 70,
+                cellPx: DEFAULT_VTT_CELL_PX,
                 offsetX: 0,
                 offsetY: 0,
                 cellDistance: 5
@@ -244,6 +255,15 @@
         const viewedSceneId = getViewedSceneId(state);
         return state.scenes.find((scene) => scene.id === viewedSceneId) || state.scenes[0] || null;
     };
+
+    const getSceneById = (sceneId, state = vttState) => {
+        if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return null;
+        const targetId = String(sceneId || '').trim();
+        if (!targetId) return null;
+        return state.scenes.find((scene) => scene.id === targetId) || null;
+    };
+
+    const getSceneMapScale = (scene) => clampMapScale(scene && scene.mapScale, 1);
 
     const getSharedSceneId = (state = vttState) => {
         if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return '';
@@ -623,15 +643,16 @@
     const getLoadedMapSizeForScene = (scene) => {
         if (!scene || !scene.mapImageUrl) return { width: 0, height: 0 };
         if (mapLoadState.url !== scene.mapImageUrl || !mapLoadState.loaded) return { width: 0, height: 0 };
+        const scale = getSceneMapScale(scene);
         return {
-            width: Math.max(0, Math.round(mapSize.width || 0)),
-            height: Math.max(0, Math.round(mapSize.height || 0))
+            width: Math.max(0, Math.round((mapSize.width || 0) * scale)),
+            height: Math.max(0, Math.round((mapSize.height || 0) * scale))
         };
     };
 
     const getWorldSizeForScene = (scene) => {
         if (!scene) return { ...DEFAULT_WORLD_SIZE };
-        const grid = scene.grid || { cellPx: 70, offsetX: 0, offsetY: 0 };
+        const grid = scene.grid || { cellPx: DEFAULT_VTT_CELL_PX, offsetX: 0, offsetY: 0 };
         const loadedMapSize = getLoadedMapSizeForScene(scene);
         let width = loadedMapSize.width || 0;
         let height = loadedMapSize.height || 0;
@@ -1039,6 +1060,8 @@
             mapLoadState = { url: '', loaded: false };
             worldSize = getWorldSizeForScene(scene);
             mapImageEl.removeAttribute('src');
+            mapImageEl.style.width = '0px';
+            mapImageEl.style.height = '0px';
             mapImageEl.style.display = 'none';
             if (fitViewOnNextMapLoad) {
                 fitViewOnNextMapLoad = false;
@@ -1079,6 +1102,8 @@
             worldSize = getWorldSizeForScene(active);
             mapLoadState = { url: requestedUrl, loaded: false };
             mapImageEl.removeAttribute('src');
+            mapImageEl.style.width = '0px';
+            mapImageEl.style.height = '0px';
             mapImageEl.style.display = 'none';
             if (fitViewOnNextMapLoad) {
                 fitViewOnNextMapLoad = false;
@@ -1133,34 +1158,63 @@
                 : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`;
     };
 
+    const describeScene = (scene) => {
+        const tokenCount = scene && Array.isArray(scene.tokens) ? scene.tokens.length : 0;
+        return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'}`;
+    };
+
     const renderSceneList = () => {
         if (!sceneListEl) return;
         const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
         const sharedSceneId = getSharedSceneId(vttState);
         const viewedSceneId = getViewedSceneId(vttState, localRole);
         const usingLocalView = isUsingLocalSceneView(vttState, localRole);
+        const sharedScene = getSceneById(sharedSceneId, vttState);
+        const viewedScene = getSceneById(viewedSceneId, vttState) || scenes[0] || null;
+        const routeNote = viewedScene && sharedScene && viewedScene.id !== sharedScene.id
+            ? `DM is previewing ${viewedScene.name || 'this scene'}. Players stay on ${sharedScene.name || 'the shared scene'} until Player Location changes.`
+            : `DM and players are both on ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}. Change Player Location to move everyone.`;
         sceneListEl.innerHTML = scenes.length
-            ? scenes.map((scene) => {
-                const tokenCount = Array.isArray(scene.tokens) ? scene.tokens.length : 0;
-                return `
-                    <div class="vtt-scene-row${scene.id === viewedSceneId ? ' is-viewed' : ''}${scene.id === sharedSceneId ? ' is-shared' : ''}">
-                        <div class="vtt-scene-load">
-                            <span class="vtt-scene-row-name">${escapeHtml(scene.name || 'Scene')}</span>
-                            <span class="vtt-scene-row-meta">${scene.mapImageUrl ? 'Map linked' : 'No map'} · ${tokenCount} token${tokenCount === 1 ? '' : 's'}</span>
+            ? `
+                <div class="vtt-scene-manager">
+                    <div class="vtt-scene-select-grid">
+                        <label class="vtt-field vtt-field-tight vtt-scene-select-field">
+                            <span>DM Location</span>
+                            <select data-scene-picker="dm">
+                                ${scenes.map((scene) => `
+                                    <option value="${escapeHtml(scene.id)}"${scene.id === viewedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
+                                `).join('')}
+                            </select>
+                        </label>
+                        <label class="vtt-field vtt-field-tight vtt-scene-select-field">
+                            <span>Player Location</span>
+                            <select data-scene-picker="shared">
+                                ${scenes.map((scene) => `
+                                    <option value="${escapeHtml(scene.id)}"${scene.id === sharedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
+                                `).join('')}
+                            </select>
+                        </label>
+                    </div>
+                    <div class="vtt-scene-summary-card${usingLocalView && viewedScene && sharedScene && viewedScene.id !== sharedScene.id ? ' is-dm-local' : ''}">
+                        <div class="vtt-scene-summary-top">
+                            <div class="vtt-scene-summary-copy">
+                                <span class="vtt-scene-summary-eyebrow">Current DM Scene</span>
+                                <strong class="vtt-scene-summary-title">${escapeHtml(viewedScene && viewedScene.name ? viewedScene.name : 'Scene')}</strong>
+                                <span class="vtt-scene-summary-meta">${escapeHtml(describeScene(viewedScene))}</span>
+                            </div>
                             <div class="vtt-scene-tag-row">
-                                ${scene.id === viewedSceneId ? `<span class="vtt-scene-tag">${usingLocalView ? 'DM View' : 'Viewing'}</span>` : ''}
-                                ${scene.id === sharedSceneId ? '<span class="vtt-scene-tag">Everyone</span>' : ''}
+                                <span class="vtt-scene-tag">${usingLocalView && viewedScene && sharedScene && viewedScene.id !== sharedScene.id ? 'DM Private' : 'Shared'}</span>
+                                <span class="vtt-scene-tag">${scenes.length} Scene${scenes.length === 1 ? '' : 's'}</span>
                             </div>
                         </div>
-                        <div class="vtt-scene-row-actions">
-                            <button class="vtt-chip-btn" data-action="view-scene-local" data-id="${escapeHtml(scene.id)}"${scene.id === viewedSceneId ? ' disabled' : ''}>DM Only</button>
-                            <button class="vtt-chip-btn strong" data-action="show-scene-everyone" data-id="${escapeHtml(scene.id)}"${scene.id === sharedSceneId ? ' disabled' : ''}>Everyone</button>
-                            <button class="vtt-chip-btn" data-action="duplicate-scene" data-id="${escapeHtml(scene.id)}">Clone</button>
-                            <button class="vtt-chip-btn" data-action="delete-scene" data-id="${escapeHtml(scene.id)}"${scenes.length <= 1 ? ' disabled' : ''}>Delete</button>
+                        <div class="vtt-scene-summary-note">${escapeHtml(routeNote)}</div>
+                        <div class="vtt-scene-action-row">
+                            <button class="vtt-chip-btn" data-action="clone-current-scene"${viewedScene ? '' : ' disabled'}>Clone Current</button>
+                            <button class="vtt-chip-btn danger" data-action="delete-current-scene"${scenes.length <= 1 || !viewedScene ? ' disabled' : ''}>Delete Current</button>
                         </div>
                     </div>
-                `;
-            }).join('')
+                </div>
+            `
             : '<div class="vtt-empty">No scenes yet.</div>';
     };
 
@@ -1368,6 +1422,8 @@
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         mapWorldEl.style.width = `${mapDisplaySize.width}px`;
         mapWorldEl.style.height = `${mapDisplaySize.height}px`;
+        mapImageEl.style.width = `${mapDisplaySize.width}px`;
+        mapImageEl.style.height = `${mapDisplaySize.height}px`;
         worldEl.style.width = `${worldSize.width}px`;
         worldEl.style.height = `${worldSize.height}px`;
         if (fitViewOnNextMapLoad && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
@@ -1416,21 +1472,29 @@
     const renderSceneControls = () => {
         const scene = getActiveScene();
         if (!scene) return;
+        const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
+        const usingLocalView = isUsingLocalSceneView(vttState, localRole);
+        const baseStageMeta = 'Drag empty space to pan. Scroll to zoom. Right-click a token image to preview it.';
         applyUIPreferences();
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
         if (roleToggleEl) roleToggleEl.textContent = `Role: ${isDM() ? 'DM' : 'Player'}`;
-        if (activeSceneLabelEl) activeSceneLabelEl.textContent = isUsingLocalSceneView(vttState, localRole) ? 'DM Only View' : 'Shared View';
+        if (activeSceneLabelEl) activeSceneLabelEl.textContent = `Players: ${sharedScene.name || 'Scene'}`;
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
+        if (stageMetaEl) {
+            stageMetaEl.textContent = isDM() && usingLocalView && sharedScene.id !== scene.id
+                ? `DM is previewing ${scene.name || 'this scene'} while players stay on ${sharedScene.name || 'the shared scene'}. ${baseStageMeta}`
+                : baseStageMeta;
+        }
         const sceneNameEl = document.getElementById('scene-name');
         const mapUrlEl = document.getElementById('scene-map-url');
-        const cellEl = document.getElementById('scene-grid-cell');
+        const scaleEl = document.getElementById('scene-map-scale');
         const distanceEl = document.getElementById('scene-grid-distance');
         const offsetXEl = document.getElementById('scene-grid-offset-x');
         const offsetYEl = document.getElementById('scene-grid-offset-y');
         if (sceneNameEl && document.activeElement !== sceneNameEl) sceneNameEl.value = scene.name || '';
         if (mapUrlEl && document.activeElement !== mapUrlEl) mapUrlEl.value = scene.mapImageUrl || '';
-        if (cellEl && document.activeElement !== cellEl) cellEl.value = String(scene.grid.cellPx || 70);
+        if (scaleEl && document.activeElement !== scaleEl) scaleEl.value = String(Math.round(getSceneMapScale(scene) * 100));
         if (distanceEl && document.activeElement !== distanceEl) distanceEl.value = String(scene.grid.cellDistance || 5);
         if (offsetXEl && document.activeElement !== offsetXEl) offsetXEl.value = String(scene.grid.offsetX || 0);
         if (offsetYEl && document.activeElement !== offsetYEl) offsetYEl.value = String(scene.grid.offsetY || 0);
@@ -1661,6 +1725,50 @@
 
         if (!isDM() && action !== 'select-token' && action !== 'select-entry') return;
 
+        if (action === 'clone-current-scene') {
+            const sourceScene = getActiveScene(vttState);
+            if (!sourceScene) return;
+            const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
+            setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+            withDraft((draft) => {
+                if (!Array.isArray(draft.scenes)) draft.scenes = [];
+                draft.scenes.push(nextScene);
+                previewTokenId = '';
+            }, { fitView: true });
+            return;
+        }
+
+        if (action === 'delete-current-scene') {
+            const targetSceneId = getViewedSceneId(vttState, localRole);
+            if (!targetSceneId) return;
+            const viewedSceneId = getViewedSceneId(vttState, localRole);
+            const sharedSceneId = getSharedSceneId(vttState);
+            withDraft((draft) => {
+                if (!Array.isArray(draft.scenes) || draft.scenes.length <= 1) return;
+                const idx = draft.scenes.findIndex((entry) => entry.id === targetSceneId);
+                if (idx < 0) return;
+                const wasActive = draft.activeSceneId === targetSceneId;
+                const wasViewed = viewedSceneId === targetSceneId;
+                draft.scenes.splice(idx, 1);
+                if (!draft.scenes.length) {
+                    const nextScene = buildSceneRecord(draft.scenes);
+                    draft.scenes.push(nextScene);
+                }
+                if (wasActive) {
+                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
+                    draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
+                }
+                if (wasViewed && !wasActive) {
+                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
+                    setSceneViewPreference(SCENE_VIEW_LOCAL, fallbackScene ? fallbackScene.id : getSharedSceneId(draft));
+                } else if (wasActive || targetSceneId === sharedSceneId) {
+                    setSceneViewPreference(SCENE_VIEW_SHARED);
+                }
+                previewTokenId = '';
+            }, { fitView: true });
+            return;
+        }
+
         if (action === 'create-scene') {
             const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : []);
             setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
@@ -1747,12 +1855,12 @@
             return;
         }
 
-        if (action === 'step-grid-cell') {
+        if (action === 'step-map-scale') {
             const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
             withDraft((draft) => {
                 const scene = getActiveScene(draft);
                 if (!scene) return;
-                scene.grid.cellPx = clamp(Math.round(toNumber(scene.grid.cellPx, 70) + delta), 24, 240);
+                scene.mapScale = clampMapScale((toNumber(scene.mapScale, 1) * 100 + delta) / 100, 1);
             });
             return;
         }
@@ -1916,6 +2024,37 @@
         if (event.type === 'input' && (target instanceof HTMLInputElement) && target.type === 'text') return;
         if (event.type === 'input' && target instanceof HTMLTextAreaElement) return;
 
+        if (target instanceof HTMLSelectElement && target.dataset.scenePicker) {
+            if (event.type !== 'change') return;
+            const sceneId = String(target.value || '').trim();
+            const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
+            if (!sceneId || !scenes.some((scene) => scene.id === sceneId)) return;
+
+            if (target.dataset.scenePicker === 'dm') {
+                const sharedSceneId = getSharedSceneId(vttState);
+                if (sceneId === sharedSceneId) {
+                    setSceneViewPreference(SCENE_VIEW_SHARED);
+                } else {
+                    setSceneViewPreference(SCENE_VIEW_LOCAL, sceneId);
+                }
+                previewTokenId = '';
+                fitViewOnNextMapLoad = true;
+                render();
+                return;
+            }
+
+            const shouldFit = !isUsingLocalSceneView(vttState, localRole) || getViewedSceneId(vttState, localRole) === sceneId;
+            withDraft((draft) => {
+                const scene = Array.isArray(draft.scenes)
+                    ? draft.scenes.find((entry) => entry.id === sceneId)
+                    : null;
+                if (!scene) return;
+                draft.activeSceneId = scene.id;
+                previewTokenId = '';
+            }, { fitView: shouldFit });
+            return;
+        }
+
         if (target instanceof HTMLInputElement && target.dataset.sceneField) {
             const field = target.dataset.sceneField;
             withDraft((draft) => {
@@ -1931,6 +2070,15 @@
                 }
                 scene[field] = target.value;
             }, { fitView: field === 'mapImageUrl' });
+            return;
+        }
+
+        if (target instanceof HTMLInputElement && target.dataset.sceneScaleField) {
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                scene.mapScale = clampMapScale(toNumber(target.value, 100) / 100, 1);
+            });
             return;
         }
 
