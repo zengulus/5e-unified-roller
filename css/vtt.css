@@ -646,6 +646,10 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     overflow: visible;
 }
 
+.vtt-token.has-image {
+    background: transparent;
+}
+
 .vtt-token[data-side="player"] {
     border-color: rgba(111, 214, 255, 0.72);
 }
@@ -711,9 +715,15 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     place-items: center;
     border-radius: inherit;
     overflow: hidden;
+    filter: grayscale(var(--vtt-token-grayscale, 0));
+    transition: filter 160ms ease;
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03)),
         rgba(7, 11, 18, 0.78);
+}
+
+.vtt-token.has-image .vtt-token-face {
+    background: transparent;
 }
 
 .vtt-token-image {
@@ -754,34 +764,35 @@ body[data-vtt-role="player"] #vtt-settings-toggle {
     display: block;
 }
 
-.vtt-token-badge {
-    position: absolute;
-    inset: auto 0 0 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.35rem;
-    padding: 0.26rem 0.35rem;
-    font-size: 0.66rem;
-    background: linear-gradient(180deg, transparent, rgba(1, 3, 7, 0.86));
-}
-
 .vtt-token-initials {
     font-size: 1.1rem;
     font-weight: 700;
     letter-spacing: 0.06em;
 }
 
-.vtt-token-label {
-    max-width: calc(100% - 2rem);
-    overflow: hidden;
+.vtt-token-subtitle {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    left: 50%;
+    width: max-content;
+    max-width: min(12rem, calc(100vw - 3rem));
+    padding: 0.2rem 0.48rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(4, 8, 15, 0.88);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.24);
+    color: rgba(244, 249, 255, 0.96);
+    font-size: 0.66rem;
+    line-height: 1.2;
     white-space: nowrap;
+    overflow: hidden;
     text-overflow: ellipsis;
+    transform: translateX(-50%);
+    pointer-events: none;
 }
 
-.vtt-token-hp {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.86;
+body[data-token-names-hidden="1"] .vtt-token-subtitle {
+    display: none;
 }
 
 .vtt-empty {

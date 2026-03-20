@@ -104,6 +104,7 @@
         connections: []
     };
     const DEFAULT_VTT_CELL_PX = 70;
+    const VTT_TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
     function createDefaultVTTState() {
@@ -496,6 +497,11 @@
         };
     };
 
+    const sanitizeVTTTokenCoordinate = (value, fallback = 0) => {
+        const parsed = toNumber(value, fallback);
+        return Math.max(0, Math.round(parsed * VTT_TOKEN_COORD_PRECISION) / VTT_TOKEN_COORD_PRECISION);
+    };
+
     const sanitizeVTTToken = (token, idx = 0) => {
         const source = token && typeof token === 'object' ? token : {};
         const id = toTrimmedString(source.id, `token_${idx + 1}`, 120).trim() || `token_${idx + 1}`;
@@ -510,8 +516,8 @@
             label: toTrimmedString(source.label, `Token ${idx + 1}`, 160).trim() || `Token ${idx + 1}`,
             side: VTT_TOKEN_SIDES.has(cleanSide) ? cleanSide : 'neutral',
             imageUrl: toSharedVTTMediaUrl(source.imageUrl),
-            x: Math.round(toNumber(source.x, idx * 2)),
-            y: Math.round(toNumber(source.y, 0)),
+            x: sanitizeVTTTokenCoordinate(source.x, idx * 2),
+            y: sanitizeVTTTokenCoordinate(source.y, 0),
             w: Math.max(1, Math.round(toNumber(source.w, 1))),
             h: Math.max(1, Math.round(toNumber(source.h, 1))),
             sourceType: toTrimmedString(source.sourceType, '', 40).trim(),

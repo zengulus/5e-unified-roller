@@ -1,6 +1,7 @@
 const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 1000;
 const DEFAULT_VTT_CELL_PX = 70;
+const TOKEN_COORD_PRECISION = 1000;
 const PEER_COLORS = [
     '#ff8a65',
     '#4db6ac',
@@ -20,6 +21,11 @@ const toTrimmedString = (value, fallback = '', maxLen = 4000) => {
 const toFiniteNumber = (value, fallback = 0) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeTokenCoordinate = (value, fallback = 0) => {
+    const parsed = toFiniteNumber(value, fallback);
+    return Math.max(0, Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION);
 };
 
 const toNonNegativeInt = (value, fallback = 0) => {
@@ -94,8 +100,8 @@ const sanitizePositionChange = (entry) => {
     return {
         sceneId,
         tokenId,
-        x: Math.max(0, Math.round(toFiniteNumber(source.x, 0))),
-        y: Math.max(0, Math.round(toFiniteNumber(source.y, 0)))
+        x: normalizeTokenCoordinate(source.x, 0),
+        y: normalizeTokenCoordinate(source.y, 0)
     };
 };
 

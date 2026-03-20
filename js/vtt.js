@@ -11,6 +11,7 @@
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
     const DEFAULT_VTT_CELL_PX = 70;
+    const TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
     const DEFAULT_VTT_STATE = {
@@ -45,6 +46,7 @@
     let uiState = {
         settingsCollapsed: false,
         initiativeCollapsed: false,
+        showTokenNames: true,
         sceneViewMode: SCENE_VIEW_SHARED,
         localSceneId: ''
     };
@@ -78,6 +80,7 @@
     const settingsToggleEl = document.getElementById('vtt-settings-toggle');
     const initiativeToggleEl = document.getElementById('vtt-initiative-toggle');
     const roleToggleEl = document.getElementById('vtt-role-toggle');
+    const tokenNamesToggleEl = document.getElementById('vtt-token-names-toggle');
     const zoomResetEl = document.querySelector('[data-action="zoom-reset"]');
     const activeSceneLabelEl = document.getElementById('vtt-active-scene-label');
     const stageTitleEl = document.getElementById('vtt-stage-title');
@@ -111,6 +114,15 @@
         const parsed = Number(value);
         if (!Number.isFinite(parsed)) return clamp(Math.round(fallback * 1000) / 1000, MIN_VTT_MAP_SCALE, MAX_VTT_MAP_SCALE);
         return clamp(Math.round(parsed * 1000) / 1000, MIN_VTT_MAP_SCALE, MAX_VTT_MAP_SCALE);
+    };
+    const normalizeTokenCoordinate = (value, fallback = 0) => {
+        const parsed = toNumber(value, fallback);
+        return Math.max(0, Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION);
+    };
+    const snapTokenCoordinate = (value, fallback = 0) => {
+        const safe = normalizeTokenCoordinate(value, fallback);
+        const base = Math.floor(safe);
+        return safe - base > 0.5 ? base + 1 : base;
     };
     const clampZoom = (value) => clamp(Math.round(value * 1000) / 1000, 0.25, 2.2);
     const positiveModulo = (value, divisor) => {
@@ -173,6 +185,14 @@
         if (hasCurrent) return `HP ${current}`;
         return `HP -/${max}`;
     };
+    const getTokenGrayscale = (token) => {
+        if (!token) return 0;
+        const hpCurrent = Number(token.hpCurrent);
+        const hpMax = Number(token.hpMax);
+        if (!Number.isFinite(hpCurrent) || !Number.isFinite(hpMax) || hpMax <= 0) return 0;
+        const ratio = clamp(hpCurrent / hpMax, 0, 1);
+        return Math.round((1 - ratio) * 1000) / 1000;
+    };
     const getStore = () => (window.RTF_STORE && typeof window.RTF_STORE.getVTTState === 'function' ? window.RTF_STORE : null);
     const getActiveCaseId = () => {
         const store = getStore();
@@ -201,6 +221,7 @@
         if (body) {
             body.dataset.settingsCollapsed = uiState.settingsCollapsed ? '1' : '0';
             body.dataset.initiativeCollapsed = uiState.initiativeCollapsed ? '1' : '0';
+            body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
         }
         if (settingsToggleEl) {
             settingsToggleEl.textContent = uiState.settingsCollapsed ? 'Show Settings' : 'Hide Settings';
@@ -209,6 +230,10 @@
         if (initiativeToggleEl) {
             initiativeToggleEl.textContent = uiState.initiativeCollapsed ? 'Show Initiative' : 'Hide Initiative';
             initiativeToggleEl.setAttribute('aria-expanded', uiState.initiativeCollapsed ? 'false' : 'true');
+        }
+        if (tokenNamesToggleEl) {
+            tokenNamesToggleEl.textContent = uiState.showTokenNames ? 'Hide Names' : 'Show Names';
+            tokenNamesToggleEl.setAttribute('aria-pressed', uiState.showTokenNames ? 'true' : 'false');
         }
     };
 
@@ -219,6 +244,7 @@
             uiState = {
                 settingsCollapsed: !!(parsed && parsed.settingsCollapsed),
                 initiativeCollapsed: !!(parsed && parsed.initiativeCollapsed),
+                showTokenNames: parsed && parsed.showTokenNames !== undefined ? !!parsed.showTokenNames : true,
                 sceneViewMode: parsed && parsed.sceneViewMode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED,
                 localSceneId: String(parsed && parsed.localSceneId || '').trim()
             };
@@ -226,6 +252,7 @@
             uiState = {
                 settingsCollapsed: false,
                 initiativeCollapsed: false,
+                showTokenNames: true,
                 sceneViewMode: SCENE_VIEW_SHARED,
                 localSceneId: ''
             };
@@ -879,8 +906,8 @@
             if (!scene || !Array.isArray(scene.tokens)) return;
             const token = scene.tokens.find((entry) => entry && entry.id === String(change && change.tokenId || '').trim());
             if (!token) return;
-            const nextX = Math.max(0, Math.round(toNumber(change.x, token.x)));
-            const nextY = Math.max(0, Math.round(toNumber(change.y, token.y)));
+            const nextX = normalizeTokenCoordinate(change.x, token.x);
+            const nextY = normalizeTokenCoordinate(change.y, token.y);
             if (token.x === nextX && token.y === nextY) return;
             token.x = nextX;
             token.y = nextY;
@@ -1451,20 +1478,17 @@
         const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => `
-            <div class="vtt-token${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}"
+            <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}"
                 data-token-id="${escapeHtml(token.id)}"
                 data-id="${escapeHtml(token.id)}"
                 data-action="select-token"
                 data-side="${escapeHtml(token.side || 'neutral')}"
-                style="left:${scene.grid.offsetX + token.x * scene.grid.cellPx}px;top:${scene.grid.offsetY + token.y * scene.grid.cellPx}px;width:${token.w * scene.grid.cellPx}px;height:${token.h * scene.grid.cellPx}px;">
+                style="left:${scene.grid.offsetX + token.x * scene.grid.cellPx}px;top:${scene.grid.offsetY + token.y * scene.grid.cellPx}px;width:${token.w * scene.grid.cellPx}px;height:${token.h * scene.grid.cellPx}px;--vtt-token-grayscale:${getTokenGrayscale(token)};">
                 <div class="vtt-token-face">
                     ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
-                    <div class="vtt-token-badge">
-                        <span class="vtt-token-label">${escapeHtml(token.label || 'Token')}</span>
-                        <span class="vtt-token-hp">${escapeHtml(token.hpCurrent !== null && token.hpCurrent !== undefined ? String(token.hpCurrent) : '-')}</span>
-                    </div>
                 </div>
                 ${token.imageUrl ? `<div class="vtt-token-hover-card"><img class="vtt-token-hover-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false"></div>` : ''}
+                <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
             </div>
         `).join('');
     };
@@ -1474,7 +1498,7 @@
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
         const usingLocalView = isUsingLocalSceneView(vttState, localRole);
-        const baseStageMeta = 'Drag empty space to pan. Scroll to zoom. Right-click a token image to preview it.';
+        const baseStageMeta = 'Drag empty space to pan. Scroll to zoom. Drag tokens freely. Double-click a token to snap it to the grid. Right-click a token image to preview it.';
         applyUIPreferences();
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
@@ -1572,6 +1596,25 @@
                 selectedEntryId = nextEntry.id;
             }
             if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
+        });
+    };
+
+    const snapTokenToGrid = (tokenId) => {
+        const targetId = String(tokenId || '').trim();
+        if (!targetId) return;
+        const token = getTokenById(targetId);
+        if (!token) return;
+        const nextX = snapTokenCoordinate(token.x, token.x);
+        const nextY = snapTokenCoordinate(token.y, token.y);
+        if (token.x === nextX && token.y === nextY) return;
+
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.tokens)) return;
+            const draftToken = scene.tokens.find((entry) => entry && entry.id === targetId);
+            if (!draftToken) return;
+            draftToken.x = nextX;
+            draftToken.y = nextY;
         });
     };
 
@@ -1690,6 +1733,10 @@
         }
         if (action === 'toggle-initiative') {
             toggleUIPreference('initiativeCollapsed');
+            return;
+        }
+        if (action === 'toggle-token-names') {
+            toggleUIPreference('showTokenNames');
             return;
         }
 
@@ -2342,8 +2389,8 @@
             const token = getTokenById(dragState.tokenId);
             if (!token) return;
             const worldPoint = screenToWorld(event.clientX, event.clientY);
-            token.x = Math.max(0, Math.round((worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - dragState.anchorX));
-            token.y = Math.max(0, Math.round((worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - dragState.anchorY));
+            token.x = normalizeTokenCoordinate((worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - dragState.anchorX, token.x);
+            token.y = normalizeTokenCoordinate((worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - dragState.anchorY, token.y);
             renderStage();
             syncDraggedState(false);
             return;
@@ -2429,6 +2476,17 @@
         renderStage();
     };
 
+    const handleStageDoubleClick = (event) => {
+        if (!(event.target instanceof Element)) return;
+        if (!isDM() || dragState) return;
+        const tokenEl = event.target.closest('.vtt-token');
+        if (!tokenEl) return;
+        const tokenId = String(tokenEl.getAttribute('data-token-id') || '').trim();
+        if (!tokenId) return;
+        event.preventDefault();
+        snapTokenToGrid(tokenId);
+    };
+
     const bindEvents = () => {
         bindSyncChipActions();
         document.addEventListener('click', (event) => {
@@ -2441,6 +2499,7 @@
         document.addEventListener('change', handleFieldChange);
         if (npcSearchInputEl) npcSearchInputEl.addEventListener('input', handleNPCSearchInput);
         if (stageEl) stageEl.addEventListener('pointerdown', handleStagePointerDown);
+        if (stageEl) stageEl.addEventListener('dblclick', handleStageDoubleClick);
         if (stageEl) stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
         document.addEventListener('pointermove', handlePointerMove);

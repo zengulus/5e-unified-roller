@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321h">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321l">
 </head>
 
 <body data-player-nav="vtt">
@@ -29,6 +29,7 @@
             <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
             <button class="hero-btn ghost" data-action="zoom-in">+</button>
             <button class="hero-btn ghost" data-action="fit-view">Fit</button>
+            <button class="hero-btn ghost" data-action="toggle-token-names" id="vtt-token-names-toggle" aria-pressed="true">Hide Names</button>
             <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
             <input type="color" id="accent-picker-input" class="vtt-accent-picker-input"
                 data-onchange="setAccentColor(this.value)">
@@ -158,18 +159,18 @@
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
-    <script src="js/store.js?v=20260321b"></script>
+    <script src="js/store.js?v=20260321c"></script>
     <script src="js/player-nav.js?v=20260320c"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
-        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260321b')
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260321c')
             .then(() => window.RTF_VTT_COLLAB || null)
             .catch((err) => {
                 console.warn('VTT collaboration module failed to load', err);
                 return null;
             });
     </script>
-    <script src="js/vtt.js?v=20260321h"></script>
+    <script src="js/vtt.js?v=20260321l"></script>
 </body>
 
 </html>
