@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321r">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321u">
 </head>
 
     <body data-player-nav="vtt">
@@ -187,7 +187,7 @@
                 <div class="vtt-initiative-list" id="vtt-initiative-list"></div>
             </section>
 
-            <section class="vtt-panel" id="vtt-initiative-detail-panel" data-dm-only="1"></section>
+            <div class="vtt-popover vtt-initiative-popover" id="vtt-initiative-detail-panel" hidden></div>
         </aside>
     </main>
 
@@ -205,7 +205,27 @@
             });
     </script>
     <div class="vtt-spawn-ghost" id="vtt-spawn-ghost" hidden></div>
-    <script src="js/vtt.js?v=20260321r"></script>
+    <div class="vtt-modal-backdrop" id="vtt-dm-unlock-modal" hidden>
+        <form class="vtt-modal-card" id="vtt-dm-unlock-form" role="dialog" aria-modal="true"
+            aria-labelledby="vtt-dm-unlock-title">
+            <div class="vtt-modal-head">
+                <h2 id="vtt-dm-unlock-title">Enable DM Mode</h2>
+            </div>
+            <div class="vtt-modal-body">
+                <p class="vtt-detail-note">Enter the DM password to unlock scene editing, token spawning, and GM controls on this browser.</p>
+                <label class="vtt-field">
+                    <span>DM Password</span>
+                    <input type="password" id="vtt-dm-unlock-input" autocomplete="current-password" spellcheck="false">
+                </label>
+                <div class="vtt-modal-error" id="vtt-dm-unlock-error" hidden>That password was not accepted.</div>
+            </div>
+            <div class="vtt-modal-actions">
+                <button class="vtt-inline-btn" type="button" data-action="close-dm-unlock">Cancel</button>
+                <button class="vtt-inline-btn strong" type="submit">Enable DM</button>
+            </div>
+        </form>
+    </div>
+    <script src="js/vtt.js?v=20260321u"></script>
 </body>
 
 </html>

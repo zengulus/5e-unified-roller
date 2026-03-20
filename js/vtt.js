@@ -73,7 +73,9 @@
     let pendingRemoteVTTSnapshot = null;
     let spawnDragState = null;
     let quickSpawnMenuState = null;
+    let initiativeDetailState = null;
     let viewMenuOpen = false;
+    let dmUnlockReturnFocusEl = null;
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
 
@@ -115,6 +117,10 @@
     const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
     const viewMenuEl = document.getElementById('vtt-view-menu');
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
+    const dmUnlockModalEl = document.getElementById('vtt-dm-unlock-modal');
+    const dmUnlockFormEl = document.getElementById('vtt-dm-unlock-form');
+    const dmUnlockInputEl = document.getElementById('vtt-dm-unlock-input');
+    const dmUnlockErrorEl = document.getElementById('vtt-dm-unlock-error');
 
     const escapeHtml = (value = '') => String(value)
         .replace(/&/g, '&amp;')
@@ -249,6 +255,42 @@
     const renderViewMenu = () => {
         if (viewMenuEl) viewMenuEl.hidden = !viewMenuOpen;
         if (viewMenuToggleEl) viewMenuToggleEl.setAttribute('aria-expanded', viewMenuOpen ? 'true' : 'false');
+    };
+
+    const closeInitiativeDetail = () => {
+        if (!initiativeDetailState && (!initiativeDetailPanelEl || initiativeDetailPanelEl.hidden)) return false;
+        initiativeDetailState = null;
+        if (initiativeDetailPanelEl) initiativeDetailPanelEl.hidden = true;
+        return true;
+    };
+
+    const openInitiativeDetail = (entryId, clientX, clientY) => {
+        const targetId = String(entryId || '').trim();
+        if (!targetId || !isDM()) return false;
+        selectedEntryId = targetId;
+        initiativeDetailState = {
+            entryId: targetId,
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
+        };
+        return true;
+    };
+
+    const positionInitiativeDetail = () => {
+        if (!initiativeDetailPanelEl || initiativeDetailPanelEl.hidden || !initiativeDetailState) return;
+        const width = initiativeDetailPanelEl.offsetWidth || 360;
+        const height = initiativeDetailPanelEl.offsetHeight || 420;
+        const margin = 12;
+        let left = initiativeDetailState.clientX + 14;
+        let top = initiativeDetailState.clientY + 14;
+        if (left + width > window.innerWidth - margin) {
+            left = Math.max(margin, initiativeDetailState.clientX - width - 14);
+        }
+        if (top + height > window.innerHeight - margin) {
+            top = Math.max(margin, window.innerHeight - height - margin);
+        }
+        initiativeDetailPanelEl.style.left = `${Math.round(left)}px`;
+        initiativeDetailPanelEl.style.top = `${Math.round(top)}px`;
     };
 
     const applyUIPreferences = () => {
@@ -495,6 +537,9 @@
             if (syncEntryRosterIdentity(entry, linkedPlayer)) mutated = true;
         });
 
+        if (mutated && Array.isArray(state.initiative.entries)) {
+            sortInitiativeEntries(state.initiative.entries);
+        }
         return mutated;
     };
 
@@ -790,6 +835,12 @@
         return scene.tokens.filter((token) => !token.hidden);
     };
 
+    const getVisibleInitiativeEntriesForRole = (state = vttState, role = localRole) => {
+        const entries = state && state.initiative && Array.isArray(state.initiative.entries) ? state.initiative.entries : [];
+        if (role === 'dm') return entries;
+        return entries.filter((entry) => !entry.hidden);
+    };
+
     const getVisibleSceneTokenForEntry = (entry, state = vttState, role = localRole) => {
         if (!entry) return null;
         const scene = getActiveScene(state);
@@ -831,13 +882,13 @@
         ) || null;
     };
 
-    const sortInitiativeEntries = (entries) => {
+    function sortInitiativeEntries(entries) {
         entries.sort((left, right) =>
             (right.total - left.total)
             || (right.tie - left.tie)
             || String(left.name || '').localeCompare(String(right.name || ''))
         );
-    };
+    }
 
     const readSharedVTTSnapshot = () => {
         const store = getStore();
@@ -885,7 +936,7 @@
     const normalizeSelections = () => {
         const scene = getActiveScene();
         const tokens = getVisibleTokensForRole(scene);
-        const entries = vttState && vttState.initiative && Array.isArray(vttState.initiative.entries) ? vttState.initiative.entries : [];
+        const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
         if (isDM() && uiState.sceneViewMode === SCENE_VIEW_LOCAL) {
             const viewedSceneId = getViewedSceneId(vttState, localRole);
             const sharedSceneId = getSharedSceneId(vttState);
@@ -895,9 +946,11 @@
                 persistUIPreferences();
             }
         }
-        if (!entries.some((entry) => entry.id === selectedEntryId)) {
+        if (!visibleEntries.some((entry) => entry.id === selectedEntryId)) {
             const activeEntryId = vttState && vttState.initiative ? String(vttState.initiative.activeEntryId || '').trim() : '';
-            selectedEntryId = entries.some((entry) => entry.id === activeEntryId) ? activeEntryId : '';
+            selectedEntryId = visibleEntries.some((entry) => entry.id === activeEntryId)
+                ? activeEntryId
+                : (visibleEntries[0] ? visibleEntries[0].id : '');
         }
         if (!tokens.some((token) => token.id === selectedTokenId)) {
             selectedTokenId = '';
@@ -1071,6 +1124,7 @@
         if (!stageEl || !isDM()) return false;
         closeNPCSearch();
         closeViewMenu();
+        closeInitiativeDetail();
         const rect = stageEl.getBoundingClientRect();
         quickSpawnMenuState = {
             worldPoint: screenToWorld(clientX, clientY),
@@ -1129,16 +1183,69 @@
             closeNPCSearch();
             quickSpawnMenuState = null;
             clearSpawnDrag();
+            closeInitiativeDetail();
         }
         if (body) body.dataset.vttRole = localRole;
         render();
     };
 
-    const promptForDMMode = () => {
-        const response = window.prompt(`Type ${DM_UNLOCK_PHRASE} to enable DM mode.`, '');
-        if (String(response || '').trim() !== DM_UNLOCK_PHRASE) return false;
+    const isDMUnlockModalOpen = () => !!(dmUnlockModalEl && !dmUnlockModalEl.hidden);
+
+    const closeDMUnlockModal = ({ restoreFocus = true } = {}) => {
+        if (!dmUnlockModalEl) return false;
+        if (dmUnlockInputEl) dmUnlockInputEl.value = '';
+        if (dmUnlockErrorEl) {
+            dmUnlockErrorEl.hidden = true;
+            dmUnlockErrorEl.textContent = 'That password was not accepted.';
+        }
+        if (dmUnlockModalEl.hidden) return false;
+        dmUnlockModalEl.hidden = true;
+        if (restoreFocus && dmUnlockReturnFocusEl && typeof dmUnlockReturnFocusEl.focus === 'function') {
+            dmUnlockReturnFocusEl.focus();
+        }
+        dmUnlockReturnFocusEl = null;
+        return true;
+    };
+
+    const openDMUnlockModal = () => {
+        if (!dmUnlockModalEl || !dmUnlockInputEl) return false;
+        closeNPCSearch();
+        closeViewMenu();
+        closeQuickSpawnMenu();
+        closeInitiativeDetail();
+        clearSpawnDrag();
+        dmUnlockReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : roleToggleEl;
+        dmUnlockModalEl.hidden = false;
+        if (dmUnlockErrorEl) {
+            dmUnlockErrorEl.hidden = true;
+            dmUnlockErrorEl.textContent = 'That password was not accepted.';
+        }
+        dmUnlockInputEl.value = '';
+        window.requestAnimationFrame(() => {
+            dmUnlockInputEl.focus();
+            dmUnlockInputEl.select();
+        });
+        return true;
+    };
+
+    const submitDMUnlockModal = () => {
+        if (!dmUnlockInputEl) return false;
+        if (String(dmUnlockInputEl.value || '').trim() !== DM_UNLOCK_PHRASE) {
+            if (dmUnlockErrorEl) {
+                dmUnlockErrorEl.textContent = 'That password was not accepted.';
+                dmUnlockErrorEl.hidden = false;
+            }
+            dmUnlockInputEl.focus();
+            dmUnlockInputEl.select();
+            return false;
+        }
+        closeDMUnlockModal({ restoreFocus: false });
         setRolePreference('dm');
         return true;
+    };
+
+    const promptForDMMode = () => {
+        return openDMUnlockModal();
     };
 
     const setSyncChipState = ({ state = 'local', label = 'Local', detail = '', retryable = false } = {}) => {
@@ -1781,58 +1888,62 @@
     const renderInitiativeList = () => {
         if (!initiativeListEl || !roundPillEl) return;
         const initiative = vttState && vttState.initiative ? vttState.initiative : { entries: [], round: 1, activeEntryId: '' };
+        const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
         roundPillEl.textContent = `Round ${initiative.round || 1}`;
         if (!Array.isArray(initiative.entries) || !initiative.entries.length) {
             initiativeListEl.innerHTML = '<div class="vtt-empty">No combatants yet. Add a token to initiative or roll from the Character Sheet.</div>';
             return;
         }
+        if (!visibleEntries.length) {
+            initiativeListEl.innerHTML = '<div class="vtt-empty">No visible combatants right now.</div>';
+            return;
+        }
 
-        initiativeListEl.innerHTML = initiative.entries.map((entry) => `
-            <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${entry.id === initiative.activeEntryId ? ' is-active-turn' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
-                <div class="vtt-entry-top">
-                    <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
+        initiativeListEl.innerHTML = visibleEntries.map((entry) => `
+            <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${entry.id === initiative.activeEntryId ? ' is-active-turn' : ''}${entry.hidden ? ' is-hidden' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
+                <div class="vtt-entry-line">
+                    <div class="vtt-entry-primary">
+                        <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
+                        <div class="vtt-entry-meta vtt-entry-meta-inline">
+                            <span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>
+                            ${entry.id === initiative.activeEntryId ? '<span class="vtt-entry-tag">Active Turn</span>' : ''}
+                            ${entry.hidden ? '<span class="vtt-entry-tag">Hidden</span>' : ''}
+                            ${entry.reactionUsed ? '<span class="vtt-entry-tag">Reaction Used</span>' : ''}
+                            ${entry.concentrating ? '<span class="vtt-entry-tag">Concentrating</span>' : ''}
+                        </div>
+                    </div>
                     <div class="vtt-entry-top-actions">
                         <div class="vtt-entry-score">${escapeHtml(String(entry.total ?? 0))}</div>
                         ${isDM() ? `<button class="vtt-inline-btn vtt-inline-btn-icon danger" data-action="remove-entry" data-id="${escapeHtml(entry.id)}" aria-label="Remove from initiative" title="Remove from initiative">X</button>` : ''}
                     </div>
                 </div>
-                <div class="vtt-entry-meta">
-                    <span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>
-                    ${entry.id === initiative.activeEntryId ? '<span class="vtt-entry-tag">Active Turn</span>' : ''}
-                    ${entry.reactionUsed ? '<span class="vtt-entry-tag">Reaction Used</span>' : ''}
-                    ${entry.concentrating ? '<span class="vtt-entry-tag">Concentrating</span>' : ''}
-                </div>
-                ${isDM() ? `
-                    <div class="vtt-entry-actions">
-                        <button class="vtt-inline-btn" data-action="toggle-reaction" data-id="${escapeHtml(entry.id)}">${entry.reactionUsed ? 'Reset Reaction' : 'Use Reaction'}</button>
-                        <button class="vtt-inline-btn" data-action="toggle-concentration" data-id="${escapeHtml(entry.id)}">${entry.concentrating ? 'Drop Concentration' : 'Concentrating'}</button>
-                    </div>
-                ` : ''}
             </div>
         `).join('');
     };
 
     const renderInitiativeDetail = () => {
         if (!initiativeDetailPanelEl) return;
-        const entry = getEntryById(selectedEntryId);
+        const activePopoverId = initiativeDetailState && initiativeDetailState.entryId ? initiativeDetailState.entryId : '';
+        const entry = getEntryById(activePopoverId);
         const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
         const isRosterManagedPlayer = !!rosterPlayer;
-        if (!entry) {
-            initiativeDetailPanelEl.innerHTML = '<div class="vtt-empty">Select an initiative entry to inspect it.</div>';
+        if (!entry || !initiativeDetailState || !isDM()) {
+            initiativeDetailPanelEl.hidden = true;
             return;
         }
-
-        if (!isDM()) {
-            initiativeDetailPanelEl.innerHTML = '<div class="vtt-empty">DM-only initiative details are hidden in Player mode.</div>';
-            return;
-        }
-
         initiativeDetailPanelEl.innerHTML = `
-            <div class="vtt-panel-head">
+            <div class="vtt-panel-head vtt-popover-head">
                 <h2>Entry Details</h2>
-                <span class="vtt-panel-pill">${escapeHtml(entry.name || 'Combatant')}</span>
+                <div class="vtt-panel-head-actions">
+                    <span class="vtt-panel-pill">${escapeHtml(entry.name || 'Combatant')}</span>
+                    <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-initiative-detail" aria-label="Close entry details">X</button>
+                </div>
             </div>
             <div class="vtt-entry-detail-stack">
+                <div class="vtt-entry-actions">
+                    <button class="vtt-inline-btn" data-action="toggle-reaction" data-id="${escapeHtml(entry.id)}">${entry.reactionUsed ? 'Reset Reaction' : 'Use Reaction'}</button>
+                    <button class="vtt-inline-btn" data-action="toggle-concentration" data-id="${escapeHtml(entry.id)}">${entry.concentrating ? 'Drop Concentration' : 'Concentrating'}</button>
+                </div>
                 <div class="vtt-entry-detail-grid">
                     <label class="vtt-field">
                         <span>Name</span>
@@ -1878,6 +1989,8 @@
                 </div>
             </div>
         `;
+        initiativeDetailPanelEl.hidden = false;
+        positionInitiativeDetail();
     };
 
     const renderStage = () => {
@@ -1990,9 +2103,17 @@
             const rosterPlayer = getRosterPlayerForRecord(scene.tokens[idx]);
             if (rosterPlayer) syncTokenRosterIdentity(scene.tokens[idx], rosterPlayer);
             draft.initiative.entries = draft.initiative.entries.map((entry) => {
-                if (entry.linkedTokenId === selectedTokenId) return syncInitiativeEntryFromToken(entry, scene.tokens[idx]);
+                const matchesLinkedToken = entry.linkedTokenId === selectedTokenId;
+                const matchesSourceIdentity = !!(
+                    scene.tokens[idx].sourceType
+                    && scene.tokens[idx].sourceId
+                    && entry.sourceType === scene.tokens[idx].sourceType
+                    && entry.sourceId === scene.tokens[idx].sourceId
+                );
+                if (matchesLinkedToken || matchesSourceIdentity) return syncInitiativeEntryFromToken(entry, scene.tokens[idx]);
                 return entry;
             });
+            sortInitiativeEntries(draft.initiative.entries);
         });
     };
 
@@ -2023,6 +2144,7 @@
                 linkedToken.passivePerception = entries[idx].passivePerception;
                 linkedToken.defences = normalizeDefences(entries[idx].defences);
             }
+            sortInitiativeEntries(entries);
         });
     };
 
@@ -2086,9 +2208,9 @@
             } else {
                 const nextEntry = buildInitiativeEntryFromToken(token);
                 entries.push(nextEntry);
-                sortInitiativeEntries(entries);
                 selectedEntryId = nextEntry.id;
             }
+            sortInitiativeEntries(entries);
             if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
         });
     };
@@ -2231,6 +2353,7 @@
                 draft.initiative.activeEntryId = entries[idx] ? entries[idx].id : (entries[idx - 1] ? entries[idx - 1].id : '');
             }
             if (selectedEntryId === removed.id) selectedEntryId = draft.initiative.activeEntryId || '';
+            if (initiativeDetailState && initiativeDetailState.entryId === removed.id) initiativeDetailState = null;
         });
     };
 
@@ -2245,6 +2368,14 @@
             } else {
                 promptForDMMode();
             }
+            return;
+        }
+        if (action === 'close-dm-unlock') {
+            closeDMUnlockModal();
+            return;
+        }
+        if (action === 'close-initiative-detail') {
+            closeInitiativeDetail();
             return;
         }
         if (action === 'toggle-view-menu') {
@@ -2565,6 +2696,9 @@
 
         if (action === 'select-entry') {
             selectedEntryId = id;
+            if (initiativeDetailState && initiativeDetailState.entryId !== id) {
+                initiativeDetailState = null;
+            }
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
@@ -2882,7 +3016,13 @@
             });
             return;
         }
-        if (isVTTCollabReady() || dragState) return;
+        if (isVTTCollabReady() || dragState) {
+            if (syncRosterLinkedPlayerPresentation(vttState)) {
+                normalizeSelections();
+                render();
+            }
+            return;
+        }
         vttState = readSharedVTTSnapshot() || deepClone(store.getVTTState(activeCaseId));
         normalizeSelections();
         render();
@@ -3046,6 +3186,10 @@
             viewMenuOpen = false;
             needsRender = true;
         }
+        if (initiativeDetailState && !event.target.closest('#vtt-initiative-detail-panel') && !event.target.closest('.vtt-entry')) {
+            initiativeDetailState = null;
+            needsRender = true;
+        }
 
         if (previewTokenId && !event.target.closest('.vtt-token')) {
             previewTokenId = '';
@@ -3103,7 +3247,28 @@
         renderStage();
     };
 
+    const handleInitiativeContextMenu = (event) => {
+        if (!(event.target instanceof Element)) return;
+        if (event.target.closest('#vtt-initiative-detail-panel')) return;
+        const entryEl = event.target.closest('.vtt-entry');
+        if (!entryEl) return;
+        if (!isDM()) return;
+        const entryId = String(entryEl.getAttribute('data-id') || entryEl.getAttribute('data-entry-id') || '').trim();
+        if (!entryId) return;
+        event.preventDefault();
+        openInitiativeDetail(entryId, event.clientX, event.clientY);
+        renderInitiativeList();
+        renderInitiativeDetail();
+    };
+
     const handleDocumentKeyDown = (event) => {
+        if (isDMUnlockModalOpen()) {
+            if (event.key === 'Escape') {
+                closeDMUnlockModal();
+                event.preventDefault();
+            }
+            return;
+        }
         const target = event.target;
         if (
             target instanceof HTMLInputElement
@@ -3117,13 +3282,14 @@
             const closedMenu = closeQuickSpawnMenu();
             const closedViewMenu = closeViewMenu();
             const clearedSpawn = clearSpawnDrag();
+            const closedInitiativeDetail = closeInitiativeDetail();
             if (previewTokenId) {
                 previewTokenId = '';
                 renderStage();
-            } else if (closedMenu || closedViewMenu || clearedSpawn) {
+            } else if (closedMenu || closedViewMenu || clearedSpawn || closedInitiativeDetail) {
                 render();
             }
-            if (closedMenu || closedViewMenu || clearedSpawn) event.preventDefault();
+            if (closedMenu || closedViewMenu || clearedSpawn || closedInitiativeDetail) event.preventDefault();
             return;
         }
         if (!selectedTokenId || event.defaultPrevented) return;
@@ -3154,10 +3320,17 @@
         document.addEventListener('keydown', handleDocumentKeyDown);
         document.addEventListener('input', handleFieldChange);
         document.addEventListener('change', handleFieldChange);
+        if (dmUnlockFormEl) {
+            dmUnlockFormEl.addEventListener('submit', (event) => {
+                event.preventDefault();
+                submitDMUnlockModal();
+            });
+        }
         if (npcSearchInputEl) npcSearchInputEl.addEventListener('input', handleNPCSearchInput);
         if (stageEl) stageEl.addEventListener('pointerdown', handleStagePointerDown);
         if (stageEl) stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
+        if (initiativeListEl) initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerUp);
@@ -3167,11 +3340,13 @@
             if (fitViewOnNextMapLoad) {
                 fitViewToWorld();
                 renderQuickSpawnMenu();
+                positionInitiativeDetail();
                 return;
             }
             applyWorldTransform();
             renderQuickSpawnMenu();
             renderSpawnGhost();
+            positionInitiativeDetail();
         });
     };
 
