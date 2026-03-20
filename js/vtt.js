@@ -117,6 +117,7 @@
     const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
     const viewMenuEl = document.getElementById('vtt-view-menu');
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
+    const sidebarEl = document.getElementById('vtt-settings-panel');
     const dmUnlockModalEl = document.getElementById('vtt-dm-unlock-modal');
     const dmUnlockFormEl = document.getElementById('vtt-dm-unlock-form');
     const dmUnlockInputEl = document.getElementById('vtt-dm-unlock-input');
@@ -255,6 +256,37 @@
     const renderViewMenu = () => {
         if (viewMenuEl) viewMenuEl.hidden = !viewMenuOpen;
         if (viewMenuToggleEl) viewMenuToggleEl.setAttribute('aria-expanded', viewMenuOpen ? 'true' : 'false');
+    };
+
+    const positionNPCSearchPopover = () => {
+        if (!npcSearchToggleEl || !npcSearchPopoverEl || npcSearchPopoverEl.hidden) return;
+        const margin = 12;
+        const gap = 8;
+        const toggleRect = npcSearchToggleEl.getBoundingClientRect();
+        const viewportWidth = Math.max(0, window.innerWidth || document.documentElement.clientWidth || 0);
+        const viewportHeight = Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
+        const maxWidth = Math.max(0, viewportWidth - margin * 2);
+        const maxHeight = Math.max(0, viewportHeight - margin * 2);
+
+        npcSearchPopoverEl.style.right = 'auto';
+        npcSearchPopoverEl.style.maxWidth = `${Math.round(maxWidth)}px`;
+        npcSearchPopoverEl.style.maxHeight = `${Math.round(maxHeight)}px`;
+
+        const popoverWidth = Math.max(0, Math.min(npcSearchPopoverEl.offsetWidth || maxWidth, maxWidth));
+        const popoverHeight = npcSearchPopoverEl.offsetHeight || 0;
+        let left = toggleRect.right - popoverWidth;
+        left = clamp(left, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
+
+        let top = toggleRect.bottom + gap;
+        if (top + popoverHeight > viewportHeight - margin) {
+            const aboveTop = toggleRect.top - popoverHeight - gap;
+            top = aboveTop >= margin
+                ? aboveTop
+                : Math.max(margin, viewportHeight - popoverHeight - margin);
+        }
+
+        npcSearchPopoverEl.style.left = `${Math.round(left)}px`;
+        npcSearchPopoverEl.style.top = `${Math.round(top)}px`;
     };
 
     const closeInitiativeDetail = () => {
@@ -1658,6 +1690,7 @@
                     </button>
                 `).join('')
                 : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`;
+        positionNPCSearchPopover();
     };
 
     const renderQuickSpawnMenu = () => {
@@ -3173,7 +3206,7 @@
         }
         let needsRender = false;
 
-        if (npcSearchOpen && !event.target.closest('.vtt-popover-anchor')) {
+        if (npcSearchOpen && !event.target.closest('.vtt-popover-anchor') && !event.target.closest('#vtt-npc-search-popover')) {
             closeNPCSearch();
             needsRender = true;
         }
@@ -3340,14 +3373,18 @@
             if (fitViewOnNextMapLoad) {
                 fitViewToWorld();
                 renderQuickSpawnMenu();
+                positionNPCSearchPopover();
                 positionInitiativeDetail();
                 return;
             }
             applyWorldTransform();
             renderQuickSpawnMenu();
             renderSpawnGhost();
+            positionNPCSearchPopover();
             positionInitiativeDetail();
         });
+        window.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
+        if (sidebarEl) sidebarEl.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
     };
 
     const init = () => {

@@ -122,13 +122,6 @@
                         <div class="vtt-popover-anchor">
                             <button class="vtt-chip-btn" data-action="toggle-npc-search" id="vtt-npc-search-toggle"
                                 aria-controls="vtt-npc-search-popover" aria-expanded="false">NPC Search</button>
-                            <div class="vtt-popover" id="vtt-npc-search-popover" hidden>
-                                <label class="vtt-field vtt-field-tight">
-                                    <span>Search NPCs</span>
-                                    <input type="text" id="vtt-npc-search-input" placeholder="Name or guild">
-                                </label>
-                                <div class="vtt-popover-results vtt-roster-list" id="vtt-npc-search-list"></div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -190,6 +183,14 @@
             <div class="vtt-popover vtt-initiative-popover" id="vtt-initiative-detail-panel" hidden></div>
         </aside>
     </main>
+
+    <div class="vtt-popover vtt-floating-popover" id="vtt-npc-search-popover" hidden>
+        <label class="vtt-field vtt-field-tight">
+            <span>Search NPCs</span>
+            <input type="text" id="vtt-npc-search-input" placeholder="Name or guild">
+        </label>
+        <div class="vtt-popover-results vtt-roster-list" id="vtt-npc-search-list"></div>
+    </div>
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
