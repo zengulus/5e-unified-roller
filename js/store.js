@@ -103,6 +103,31 @@
         nodes: [],
         connections: []
     };
+    function createDefaultVTTState() {
+        return {
+            activeSceneId: 'scene_1',
+            scenes: [
+                {
+                    id: 'scene_1',
+                    name: 'Scene 1',
+                    mapImageUrl: '',
+                    grid: {
+                        cellPx: 70,
+                        offsetX: 0,
+                        offsetY: 0,
+                        cellDistance: 5
+                    },
+                    tokens: [],
+                    fog: []
+                }
+            ],
+            initiative: {
+                entries: [],
+                round: 1,
+                activeEntryId: ''
+            }
+        };
+    }
     const VTT_TOKEN_SIDES = new Set(['player', 'ally', 'enemy', 'neutral']);
     const VTT_DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const DEFAULT_CAMPAIGN_META_BOARD_STATE = {
@@ -524,25 +549,6 @@
             conditions: sanitizeVTTConditions(source.conditions)
         };
     };
-
-    const createDefaultVTTState = () => ({
-        activeSceneId: 'scene_1',
-        scenes: [
-            {
-                id: 'scene_1',
-                name: 'Scene 1',
-                mapImageUrl: '',
-                grid: sanitizeVTTGrid(null),
-                tokens: [],
-                fog: []
-            }
-        ],
-        initiative: {
-            entries: [],
-            round: 1,
-            activeEntryId: ''
-        }
-    });
 
     const sanitizeVTTState = (value) => {
         const base = createDefaultVTTState();
