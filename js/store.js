@@ -10,6 +10,7 @@
     const SYNC_CONFLICT_EVENT = 'rtf-sync-conflict';
     const STORE_UPDATED_EVENT = 'rtf-store-updated';
     const LEAD_STORAGE_KEY = 'rtf_lead_queue_v1';
+    const VTT_LOCAL_PREFS_KEY = 'rtf_vtt_local_prefs_v1';
     const PREP_PROCEDURE_STATE_KEY = 'rtf_prep_procedure_state_v1';
     const CLOCKS_STORAGE_KEY = 'rtf_clocks_page_v1';
     const HEAT_SYNC_KEY = 'rtf_timeline_auto_heat';
@@ -156,6 +157,7 @@
         };
     }
     const VTT_TOKEN_SIDES = new Set(['player', 'ally', 'enemy', 'neutral']);
+    const VTT_TOKEN_MOVE_ACCESS = new Set(['dm', 'player']);
     const VTT_DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const DEFAULT_CAMPAIGN_META_BOARD_STATE = {
         name: 'CAMPAIGN META BOARD',
@@ -458,13 +460,39 @@
         return normalized;
     };
 
+    const sanitizePlayerHp = (value, fallback = '10') => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return Math.max(0, Math.min(999999, Math.round(value)));
+        }
+        return toTrimmedString(value, fallback, 40);
+    };
+
+    const sanitizePlayer = (player, idx = 0) => {
+        const source = player && typeof player === 'object' ? player : {};
+        const fallbackId = buildEntityId('player', idx);
+        return {
+            id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
+            name: toTrimmedString(source.name || 'New Agent', 'New Agent', 160),
+            ac: Math.max(0, Math.min(999, Math.round(toNumber(source.ac, 10)))),
+            init: Math.max(-99, Math.min(999, Math.round(toNumber(source.init, 0)))),
+            hp: sanitizePlayerHp(source.hp, '10'),
+            pp: Math.max(0, Math.min(999, Math.round(toNumber(source.pp, 10)))),
+            dc: Math.max(0, Math.min(999, Math.round(toNumber(source.dc, 10)))),
+            dp: Math.max(0, Math.min(4, Math.round(toNumber(source.dp, 2)))),
+            projectClock: Math.max(0, Math.min(6, Math.round(toNumber(source.projectClock, 0)))),
+            projectName: toTrimmedString(source.projectName, '', 240),
+            projectReward: toTrimmedString(source.projectReward, '', 240),
+            imageUrl: toSharedVTTMediaUrl(source.imageUrl)
+        };
+    };
+
     const sanitizeCampaign = (campaign) => {
         const source = campaign && typeof campaign === 'object' ? campaign : {};
         return {
             rep: sanitizeRep(source.rep),
             heat: toNumber(source.heat, 0),
             cognitiveRisk: toNumber(source.cognitiveRisk, 0),
-            players: Array.isArray(source.players) ? source.players : [],
+            players: Array.isArray(source.players) ? source.players.map((entry, idx) => sanitizePlayer(entry, idx)) : [],
             npcs: Array.isArray(source.npcs) ? source.npcs : [],
             locations: Array.isArray(source.locations) ? source.locations : [],
             requisitions: Array.isArray(source.requisitions) ? source.requisitions : [],
@@ -524,10 +552,16 @@
         return Math.max(0, Math.round(parsed * VTT_TOKEN_COORD_PRECISION) / VTT_TOKEN_COORD_PRECISION);
     };
 
+    const sanitizeVTTTokenMoveAccess = (value, fallback = 'dm') => {
+        const clean = toTrimmedString(value, fallback, 20).trim().toLowerCase();
+        return VTT_TOKEN_MOVE_ACCESS.has(clean) ? clean : (fallback === 'player' ? 'player' : 'dm');
+    };
+
     const sanitizeVTTToken = (token, idx = 0) => {
         const source = token && typeof token === 'object' ? token : {};
         const id = toTrimmedString(source.id, `token_${idx + 1}`, 120).trim() || `token_${idx + 1}`;
         const cleanSide = toTrimmedString(source.side, 'neutral', 20).trim().toLowerCase();
+        const cleanSourceType = toTrimmedString(source.sourceType, '', 40).trim();
         const hasHpCurrent = source.hpCurrent !== null && source.hpCurrent !== undefined && source.hpCurrent !== '';
         const hasHpMax = source.hpMax !== null && source.hpMax !== undefined && source.hpMax !== '';
         const hasAc = source.ac !== null && source.ac !== undefined && source.ac !== '';
@@ -542,8 +576,9 @@
             y: sanitizeVTTTokenCoordinate(source.y, 0),
             w: Math.max(1, Math.round(toNumber(source.w, 1))),
             h: Math.max(1, Math.round(toNumber(source.h, 1))),
-            sourceType: toTrimmedString(source.sourceType, '', 40).trim(),
+            sourceType: cleanSourceType,
             sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
+            moveAccess: sanitizeVTTTokenMoveAccess(source.moveAccess, cleanSourceType === 'player' ? 'player' : 'dm'),
             hpCurrent: hasHpCurrent ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpCurrent, 0)))) : null,
             hpMax: hasHpMax ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpMax, 0)))) : null,
             ac: hasAc ? Math.max(0, Math.min(99, Math.round(toNumber(source.ac, 0)))) : null,
@@ -752,6 +787,29 @@
         const raw = typeof value === 'string' ? value.trim() : '';
         if (!raw) return '';
         return sanitizeCaseId(raw, 'case_primary');
+    };
+    const sanitizeVTTRolePreference = (value) => value === 'dm' ? 'dm' : 'player';
+    const sanitizeVTTLocalPrefsEntry = (source) => {
+        const base = source && typeof source === 'object' ? source : {};
+        return {
+            role: sanitizeVTTRolePreference(base.role)
+        };
+    };
+    const parseVTTLocalPrefsMap = () => {
+        try {
+            const raw = localStorage.getItem(VTT_LOCAL_PREFS_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            if (!parsed || typeof parsed !== 'object') return {};
+            const clean = {};
+            Object.keys(parsed).forEach((caseId) => {
+                const safeCaseId = sanitizeCaseIdOptional(caseId);
+                if (!safeCaseId) return;
+                clean[safeCaseId] = sanitizeVTTLocalPrefsEntry(parsed[caseId]);
+            });
+            return clean;
+        } catch (err) {
+            return {};
+        }
     };
     const normalizeCampaignScopeCaseState = (scope, preferredActiveCaseId = '') => {
         const source = scope && typeof scope === 'object' ? scope : {};
@@ -7000,25 +7058,21 @@
         addPlayer(player) {
             const source = player && typeof player === 'object' ? player : {};
             const generatedId = 'player_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5);
-            const rawHp = source.hp;
-            const safeHp = (typeof rawHp === 'number' && Number.isFinite(rawHp))
-                ? Math.max(0, Math.min(999999, Math.round(rawHp)))
-                : toTrimmedString(rawHp, '10', 40);
-
             const playerId = toTrimmedString(source.id || generatedId, generatedId, 80);
-            this.state.campaign.players.push({
+            this.state.campaign.players.push(sanitizePlayer({
                 id: playerId,
                 name: toTrimmedString(source.name || 'New Agent', 'New Agent', 160),
                 ac: Math.max(0, Math.min(999, Math.round(toNumber(source.ac, 10)))),
                 init: Math.max(-99, Math.min(999, Math.round(toNumber(source.init, 0)))),
-                hp: safeHp,
+                hp: sanitizePlayerHp(source.hp, '10'),
                 pp: Math.max(0, Math.min(999, Math.round(toNumber(source.pp, 10)))),
                 dc: Math.max(0, Math.min(999, Math.round(toNumber(source.dc, 10)))),
                 dp: Math.max(0, Math.min(4, Math.round(toNumber(source.dp, 2)))),
                 projectClock: Math.max(0, Math.min(6, Math.round(toNumber(source.projectClock, 0)))),
                 projectName: toTrimmedString(source.projectName, '', 240),
-                projectReward: toTrimmedString(source.projectReward, '', 240)
-            });
+                projectReward: toTrimmedString(source.projectReward, '', 240),
+                imageUrl: toSharedVTTMediaUrl(source.imageUrl)
+            }, this.state.campaign.players.length));
             const scope = buildPlayerEntityScope(playerId);
             this.save({
                 scope: [
@@ -7611,6 +7665,31 @@
             if (!entry) return sanitizeVTTState(null);
             entry.vtt = sanitizeVTTState(entry.vtt);
             return entry.vtt;
+        }
+
+        getVTTLocalPrefsStorageKey() {
+            return VTT_LOCAL_PREFS_KEY;
+        }
+
+        getVTTLocalRole(caseId = null) {
+            const targetCaseId = sanitizeCaseId(caseId, this.getActiveCaseId());
+            const prefsMap = parseVTTLocalPrefsMap();
+            const entry = prefsMap[targetCaseId];
+            return sanitizeVTTRolePreference(entry && entry.role);
+        }
+
+        setVTTLocalRole(role, caseId = null) {
+            const targetCaseId = sanitizeCaseId(caseId, this.getActiveCaseId());
+            const prefsMap = parseVTTLocalPrefsMap();
+            const next = sanitizeVTTLocalPrefsEntry({ role });
+            if (next.role === 'player') delete prefsMap[targetCaseId];
+            else prefsMap[targetCaseId] = next;
+            try {
+                localStorage.setItem(VTT_LOCAL_PREFS_KEY, JSON.stringify(prefsMap));
+            } catch (err) {
+                console.warn('RTF_STORE: Failed to persist local VTT role preference', err);
+            }
+            return next.role;
         }
 
         normalizeVTTStateSnapshot(vttState) {

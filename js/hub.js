@@ -304,6 +304,7 @@ function addPlayer() {
     const player = {
         id: 'player_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5),
         name: "New Recruit",
+        imageUrl: "",
         dp: 2,
         projectClock: 0,
         projectName: "",
@@ -382,7 +383,7 @@ function updatePlayer(idx, field, val) {
     const campaign = getCampaign();
     if (!campaign || !Array.isArray(campaign.players)) return;
     if (!campaign.players[idx]) return;
-    if (!['name', 'projectName', 'projectReward'].includes(field)) return;
+    if (!['name', 'projectName', 'projectReward', 'imageUrl'].includes(field)) return;
     campaign.players[idx][field] = val;
     save(buildPlayerScope(campaign.players[idx].id));
 }
@@ -438,6 +439,7 @@ function render() {
     const rewardOptions = projectRewards.map((reward) => `<option value="${escapeHtml(reward)}"></option>`).join('');
     const rosterMarkup = players.map((p, i) => {
         const safeName = escapeHtml(p.name || '');
+        const safeImageUrl = escapeHtml(p.imageUrl || '');
         const safeProjectName = escapeHtml(p.projectName || '');
         const safeProjectReward = escapeHtml(p.projectReward || '');
         const safeDP = Number.isFinite(Number(p.dp)) ? Number(p.dp) : 0;
@@ -446,6 +448,8 @@ function render() {
             <div class="player-row">
                 <div>
                     <input type="text" value="${safeName}" data-onchange="updatePlayer(${i}, 'name', this.value)">
+                    <span class="mini-label hub-player-image-label">Token Image URL</span>
+                    <input type="text" class="hub-player-image-input" placeholder="https://..." value="${safeImageUrl}" data-onchange="updatePlayer(${i}, 'imageUrl', this.value)">
                     <div class="dp-counter hub-dp-counter">${safeDP} DP</div>
                     <div class="hub-player-dp-actions">
                         <button class="btn" data-onclick="modDP(${i},-1)">Spend</button>

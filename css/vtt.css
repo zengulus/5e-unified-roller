@@ -40,6 +40,16 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     justify-content: flex-end;
 }
 
+.vtt-topbar-menu .hero-btn {
+    min-width: 0;
+}
+
+.vtt-topbar-menu .vtt-popover {
+    top: calc(100% + 0.55rem);
+    right: 0;
+    width: min(280px, calc(100vw - 2rem));
+}
+
 .vtt-topbar .hero-btn {
     min-height: 38px;
     padding: 0.55rem 0.9rem;
@@ -140,6 +150,10 @@ body[data-initiative-collapsed="1"] .vtt-initiative-panel {
 }
 
 body[data-vtt-role="player"] #vtt-settings-toggle {
+    display: none;
+}
+
+body[data-vtt-role="player"] [data-vtt-menu-dm-only="1"] {
     display: none;
 }
 
@@ -509,6 +523,8 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
     width: 100%;
     border-radius: 1rem;
     text-align: left;
+    cursor: grab;
+    touch-action: none;
 }
 
 .vtt-token-spawn-name {
@@ -523,6 +539,10 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
     color: rgba(220, 229, 241, 0.72);
     min-width: 0;
     white-space: nowrap;
+}
+
+.vtt-token-spawn:active {
+    cursor: grabbing;
 }
 
 .vtt-popover-anchor {
@@ -555,6 +575,91 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
     overflow: auto;
 }
 
+.vtt-view-menu {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.vtt-menu-section {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.vtt-menu-title {
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(220, 229, 241, 0.68);
+}
+
+.vtt-menu-list {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.vtt-menu-list .vtt-chip-btn {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    justify-content: space-between;
+    border-radius: 1rem;
+    text-align: left;
+}
+
+.vtt-quick-spawn-menu {
+    right: auto;
+    width: min(320px, calc(100% - 1.25rem));
+    max-height: min(24rem, calc(100% - 1.25rem));
+    overflow: auto;
+    z-index: 14;
+}
+
+.vtt-quick-spawn-title {
+    margin-bottom: 0.7rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(220, 229, 241, 0.72);
+}
+
+.vtt-quick-spawn-list {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.vtt-spawn-ghost {
+    position: fixed;
+    z-index: 42;
+    min-width: 11rem;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 1rem;
+    background: rgba(7, 11, 19, 0.96);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.42);
+    pointer-events: none;
+    transform: translate3d(0, 0, 0);
+}
+
+.vtt-spawn-ghost[hidden] {
+    display: none;
+}
+
+.vtt-spawn-ghost[data-over-stage="true"] {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.48);
+    background: rgba(8, 16, 22, 0.98);
+}
+
+.vtt-spawn-ghost-name {
+    font-weight: 700;
+    color: #f6fbff;
+}
+
+.vtt-spawn-ghost-meta {
+    margin-top: 0.18rem;
+    font-size: 0.74rem;
+    color: rgba(220, 229, 241, 0.7);
+}
+
 .vtt-stage-toolbar {
     display: flex;
     align-items: center;
@@ -585,6 +690,10 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
     cursor: grab;
 }
 
+body[data-spawn-dragging="1"] .vtt-stage {
+    cursor: copy;
+}
+
 .vtt-stage.is-panning {
     cursor: grabbing;
 }
@@ -597,6 +706,10 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
         linear-gradient(to right, rgba(255, 255, 255, 0.16) 1px, transparent 1px),
         linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 1px, transparent 1px);
     z-index: 2;
+}
+
+body[data-grid-hidden="1"] .vtt-stage-grid {
+    display: none;
 }
 
 .vtt-map-world {
@@ -892,6 +1005,12 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     gap: 0.75rem;
 }
 
+.vtt-entry-top-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
 .vtt-entry-name {
     font-weight: 700;
 }
@@ -919,6 +1038,12 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
 
 .vtt-entry-actions {
     justify-content: flex-end;
+}
+
+.vtt-inline-btn-icon {
+    min-width: 2.1rem;
+    padding: 0.5rem 0.6rem;
+    text-align: center;
 }
 
 .vtt-entry-input {

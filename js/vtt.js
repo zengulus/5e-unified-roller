@@ -1,5 +1,5 @@
 (function () {
-    const ROLE_STORAGE_PREFIX = 'rtf_vtt_role_';
+    const DM_UNLOCK_PHRASE = 'setDMMode';
     const UI_PREFS_STORAGE_PREFIX = 'rtf_vtt_ui_';
     const PROCESSED_INIT_STORAGE_PREFIX = 'rtf_vtt_processed_init_';
     const TRACKER_INITIATIVE_QUEUE_KEY = 'rtf_tracker_initiative_queue';
@@ -8,6 +8,7 @@
     const DRAG_SYNC_INTERVAL_MS = 120;
     const TOKEN_DOUBLE_CLICK_MS = 320;
     const SIDE_OPTIONS = ['player', 'ally', 'enemy', 'neutral'];
+    const MOVE_ACCESS_OPTIONS = ['dm', 'player'];
     const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
@@ -43,13 +44,14 @@
     let vttState = null;
     let selectedTokenId = '';
     let selectedEntryId = '';
-    let localRole = 'dm';
+    let localRole = 'player';
     let uiState = {
         settingsCollapsed: false,
         initiativeCollapsed: false,
         scenePanelCollapsed: false,
         spawnPanelCollapsed: false,
         inspectorPanelCollapsed: false,
+        showGrid: true,
         showTokenNames: true,
         sceneViewMode: SCENE_VIEW_SHARED,
         localSceneId: ''
@@ -69,6 +71,9 @@
     let vttCollabSession = null;
     let vttCollabInitPromise = null;
     let pendingRemoteVTTSnapshot = null;
+    let spawnDragState = null;
+    let quickSpawnMenuState = null;
+    let viewMenuOpen = false;
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
 
@@ -105,6 +110,11 @@
     const npcSearchPopoverEl = document.getElementById('vtt-npc-search-popover');
     const npcSearchInputEl = document.getElementById('vtt-npc-search-input');
     const npcSearchListEl = document.getElementById('vtt-npc-search-list');
+    const quickSpawnMenuEl = document.getElementById('vtt-quick-spawn-menu');
+    const spawnGhostEl = document.getElementById('vtt-spawn-ghost');
+    const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
+    const viewMenuEl = document.getElementById('vtt-view-menu');
+    const gridToggleEl = document.getElementById('vtt-grid-toggle');
 
     const escapeHtml = (value = '') => String(value)
         .replace(/&/g, '&amp;')
@@ -148,6 +158,11 @@
         } catch (err) {
             return '';
         }
+    };
+    const toSharedTokenImageUrl = (value) => {
+        const raw = toImageUrl(value);
+        if (!raw) return '';
+        return /^https:\/\//i.test(raw) || /^data:image\//i.test(raw) ? raw : '';
     };
     const buildId = (prefix) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const buildInitials = (label = '') => {
@@ -216,14 +231,24 @@
         }
         return `vtt:case:${String(caseId || 'case_primary').trim() || 'case_primary'}`;
     };
-    const getRoleStorageKey = () => `${ROLE_STORAGE_PREFIX}${getActiveCaseId()}`;
     const getUIPrefsStorageKey = () => `${UI_PREFS_STORAGE_PREFIX}${getActiveCaseId()}`;
     const getProcessedInitStorageKey = () => `${PROCESSED_INIT_STORAGE_PREFIX}${getActiveCaseId()}`;
+    const getRolePrefsStorageKey = () => {
+        const store = getStore();
+        return store && typeof store.getVTTLocalPrefsStorageKey === 'function'
+            ? String(store.getVTTLocalPrefsStorageKey() || '').trim()
+            : '';
+    };
     const isVTTCollabReady = () => !!(vttCollabSession && typeof vttCollabSession.isActive === 'function' && vttCollabSession.isActive());
     const isDM = () => localRole === 'dm';
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
         npcSearchOpen = false;
         if (clearQuery) npcSearchQuery = '';
+    };
+
+    const renderViewMenu = () => {
+        if (viewMenuEl) viewMenuEl.hidden = !viewMenuOpen;
+        if (viewMenuToggleEl) viewMenuToggleEl.setAttribute('aria-expanded', viewMenuOpen ? 'true' : 'false');
     };
 
     const applyUIPreferences = () => {
@@ -233,32 +258,41 @@
             body.dataset.scenePanelCollapsed = uiState.scenePanelCollapsed ? '1' : '0';
             body.dataset.spawnPanelCollapsed = uiState.spawnPanelCollapsed ? '1' : '0';
             body.dataset.inspectorPanelCollapsed = uiState.inspectorPanelCollapsed ? '1' : '0';
+            body.dataset.gridHidden = uiState.showGrid ? '0' : '1';
             body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
         }
         if (settingsToggleEl) {
-            settingsToggleEl.textContent = uiState.settingsCollapsed ? 'Show Settings' : 'Hide Settings';
-            settingsToggleEl.setAttribute('aria-expanded', uiState.settingsCollapsed ? 'false' : 'true');
+            settingsToggleEl.textContent = `Sidebar: ${uiState.settingsCollapsed ? 'Off' : 'On'}`;
+            settingsToggleEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
+            settingsToggleEl.disabled = !isDM();
         }
         if (initiativeToggleEl) {
-            initiativeToggleEl.textContent = uiState.initiativeCollapsed ? 'Show Initiative' : 'Hide Initiative';
-            initiativeToggleEl.setAttribute('aria-expanded', uiState.initiativeCollapsed ? 'false' : 'true');
+            initiativeToggleEl.textContent = `Initiative: ${uiState.initiativeCollapsed ? 'Off' : 'On'}`;
+            initiativeToggleEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (scenePanelToggleEl) {
-            scenePanelToggleEl.textContent = uiState.scenePanelCollapsed ? 'Show' : 'Hide';
-            scenePanelToggleEl.setAttribute('aria-expanded', uiState.scenePanelCollapsed ? 'false' : 'true');
+            scenePanelToggleEl.textContent = `Scene Panel: ${uiState.scenePanelCollapsed ? 'Off' : 'On'}`;
+            scenePanelToggleEl.setAttribute('aria-pressed', uiState.scenePanelCollapsed ? 'false' : 'true');
+            scenePanelToggleEl.disabled = !isDM();
         }
         if (spawnPanelToggleEl) {
-            spawnPanelToggleEl.textContent = uiState.spawnPanelCollapsed ? 'Show' : 'Hide';
-            spawnPanelToggleEl.setAttribute('aria-expanded', uiState.spawnPanelCollapsed ? 'false' : 'true');
+            spawnPanelToggleEl.textContent = `Spawn Panel: ${uiState.spawnPanelCollapsed ? 'Off' : 'On'}`;
+            spawnPanelToggleEl.setAttribute('aria-pressed', uiState.spawnPanelCollapsed ? 'false' : 'true');
+            spawnPanelToggleEl.disabled = !isDM();
         }
         if (inspectorPanelToggleEl) {
-            inspectorPanelToggleEl.textContent = uiState.inspectorPanelCollapsed ? 'Show' : 'Hide';
-            inspectorPanelToggleEl.setAttribute('aria-expanded', uiState.inspectorPanelCollapsed ? 'false' : 'true');
+            inspectorPanelToggleEl.textContent = `Inspector: ${uiState.inspectorPanelCollapsed ? 'Off' : 'On'}`;
+            inspectorPanelToggleEl.setAttribute('aria-pressed', uiState.inspectorPanelCollapsed ? 'false' : 'true');
         }
         if (tokenNamesToggleEl) {
-            tokenNamesToggleEl.textContent = uiState.showTokenNames ? 'Hide Names' : 'Show Names';
+            tokenNamesToggleEl.textContent = `Token Names: ${uiState.showTokenNames ? 'On' : 'Off'}`;
             tokenNamesToggleEl.setAttribute('aria-pressed', uiState.showTokenNames ? 'true' : 'false');
         }
+        if (gridToggleEl) {
+            gridToggleEl.textContent = `Grid: ${uiState.showGrid ? 'On' : 'Off'}`;
+            gridToggleEl.setAttribute('aria-pressed', uiState.showGrid ? 'true' : 'false');
+        }
+        renderViewMenu();
     };
 
     const loadUIPreferences = () => {
@@ -271,6 +305,7 @@
                 scenePanelCollapsed: !!(parsed && parsed.scenePanelCollapsed),
                 spawnPanelCollapsed: !!(parsed && parsed.spawnPanelCollapsed),
                 inspectorPanelCollapsed: !!(parsed && parsed.inspectorPanelCollapsed),
+                showGrid: parsed && parsed.showGrid !== undefined ? !!parsed.showGrid : true,
                 showTokenNames: parsed && parsed.showTokenNames !== undefined ? !!parsed.showTokenNames : true,
                 sceneViewMode: parsed && parsed.sceneViewMode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED,
                 localSceneId: String(parsed && parsed.localSceneId || '').trim()
@@ -282,6 +317,7 @@
                 scenePanelCollapsed: false,
                 spawnPanelCollapsed: false,
                 inspectorPanelCollapsed: false,
+                showGrid: true,
                 showTokenNames: true,
                 sceneViewMode: SCENE_VIEW_SHARED,
                 localSceneId: ''
@@ -366,9 +402,106 @@
         return store && typeof store.getPlayers === 'function' ? store.getPlayers() : [];
     };
 
+    const findPlayerById = (playerId) => {
+        const targetId = String(playerId || '').trim();
+        if (!targetId) return null;
+        return getPlayers().find((player) => String(player && player.id || '') === targetId) || null;
+    };
+
     const getNPCs = () => {
         const store = getStore();
         return store && typeof store.getNPCs === 'function' ? store.getNPCs() : [];
+    };
+
+    const normalizeMoveAccess = (value, fallback = 'dm') => {
+        const clean = String(value || fallback || 'dm').trim().toLowerCase();
+        return clean === 'player' ? 'player' : 'dm';
+    };
+
+    const getRosterPlayerForRecord = (record) => {
+        const source = record && typeof record === 'object' ? record : null;
+        if (!source) return null;
+        if (String(source.sourceType || '').trim() === 'player') {
+            return findPlayerById(source.sourceId);
+        }
+        return null;
+    };
+
+    const syncTokenRosterIdentity = (token, player) => {
+        if (!token || !player) return false;
+        const nextLabel = String(player.name || 'Player').trim() || 'Player';
+        const nextImageUrl = toSharedTokenImageUrl(player.imageUrl);
+        let mutated = false;
+        if (token.label !== nextLabel) {
+            token.label = nextLabel;
+            mutated = true;
+        }
+        if ((token.imageUrl || '') !== nextImageUrl) {
+            token.imageUrl = nextImageUrl;
+            mutated = true;
+        }
+        return mutated;
+    };
+
+    const syncEntryRosterIdentity = (entry, player) => {
+        if (!entry || !player) return false;
+        const nextName = String(player.name || 'Player').trim() || 'Player';
+        const nextImageUrl = toSharedTokenImageUrl(player.imageUrl);
+        let mutated = false;
+        if (entry.name !== nextName) {
+            entry.name = nextName;
+            mutated = true;
+        }
+        if ((entry.imageUrl || '') !== nextImageUrl) {
+            entry.imageUrl = nextImageUrl;
+            mutated = true;
+        }
+        if (entry.sourceType !== 'player') {
+            entry.sourceType = 'player';
+            mutated = true;
+        }
+        const nextSourceId = String(player.id || '').trim();
+        if ((entry.sourceId || '') !== nextSourceId) {
+            entry.sourceId = nextSourceId;
+            mutated = true;
+        }
+        return mutated;
+    };
+
+    const syncRosterLinkedPlayerPresentation = (state = vttState) => {
+        if (!state || !Array.isArray(state.scenes) || !state.initiative || !Array.isArray(state.initiative.entries)) return false;
+        const players = getPlayers();
+        if (!players.length) return false;
+        const playersById = new Map(players.map((player) => [String(player && player.id || '').trim(), player]).filter(([id]) => !!id));
+        if (!playersById.size) return false;
+
+        let mutated = false;
+        const playerByTokenId = new Map();
+        state.scenes.forEach((scene) => {
+            if (!scene || !Array.isArray(scene.tokens)) return;
+            scene.tokens.forEach((token) => {
+                const player = playersById.get(String(token && token.sourceId || '').trim());
+                if (!player || String(token && token.sourceType || '').trim() !== 'player') return;
+                if (syncTokenRosterIdentity(token, player)) mutated = true;
+                playerByTokenId.set(String(token.id || '').trim(), player);
+            });
+        });
+
+        state.initiative.entries.forEach((entry) => {
+            const linkedPlayer = playersById.get(String(entry && entry.sourceId || '').trim())
+                || playerByTokenId.get(String(entry && entry.linkedTokenId || '').trim())
+                || null;
+            if (!linkedPlayer) return;
+            if (syncEntryRosterIdentity(entry, linkedPlayer)) mutated = true;
+        });
+
+        return mutated;
+    };
+
+    const canRoleMoveToken = (token, role = localRole) => {
+        if (!token) return false;
+        if (role === 'dm') return true;
+        return normalizeMoveAccess(token.moveAccess, token.sourceType === 'player' ? 'player' : 'dm') === 'player';
     };
 
     const getActiveCaseName = () => {
@@ -427,13 +560,14 @@
             id: buildId('token'),
             label: String(player && player.name || 'Player').trim() || 'Player',
             side: 'player',
-            imageUrl: toImageUrl(player && player.imageUrl),
+            imageUrl: toSharedTokenImageUrl(player && player.imageUrl),
             x: 0,
             y: 0,
             w: 1,
             h: 1,
             sourceType: 'player',
             sourceId: String(player && player.id || '').trim(),
+            moveAccess: 'player',
             hpCurrent: hp.hpCurrent,
             hpMax: hp.hpMax,
             ac: Number.isFinite(Number(player && player.ac)) ? clamp(Math.round(Number(player.ac)), 0, 99) : null,
@@ -465,6 +599,7 @@
             h: 1,
             sourceType: 'npc',
             sourceId: String(npc && npc.id || '').trim(),
+            moveAccess: 'dm',
             hpCurrent: hp.hpCurrent,
             hpMax: hp.hpMax,
             ac: Number.isFinite(Number(npc && npc.ac)) ? clamp(Math.round(Number(npc.ac)), 0, 99) : null,
@@ -494,6 +629,7 @@
         h: 1,
         sourceType: '',
         sourceId: '',
+        moveAccess: 'dm',
         hpCurrent: null,
         hpMax: null,
         ac: null,
@@ -510,6 +646,80 @@
             passivePerception: 10
         }
     });
+
+    const findSpawnSource = (kind, id = '') => {
+        const sourceId = String(id || '').trim();
+        if (kind === 'player') {
+            return getPlayers().find((entry) => String(entry && entry.id || '') === sourceId) || null;
+        }
+        if (kind === 'npc') {
+            return getNPCs().find((entry) => String(entry && entry.id || '') === sourceId) || null;
+        }
+        if (kind === 'custom') {
+            return { name: 'Custom Token' };
+        }
+        return null;
+    };
+
+    const getSpawnDescriptorLabel = (kind, id = '') => {
+        const source = findSpawnSource(kind, id);
+        if (source && source.name) return String(source.name).trim() || 'Token';
+        if (kind === 'player') return 'Player';
+        if (kind === 'npc') return 'NPC';
+        return 'Custom Token';
+    };
+
+    const buildTokenFromSpawnDescriptor = (kind, id = '') => {
+        if (kind === 'player') {
+            const player = findSpawnSource('player', id);
+            return player ? buildTokenFromPlayer(player) : null;
+        }
+        if (kind === 'npc') {
+            const npc = findSpawnSource('npc', id);
+            return npc ? buildTokenFromNPC(npc) : null;
+        }
+        if (kind === 'custom') {
+            return buildCustomToken();
+        }
+        return null;
+    };
+
+    const positionTokenAtWorldPoint = (token, scene, worldPoint) => {
+        if (!token || !scene || !scene.grid || !worldPoint) return token;
+        const cellPx = Math.max(1, toNumber(scene.grid.cellPx, DEFAULT_VTT_CELL_PX));
+        const offsetX = toNumber(scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene.grid.offsetY, 0);
+        const tokenWidth = Math.max(1, toNumber(token.w, 1));
+        const tokenHeight = Math.max(1, toNumber(token.h, 1));
+        const cellX = (toNumber(worldPoint.x, 0) - offsetX) / cellPx;
+        const cellY = (toNumber(worldPoint.y, 0) - offsetY) / cellPx;
+        token.x = normalizeTokenCoordinate(cellX - tokenWidth / 2, token.x);
+        token.y = normalizeTokenCoordinate(cellY - tokenHeight / 2, token.y);
+        return token;
+    };
+
+    const spawnTokenFromDescriptor = (kind, id = '', worldPoint = null) => {
+        const nextToken = buildTokenFromSpawnDescriptor(kind, id);
+        if (!nextToken) return false;
+        if (kind === 'npc') closeNPCSearch({ clearQuery: true });
+        else closeNPCSearch();
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene) return;
+            const token = deepClone(nextToken);
+            if (worldPoint) {
+                positionTokenAtWorldPoint(token, scene, worldPoint);
+            } else {
+                const existingCount = Array.isArray(scene.tokens) ? scene.tokens.length : 0;
+                token.x = existingCount * 2;
+                token.y = 0;
+            }
+            scene.tokens.push(token);
+            selectedTokenId = token.id;
+            quickSpawnMenuState = null;
+        });
+        return true;
+    };
 
     const syncInitiativeEntryFromToken = (entry, token) => ({
         ...entry,
@@ -634,12 +844,16 @@
         if (!store) return null;
         if (isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function') {
             try {
-                return deepClone(vttCollabSession.getSnapshot());
+                const snapshot = deepClone(vttCollabSession.getSnapshot());
+                syncRosterLinkedPlayerPresentation(snapshot);
+                return snapshot;
             } catch (err) {
                 console.warn('VTT collaboration snapshot read failed', err);
             }
         }
-        return deepClone(store.getVTTState(getActiveCaseId()));
+        const snapshot = deepClone(store.getVTTState(getActiveCaseId()));
+        syncRosterLinkedPlayerPresentation(snapshot);
+        return snapshot;
     };
 
     const persistSharedVTTSnapshot = (payload, options = {}) => {
@@ -662,6 +876,7 @@
         mutator(draft);
         const saved = persistSharedVTTSnapshot(draft, options);
         vttState = deepClone(saved || draft);
+        syncRosterLinkedPlayerPresentation(vttState);
         normalizeSelections();
         if (options.fitView) fitViewOnNextMapLoad = true;
         render();
@@ -681,12 +896,11 @@
             }
         }
         if (!entries.some((entry) => entry.id === selectedEntryId)) {
-            selectedEntryId = entries[0] ? entries[0].id : '';
+            const activeEntryId = vttState && vttState.initiative ? String(vttState.initiative.activeEntryId || '').trim() : '';
+            selectedEntryId = entries.some((entry) => entry.id === activeEntryId) ? activeEntryId : '';
         }
-        if (selectedEntryId) {
-            syncTokenSelectionFromEntry(selectedEntryId, vttState, localRole);
-        } else if (!tokens.some((token) => token.id === selectedTokenId)) {
-            selectedTokenId = tokens[0] ? tokens[0].id : '';
+        if (!tokens.some((token) => token.id === selectedTokenId)) {
+            selectedTokenId = '';
         }
         if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
             previewTokenId = '';
@@ -833,20 +1047,98 @@
         };
     };
 
+    const isClientPointInsideStage = (clientX, clientY) => {
+        if (!stageEl) return false;
+        const rect = stageEl.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    };
+
+    const closeQuickSpawnMenu = () => {
+        if (!quickSpawnMenuState) return false;
+        quickSpawnMenuState = null;
+        renderQuickSpawnMenu();
+        return true;
+    };
+
+    const closeViewMenu = () => {
+        if (!viewMenuOpen) return false;
+        viewMenuOpen = false;
+        renderViewMenu();
+        return true;
+    };
+
+    const openQuickSpawnMenu = (clientX, clientY) => {
+        if (!stageEl || !isDM()) return false;
+        closeNPCSearch();
+        closeViewMenu();
+        const rect = stageEl.getBoundingClientRect();
+        quickSpawnMenuState = {
+            worldPoint: screenToWorld(clientX, clientY),
+            stageX: Math.round(clientX - rect.left),
+            stageY: Math.round(clientY - rect.top)
+        };
+        renderQuickSpawnMenu();
+        return true;
+    };
+
+    const clearSpawnDrag = () => {
+        if (!spawnDragState) return false;
+        spawnDragState = null;
+        renderSpawnGhost();
+        return true;
+    };
+
+    const beginSpawnDrag = (event, kind, id = '') => {
+        if (!event || !isDM()) return false;
+        const source = findSpawnSource(kind, id);
+        if (!source && kind !== 'custom') return false;
+        closeNPCSearch();
+        closeViewMenu();
+        closeQuickSpawnMenu();
+        spawnDragState = {
+            pointerId: event.pointerId,
+            kind,
+            id: String(id || '').trim(),
+            label: getSpawnDescriptorLabel(kind, id),
+            clientX: event.clientX,
+            clientY: event.clientY,
+            overStage: isClientPointInsideStage(event.clientX, event.clientY)
+        };
+        previewTokenId = '';
+        renderSpawnGhost();
+        return true;
+    };
+
     const loadRolePreference = () => {
-        const raw = localStorage.getItem(getRoleStorageKey());
-        localRole = raw === 'player' ? 'player' : 'dm';
+        const store = getStore();
+        if (store && typeof store.getVTTLocalRole === 'function') {
+            localRole = store.getVTTLocalRole(getActiveCaseId()) === 'dm' ? 'dm' : 'player';
+        } else {
+            localRole = 'player';
+        }
         if (body) body.dataset.vttRole = localRole;
     };
 
     const setRolePreference = (role) => {
         localRole = role === 'player' ? 'player' : 'dm';
-        localStorage.setItem(getRoleStorageKey(), localRole);
+        const store = getStore();
+        if (store && typeof store.setVTTLocalRole === 'function') {
+            localRole = store.setVTTLocalRole(localRole, getActiveCaseId()) === 'dm' ? 'dm' : 'player';
+        }
         if (localRole !== 'dm') {
             closeNPCSearch();
+            quickSpawnMenuState = null;
+            clearSpawnDrag();
         }
         if (body) body.dataset.vttRole = localRole;
         render();
+    };
+
+    const promptForDMMode = () => {
+        const response = window.prompt(`Type ${DM_UNLOCK_PHRASE} to enable DM mode.`, '');
+        if (String(response || '').trim() !== DM_UNLOCK_PHRASE) return false;
+        setRolePreference('dm');
+        return true;
     };
 
     const setSyncChipState = ({ state = 'local', label = 'Local', detail = '', retryable = false } = {}) => {
@@ -919,11 +1211,13 @@
             ? store.normalizeVTTStateSnapshot(payload)
             : deepClone(payload);
         if (dragState) {
+            syncRosterLinkedPlayerPresentation(clean);
             pendingRemoteVTTSnapshot = clean;
             return;
         }
         pendingRemoteVTTSnapshot = null;
         vttState = deepClone(clean);
+        syncRosterLinkedPlayerPresentation(vttState);
         normalizeSelections();
         render();
     };
@@ -931,6 +1225,7 @@
     const applyPendingRemoteVTTSnapshot = () => {
         if (dragState || !pendingRemoteVTTSnapshot) return false;
         vttState = deepClone(pendingRemoteVTTSnapshot);
+        syncRosterLinkedPlayerPresentation(vttState);
         pendingRemoteVTTSnapshot = null;
         normalizeSelections();
         render();
@@ -944,6 +1239,7 @@
                 pendingRemoteVTTSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
                     ? store.normalizeVTTStateSnapshot(meta.snapshot)
                     : deepClone(meta.snapshot);
+                syncRosterLinkedPlayerPresentation(pendingRemoteVTTSnapshot);
             }
             return;
         }
@@ -954,6 +1250,7 @@
                     ? store.normalizeVTTStateSnapshot(meta.snapshot)
                     : meta.snapshot
             );
+            syncRosterLinkedPlayerPresentation(vttState);
             normalizeSelections();
             renderStage();
             return;
@@ -1073,7 +1370,7 @@
         pendingRemoteVTTSnapshot = null;
         const store = getStore();
         if (store) {
-            vttState = deepClone(store.getVTTState(expectedCaseId));
+            vttState = readSharedVTTSnapshot() || deepClone(store.getVTTState(expectedCaseId));
             normalizeSelections();
             render();
         }
@@ -1208,14 +1505,21 @@
     const renderSpawnLists = () => {
         if (playerSpawnListEl) {
             const players = getPlayers();
-            playerSpawnListEl.innerHTML = players.length
-                ? players.map((player) => `
-                    <button class="vtt-token-spawn" data-action="spawn-player" data-id="${escapeHtml(String(player.id || ''))}">
-                        <span class="vtt-token-spawn-name">${escapeHtml(player.name || 'Player')}</span>
-                        <span class="vtt-token-spawn-meta">AC ${escapeHtml(String(player.ac ?? '-'))} · PP ${escapeHtml(String(player.pp ?? '-'))}</span>
+            playerSpawnListEl.innerHTML = [
+                `
+                    <button class="vtt-token-spawn" type="button" data-spawn-kind="custom">
+                        <span class="vtt-token-spawn-name">Custom Token</span>
+                        <span class="vtt-token-spawn-meta">Drag onto the stage</span>
                     </button>
-                `).join('')
-                : '<div class="vtt-empty">No players in the shared store yet.</div>';
+                `,
+                ...players.map((player) => `
+                    <button class="vtt-token-spawn" type="button" data-spawn-kind="player" data-id="${escapeHtml(String(player.id || ''))}">
+                        <span class="vtt-token-spawn-name">${escapeHtml(player.name || 'Player')}</span>
+                        <span class="vtt-token-spawn-meta">Drag onto the stage · AC ${escapeHtml(String(player.ac ?? '-'))} · PP ${escapeHtml(String(player.pp ?? '-'))}</span>
+                    </button>
+                `),
+                players.length ? '' : '<div class="vtt-empty">No players in the shared store yet.</div>'
+            ].join('');
         }
     };
 
@@ -1241,12 +1545,77 @@
 
         npcSearchListEl.innerHTML = npcs.length
                 ? npcs.map((npc) => `
-                    <button class="vtt-token-spawn" data-action="spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
+                    <button class="vtt-token-spawn" type="button" data-spawn-kind="npc" data-id="${escapeHtml(String(npc.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
-                        <span class="vtt-token-spawn-meta">${escapeHtml(npc.guild || 'No guild')}</span>
+                        <span class="vtt-token-spawn-meta">Drag onto the stage · ${escapeHtml(npc.guild || 'No guild')}</span>
                     </button>
                 `).join('')
                 : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`;
+    };
+
+    const renderQuickSpawnMenu = () => {
+        if (!quickSpawnMenuEl) return;
+        if (!quickSpawnMenuState || !isDM() || !stageEl) {
+            quickSpawnMenuEl.hidden = true;
+            quickSpawnMenuEl.innerHTML = '';
+            return;
+        }
+
+        const players = getPlayers();
+        const featuredNPCs = getNPCs()
+            .slice()
+            .sort((left, right) => String(left && left.name || '').localeCompare(String(right && right.name || '')))
+            .slice(0, 6);
+        quickSpawnMenuEl.hidden = false;
+        quickSpawnMenuEl.innerHTML = `
+            <div class="vtt-quick-spawn-title">Quick Spawn</div>
+            <div class="vtt-quick-spawn-list">
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-custom">
+                    <span class="vtt-token-spawn-name">Custom Token</span>
+                    <span class="vtt-token-spawn-meta">Spawn here</span>
+                </button>
+                ${players.map((player) => `
+                    <button class="vtt-token-spawn" type="button" data-action="quick-spawn-player" data-id="${escapeHtml(String(player.id || ''))}">
+                        <span class="vtt-token-spawn-name">${escapeHtml(player.name || 'Player')}</span>
+                        <span class="vtt-token-spawn-meta">Spawn here</span>
+                    </button>
+                `).join('')}
+                ${featuredNPCs.map((npc) => `
+                    <button class="vtt-token-spawn" type="button" data-action="quick-spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
+                        <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
+                        <span class="vtt-token-spawn-meta">${escapeHtml(npc.guild || 'NPC')}</span>
+                    </button>
+                `).join('')}
+                <button class="vtt-chip-btn" type="button" data-action="quick-spawn-open-npc-search">NPC Search</button>
+            </div>
+        `;
+
+        const stageRect = stageEl.getBoundingClientRect();
+        const menuWidth = quickSpawnMenuEl.offsetWidth || 280;
+        const menuHeight = quickSpawnMenuEl.offsetHeight || 0;
+        const left = clamp(quickSpawnMenuState.stageX, 12, Math.max(12, stageRect.width - menuWidth - 12));
+        const top = clamp(quickSpawnMenuState.stageY, 12, Math.max(12, stageRect.height - menuHeight - 12));
+        quickSpawnMenuEl.style.left = `${left}px`;
+        quickSpawnMenuEl.style.top = `${top}px`;
+    };
+
+    const renderSpawnGhost = () => {
+        if (!spawnGhostEl) return;
+        if (!spawnDragState || !isDM()) {
+            spawnGhostEl.hidden = true;
+            spawnGhostEl.innerHTML = '';
+            if (body) body.dataset.spawnDragging = '0';
+            return;
+        }
+        spawnGhostEl.hidden = false;
+        spawnGhostEl.dataset.overStage = spawnDragState.overStage ? 'true' : 'false';
+        spawnGhostEl.style.left = `${Math.round(spawnDragState.clientX + 18)}px`;
+        spawnGhostEl.style.top = `${Math.round(spawnDragState.clientY + 18)}px`;
+        spawnGhostEl.innerHTML = `
+            <div class="vtt-spawn-ghost-name">${escapeHtml(spawnDragState.label || 'Token')}</div>
+            <div class="vtt-spawn-ghost-meta">${spawnDragState.overStage ? 'Release to spawn' : 'Drag onto the stage'}</div>
+        `;
+        if (body) body.dataset.spawnDragging = '1';
     };
 
     const describeScene = (scene) => {
@@ -1311,6 +1680,8 @@
 
     const renderTokenInspector = () => {
         const token = getTokenById(selectedTokenId);
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        const isRosterManagedPlayer = !!rosterPlayer;
         if (!selectionPillEl || !tokenInspectorEl) return;
         if (!isDM() && token && token.hidden) {
             selectionPillEl.textContent = 'No Token';
@@ -1341,7 +1712,7 @@
             <div class="vtt-inspector-stack">
                 <label class="vtt-field">
                     <span>Label</span>
-                    <input class="vtt-inspector-input" type="text" data-token-field="label" value="${escapeHtml(token.label)}">
+                    <input class="vtt-inspector-input" type="text" ${isRosterManagedPlayer ? 'readonly' : 'data-token-field="label"'} value="${escapeHtml(token.label)}">
                 </label>
                 <div class="vtt-inspector-grid">
                     <label class="vtt-field">
@@ -1351,8 +1722,15 @@
                         </select>
                     </label>
                     <label class="vtt-field">
+                        <span>Movement</span>
+                        <select class="vtt-inspector-select" data-token-field="moveAccess">
+                            <option value="dm"${normalizeMoveAccess(token.moveAccess, 'dm') === 'dm' ? ' selected' : ''}>DM Only</option>
+                            <option value="player"${normalizeMoveAccess(token.moveAccess, token.sourceType === 'player' ? 'player' : 'dm') === 'player' ? ' selected' : ''}>Players Can Move</option>
+                        </select>
+                    </label>
+                    <label class="vtt-field">
                         <span>Image URL</span>
-                        <input class="vtt-inspector-input" type="text" data-token-field="imageUrl" value="${escapeHtml(token.imageUrl || '')}">
+                        <input class="vtt-inspector-input" type="text" ${isRosterManagedPlayer ? 'readonly' : 'data-token-field="imageUrl"'} value="${escapeHtml(token.imageUrl || '')}">
                     </label>
                     <label class="vtt-field">
                         <span>HP Current</span>
@@ -1391,6 +1769,7 @@
                     <span>Conditions</span>
                     <textarea class="vtt-inspector-textarea" data-token-field="conditions">${escapeHtml(serializeConditions(token.conditions))}</textarea>
                 </label>
+                ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player token name and portrait are managed from the Hub roster.</div>' : ''}
                 <div class="vtt-inspector-actions">
                     <button class="vtt-inline-btn" data-action="add-token-to-initiative" data-id="${escapeHtml(token.id)}">Add To Initiative</button>
                     <button class="vtt-inline-btn danger" data-action="delete-token" data-id="${escapeHtml(token.id)}">Delete Token</button>
@@ -1412,11 +1791,13 @@
             <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${entry.id === initiative.activeEntryId ? ' is-active-turn' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
                 <div class="vtt-entry-top">
                     <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
-                    <div class="vtt-entry-score">${escapeHtml(String(entry.total ?? 0))}</div>
+                    <div class="vtt-entry-top-actions">
+                        <div class="vtt-entry-score">${escapeHtml(String(entry.total ?? 0))}</div>
+                        ${isDM() ? `<button class="vtt-inline-btn vtt-inline-btn-icon danger" data-action="remove-entry" data-id="${escapeHtml(entry.id)}" aria-label="Remove from initiative" title="Remove from initiative">X</button>` : ''}
+                    </div>
                 </div>
                 <div class="vtt-entry-meta">
                     <span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>
-                    <span class="vtt-entry-tag">${escapeHtml(serializeHp(entry.hpCurrent, entry.hpMax))}</span>
                     ${entry.id === initiative.activeEntryId ? '<span class="vtt-entry-tag">Active Turn</span>' : ''}
                     ${entry.reactionUsed ? '<span class="vtt-entry-tag">Reaction Used</span>' : ''}
                     ${entry.concentrating ? '<span class="vtt-entry-tag">Concentrating</span>' : ''}
@@ -1434,6 +1815,8 @@
     const renderInitiativeDetail = () => {
         if (!initiativeDetailPanelEl) return;
         const entry = getEntryById(selectedEntryId);
+        const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
+        const isRosterManagedPlayer = !!rosterPlayer;
         if (!entry) {
             initiativeDetailPanelEl.innerHTML = '<div class="vtt-empty">Select an initiative entry to inspect it.</div>';
             return;
@@ -1453,7 +1836,7 @@
                 <div class="vtt-entry-detail-grid">
                     <label class="vtt-field">
                         <span>Name</span>
-                        <input class="vtt-entry-input" type="text" data-entry-field="name" value="${escapeHtml(entry.name || '')}">
+                        <input class="vtt-entry-input" type="text" ${isRosterManagedPlayer ? 'readonly' : 'data-entry-field="name"'} value="${escapeHtml(entry.name || '')}">
                     </label>
                     <label class="vtt-field">
                         <span>Initiative</span>
@@ -1472,14 +1855,6 @@
                         <input class="vtt-entry-input" type="number" data-entry-field="ac" value="${entry.ac ?? ''}">
                     </label>
                     <label class="vtt-field">
-                        <span>HP</span>
-                        <input class="vtt-entry-input" type="number" data-entry-field="hpCurrent" value="${entry.hpCurrent ?? ''}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>HP Max</span>
-                        <input class="vtt-entry-input" type="number" data-entry-field="hpMax" value="${entry.hpMax ?? ''}">
-                    </label>
-                    <label class="vtt-field">
                         <span>Linked Token</span>
                         <input class="vtt-entry-input" type="text" value="${escapeHtml(entry.linkedTokenId || 'Unlinked')}" readonly>
                     </label>
@@ -1495,6 +1870,7 @@
                         `).join('')}
                     </div>
                 </div>
+                ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player initiative names and portraits stay synced to the Hub roster.</div>' : ''}
                 <div class="vtt-entry-actions">
                     <button class="vtt-inline-btn" data-action="move-entry-up" data-id="${escapeHtml(entry.id)}">Move Up</button>
                     <button class="vtt-inline-btn" data-action="move-entry-down" data-id="${escapeHtml(entry.id)}">Move Down</button>
@@ -1563,11 +1939,11 @@
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
         const usingLocalView = isUsingLocalSceneView(vttState, localRole);
-        const baseStageMeta = 'Drag empty space to pan. Two-finger scroll pans. Pinch or Ctrl-scroll zooms. Drag tokens freely. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.';
+        const baseStageMeta = 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.';
         applyUIPreferences();
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
-        if (roleToggleEl) roleToggleEl.textContent = `Role: ${isDM() ? 'DM' : 'Player'}`;
+        if (roleToggleEl) roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
         if (activeSceneLabelEl) activeSceneLabelEl.textContent = `Players: ${sharedScene.name || 'Scene'}`;
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
         if (stageMetaEl) {
@@ -1592,12 +1968,15 @@
     const render = () => {
         normalizeSelections();
         renderSceneControls();
+        renderViewMenu();
         renderSpawnLists();
         renderNPCSearchPopover();
         renderStage();
+        renderQuickSpawnMenu();
         renderTokenInspector();
         renderInitiativeList();
         renderInitiativeDetail();
+        renderSpawnGhost();
     };
 
     const updateSelectedToken = (mutator) => {
@@ -1608,6 +1987,8 @@
             const idx = scene.tokens.findIndex((token) => token.id === selectedTokenId);
             if (idx < 0) return;
             mutator(scene.tokens[idx], draft);
+            const rosterPlayer = getRosterPlayerForRecord(scene.tokens[idx]);
+            if (rosterPlayer) syncTokenRosterIdentity(scene.tokens[idx], rosterPlayer);
             draft.initiative.entries = draft.initiative.entries.map((entry) => {
                 if (entry.linkedTokenId === selectedTokenId) return syncInitiativeEntryFromToken(entry, scene.tokens[idx]);
                 return entry;
@@ -1633,11 +2014,59 @@
                 linkedToken.hpCurrent = entries[idx].hpCurrent;
                 linkedToken.hpMax = entries[idx].hpMax;
                 linkedToken.ac = entries[idx].ac;
-                linkedToken.label = entries[idx].name || linkedToken.label;
+                if (!getRosterPlayerForRecord(linkedToken)) {
+                    linkedToken.label = entries[idx].name || linkedToken.label;
+                } else {
+                    syncTokenRosterIdentity(linkedToken, getRosterPlayerForRecord(linkedToken));
+                    syncEntryRosterIdentity(entries[idx], getRosterPlayerForRecord(linkedToken));
+                }
                 linkedToken.passivePerception = entries[idx].passivePerception;
                 linkedToken.defences = normalizeDefences(entries[idx].defences);
             }
         });
+    };
+
+    const findReplacementTokenForIdentity = (state, removedToken) => {
+        const sourceType = String(removedToken && removedToken.sourceType || '').trim();
+        const sourceId = String(removedToken && removedToken.sourceId || '').trim();
+        const removedTokenId = String(removedToken && removedToken.id || '').trim();
+        if (!sourceType || !sourceId || !state || !Array.isArray(state.scenes)) return null;
+        for (const scene of state.scenes) {
+            if (!scene || !Array.isArray(scene.tokens)) continue;
+            const replacement = scene.tokens.find((token) =>
+                String(token && token.id || '').trim() !== removedTokenId
+                && String(token && token.sourceType || '').trim() === sourceType
+                && String(token && token.sourceId || '').trim() === sourceId
+            );
+            if (replacement) return replacement;
+        }
+        return null;
+    };
+
+    const removeInitiativeEntriesForToken = (draft, removedToken) => {
+        if (!draft || !draft.initiative || !Array.isArray(draft.initiative.entries) || !removedToken) return;
+        const replacementToken = findReplacementTokenForIdentity(draft, removedToken);
+        const removedEntryIds = new Set();
+        draft.initiative.entries = draft.initiative.entries.flatMap((entry) => {
+            const matchesLinkedToken = String(entry && entry.linkedTokenId || '').trim() === String(removedToken.id || '').trim();
+            const matchesSource = !!(
+                removedToken.sourceType
+                && removedToken.sourceId
+                && String(entry && entry.sourceType || '').trim() === String(removedToken.sourceType || '').trim()
+                && String(entry && entry.sourceId || '').trim() === String(removedToken.sourceId || '').trim()
+            );
+            if (!matchesLinkedToken && !matchesSource) return [entry];
+            if (replacementToken) return [syncInitiativeEntryFromToken(entry, replacementToken)];
+            removedEntryIds.add(String(entry && entry.id || '').trim());
+            return [];
+        });
+
+        if (removedEntryIds.has(String(draft.initiative.activeEntryId || '').trim())) {
+            draft.initiative.activeEntryId = draft.initiative.entries[0] ? draft.initiative.entries[0].id : '';
+        }
+        if (removedEntryIds.has(String(selectedEntryId || '').trim())) {
+            selectedEntryId = draft.initiative.activeEntryId || '';
+        }
     };
 
     const addTokenToInitiative = (tokenId) => {
@@ -1727,6 +2156,7 @@
             });
             if (typeof vttCollabSession.getSnapshot === 'function') {
                 vttState = deepClone(vttCollabSession.getSnapshot());
+                syncRosterLinkedPlayerPresentation(vttState);
             }
             lastDragSyncAt = now;
             return;
@@ -1739,6 +2169,7 @@
             : -1;
         if (!draftScene || idx < 0) {
             vttState = deepClone(draft);
+            syncRosterLinkedPlayerPresentation(vttState);
             lastDragSyncAt = now;
             return;
         }
@@ -1751,6 +2182,7 @@
 
         const saved = store.updateVTTState(draft, getActiveCaseId());
         vttState = deepClone(saved);
+        syncRosterLinkedPlayerPresentation(vttState);
         lastDragSyncAt = now;
     };
 
@@ -1808,7 +2240,22 @@
         const id = String(actionEl.dataset.id || '').trim();
 
         if (action === 'toggle-role') {
-            setRolePreference(isDM() ? 'player' : 'dm');
+            if (isDM()) {
+                setRolePreference('player');
+            } else {
+                promptForDMMode();
+            }
+            return;
+        }
+        if (action === 'toggle-view-menu') {
+            viewMenuOpen = !viewMenuOpen;
+            renderViewMenu();
+            return;
+        }
+        if (action === 'open-quick-spawn') {
+            if (!isDM() || !stageEl) return;
+            const rect = stageEl.getBoundingClientRect();
+            openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2);
             return;
         }
         if (action === 'toggle-settings') {
@@ -1833,6 +2280,37 @@
         }
         if (action === 'toggle-token-names') {
             toggleUIPreference('showTokenNames');
+            return;
+        }
+        if (action === 'toggle-grid') {
+            toggleUIPreference('showGrid');
+            return;
+        }
+        if (action === 'quick-spawn-custom') {
+            if (!quickSpawnMenuState) return;
+            spawnTokenFromDescriptor('custom', '', quickSpawnMenuState.worldPoint);
+            return;
+        }
+        if (action === 'quick-spawn-player') {
+            if (!quickSpawnMenuState) return;
+            spawnTokenFromDescriptor('player', id, quickSpawnMenuState.worldPoint);
+            return;
+        }
+        if (action === 'quick-spawn-npc') {
+            if (!quickSpawnMenuState) return;
+            spawnTokenFromDescriptor('npc', id, quickSpawnMenuState.worldPoint);
+            return;
+        }
+        if (action === 'quick-spawn-open-npc-search') {
+            closeQuickSpawnMenu();
+            npcSearchOpen = true;
+            renderNPCSearchPopover();
+            if (npcSearchInputEl) {
+                window.requestAnimationFrame(() => {
+                    npcSearchInputEl.focus();
+                    npcSearchInputEl.select();
+                });
+            }
             return;
         }
 
@@ -2019,46 +2497,19 @@
         }
 
         if (action === 'add-custom-token') {
-            closeNPCSearch();
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                const token = buildCustomToken();
-                const existingCount = Array.isArray(scene.tokens) ? scene.tokens.length : 0;
-                token.x = existingCount * 2;
-                scene.tokens.push(token);
-                selectedTokenId = token.id;
-            });
+            if (!stageEl) return;
+            const rect = stageEl.getBoundingClientRect();
+            openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2);
             return;
         }
 
         if (action === 'spawn-player') {
-            const player = getPlayers().find((entry) => String(entry && entry.id || '') === id);
-            if (!player) return;
-            closeNPCSearch();
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                const token = buildTokenFromPlayer(player);
-                token.x = (scene.tokens || []).length * 2;
-                scene.tokens.push(token);
-                selectedTokenId = token.id;
-            });
+            spawnTokenFromDescriptor('player', id, quickSpawnMenuState && quickSpawnMenuState.worldPoint ? quickSpawnMenuState.worldPoint : null);
             return;
         }
 
         if (action === 'spawn-npc') {
-            const npc = getNPCs().find((entry) => String(entry && entry.id || '') === id);
-            if (!npc) return;
-            closeNPCSearch({ clearQuery: true });
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                const token = buildTokenFromNPC(npc);
-                token.x = (scene.tokens || []).length * 2;
-                scene.tokens.push(token);
-                selectedTokenId = token.id;
-            });
+            spawnTokenFromDescriptor('npc', id, quickSpawnMenuState && quickSpawnMenuState.worldPoint ? quickSpawnMenuState.worldPoint : null);
             return;
         }
 
@@ -2077,11 +2528,10 @@
             withDraft((draft) => {
                 const scene = getActiveScene(draft);
                 if (!scene || !Array.isArray(scene.tokens)) return;
+                const removedToken = scene.tokens.find((token) => token.id === id);
+                if (!removedToken) return;
                 scene.tokens = scene.tokens.filter((token) => token.id !== id);
-                draft.initiative.entries = draft.initiative.entries.map((entry) => {
-                    if (entry.linkedTokenId !== id) return entry;
-                    return { ...entry, linkedTokenId: '' };
-                });
+                removeInitiativeEntriesForToken(draft, removedToken);
                 if (selectedTokenId === id) selectedTokenId = '';
                 if (previewTokenId === id) previewTokenId = '';
             });
@@ -2115,7 +2565,6 @@
 
         if (action === 'select-entry') {
             selectedEntryId = id;
-            syncTokenSelectionFromEntry(id);
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
@@ -2237,6 +2686,9 @@
 
         if (selectedTokenId && target.dataset.tokenField) {
             const field = target.dataset.tokenField;
+            const token = getTokenById(selectedTokenId);
+            const rosterPlayer = getRosterPlayerForRecord(token);
+            if (rosterPlayer && (field === 'label' || field === 'imageUrl')) return;
             updateSelectedToken((token) => {
                 if (field === 'hidden' && target instanceof HTMLInputElement && target.type === 'checkbox') {
                     token.hidden = target.checked;
@@ -2248,6 +2700,10 @@
                 }
                 if (field === 'side' && target instanceof HTMLSelectElement) {
                     token.side = SIDE_OPTIONS.includes(target.value) ? target.value : 'neutral';
+                    return;
+                }
+                if (field === 'moveAccess' && target instanceof HTMLSelectElement) {
+                    token.moveAccess = MOVE_ACCESS_OPTIONS.includes(target.value) ? target.value : 'dm';
                     return;
                 }
                 if (field === 'imageUrl') {
@@ -2270,6 +2726,9 @@
 
         if (selectedEntryId && target.dataset.entryField) {
             const field = target.dataset.entryField;
+            const entry = getEntryById(selectedEntryId);
+            const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
+            if (rosterPlayer && field === 'name') return;
             updateSelectedEntry((entry) => {
                 if (field === 'name') {
                     entry.name = String(target.value || '').trim() || 'Combatant';
@@ -2406,6 +2865,7 @@
         }
         const saved = persistSharedVTTSnapshot(draft, { reason: 'initiative-queue' });
         vttState = deepClone(saved || draft);
+        syncRosterLinkedPlayerPresentation(vttState);
         markProcessedRollIds(newlyProcessed);
         normalizeSelections();
         render();
@@ -2415,6 +2875,7 @@
         const store = getStore();
         if (!store) return;
         const activeCaseId = getActiveCaseId();
+        loadRolePreference();
         if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
             refreshVTTCollabRoomIfNeeded().catch((err) => {
                 console.warn('VTT collaboration room refresh failed', err);
@@ -2422,7 +2883,7 @@
             return;
         }
         if (isVTTCollabReady() || dragState) return;
-        vttState = deepClone(store.getVTTState(activeCaseId));
+        vttState = readSharedVTTSnapshot() || deepClone(store.getVTTState(activeCaseId));
         normalizeSelections();
         render();
     };
@@ -2437,7 +2898,7 @@
             loadUIPreferences();
             return;
         }
-        if (event.key === getRoleStorageKey()) {
+        if (event.key && event.key === getRolePrefsStorageKey()) {
             loadRolePreference();
             render();
         }
@@ -2446,13 +2907,15 @@
     const handleStagePointerDown = (event) => {
         if (!(event.target instanceof Element)) return;
         if (event.button !== 0) return;
+        if (event.target.closest('#vtt-quick-spawn-menu')) return;
+        closeQuickSpawnMenu();
 
         const tokenEl = event.target.closest('.vtt-token');
         const scene = getActiveScene();
         if (tokenEl) {
-            if (!isDM()) return;
             const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
             if (!token || !scene) return;
+            const canMoveToken = canRoleMoveToken(token, localRole);
             const now = Date.now();
             const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
             lastTokenPointerDownId = token.id;
@@ -2463,11 +2926,16 @@
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
-            if (isDoublePress) {
+            if (isDoublePress && canMoveToken) {
                 lastTokenPointerDownId = '';
                 lastTokenPointerDownAt = 0;
                 event.preventDefault();
                 snapTokenToGrid(token.id);
+                return;
+            }
+            if (!canMoveToken) {
+                renderStage();
+                event.preventDefault();
                 return;
             }
             const worldPoint = screenToWorld(event.clientX, event.clientY);
@@ -2497,11 +2965,18 @@
     };
 
     const handlePointerMove = (event) => {
-        if (dragState && isDM()) {
+        if (spawnDragState) {
+            spawnDragState.clientX = event.clientX;
+            spawnDragState.clientY = event.clientY;
+            spawnDragState.overStage = isClientPointInsideStage(event.clientX, event.clientY);
+            renderSpawnGhost();
+            return;
+        }
+        if (dragState) {
             const scene = getActiveScene();
             if (!scene) return;
             const token = getTokenById(dragState.tokenId);
-            if (!token) return;
+            if (!token || !canRoleMoveToken(token, localRole)) return;
             lastTokenPointerDownId = '';
             lastTokenPointerDownAt = 0;
             const worldPoint = screenToWorld(event.clientX, event.clientY);
@@ -2519,7 +2994,17 @@
         }
     };
 
-    const handlePointerUp = () => {
+    const handlePointerUp = (event) => {
+        if (spawnDragState) {
+            const shouldSpawn = isDM() && event && isClientPointInsideStage(event.clientX, event.clientY);
+            const nextWorldPoint = shouldSpawn ? screenToWorld(event.clientX, event.clientY) : null;
+            const descriptor = { kind: spawnDragState.kind, id: spawnDragState.id };
+            clearSpawnDrag();
+            if (shouldSpawn) {
+                spawnTokenFromDescriptor(descriptor.kind, descriptor.id, nextWorldPoint);
+            }
+            return;
+        }
         let appliedRemoteSnapshot = false;
         if (dragState) {
             syncDraggedState(true);
@@ -2537,10 +3022,28 @@
 
     const handleDocumentPointerDown = (event) => {
         if (!(event.target instanceof Element)) return;
+        const spawnEl = event.button === 0 ? event.target.closest('[data-spawn-kind]') : null;
+        if (spawnEl instanceof HTMLElement) {
+            const kind = String(spawnEl.dataset.spawnKind || '').trim();
+            const id = String(spawnEl.dataset.id || '').trim();
+            if (beginSpawnDrag(event, kind, id)) {
+                event.preventDefault();
+                return;
+            }
+        }
         let needsRender = false;
 
         if (npcSearchOpen && !event.target.closest('.vtt-popover-anchor')) {
             closeNPCSearch();
+            needsRender = true;
+        }
+
+        if (quickSpawnMenuState && !event.target.closest('#vtt-quick-spawn-menu')) {
+            quickSpawnMenuState = null;
+            needsRender = true;
+        }
+        if (viewMenuOpen && !event.target.closest('.vtt-topbar-menu')) {
+            viewMenuOpen = false;
             needsRender = true;
         }
 
@@ -2554,14 +3057,11 @@
 
     const handleStageWheel = (event) => {
         if (!stageEl) return;
+        if (event.target instanceof Element && event.target.closest('#vtt-quick-spawn-menu')) return;
         event.preventDefault();
-        if (!event.ctrlKey && !event.metaKey) {
-            localView.x = Math.round(localView.x - event.deltaX);
-            localView.y = Math.round(localView.y - event.deltaY);
-            applyWorldTransform();
-            return;
-        }
-        const factor = Math.exp(-event.deltaY * 0.0015);
+        const dominantDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+        if (!Number.isFinite(dominantDelta) || dominantDelta === 0) return;
+        const factor = Math.exp(-dominantDelta * 0.0015);
         const nextZoom = clampZoom(localView.zoom * factor);
         if (nextZoom === localView.zoom) return;
         setZoomAtPoint(nextZoom, event.clientX, event.clientY);
@@ -2569,12 +3069,17 @@
 
     const handleStageContextMenu = (event) => {
         if (!(event.target instanceof Element)) return;
+        if (event.target.closest('#vtt-quick-spawn-menu')) return;
         const tokenEl = event.target.closest('.vtt-token');
         if (!tokenEl) {
-            if (previewTokenId) {
-                previewTokenId = '';
+            if (previewTokenId) previewTokenId = '';
+            if (!isDM()) {
                 renderStage();
+                return;
             }
+            event.preventDefault();
+            openQuickSpawnMenu(event.clientX, event.clientY);
+            renderStage();
             return;
         }
 
@@ -2599,8 +3104,6 @@
     };
 
     const handleDocumentKeyDown = (event) => {
-        if (!isDM() || !selectedTokenId || event.defaultPrevented) return;
-        if (event.altKey || event.ctrlKey || event.metaKey) return;
         const target = event.target;
         if (
             target instanceof HTMLInputElement
@@ -2610,6 +3113,23 @@
         ) {
             return;
         }
+        if (event.key === 'Escape') {
+            const closedMenu = closeQuickSpawnMenu();
+            const closedViewMenu = closeViewMenu();
+            const clearedSpawn = clearSpawnDrag();
+            if (previewTokenId) {
+                previewTokenId = '';
+                renderStage();
+            } else if (closedMenu || closedViewMenu || clearedSpawn) {
+                render();
+            }
+            if (closedMenu || closedViewMenu || clearedSpawn) event.preventDefault();
+            return;
+        }
+        if (!selectedTokenId || event.defaultPrevented) return;
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const selectedToken = getTokenById(selectedTokenId);
+        if (!selectedToken || !canRoleMoveToken(selectedToken, localRole)) return;
 
         let deltaX = 0;
         let deltaY = 0;
@@ -2640,14 +3160,18 @@
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
+        document.addEventListener('pointercancel', handlePointerUp);
         window.addEventListener(STORE_UPDATED_EVENT, handleStoreUpdate);
         window.addEventListener('storage', handleStorageEvent);
         window.addEventListener('resize', () => {
             if (fitViewOnNextMapLoad) {
                 fitViewToWorld();
+                renderQuickSpawnMenu();
                 return;
             }
             applyWorldTransform();
+            renderQuickSpawnMenu();
+            renderSpawnGhost();
         });
     };
 
@@ -2661,7 +3185,7 @@
         bindEvents();
         loadRolePreference();
         loadUIPreferences();
-        vttState = deepClone(store.getVTTState(getActiveCaseId()));
+        vttState = readSharedVTTSnapshot() || deepClone(store.getVTTState(getActiveCaseId()));
         normalizeSelections();
         render();
         initVTTCollab().catch((err) => {

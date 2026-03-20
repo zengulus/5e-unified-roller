@@ -359,6 +359,15 @@ body.hub-system-details-visible .hub-status-system-text {
     margin-top: 8px;
 }
 
+.hub-player-image-label {
+    display: block;
+    margin-top: 8px;
+}
+
+.hub-player-image-input {
+    margin-top: 6px;
+}
+
 .hub-player-project-col {
     grid-column: span 2;
 }

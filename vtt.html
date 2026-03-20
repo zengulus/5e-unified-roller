@@ -9,32 +9,57 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321n">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321r">
 </head>
 
-<body data-player-nav="vtt">
-    <header class="hero-header vtt-topbar">
-        <div class="vtt-topbar-group">
-            <button class="hero-btn ghost" data-action="toggle-settings" id="vtt-settings-toggle"
-                aria-controls="vtt-settings-panel" aria-expanded="true">Hide Settings</button>
-            <button class="hero-btn ghost" data-action="toggle-initiative" id="vtt-initiative-toggle"
-                aria-controls="vtt-initiative-panel" aria-expanded="true">Hide Initiative</button>
-            <a class="hero-btn ghost" href="index.html">Character Sheet</a>
-            <span class="vtt-topbar-case">Case <strong id="vtt-case-name">Primary Case</strong></span>
-            <span class="vtt-sync-chip" id="vtt-sync-chip">Local</span>
-        </div>
-        <div class="vtt-topbar-group vtt-topbar-group-right">
-            <button class="hero-btn ghost" data-action="toggle-role" id="vtt-role-toggle">Role: DM</button>
+    <body data-player-nav="vtt">
+        <header class="hero-header vtt-topbar">
+            <div class="vtt-topbar-group">
+                <a class="hero-btn ghost" href="index.html">Character Sheet</a>
+                <span class="vtt-topbar-case">Case <strong id="vtt-case-name">Primary Case</strong></span>
+                <span class="vtt-sync-chip" id="vtt-sync-chip">Local</span>
+            </div>
+            <div class="vtt-topbar-group vtt-topbar-group-right">
+            <button class="hero-btn ghost" data-action="toggle-role" id="vtt-role-toggle">DM Mode</button>
             <button class="hero-btn ghost" data-action="zoom-out">-</button>
-            <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
-            <button class="hero-btn ghost" data-action="zoom-in">+</button>
-            <button class="hero-btn ghost" data-action="fit-view">Fit</button>
-            <button class="hero-btn ghost" data-action="toggle-token-names" id="vtt-token-names-toggle" aria-pressed="true">Hide Names</button>
-            <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
-            <input type="color" id="accent-picker-input" class="vtt-accent-picker-input"
-                data-onchange="setAccentColor(this.value)">
-        </div>
-    </header>
+                <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
+                <button class="hero-btn ghost" data-action="zoom-in">+</button>
+                <button class="hero-btn ghost" data-action="fit-view">Fit</button>
+                <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
+                <input type="color" id="accent-picker-input" class="vtt-accent-picker-input"
+                    data-onchange="setAccentColor(this.value)">
+                <div class="vtt-popover-anchor vtt-topbar-menu">
+                    <button class="hero-btn ghost" data-action="toggle-view-menu" id="vtt-view-menu-toggle"
+                        aria-controls="vtt-view-menu" aria-expanded="false">Settings</button>
+                    <div class="vtt-popover vtt-view-menu" id="vtt-view-menu" hidden>
+                        <div class="vtt-menu-section">
+                            <div class="vtt-menu-title">Display</div>
+                            <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" data-action="toggle-initiative" id="vtt-initiative-toggle"
+                                    aria-controls="vtt-initiative-panel" aria-pressed="true">Initiative: On</button>
+                                <button class="vtt-chip-btn" data-action="toggle-token-names" id="vtt-token-names-toggle"
+                                    aria-pressed="true">Token Names: On</button>
+                                <button class="vtt-chip-btn" data-action="toggle-grid" id="vtt-grid-toggle"
+                                    aria-pressed="true">Grid: On</button>
+                            </div>
+                        </div>
+                        <div class="vtt-menu-section" data-vtt-menu-dm-only="1">
+                            <div class="vtt-menu-title">DM Panels</div>
+                            <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" data-action="toggle-settings" id="vtt-settings-toggle"
+                                    aria-controls="vtt-settings-panel" aria-pressed="true">Sidebar: On</button>
+                                <button class="vtt-chip-btn" data-action="toggle-scene-panel" id="vtt-scene-panel-toggle"
+                                    aria-controls="vtt-scene-panel-body" aria-pressed="true">Scene Panel: On</button>
+                                <button class="vtt-chip-btn" data-action="toggle-spawn-panel" id="vtt-spawn-panel-toggle"
+                                    aria-controls="vtt-spawn-panel-body" aria-pressed="true">Spawn Panel: On</button>
+                                <button class="vtt-chip-btn" data-action="toggle-inspector-panel" id="vtt-inspector-panel-toggle"
+                                    aria-controls="vtt-inspector-panel-body" aria-pressed="true">Inspector: On</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
 
     <main class="vtt-shell">
         <aside class="vtt-sidebar" id="vtt-settings-panel">
@@ -43,7 +68,6 @@
                     <h2>Scene</h2>
                     <div class="vtt-panel-head-actions">
                         <span class="vtt-panel-pill" id="vtt-active-scene-label">Scene 1</span>
-                        <button class="vtt-chip-btn" data-action="toggle-scene-panel" id="vtt-scene-panel-toggle" aria-controls="vtt-scene-panel-body" aria-expanded="true">Hide</button>
                         <button class="vtt-chip-btn" data-action="create-scene">New Scene</button>
                     </div>
                 </div>
@@ -94,8 +118,7 @@
                 <div class="vtt-panel-head">
                     <h2>Spawn</h2>
                     <div class="vtt-panel-head-actions">
-                        <button class="vtt-chip-btn" data-action="toggle-spawn-panel" id="vtt-spawn-panel-toggle" aria-controls="vtt-spawn-panel-body" aria-expanded="true">Hide</button>
-                        <button class="vtt-chip-btn" data-action="add-custom-token">Custom Token</button>
+                        <button class="vtt-chip-btn" data-action="open-quick-spawn">Quick Spawn</button>
                         <div class="vtt-popover-anchor">
                             <button class="vtt-chip-btn" data-action="toggle-npc-search" id="vtt-npc-search-toggle"
                                 aria-controls="vtt-npc-search-popover" aria-expanded="false">NPC Search</button>
@@ -122,7 +145,6 @@
                     <h2>Token Inspector</h2>
                     <div class="vtt-panel-head-actions">
                         <span class="vtt-panel-pill" id="vtt-selection-pill">No Token</span>
-                        <button class="vtt-chip-btn" data-action="toggle-inspector-panel" id="vtt-inspector-panel-toggle" aria-controls="vtt-inspector-panel-body" aria-expanded="true">Hide</button>
                     </div>
                 </div>
                 <div class="vtt-panel-body" id="vtt-inspector-panel-body">
@@ -148,6 +170,7 @@
                     <div class="vtt-fog-layer" id="vtt-fog-layer"></div>
                     <div class="vtt-token-layer" id="vtt-token-layer"></div>
                 </div>
+                <div class="vtt-quick-spawn-menu vtt-popover" id="vtt-quick-spawn-menu" hidden></div>
             </div>
         </section>
 
@@ -170,7 +193,7 @@
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
-    <script src="js/store.js?v=20260321d"></script>
+    <script src="js/store.js?v=20260321e"></script>
     <script src="js/player-nav.js?v=20260320c"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
@@ -181,7 +204,8 @@
                 return null;
             });
     </script>
-    <script src="js/vtt.js?v=20260321o"></script>
+    <div class="vtt-spawn-ghost" id="vtt-spawn-ghost" hidden></div>
+    <script src="js/vtt.js?v=20260321r"></script>
 </body>
 
 </html>
