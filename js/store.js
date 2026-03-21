@@ -613,7 +613,8 @@
             x: sanitizeVTTTokenCoordinate(source.x, 0.5),
             y: sanitizeVTTTokenCoordinate(source.y, 0.5),
             sizeCells: Math.max(1, Math.min(99, Math.round(toNumber(source.sizeCells, 4)))),
-            angleDeg: Math.round(toNumber(source.angleDeg, 0))
+            angleDeg: Math.round(toNumber(source.angleDeg, 0)),
+            expiresAt: Math.max(0, Math.round(toNumber(source.expiresAt, 0)))
         };
     };
 

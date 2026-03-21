@@ -18,6 +18,8 @@
     const TEMPLATE_KIND_CONE = 'cone';
     const DEFAULT_TOOL_SIZE_CELLS = 4;
     const DEFAULT_TEMPLATE_CONE_ARC_DEG = 53.13010235415598;
+    const TEMPLATE_HOLD_PERSIST_MS = 1000;
+    const TEMPLATE_SHARED_LIFETIME_MS = 5000;
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
     const DEFAULT_VTT_CELL_PX = 70;
@@ -95,6 +97,7 @@
     let templateRotateState = null;
     let visionConeRotateState = null;
     let rulerState = null;
+    let templateExpiryTimer = 0;
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
@@ -134,12 +137,11 @@
     const spawnGhostEl = document.getElementById('vtt-spawn-ghost');
     const toolsMenuToggleEl = document.getElementById('vtt-tools-menu-toggle');
     const toolsMenuEl = document.getElementById('vtt-tools-menu');
+    const rulerToggleEl = document.getElementById('vtt-ruler-toggle');
     const toolModeNavigateEl = document.getElementById('vtt-tool-mode-navigate');
-    const toolModeRulerEl = document.getElementById('vtt-tool-mode-ruler');
     const toolModeCircleEl = document.getElementById('vtt-tool-mode-circle');
     const toolModeConeEl = document.getElementById('vtt-tool-mode-cone');
     const toolSizeInputEl = document.getElementById('vtt-tool-size-input');
-    const templateDeleteEl = document.getElementById('vtt-template-delete');
     const stealthModeToggleEl = document.getElementById('vtt-stealth-mode-toggle');
     const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
     const viewMenuEl = document.getElementById('vtt-view-menu');
@@ -361,6 +363,38 @@
             angleDeg: normalizeAngleDeg(options.angleDeg)
         };
     };
+    const getRenderableSceneTemplates = (scene, now = Date.now()) => {
+        if (!scene || !Array.isArray(scene.templates)) return [];
+        return scene.templates.filter((template) => toNumber(template && template.expiresAt, 0) > now);
+    };
+    const queueSharedTransientTemplate = (template) => {
+        if (!template) return;
+        const payload = {
+            ...template,
+            expiresAt: Date.now() + TEMPLATE_SHARED_LIFETIME_MS
+        };
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene) return;
+            if (!Array.isArray(scene.templates)) scene.templates = [];
+            scene.templates.push(payload);
+        });
+    };
+    const scheduleTemplateExpiryRender = (scene) => {
+        if (templateExpiryTimer) {
+            window.clearTimeout(templateExpiryTimer);
+            templateExpiryTimer = 0;
+        }
+        const templates = getRenderableSceneTemplates(scene);
+        if (!templates.length) return;
+        const nextExpiry = Math.min(...templates.map((template) => Math.max(0, toNumber(template && template.expiresAt, 0))));
+        if (!Number.isFinite(nextExpiry) || nextExpiry <= 0) return;
+        const delay = Math.max(0, nextExpiry - Date.now() + 32);
+        templateExpiryTimer = window.setTimeout(() => {
+            templateExpiryTimer = 0;
+            renderStage();
+        }, delay);
+    };
     const getTemplateAngleFromWorldPoint = (scene, template, worldPoint) => {
         if (!scene || !template || !worldPoint) return 0;
         const origin = getTemplateWorldPoint(scene, template);
@@ -499,9 +533,8 @@
         return true;
     };
     const setToolMode = (mode) => {
+        clearTemplatePlacementState();
         localToolState.mode = normalizeToolMode(mode);
-        if (localToolState.mode !== TOOL_MODE_CONE) templatePlacementState = null;
-        if (localToolState.mode !== TOOL_MODE_RULER) rulerState = null;
     };
     const closeToolsMenu = () => {
         if (!toolsMenuOpen) return false;
@@ -516,21 +549,14 @@
     };
 
     const renderToolsMenu = () => {
-        const selectedTemplate = getTemplateById(selectedTemplateId);
         if (toolsMenuEl) toolsMenuEl.hidden = !toolsMenuOpen;
         if (toolsMenuToggleEl) toolsMenuToggleEl.setAttribute('aria-expanded', toolsMenuOpen ? 'true' : 'false');
+        if (rulerToggleEl) rulerToggleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false');
         if (toolModeNavigateEl) toolModeNavigateEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NAVIGATE ? 'true' : 'false');
-        if (toolModeRulerEl) toolModeRulerEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false');
         if (toolModeCircleEl) toolModeCircleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CIRCLE ? 'true' : 'false');
         if (toolModeConeEl) toolModeConeEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CONE ? 'true' : 'false');
         if (toolSizeInputEl && document.activeElement !== toolSizeInputEl) {
-            toolSizeInputEl.value = String(selectedTemplate ? normalizeToolSizeCells(selectedTemplate.sizeCells, localToolState.sizeCells) : localToolState.sizeCells);
-        }
-        if (templateDeleteEl) {
-            templateDeleteEl.disabled = !selectedTemplate;
-            templateDeleteEl.textContent = selectedTemplate
-                ? `Delete ${selectedTemplate.kind === TEMPLATE_KIND_CONE ? 'Cone' : 'Circle'}`
-                : 'Delete Selected Area';
+            toolSizeInputEl.value = String(localToolState.sizeCells);
         }
         if (stealthModeToggleEl) {
             const scene = getActiveScene();
@@ -1253,7 +1279,6 @@
         const scene = getActiveScene();
         const tokens = getVisibleTokensForRole(scene);
         const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
-        const templates = scene && Array.isArray(scene.templates) ? scene.templates : [];
         if (isDM() && uiState.sceneViewMode === SCENE_VIEW_LOCAL) {
             const viewedSceneId = getViewedSceneId(vttState, localRole);
             const sharedSceneId = getSharedSceneId(vttState);
@@ -1275,15 +1300,11 @@
         if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
             previewTokenId = '';
         }
-        if (!templates.some((template) => template.id === selectedTemplateId)) {
-            selectedTemplateId = '';
-        }
+        selectedTemplateId = '';
         if (templatePlacementState && (!scene || templatePlacementState.sceneId !== scene.id)) {
             templatePlacementState = null;
         }
-        if (templateRotateState && (!scene || templateRotateState.sceneId !== scene.id || !templates.some((template) => template.id === templateRotateState.templateId))) {
-            templateRotateState = null;
-        }
+        templateRotateState = null;
         if (visionConeRotateState && (!scene || visionConeRotateState.sceneId !== scene.id || !tokens.some((token) => token.id === visionConeRotateState.tokenId))) {
             visionConeRotateState = null;
         }
@@ -1321,14 +1342,6 @@
             scene.tokens.forEach((token) => {
                 width = Math.max(width, grid.offsetX + (token.x + token.w + 4) * grid.cellPx);
                 height = Math.max(height, grid.offsetY + (token.y + token.h + 4) * grid.cellPx);
-            });
-        }
-        if (Array.isArray(scene.templates) && scene.templates.length) {
-            scene.templates.forEach((template) => {
-                const bounds = getAreaTemplateWorldBounds(template, scene);
-                if (!bounds) return;
-                width = Math.max(width, bounds.maxX + grid.cellPx * 2);
-                height = Math.max(height, bounds.maxY + grid.cellPx * 2);
             });
         }
         return {
@@ -2415,20 +2428,16 @@
         `;
     };
 
-    const buildAreaTemplateMarkup = (template, scene, { preview = false } = {}) => {
-        const renderedTemplate = templateRotateState && templateRotateState.templateId === template.id
-            ? { ...template, angleDeg: templateRotateState.angleDeg }
-            : template;
-        const geometry = getAreaTemplateWorldGeometry(renderedTemplate, scene);
+    const buildAreaTemplateMarkup = (template, scene, { preview = false, transient = false } = {}) => {
+        const geometry = getAreaTemplateWorldGeometry(template, scene);
         if (!geometry) return '';
         const classes = [
             'vtt-overlay-item',
             'vtt-area-template',
             template.kind === TEMPLATE_KIND_CONE ? 'is-cone' : 'is-circle'
         ];
-        if (selectedTemplateId && template.id === selectedTemplateId) classes.push('is-selected');
-        if (templateRotateState && template.id === templateRotateState.templateId) classes.push('is-rotating');
         if (preview) classes.push('is-preview');
+        if (transient) classes.push('is-transient');
         const shapeMarkup = template.kind === TEMPLATE_KIND_CONE
             ? `
                 <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -2446,13 +2455,6 @@
                         stroke-width="2"></circle>
                 </svg>
             `;
-        const handleMarkup = !preview && template.kind === TEMPLATE_KIND_CONE && selectedTemplateId === template.id
-            ? `
-                <button class="vtt-template-rotate-handle" type="button"
-                    data-template-id="${escapeHtml(String(template.id || ''))}"
-                    aria-label="Rotate cone"></button>
-            `
-            : '';
         return `
             <div class="${classes.join(' ')}"
                 data-template-id="${escapeHtml(String(template.id || ''))}"
@@ -2462,13 +2464,12 @@
                 data-world-height="${escapeHtml(String(geometry.height))}"
                 data-world-rotation="${escapeHtml(String(geometry.rotationDeg))}">
                 ${shapeMarkup}
-                ${handleMarkup}
             </div>
         `;
     };
 
     const buildRulerMarkup = (scene) => {
-        if (!scene || !rulerState || rulerState.sceneId !== scene.id || !rulerState.start || !rulerState.end) return '';
+        if (!scene || !rulerState || !rulerState.dragging || rulerState.sceneId !== scene.id || !rulerState.start || !rulerState.end) return '';
         const start = getTemplateWorldPoint(scene, rulerState.start);
         const end = getTemplateWorldPoint(scene, rulerState.end);
         const dx = end.x - start.x;
@@ -2491,6 +2492,7 @@
     const renderTemplateLayer = (scene, visibleTokens) => {
         if (!templateLayerEl) return;
         const showStealthCones = !!(scene && scene.stealthMode);
+        const visibleTemplates = getRenderableSceneTemplates(scene);
         const visionMarkup = showStealthCones
             ? visibleTokens
                 .filter((token) => {
@@ -2500,14 +2502,13 @@
                 .map((token) => buildVisionConeMarkup(token, scene))
                 .join('')
             : '';
-        const templateMarkup = Array.isArray(scene && scene.templates)
-            ? scene.templates.map((template) => buildAreaTemplateMarkup(template, scene)).join('')
-            : '';
+        const templateMarkup = visibleTemplates.map((template) => buildAreaTemplateMarkup(template, scene, { transient: true })).join('');
         const previewMarkup = templatePlacementState && templatePlacementState.sceneId === scene.id && templatePlacementState.template
             ? buildAreaTemplateMarkup(templatePlacementState.template, scene, { preview: true })
             : '';
         const rulerMarkup = buildRulerMarkup(scene);
         templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`;
+        scheduleTemplateExpiryRender(scene);
     };
 
     const renderStage = () => {
@@ -2572,11 +2573,11 @@
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
         const usingLocalView = isUsingLocalSceneView(vttState, localRole);
         const toolMeta = localToolState.mode === TOOL_MODE_RULER
-            ? 'Ruler active: drag on the stage to measure squares and feet.'
+            ? 'Ruler active: click and hold on the stage to measure squares and feet.'
             : (localToolState.mode === TOOL_MODE_CIRCLE
-                ? `Circle tool active: click to place a ${localToolState.sizeCells}-square radius circle.`
+                ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Hold for a moment to leave a 5-second shared marker.`
                 : (localToolState.mode === TOOL_MODE_CONE
-                    ? `Cone tool active: drag to place a ${localToolState.sizeCells}-square cone.`
+                    ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Hold for a moment to leave a 5-second shared marker.`
                     : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
@@ -2920,6 +2921,11 @@
             renderToolsMenu();
             return;
         }
+        if (action === 'toggle-ruler-mode') {
+            setToolMode(localToolState.mode === TOOL_MODE_RULER ? TOOL_MODE_NAVIGATE : TOOL_MODE_RULER);
+            render();
+            return;
+        }
         if (action === 'set-tool-mode') {
             const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
             setToolMode(nextMode);
@@ -3002,10 +3008,6 @@
         }
         if (action === 'fit-view') {
             fitViewToWorld();
-            return;
-        }
-        if (action === 'delete-selected-template') {
-            deleteTemplateById(selectedTemplateId);
             return;
         }
         if (action === 'toggle-stealth-mode') {
@@ -3306,16 +3308,6 @@
         if (target instanceof HTMLInputElement && target.dataset.toolSizeField) {
             const nextSize = normalizeToolSizeCells(target.value, localToolState.sizeCells);
             localToolState.sizeCells = nextSize;
-            if (selectedTemplateId) {
-                withDraft((draft) => {
-                    const scene = getActiveScene(draft);
-                    if (!scene || !Array.isArray(scene.templates)) return;
-                    const template = scene.templates.find((entry) => entry && entry.id === selectedTemplateId);
-                    if (!template) return;
-                    template.sizeCells = nextSize;
-                });
-                return;
-            }
             renderToolsMenu();
             return;
         }
@@ -3719,16 +3711,15 @@
         if (localToolState.mode === TOOL_MODE_CIRCLE) {
             const template = buildAreaTemplate(TEMPLATE_KIND_CIRCLE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
             if (!template) return;
-            withDraft((draft) => {
-                const draftScene = getActiveScene(draft);
-                if (!draftScene) return;
-                if (!Array.isArray(draftScene.templates)) draftScene.templates = [];
-                draftScene.templates.push(template);
-                selectedTemplateId = template.id;
-                selectedTokenId = '';
-                selectedEntryId = '';
-                previewTokenId = '';
-            });
+            templatePlacementState = {
+                sceneId: scene.id,
+                template,
+                startedAt: Date.now()
+            };
+            templateRotateState = null;
+            visionConeRotateState = null;
+            rulerState = null;
+            renderStage();
             event.preventDefault();
             return;
         }
@@ -3736,13 +3727,14 @@
         if (localToolState.mode === TOOL_MODE_CONE) {
             const template = buildAreaTemplate(TEMPLATE_KIND_CONE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
             if (!template) return;
-            templatePlacementState = { sceneId: scene.id, template };
+            templatePlacementState = {
+                sceneId: scene.id,
+                template,
+                startedAt: Date.now()
+            };
+            templateRotateState = null;
             visionConeRotateState = null;
             rulerState = null;
-            selectedTemplateId = '';
-            selectedTokenId = '';
-            selectedEntryId = '';
-            previewTokenId = '';
             renderToolsMenu();
             renderStage();
             event.preventDefault();
@@ -3753,11 +3745,8 @@
             const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
             rulerState = { sceneId: scene.id, start: anchor, end: anchor, dragging: true };
             templatePlacementState = null;
+            templateRotateState = null;
             visionConeRotateState = null;
-            selectedTemplateId = '';
-            selectedTokenId = '';
-            selectedEntryId = '';
-            previewTokenId = '';
             renderToolsMenu();
             renderStage();
             event.preventDefault();
@@ -3836,7 +3825,13 @@
             const scene = getActiveScene();
             if (!scene || !templatePlacementState.template) return;
             const worldPoint = screenToWorld(event.clientX, event.clientY);
-            templatePlacementState.template.angleDeg = getTemplateAngleFromWorldPoint(scene, templatePlacementState.template, worldPoint);
+            if (templatePlacementState.template.kind === TEMPLATE_KIND_CIRCLE) {
+                const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
+                templatePlacementState.template.x = anchor.x;
+                templatePlacementState.template.y = anchor.y;
+            } else {
+                templatePlacementState.template.angleDeg = getTemplateAngleFromWorldPoint(scene, templatePlacementState.template, worldPoint);
+            }
             renderStage();
             return;
         }
@@ -3905,24 +3900,17 @@
             return;
         }
         if (templatePlacementState) {
-            if (event && event.type === 'pointercancel') {
-                templatePlacementState = null;
-                renderStage();
-                return;
-            }
-            const pendingTemplate = templatePlacementState.template ? { ...templatePlacementState.template } : null;
+            const pendingTemplateState = templatePlacementState;
             templatePlacementState = null;
-            if (!pendingTemplate) {
+            if (event && event.type === 'pointercancel') {
                 renderStage();
                 return;
             }
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                if (!Array.isArray(scene.templates)) scene.templates = [];
-                scene.templates.push(pendingTemplate);
-                selectedTemplateId = pendingTemplate.id;
-            });
+            if (pendingTemplateState && pendingTemplateState.template && Date.now() - toNumber(pendingTemplateState.startedAt, 0) >= TEMPLATE_HOLD_PERSIST_MS) {
+                queueSharedTransientTemplate({ ...pendingTemplateState.template });
+                return;
+            }
+            renderStage();
             return;
         }
         if (templateRotateState) {
@@ -3973,7 +3961,7 @@
             if (!appliedRemoteSnapshot) render();
         }
         if (rulerState && rulerState.dragging) {
-            rulerState.dragging = false;
+            rulerState = null;
             renderStage();
         }
 
@@ -4041,12 +4029,6 @@
     const handleStageContextMenu = (event) => {
         if (!(event.target instanceof Element)) return;
         if (event.target.closest('#vtt-quick-spawn-menu')) return;
-        const templateEl = getTemplateElementAtClientPoint(event.clientX, event.clientY, event.target);
-        if (templateEl) {
-            event.preventDefault();
-            deleteTemplateById(String(templateEl.getAttribute('data-template-id') || '').trim());
-            return;
-        }
         if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
             event.preventDefault();
             return;
@@ -4132,11 +4114,6 @@
                 render();
                 event.preventDefault();
             }
-            return;
-        }
-        if ((event.key === 'Delete' || event.key === 'Backspace') && selectedTemplateId) {
-            deleteTemplateById(selectedTemplateId);
-            event.preventDefault();
             return;
         }
         if (!selectedTokenId || event.defaultPrevented) return;
