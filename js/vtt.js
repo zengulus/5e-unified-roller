@@ -401,7 +401,7 @@
         return normalizeAngleDeg(Math.atan2(worldPoint.y - origin.y, worldPoint.x - origin.x) * 180 / Math.PI);
     };
     const getVisionConeRangeCells = (token) => Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
-    const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 170);
+    const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 360);
     const getTokenVisionFacingDeg = (token) => normalizeAngleDeg(token && token.vision && token.vision.facingDeg);
     const getVisionConeGeometry = (token, scene) => {
         if (!token || !scene || !token.vision || !token.vision.enabled) return null;
@@ -410,16 +410,15 @@
         const rangeCells = getVisionConeRangeCells(token);
         if (!rangeCells) return null;
         const anchor = getTemplateWorldPoint(scene, getTokenCenterInCells(token));
-        const sizePx = rangeCells * getSceneCellPx(scene);
-        const arcDeg = getVisionConeArcDeg(token);
-        const halfWidth = getConeHalfWidthPx(sizePx, arcDeg);
+        const radiusPx = rangeCells * getSceneCellPx(scene);
+        const diameterPx = radiusPx * 2;
         return {
-            left: anchor.x,
-            top: anchor.y - halfWidth,
-            width: sizePx,
-            height: halfWidth * 2,
+            left: anchor.x - radiusPx,
+            top: anchor.y - radiusPx,
+            width: diameterPx,
+            height: diameterPx,
             rotationDeg: getTokenVisionFacingDeg(token),
-            arcDeg
+            arcDeg: getVisionConeArcDeg(token)
         };
     };
     const isCellPointInsideVisionCone = (point, token) => {
@@ -2262,7 +2261,7 @@
                         </label>
                         <label class="vtt-field">
                             <span>Angle</span>
-                            <input class="vtt-inspector-input" type="number" data-token-vision-field="arcDeg" min="1" max="170" value="${escapeHtml(String(token.vision && token.vision.arcDeg !== undefined ? token.vision.arcDeg : 90))}">
+                            <input class="vtt-inspector-input" type="number" data-token-vision-field="arcDeg" min="1" max="360" value="${escapeHtml(String(token.vision && token.vision.arcDeg !== undefined ? token.vision.arcDeg : 90))}">
                         </label>
                         <label class="vtt-field">
                             <span>Range</span>
@@ -2403,6 +2402,37 @@
         const fill = overlapsPlayers ? 'rgba(255, 102, 102, 0.24)' : 'rgba(94, 176, 255, 0.22)';
         const stroke = overlapsPlayers ? 'rgba(255, 132, 132, 0.82)' : 'rgba(122, 194, 255, 0.78)';
         const classes = ['vtt-overlay-item', 'vtt-vision-cone'];
+        const arcDeg = clamp(toNumber(geometry.arcDeg, 90), 1, 360);
+        const center = 50;
+        const radius = 49;
+        const shapeMarkup = arcDeg >= 359.5
+            ? `
+                <circle cx="${center}" cy="${center}" r="${radius}"
+                    fill="${fill}"
+                    stroke="${stroke}"
+                    stroke-width="1.8"></circle>
+            `
+            : (() => {
+                const startRad = (-arcDeg / 2) * Math.PI / 180;
+                const endRad = (arcDeg / 2) * Math.PI / 180;
+                const startX = center + Math.cos(startRad) * radius;
+                const startY = center + Math.sin(startRad) * radius;
+                const endX = center + Math.cos(endRad) * radius;
+                const endY = center + Math.sin(endRad) * radius;
+                const largeArcFlag = arcDeg > 180 ? 1 : 0;
+                const path = [
+                    `M ${center} ${center}`,
+                    `L ${startX.toFixed(3)} ${startY.toFixed(3)}`,
+                    `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX.toFixed(3)} ${endY.toFixed(3)}`,
+                    'Z'
+                ].join(' ');
+                return `
+                    <path d="${path}"
+                        fill="${fill}"
+                        stroke="${stroke}"
+                        stroke-width="1.8"></path>
+                `;
+            })();
         if (selectedTokenId === token.id) classes.push('is-selected');
         if (visionConeRotateState && visionConeRotateState.tokenId === token.id) classes.push('is-rotating');
         const handleMarkup = selectedTokenId === token.id && canRoleMoveToken(token)
@@ -2421,7 +2451,7 @@
                 data-world-height="${escapeHtml(String(geometry.height))}"
                 data-world-rotation="${escapeHtml(String(geometry.rotationDeg))}">
                 <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                    <polygon points="0,50 100,0 100,100" fill="${fill}" stroke="${stroke}" stroke-width="1.8"></polygon>
+                    ${shapeMarkup}
                 </svg>
                 ${handleMarkup}
             </div>
@@ -3434,7 +3464,7 @@
                 }
                 const nextValue = String(target.value || '').trim();
                 if (field === 'arcDeg') {
-                    token.vision.arcDeg = nextValue === '' ? 90 : clamp(Math.round(toNumber(nextValue, 90)), 1, 170);
+                    token.vision.arcDeg = nextValue === '' ? 90 : clamp(Math.round(toNumber(nextValue, 90)), 1, 360);
                     return;
                 }
                 if (field === 'baseRangeCells') {

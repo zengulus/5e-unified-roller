@@ -842,12 +842,12 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 }
 
 .vtt-vision-cone,
-.vtt-area-template.is-cone {
-    transform-origin: 0 50%;
-}
-
 .vtt-area-template.is-circle {
     transform-origin: 50% 50%;
+}
+
+.vtt-area-template.is-cone {
+    transform-origin: 0 50%;
 }
 
 .vtt-area-template.is-rotating,
