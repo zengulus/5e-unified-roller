@@ -92,6 +92,7 @@
     let lastTokenPointerDownAt = 0;
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
     let templatePlacementState = null;
+    let templateRotateState = null;
     let rulerState = null;
 
     const body = document.body;
@@ -359,6 +360,11 @@
             angleDeg: normalizeAngleDeg(options.angleDeg)
         };
     };
+    const getTemplateAngleFromWorldPoint = (scene, template, worldPoint) => {
+        if (!scene || !template || !worldPoint) return 0;
+        const origin = getTemplateWorldPoint(scene, template);
+        return normalizeAngleDeg(Math.atan2(worldPoint.y - origin.y, worldPoint.x - origin.x) * 180 / Math.PI);
+    };
     const getVisionConeRangeCells = (token) => Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
     const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 170);
     const getVisionConeGeometry = (token, scene) => {
@@ -456,9 +462,22 @@
         if (!scene || !Array.isArray(scene.templates)) return null;
         return scene.templates.find((template) => String(template && template.id || '').trim() === String(templateId || '').trim()) || null;
     };
+    const deleteTemplateById = (templateId) => {
+        const targetId = String(templateId || '').trim();
+        if (!targetId) return false;
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.templates)) return;
+            scene.templates = scene.templates.filter((template) => String(template && template.id || '').trim() !== targetId);
+            if (selectedTemplateId === targetId) selectedTemplateId = '';
+            if (templateRotateState && templateRotateState.templateId === targetId) templateRotateState = null;
+        });
+        return true;
+    };
     const clearTemplatePlacementState = () => {
-        if (!templatePlacementState && !rulerState) return false;
+        if (!templatePlacementState && !templateRotateState && !rulerState) return false;
         templatePlacementState = null;
+        templateRotateState = null;
         rulerState = null;
         return true;
     };
@@ -1244,6 +1263,9 @@
         }
         if (templatePlacementState && (!scene || templatePlacementState.sceneId !== scene.id)) {
             templatePlacementState = null;
+        }
+        if (templateRotateState && (!scene || templateRotateState.sceneId !== scene.id || !templates.some((template) => template.id === templateRotateState.templateId))) {
+            templateRotateState = null;
         }
         if (rulerState && (!scene || rulerState.sceneId !== scene.id)) {
             rulerState = null;
@@ -2353,7 +2375,10 @@
     };
 
     const buildAreaTemplateMarkup = (template, scene, { preview = false } = {}) => {
-        const geometry = getAreaTemplateWorldGeometry(template, scene);
+        const renderedTemplate = templateRotateState && templateRotateState.templateId === template.id
+            ? { ...template, angleDeg: templateRotateState.angleDeg }
+            : template;
+        const geometry = getAreaTemplateWorldGeometry(renderedTemplate, scene);
         if (!geometry) return '';
         const classes = [
             'vtt-overlay-item',
@@ -2361,6 +2386,7 @@
             template.kind === TEMPLATE_KIND_CONE ? 'is-cone' : 'is-circle'
         ];
         if (selectedTemplateId && template.id === selectedTemplateId) classes.push('is-selected');
+        if (templateRotateState && template.id === templateRotateState.templateId) classes.push('is-rotating');
         if (preview) classes.push('is-preview');
         const shapeMarkup = template.kind === TEMPLATE_KIND_CONE
             ? `
@@ -2379,6 +2405,13 @@
                         stroke-width="2"></circle>
                 </svg>
             `;
+        const handleMarkup = !preview && template.kind === TEMPLATE_KIND_CONE && selectedTemplateId === template.id
+            ? `
+                <button class="vtt-template-rotate-handle" type="button"
+                    data-template-id="${escapeHtml(String(template.id || ''))}"
+                    aria-label="Rotate cone"></button>
+            `
+            : '';
         return `
             <div class="${classes.join(' ')}"
                 data-template-id="${escapeHtml(String(template.id || ''))}"
@@ -2388,6 +2421,7 @@
                 data-world-height="${escapeHtml(String(geometry.height))}"
                 data-world-rotation="${escapeHtml(String(geometry.rotationDeg))}">
                 ${shapeMarkup}
+                ${handleMarkup}
             </div>
         `;
     };
@@ -2930,13 +2964,7 @@
             return;
         }
         if (action === 'delete-selected-template') {
-            if (!selectedTemplateId) return;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.templates)) return;
-                scene.templates = scene.templates.filter((template) => String(template && template.id || '').trim() !== String(selectedTemplateId || '').trim());
-                selectedTemplateId = '';
-            });
+            deleteTemplateById(selectedTemplateId);
             return;
         }
         if (action === 'toggle-stealth-mode') {
@@ -3580,6 +3608,30 @@
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
+        const rotateHandleEl = event.target.closest('.vtt-template-rotate-handle');
+        if (rotateHandleEl) {
+            const templateId = String(rotateHandleEl.getAttribute('data-template-id') || '').trim();
+            const template = getTemplateById(templateId);
+            if (!template || template.kind !== TEMPLATE_KIND_CONE) return;
+            selectedTemplateId = template.id;
+            selectedTokenId = '';
+            selectedEntryId = '';
+            previewTokenId = '';
+            templatePlacementState = null;
+            rulerState = null;
+            templateRotateState = {
+                sceneId: scene.id,
+                templateId: template.id,
+                angleDeg: getTemplateAngleFromWorldPoint(scene, template, worldPoint)
+            };
+            renderTokenInspector();
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
 
         if (localToolState.mode === TOOL_MODE_CIRCLE) {
             const template = buildAreaTemplate(TEMPLATE_KIND_CIRCLE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
@@ -3712,9 +3764,20 @@
         if (templatePlacementState) {
             const scene = getActiveScene();
             if (!scene || !templatePlacementState.template) return;
-            const origin = getTemplateWorldPoint(scene, templatePlacementState.template);
             const worldPoint = screenToWorld(event.clientX, event.clientY);
-            templatePlacementState.template.angleDeg = normalizeAngleDeg(Math.atan2(worldPoint.y - origin.y, worldPoint.x - origin.x) * 180 / Math.PI);
+            templatePlacementState.template.angleDeg = getTemplateAngleFromWorldPoint(scene, templatePlacementState.template, worldPoint);
+            renderStage();
+            return;
+        }
+        if (templateRotateState) {
+            const scene = getActiveScene();
+            const template = getTemplateById(templateRotateState.templateId);
+            if (!scene || !template || template.kind !== TEMPLATE_KIND_CONE) {
+                templateRotateState = null;
+                renderStage();
+                return;
+            }
+            templateRotateState.angleDeg = getTemplateAngleFromWorldPoint(scene, template, screenToWorld(event.clientX, event.clientY));
             renderStage();
             return;
         }
@@ -3776,6 +3839,24 @@
                 if (!Array.isArray(scene.templates)) scene.templates = [];
                 scene.templates.push(pendingTemplate);
                 selectedTemplateId = pendingTemplate.id;
+            });
+            return;
+        }
+        if (templateRotateState) {
+            if (event && event.type === 'pointercancel') {
+                templateRotateState = null;
+                renderStage();
+                return;
+            }
+            const pendingRotation = { ...templateRotateState };
+            templateRotateState = null;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.templates)) return;
+                const template = scene.templates.find((entry) => entry && entry.id === pendingRotation.templateId);
+                if (!template) return;
+                template.angleDeg = normalizeAngleDeg(pendingRotation.angleDeg);
+                selectedTemplateId = template.id;
             });
             return;
         }
@@ -3856,6 +3937,12 @@
     const handleStageContextMenu = (event) => {
         if (!(event.target instanceof Element)) return;
         if (event.target.closest('#vtt-quick-spawn-menu')) return;
+        const templateEl = event.target.closest('.vtt-area-template');
+        if (templateEl) {
+            event.preventDefault();
+            deleteTemplateById(String(templateEl.getAttribute('data-template-id') || '').trim());
+            return;
+        }
         if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
             event.preventDefault();
             return;
@@ -3944,12 +4031,7 @@
             return;
         }
         if ((event.key === 'Delete' || event.key === 'Backspace') && selectedTemplateId) {
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.templates)) return;
-                scene.templates = scene.templates.filter((template) => String(template && template.id || '').trim() !== String(selectedTemplateId || '').trim());
-                selectedTemplateId = '';
-            });
+            deleteTemplateById(selectedTemplateId);
             event.preventDefault();
             return;
         }
