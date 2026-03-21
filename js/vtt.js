@@ -10,6 +10,14 @@
     const SIDE_OPTIONS = ['player', 'ally', 'enemy', 'neutral'];
     const MOVE_ACCESS_OPTIONS = ['dm', 'player'];
     const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+    const TOOL_MODE_NAVIGATE = 'navigate';
+    const TOOL_MODE_RULER = 'ruler';
+    const TOOL_MODE_CIRCLE = 'circle';
+    const TOOL_MODE_CONE = 'cone';
+    const TEMPLATE_KIND_CIRCLE = 'circle';
+    const TEMPLATE_KIND_CONE = 'cone';
+    const DEFAULT_TOOL_SIZE_CELLS = 4;
+    const DEFAULT_TEMPLATE_CONE_ARC_DEG = 53.13010235415598;
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
     const DEFAULT_VTT_CELL_PX = 70;
@@ -30,7 +38,9 @@
                     offsetY: 0,
                     cellDistance: 5
                 },
+                stealthMode: false,
                 tokens: [],
+                templates: [],
                 fog: []
             }
         ],
@@ -44,6 +54,7 @@
     let vttState = null;
     let selectedTokenId = '';
     let selectedEntryId = '';
+    let selectedTemplateId = '';
     let localRole = 'player';
     let uiState = {
         settingsCollapsed: false,
@@ -75,9 +86,13 @@
     let quickSpawnMenuState = null;
     let initiativeDetailState = null;
     let viewMenuOpen = false;
+    let toolsMenuOpen = false;
     let dmUnlockReturnFocusEl = null;
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
+    let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
+    let templatePlacementState = null;
+    let rulerState = null;
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
@@ -87,6 +102,7 @@
     const mapImageEl = document.getElementById('vtt-map-image');
     const gridLayerEl = document.getElementById('vtt-grid-layer');
     const fogLayerEl = document.getElementById('vtt-fog-layer');
+    const templateLayerEl = document.getElementById('vtt-template-layer');
     const tokenLayerEl = document.getElementById('vtt-token-layer');
     const caseNameEl = document.getElementById('vtt-case-name');
     const syncChipEl = document.getElementById('vtt-sync-chip');
@@ -114,6 +130,15 @@
     const npcSearchListEl = document.getElementById('vtt-npc-search-list');
     const quickSpawnMenuEl = document.getElementById('vtt-quick-spawn-menu');
     const spawnGhostEl = document.getElementById('vtt-spawn-ghost');
+    const toolsMenuToggleEl = document.getElementById('vtt-tools-menu-toggle');
+    const toolsMenuEl = document.getElementById('vtt-tools-menu');
+    const toolModeNavigateEl = document.getElementById('vtt-tool-mode-navigate');
+    const toolModeRulerEl = document.getElementById('vtt-tool-mode-ruler');
+    const toolModeCircleEl = document.getElementById('vtt-tool-mode-circle');
+    const toolModeConeEl = document.getElementById('vtt-tool-mode-cone');
+    const toolSizeInputEl = document.getElementById('vtt-tool-size-input');
+    const templateDeleteEl = document.getElementById('vtt-template-delete');
+    const stealthModeToggleEl = document.getElementById('vtt-stealth-mode-toggle');
     const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
     const viewMenuEl = document.getElementById('vtt-view-menu');
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
@@ -187,6 +212,10 @@
             ...token,
             id: buildId('token')
         }));
+        const clonedTemplates = deepClone(Array.isArray(source && source.templates) ? source.templates : []).map((template) => ({
+            ...template,
+            id: buildId('template')
+        }));
         return {
             id: buildId('scene'),
             name: nextName,
@@ -198,7 +227,9 @@
                 offsetY: 0,
                 cellDistance: 5
             }),
+            stealthMode: !!(source && source.stealthMode),
             tokens: clonedTokens,
+            templates: clonedTemplates,
             fog: deepClone(Array.isArray(source && source.fog) ? source.fog : [])
         };
     };
@@ -223,6 +254,152 @@
         if (!Number.isFinite(hpCurrent) || !Number.isFinite(hpMax) || hpMax <= 0) return 0;
         const ratio = clamp(hpCurrent / hpMax, 0, 1);
         return Math.round((1 - ratio) * 1000) / 1000;
+    };
+    const getTokenCenterInCells = (token) => ({
+        x: normalizeTokenCoordinate(toNumber(token && token.x, 0) + Math.max(1, toNumber(token && token.w, 1)) / 2, 0.5),
+        y: normalizeTokenCoordinate(toNumber(token && token.y, 0) + Math.max(1, toNumber(token && token.h, 1)) / 2, 0.5)
+    });
+    const getTokenFootprintPoints = (token) => {
+        if (!token) return [];
+        const width = Math.max(1, toNumber(token.w, 1));
+        const height = Math.max(1, toNumber(token.h, 1));
+        const x = toNumber(token.x, 0);
+        const y = toNumber(token.y, 0);
+        return [
+            { x: x + width / 2, y: y + height / 2 },
+            { x: x, y: y },
+            { x: x + width / 2, y: y },
+            { x: x + width, y: y },
+            { x: x, y: y + height / 2 },
+            { x: x + width, y: y + height / 2 },
+            { x: x, y: y + height },
+            { x: x + width / 2, y: y + height },
+            { x: x + width, y: y + height }
+        ];
+    };
+    const getTemplateWorldPoint = (scene, point) => {
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        return {
+            x: offsetX + toNumber(point && point.x, 0) * cellPx,
+            y: offsetY + toNumber(point && point.y, 0) * cellPx
+        };
+    };
+    const getConeHalfWidthPx = (lengthPx, arcDeg) => {
+        const clampedArc = clamp(toNumber(arcDeg, 60), 1, 170);
+        return Math.max(1, lengthPx * Math.tan((clampedArc / 2) * Math.PI / 180));
+    };
+    const getConeWorldVertices = (originPoint, lengthPx, angleDeg, arcDeg) => {
+        const radians = normalizeAngleDeg(angleDeg) * Math.PI / 180;
+        const axisX = Math.cos(radians);
+        const axisY = Math.sin(radians);
+        const perpX = -axisY;
+        const perpY = axisX;
+        const halfWidth = getConeHalfWidthPx(lengthPx, arcDeg);
+        return [
+            { x: originPoint.x, y: originPoint.y },
+            { x: originPoint.x + axisX * lengthPx - perpX * halfWidth, y: originPoint.y + axisY * lengthPx - perpY * halfWidth },
+            { x: originPoint.x + axisX * lengthPx + perpX * halfWidth, y: originPoint.y + axisY * lengthPx + perpY * halfWidth }
+        ];
+    };
+    const getAreaTemplateWorldGeometry = (template, scene) => {
+        if (!template || !scene) return null;
+        const sizePx = Math.max(1, normalizeToolSizeCells(template.sizeCells, DEFAULT_TOOL_SIZE_CELLS) * getSceneCellPx(scene));
+        const anchor = getTemplateWorldPoint(scene, template);
+        if (String(template.kind || TEMPLATE_KIND_CIRCLE) === TEMPLATE_KIND_CONE) {
+            const halfWidth = sizePx / 2;
+            return {
+                kind: TEMPLATE_KIND_CONE,
+                left: anchor.x,
+                top: anchor.y - halfWidth,
+                width: sizePx,
+                height: halfWidth * 2,
+                rotationDeg: normalizeAngleDeg(template.angleDeg)
+            };
+        }
+        return {
+            kind: TEMPLATE_KIND_CIRCLE,
+            left: anchor.x - sizePx,
+            top: anchor.y - sizePx,
+            width: sizePx * 2,
+            height: sizePx * 2,
+            rotationDeg: 0
+        };
+    };
+    const getAreaTemplateWorldBounds = (template, scene) => {
+        const geometry = getAreaTemplateWorldGeometry(template, scene);
+        if (!geometry) return null;
+        if (geometry.kind === TEMPLATE_KIND_CIRCLE) {
+            return {
+                minX: geometry.left,
+                minY: geometry.top,
+                maxX: geometry.left + geometry.width,
+                maxY: geometry.top + geometry.height
+            };
+        }
+        const anchor = getTemplateWorldPoint(scene, template);
+        const vertices = getConeWorldVertices(anchor, geometry.width, geometry.rotationDeg, DEFAULT_TEMPLATE_CONE_ARC_DEG);
+        return {
+            minX: Math.min(...vertices.map((point) => point.x)),
+            minY: Math.min(...vertices.map((point) => point.y)),
+            maxX: Math.max(...vertices.map((point) => point.x)),
+            maxY: Math.max(...vertices.map((point) => point.y))
+        };
+    };
+    const buildAreaTemplate = (kind, scene, worldPoint, options = {}) => {
+        if (!scene || !worldPoint) return null;
+        const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
+        return {
+            id: buildId('template'),
+            kind: kind === TEMPLATE_KIND_CONE ? TEMPLATE_KIND_CONE : TEMPLATE_KIND_CIRCLE,
+            x: anchor.x,
+            y: anchor.y,
+            sizeCells: normalizeToolSizeCells(options.sizeCells, localToolState.sizeCells),
+            angleDeg: normalizeAngleDeg(options.angleDeg)
+        };
+    };
+    const getVisionConeRangeCells = (token) => Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
+    const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 170);
+    const getVisionConeGeometry = (token, scene) => {
+        if (!token || !scene || !token.vision || !token.vision.enabled) return null;
+        const side = String(token.side || '').trim().toLowerCase();
+        if (side !== 'enemy' && side !== 'neutral') return null;
+        const rangeCells = getVisionConeRangeCells(token);
+        if (!rangeCells) return null;
+        const anchor = getTemplateWorldPoint(scene, getTokenCenterInCells(token));
+        const sizePx = rangeCells * getSceneCellPx(scene);
+        const arcDeg = getVisionConeArcDeg(token);
+        const halfWidth = getConeHalfWidthPx(sizePx, arcDeg);
+        return {
+            left: anchor.x,
+            top: anchor.y - halfWidth,
+            width: sizePx,
+            height: halfWidth * 2,
+            rotationDeg: normalizeAngleDeg(token.vision.facingDeg),
+            arcDeg
+        };
+    };
+    const isCellPointInsideVisionCone = (point, token) => {
+        if (!point || !token || !token.vision || !token.vision.enabled) return false;
+        const origin = getTokenCenterInCells(token);
+        const dx = toNumber(point.x, 0) - origin.x;
+        const dy = toNumber(point.y, 0) - origin.y;
+        const distance = Math.hypot(dx, dy);
+        const rangeCells = getVisionConeRangeCells(token);
+        if (distance > rangeCells || !rangeCells) return false;
+        const angle = normalizeAngleDeg(Math.atan2(dy, dx) * 180 / Math.PI);
+        const facing = normalizeAngleDeg(token.vision.facingDeg);
+        const delta = Math.abs((((angle - facing) + 540) % 360) - 180);
+        return delta <= getVisionConeArcDeg(token) / 2;
+    };
+    const doesVisionConeOverlapPlayers = (token, scene, state = vttState) => {
+        if (!token || !scene || !state || !Array.isArray(scene.tokens)) return false;
+        return scene.tokens.some((candidate) => {
+            if (!candidate || candidate.id === token.id || String(candidate.side || '').trim().toLowerCase() !== 'player') return false;
+            if (!isDM() && candidate.hidden) return false;
+            return getTokenFootprintPoints(candidate).some((point) => isCellPointInsideVisionCone(point, token));
+        });
     };
     const getStore = () => (window.RTF_STORE && typeof window.RTF_STORE.getVTTState === 'function' ? window.RTF_STORE : null);
     const getActiveCaseId = () => {
@@ -252,10 +429,81 @@
         npcSearchOpen = false;
         if (clearQuery) npcSearchQuery = '';
     };
+    const normalizeToolMode = (value) => {
+        const token = String(value || '').trim().toLowerCase();
+        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE) return token;
+        return TOOL_MODE_NAVIGATE;
+    };
+    const normalizeToolSizeCells = (value, fallback = DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
+    const normalizeAngleDeg = (value) => {
+        const parsed = Math.round(toNumber(value, 0));
+        const result = parsed % 360;
+        return result < 0 ? result + 360 : result;
+    };
+    const getSceneCellPx = (scene) => Math.max(1, toNumber(scene && scene.grid && scene.grid.cellPx, DEFAULT_VTT_CELL_PX));
+    const snapTemplateCellCoordinate = (value) => Math.max(0.5, Math.round(toNumber(value, 0.5) - 0.5) + 0.5);
+    const snapWorldPointToTemplateAnchor = (scene, worldPoint) => {
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        return {
+            x: snapTemplateCellCoordinate((toNumber(worldPoint && worldPoint.x, 0) - offsetX) / cellPx),
+            y: snapTemplateCellCoordinate((toNumber(worldPoint && worldPoint.y, 0) - offsetY) / cellPx)
+        };
+    };
+    const getTemplateById = (templateId, state = vttState) => {
+        const scene = getActiveScene(state);
+        if (!scene || !Array.isArray(scene.templates)) return null;
+        return scene.templates.find((template) => String(template && template.id || '').trim() === String(templateId || '').trim()) || null;
+    };
+    const clearTemplatePlacementState = () => {
+        if (!templatePlacementState && !rulerState) return false;
+        templatePlacementState = null;
+        rulerState = null;
+        return true;
+    };
+    const setToolMode = (mode) => {
+        localToolState.mode = normalizeToolMode(mode);
+        if (localToolState.mode !== TOOL_MODE_CONE) templatePlacementState = null;
+        if (localToolState.mode !== TOOL_MODE_RULER) rulerState = null;
+    };
+    const closeToolsMenu = () => {
+        if (!toolsMenuOpen) return false;
+        toolsMenuOpen = false;
+        renderToolsMenu();
+        return true;
+    };
 
     const renderViewMenu = () => {
         if (viewMenuEl) viewMenuEl.hidden = !viewMenuOpen;
         if (viewMenuToggleEl) viewMenuToggleEl.setAttribute('aria-expanded', viewMenuOpen ? 'true' : 'false');
+    };
+
+    const renderToolsMenu = () => {
+        const selectedTemplate = getTemplateById(selectedTemplateId);
+        if (toolsMenuEl) toolsMenuEl.hidden = !toolsMenuOpen;
+        if (toolsMenuToggleEl) toolsMenuToggleEl.setAttribute('aria-expanded', toolsMenuOpen ? 'true' : 'false');
+        if (toolModeNavigateEl) toolModeNavigateEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NAVIGATE ? 'true' : 'false');
+        if (toolModeRulerEl) toolModeRulerEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false');
+        if (toolModeCircleEl) toolModeCircleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CIRCLE ? 'true' : 'false');
+        if (toolModeConeEl) toolModeConeEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CONE ? 'true' : 'false');
+        if (toolSizeInputEl && document.activeElement !== toolSizeInputEl) {
+            toolSizeInputEl.value = String(selectedTemplate ? normalizeToolSizeCells(selectedTemplate.sizeCells, localToolState.sizeCells) : localToolState.sizeCells);
+        }
+        if (templateDeleteEl) {
+            templateDeleteEl.disabled = !selectedTemplate;
+            templateDeleteEl.textContent = selectedTemplate
+                ? `Delete ${selectedTemplate.kind === TEMPLATE_KIND_CONE ? 'Cone' : 'Circle'}`
+                : 'Delete Selected Area';
+        }
+        if (stealthModeToggleEl) {
+            const scene = getActiveScene();
+            const enabled = !!(scene && scene.stealthMode);
+            stealthModeToggleEl.textContent = `Sight Cones: ${enabled ? 'On' : 'Off'}`;
+            stealthModeToggleEl.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+            stealthModeToggleEl.disabled = !isDM();
+        }
+        if (body) body.dataset.toolMode = localToolState.mode;
     };
 
     const positionNPCSearchPopover = () => {
@@ -969,6 +1217,7 @@
         const scene = getActiveScene();
         const tokens = getVisibleTokensForRole(scene);
         const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
+        const templates = scene && Array.isArray(scene.templates) ? scene.templates : [];
         if (isDM() && uiState.sceneViewMode === SCENE_VIEW_LOCAL) {
             const viewedSceneId = getViewedSceneId(vttState, localRole);
             const sharedSceneId = getSharedSceneId(vttState);
@@ -989,6 +1238,15 @@
         }
         if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
             previewTokenId = '';
+        }
+        if (!templates.some((template) => template.id === selectedTemplateId)) {
+            selectedTemplateId = '';
+        }
+        if (templatePlacementState && (!scene || templatePlacementState.sceneId !== scene.id)) {
+            templatePlacementState = null;
+        }
+        if (rulerState && (!scene || rulerState.sceneId !== scene.id)) {
+            rulerState = null;
         }
         if (body) {
             body.dataset.vttRole = localRole;
@@ -1023,6 +1281,14 @@
                 height = Math.max(height, grid.offsetY + (token.y + token.h + 4) * grid.cellPx);
             });
         }
+        if (Array.isArray(scene.templates) && scene.templates.length) {
+            scene.templates.forEach((template) => {
+                const bounds = getAreaTemplateWorldBounds(template, scene);
+                if (!bounds) return;
+                width = Math.max(width, bounds.maxX + grid.cellPx * 2);
+                height = Math.max(height, bounds.maxY + grid.cellPx * 2);
+            });
+        }
         return {
             width: Math.max(1, Math.round(width)),
             height: Math.max(1, Math.round(height))
@@ -1032,7 +1298,7 @@
     const scaleForZoom = (value) => Math.max(0, Math.round(value * localView.zoom * 1000) / 1000);
 
     const applyRenderedWorldGeometry = (scene = getActiveScene()) => {
-        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !tokenLayerEl) return;
+        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl) return;
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         const scaledMapWidth = scaleForZoom(mapDisplaySize.width || 0);
         const scaledMapHeight = scaleForZoom(mapDisplaySize.height || 0);
@@ -1049,6 +1315,17 @@
             maskEl.style.top = `${scaleForZoom(toNumber(maskEl.dataset.worldTop, 0))}px`;
             maskEl.style.width = `${scaleForZoom(toNumber(maskEl.dataset.worldWidth, 0))}px`;
             maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
+        });
+
+        templateLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
+            if (!(itemEl instanceof HTMLElement)) return;
+            itemEl.style.left = `${scaleForZoom(toNumber(itemEl.dataset.worldLeft, 0))}px`;
+            itemEl.style.top = `${scaleForZoom(toNumber(itemEl.dataset.worldTop, 0))}px`;
+            itemEl.style.width = `${scaleForZoom(toNumber(itemEl.dataset.worldWidth, 0))}px`;
+            itemEl.style.height = `${scaleForZoom(toNumber(itemEl.dataset.worldHeight, 0))}px`;
+            if (itemEl.dataset.worldRotation !== undefined) {
+                itemEl.style.transform = `rotate(${toNumber(itemEl.dataset.worldRotation, 0)}deg)`;
+            }
         });
 
         tokenLayerEl.querySelectorAll('.vtt-token').forEach((tokenEl) => {
@@ -1156,6 +1433,7 @@
         if (!stageEl || !isDM()) return false;
         closeNPCSearch();
         closeViewMenu();
+        closeToolsMenu();
         closeInitiativeDetail();
         const rect = stageEl.getBoundingClientRect();
         quickSpawnMenuState = {
@@ -1180,6 +1458,7 @@
         if (!source && kind !== 'custom') return false;
         closeNPCSearch();
         closeViewMenu();
+        closeToolsMenu();
         closeQuickSpawnMenu();
         spawnDragState = {
             pointerId: event.pointerId,
@@ -1217,6 +1496,9 @@
             clearSpawnDrag();
             closeInitiativeDetail();
         }
+        closeViewMenu();
+        closeToolsMenu();
+        clearTemplatePlacementState();
         if (body) body.dataset.vttRole = localRole;
         render();
     };
@@ -1243,9 +1525,11 @@
         if (!dmUnlockModalEl || !dmUnlockInputEl) return false;
         closeNPCSearch();
         closeViewMenu();
+        closeToolsMenu();
         closeQuickSpawnMenu();
         closeInitiativeDetail();
         clearSpawnDrag();
+        clearTemplatePlacementState();
         dmUnlockReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : roleToggleEl;
         dmUnlockModalEl.hidden = false;
         if (dmUnlockErrorEl) {
@@ -1822,6 +2106,7 @@
         const token = getTokenById(selectedTokenId);
         const rosterPlayer = getRosterPlayerForRecord(token);
         const isRosterManagedPlayer = !!rosterPlayer;
+        const supportsSightCone = !!(token && (token.side === 'enemy' || token.side === 'neutral'));
         if (!selectionPillEl || !tokenInspectorEl) return;
         if (!isDM() && token && token.hidden) {
             selectionPillEl.textContent = 'No Token';
@@ -1909,6 +2194,27 @@
                     <span>Conditions</span>
                     <textarea class="vtt-inspector-textarea" data-token-field="conditions">${escapeHtml(serializeConditions(token.conditions))}</textarea>
                 </label>
+                ${supportsSightCone ? `
+                    <div class="vtt-subhead">Sight Cone</div>
+                    <div class="vtt-inspector-grid">
+                        <label class="vtt-inspector-check">
+                            <input type="checkbox" data-token-vision-field="enabled"${token.vision && token.vision.enabled ? ' checked' : ''}>
+                            <span>Enabled</span>
+                        </label>
+                        <label class="vtt-field">
+                            <span>Facing</span>
+                            <input class="vtt-inspector-input" type="number" data-token-vision-field="facingDeg" value="${escapeHtml(String(token.vision && token.vision.facingDeg !== undefined ? token.vision.facingDeg : 0))}">
+                        </label>
+                        <label class="vtt-field">
+                            <span>Angle</span>
+                            <input class="vtt-inspector-input" type="number" data-token-vision-field="arcDeg" min="1" max="170" value="${escapeHtml(String(token.vision && token.vision.arcDeg !== undefined ? token.vision.arcDeg : 90))}">
+                        </label>
+                        <label class="vtt-field">
+                            <span>Range</span>
+                            <input class="vtt-inspector-input" type="number" data-token-vision-field="baseRangeCells" min="0" max="99" value="${escapeHtml(String(token.vision && token.vision.baseRangeCells !== undefined ? token.vision.baseRangeCells : 6))}">
+                        </label>
+                    </div>
+                ` : ''}
                 ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player token name and portrait are managed from the Hub roster.</div>' : ''}
                 <div class="vtt-inspector-actions">
                     <button class="vtt-inline-btn" data-action="add-token-to-initiative" data-id="${escapeHtml(token.id)}">Add To Initiative</button>
@@ -2026,9 +2332,112 @@
         positionInitiativeDetail();
     };
 
+    const buildVisionConeMarkup = (token, scene) => {
+        const geometry = getVisionConeGeometry(token, scene);
+        if (!geometry) return '';
+        const overlapsPlayers = doesVisionConeOverlapPlayers(token, scene, vttState);
+        const fill = overlapsPlayers ? 'rgba(255, 102, 102, 0.24)' : 'rgba(94, 176, 255, 0.22)';
+        const stroke = overlapsPlayers ? 'rgba(255, 132, 132, 0.82)' : 'rgba(122, 194, 255, 0.78)';
+        return `
+            <div class="vtt-overlay-item vtt-vision-cone"
+                data-world-left="${escapeHtml(String(geometry.left))}"
+                data-world-top="${escapeHtml(String(geometry.top))}"
+                data-world-width="${escapeHtml(String(geometry.width))}"
+                data-world-height="${escapeHtml(String(geometry.height))}"
+                data-world-rotation="${escapeHtml(String(geometry.rotationDeg))}">
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <polygon points="0,50 100,0 100,100" fill="${fill}" stroke="${stroke}" stroke-width="1.8"></polygon>
+                </svg>
+            </div>
+        `;
+    };
+
+    const buildAreaTemplateMarkup = (template, scene, { preview = false } = {}) => {
+        const geometry = getAreaTemplateWorldGeometry(template, scene);
+        if (!geometry) return '';
+        const classes = [
+            'vtt-overlay-item',
+            'vtt-area-template',
+            template.kind === TEMPLATE_KIND_CONE ? 'is-cone' : 'is-circle'
+        ];
+        if (selectedTemplateId && template.id === selectedTemplateId) classes.push('is-selected');
+        if (preview) classes.push('is-preview');
+        const shapeMarkup = template.kind === TEMPLATE_KIND_CONE
+            ? `
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <polygon points="0,50 100,0 100,100"
+                        fill="rgba(255, 211, 102, 0.2)"
+                        stroke="rgba(255, 227, 163, 0.84)"
+                        stroke-width="1.8"></polygon>
+                </svg>
+            `
+            : `
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <circle cx="50" cy="50" r="48"
+                        fill="rgba(255, 211, 102, 0.18)"
+                        stroke="rgba(255, 227, 163, 0.84)"
+                        stroke-width="2"></circle>
+                </svg>
+            `;
+        return `
+            <div class="${classes.join(' ')}"
+                data-template-id="${escapeHtml(String(template.id || ''))}"
+                data-world-left="${escapeHtml(String(geometry.left))}"
+                data-world-top="${escapeHtml(String(geometry.top))}"
+                data-world-width="${escapeHtml(String(geometry.width))}"
+                data-world-height="${escapeHtml(String(geometry.height))}"
+                data-world-rotation="${escapeHtml(String(geometry.rotationDeg))}">
+                ${shapeMarkup}
+            </div>
+        `;
+    };
+
+    const buildRulerMarkup = (scene) => {
+        if (!scene || !rulerState || rulerState.sceneId !== scene.id || !rulerState.start || !rulerState.end) return '';
+        const start = getTemplateWorldPoint(scene, rulerState.start);
+        const end = getTemplateWorldPoint(scene, rulerState.end);
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const distanceCells = Math.hypot(toNumber(rulerState.end.x, 0) - toNumber(rulerState.start.x, 0), toNumber(rulerState.end.y, 0) - toNumber(rulerState.start.y, 0));
+        const distanceFeet = Math.round(distanceCells * Math.max(1, toNumber(scene.grid && scene.grid.cellDistance, 5)));
+        const label = `${Number.isInteger(distanceCells) ? distanceCells : Math.round(distanceCells * 10) / 10} sq · ${distanceFeet} ft`;
+        return `
+            <div class="vtt-overlay-item vtt-ruler-line"
+                data-world-left="${escapeHtml(String(start.x))}"
+                data-world-top="${escapeHtml(String(start.y - 10))}"
+                data-world-width="${escapeHtml(String(Math.max(1, Math.hypot(dx, dy))))}"
+                data-world-height="20"
+                data-world-rotation="${escapeHtml(String(normalizeAngleDeg(Math.atan2(dy, dx) * 180 / Math.PI)))}">
+                <div class="vtt-ruler-label">${escapeHtml(label)}</div>
+            </div>
+        `;
+    };
+
+    const renderTemplateLayer = (scene, visibleTokens) => {
+        if (!templateLayerEl) return;
+        const showStealthCones = !!(scene && scene.stealthMode);
+        const visionMarkup = showStealthCones
+            ? visibleTokens
+                .filter((token) => {
+                    const side = String(token && token.side || '').trim().toLowerCase();
+                    return side === 'enemy' || side === 'neutral';
+                })
+                .map((token) => buildVisionConeMarkup(token, scene))
+                .join('')
+            : '';
+        const templateMarkup = Array.isArray(scene && scene.templates)
+            ? scene.templates.map((template) => buildAreaTemplateMarkup(template, scene)).join('')
+            : '';
+        const previewMarkup = templatePlacementState && templatePlacementState.sceneId === scene.id && templatePlacementState.template
+            ? buildAreaTemplateMarkup(templatePlacementState.template, scene, { preview: true })
+            : '';
+        const rulerMarkup = buildRulerMarkup(scene);
+        templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`;
+    };
+
     const renderStage = () => {
         const scene = getActiveScene();
-        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !tokenLayerEl) return;
+        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl) return;
 
         loadMapForScene(scene);
         worldSize = getWorldSizeForScene(scene);
@@ -2051,6 +2460,8 @@
         const focusedEntryToken = getVisibleSceneTokenForEntry(getEntryById(selectedEntryId), vttState, localRole);
         const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
         const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
+
+        renderTemplateLayer(scene, visibleTokens);
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => `
             <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}"
@@ -2085,8 +2496,16 @@
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
         const usingLocalView = isUsingLocalSceneView(vttState, localRole);
-        const baseStageMeta = 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.';
+        const toolMeta = localToolState.mode === TOOL_MODE_RULER
+            ? 'Ruler active: drag on the stage to measure squares and feet.'
+            : (localToolState.mode === TOOL_MODE_CIRCLE
+                ? `Circle tool active: click to place a ${localToolState.sizeCells}-square radius circle.`
+                : (localToolState.mode === TOOL_MODE_CONE
+                    ? `Cone tool active: drag to place a ${localToolState.sizeCells}-square cone.`
+                    : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'));
+        const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
+        renderToolsMenu();
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
         if (roleToggleEl) roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
@@ -2094,8 +2513,8 @@
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
         if (stageMetaEl) {
             stageMetaEl.textContent = isDM() && usingLocalView && sharedScene.id !== scene.id
-                ? `DM is previewing ${scene.name || 'this scene'} while players stay on ${sharedScene.name || 'the shared scene'}. ${baseStageMeta}`
-                : baseStageMeta;
+                ? `DM is previewing ${scene.name || 'this scene'} while players stay on ${sharedScene.name || 'the shared scene'}. ${toolMeta} ${stealthMeta}`
+                : `${toolMeta} ${stealthMeta}`;
         }
         const sceneNameEl = document.getElementById('scene-name');
         const mapUrlEl = document.getElementById('scene-map-url');
@@ -2115,6 +2534,7 @@
         normalizeSelections();
         renderSceneControls();
         renderViewMenu();
+        renderToolsMenu();
         renderSpawnLists();
         renderNPCSearchPopover();
         renderStage();
@@ -2413,7 +2833,22 @@
         }
         if (action === 'toggle-view-menu') {
             viewMenuOpen = !viewMenuOpen;
+            if (viewMenuOpen) toolsMenuOpen = false;
             renderViewMenu();
+            renderToolsMenu();
+            return;
+        }
+        if (action === 'toggle-tools-menu') {
+            toolsMenuOpen = !toolsMenuOpen;
+            if (toolsMenuOpen) viewMenuOpen = false;
+            renderViewMenu();
+            renderToolsMenu();
+            return;
+        }
+        if (action === 'set-tool-mode') {
+            const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
+            setToolMode(nextMode);
+            render();
             return;
         }
         if (action === 'open-quick-spawn') {
@@ -2492,6 +2927,25 @@
         }
         if (action === 'fit-view') {
             fitViewToWorld();
+            return;
+        }
+        if (action === 'delete-selected-template') {
+            if (!selectedTemplateId) return;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.templates)) return;
+                scene.templates = scene.templates.filter((template) => String(template && template.id || '').trim() !== String(selectedTemplateId || '').trim());
+                selectedTemplateId = '';
+            });
+            return;
+        }
+        if (action === 'toggle-stealth-mode') {
+            if (!isDM()) return;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                scene.stealthMode = !scene.stealthMode;
+            });
             return;
         }
 
@@ -2780,6 +3234,22 @@
     const handleFieldChange = (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
+        if (target instanceof HTMLInputElement && target.dataset.toolSizeField) {
+            const nextSize = normalizeToolSizeCells(target.value, localToolState.sizeCells);
+            localToolState.sizeCells = nextSize;
+            if (selectedTemplateId) {
+                withDraft((draft) => {
+                    const scene = getActiveScene(draft);
+                    if (!scene || !Array.isArray(scene.templates)) return;
+                    const template = scene.templates.find((entry) => entry && entry.id === selectedTemplateId);
+                    if (!template) return;
+                    template.sizeCells = nextSize;
+                });
+                return;
+            }
+            renderToolsMenu();
+            return;
+        }
         if (event.type === 'input' && target instanceof HTMLInputElement) return;
         if (event.type === 'input' && target instanceof HTMLTextAreaElement) return;
 
@@ -2887,6 +3357,30 @@
                     return;
                 }
                 token[field] = nextValue === '' ? null : Math.round(toNumber(nextValue, 0));
+            });
+            return;
+        }
+
+        if (selectedTokenId && target.dataset.tokenVisionField) {
+            const field = target.dataset.tokenVisionField;
+            updateSelectedToken((token) => {
+                if (!token.vision || typeof token.vision !== 'object') {
+                    token.vision = { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6, passivePerception: 10 };
+                }
+                if (field === 'enabled' && target instanceof HTMLInputElement && target.type === 'checkbox') {
+                    token.vision.enabled = target.checked;
+                    return;
+                }
+                const nextValue = String(target.value || '').trim();
+                if (field === 'arcDeg') {
+                    token.vision.arcDeg = nextValue === '' ? 90 : clamp(Math.round(toNumber(nextValue, 90)), 1, 170);
+                    return;
+                }
+                if (field === 'baseRangeCells') {
+                    token.vision.baseRangeCells = nextValue === '' ? 0 : clamp(Math.round(toNumber(nextValue, 6)), 0, 99);
+                    return;
+                }
+                token.vision[field] = nextValue === '' ? 0 : Math.round(toNumber(nextValue, 0));
             });
             return;
         }
@@ -3083,22 +3577,88 @@
         if (event.target.closest('#vtt-quick-spawn-menu')) return;
         closeQuickSpawnMenu();
 
-        const tokenEl = event.target.closest('.vtt-token');
         const scene = getActiveScene();
+        if (!scene) return;
+        const worldPoint = screenToWorld(event.clientX, event.clientY);
+
+        if (localToolState.mode === TOOL_MODE_CIRCLE) {
+            const template = buildAreaTemplate(TEMPLATE_KIND_CIRCLE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
+            if (!template) return;
+            withDraft((draft) => {
+                const draftScene = getActiveScene(draft);
+                if (!draftScene) return;
+                if (!Array.isArray(draftScene.templates)) draftScene.templates = [];
+                draftScene.templates.push(template);
+                selectedTemplateId = template.id;
+                selectedTokenId = '';
+                selectedEntryId = '';
+                previewTokenId = '';
+            });
+            event.preventDefault();
+            return;
+        }
+
+        if (localToolState.mode === TOOL_MODE_CONE) {
+            const template = buildAreaTemplate(TEMPLATE_KIND_CONE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
+            if (!template) return;
+            templatePlacementState = { sceneId: scene.id, template };
+            rulerState = null;
+            selectedTemplateId = '';
+            selectedTokenId = '';
+            selectedEntryId = '';
+            previewTokenId = '';
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
+
+        if (localToolState.mode === TOOL_MODE_RULER) {
+            const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
+            rulerState = { sceneId: scene.id, start: anchor, end: anchor, dragging: true };
+            templatePlacementState = null;
+            selectedTemplateId = '';
+            selectedTokenId = '';
+            selectedEntryId = '';
+            previewTokenId = '';
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
+
+        const templateEl = event.target.closest('.vtt-area-template');
+        if (templateEl) {
+            selectedTemplateId = String(templateEl.getAttribute('data-template-id') || '').trim();
+            selectedTokenId = '';
+            selectedEntryId = '';
+            previewTokenId = '';
+            renderTokenInspector();
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
+
+        const tokenEl = event.target.closest('.vtt-token');
         if (tokenEl) {
             const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
-            if (!token || !scene) return;
+            if (!token) return;
             const canMoveToken = canRoleMoveToken(token, localRole);
             const now = Date.now();
             const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
             lastTokenPointerDownId = token.id;
             lastTokenPointerDownAt = now;
             selectedTokenId = token.id;
+            selectedTemplateId = '';
             const linkedEntry = findEntryForToken(token.id);
             selectedEntryId = linkedEntry ? linkedEntry.id : '';
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
+            renderToolsMenu();
             if (isDoublePress && canMoveToken) {
                 lastTokenPointerDownId = '';
                 lastTokenPointerDownAt = 0;
@@ -3111,7 +3671,6 @@
                 event.preventDefault();
                 return;
             }
-            const worldPoint = screenToWorld(event.clientX, event.clientY);
             const anchorX = (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x;
             const anchorY = (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y;
             dragState = {
@@ -3127,6 +3686,11 @@
 
         lastTokenPointerDownId = '';
         lastTokenPointerDownAt = 0;
+        if (selectedTemplateId) {
+            selectedTemplateId = '';
+            renderToolsMenu();
+            renderStage();
+        }
 
         panState = {
             startClientX: event.clientX,
@@ -3143,6 +3707,22 @@
             spawnDragState.clientY = event.clientY;
             spawnDragState.overStage = isClientPointInsideStage(event.clientX, event.clientY);
             renderSpawnGhost();
+            return;
+        }
+        if (templatePlacementState) {
+            const scene = getActiveScene();
+            if (!scene || !templatePlacementState.template) return;
+            const origin = getTemplateWorldPoint(scene, templatePlacementState.template);
+            const worldPoint = screenToWorld(event.clientX, event.clientY);
+            templatePlacementState.template.angleDeg = normalizeAngleDeg(Math.atan2(worldPoint.y - origin.y, worldPoint.x - origin.x) * 180 / Math.PI);
+            renderStage();
+            return;
+        }
+        if (rulerState && rulerState.dragging) {
+            const scene = getActiveScene();
+            if (!scene) return;
+            rulerState.end = snapWorldPointToTemplateAnchor(scene, screenToWorld(event.clientX, event.clientY));
+            renderStage();
             return;
         }
         if (dragState) {
@@ -3178,6 +3758,27 @@
             }
             return;
         }
+        if (templatePlacementState) {
+            if (event && event.type === 'pointercancel') {
+                templatePlacementState = null;
+                renderStage();
+                return;
+            }
+            const pendingTemplate = templatePlacementState.template ? { ...templatePlacementState.template } : null;
+            templatePlacementState = null;
+            if (!pendingTemplate) {
+                renderStage();
+                return;
+            }
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                if (!Array.isArray(scene.templates)) scene.templates = [];
+                scene.templates.push(pendingTemplate);
+                selectedTemplateId = pendingTemplate.id;
+            });
+            return;
+        }
         let appliedRemoteSnapshot = false;
         if (dragState) {
             syncDraggedState(true);
@@ -3185,6 +3786,10 @@
             dragState = null;
             appliedRemoteSnapshot = applyPendingRemoteVTTSnapshot();
             if (!appliedRemoteSnapshot) render();
+        }
+        if (rulerState && rulerState.dragging) {
+            rulerState.dragging = false;
+            renderStage();
         }
 
         if (panState) {
@@ -3219,6 +3824,10 @@
             viewMenuOpen = false;
             needsRender = true;
         }
+        if (toolsMenuOpen && !event.target.closest('.vtt-topbar-tools')) {
+            toolsMenuOpen = false;
+            needsRender = true;
+        }
         if (initiativeDetailState && !event.target.closest('#vtt-initiative-detail-panel') && !event.target.closest('.vtt-entry')) {
             initiativeDetailState = null;
             needsRender = true;
@@ -3247,6 +3856,10 @@
     const handleStageContextMenu = (event) => {
         if (!(event.target instanceof Element)) return;
         if (event.target.closest('#vtt-quick-spawn-menu')) return;
+        if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
+            event.preventDefault();
+            return;
+        }
         const tokenEl = event.target.closest('.vtt-token');
         if (!tokenEl) {
             if (previewTokenId) previewTokenId = '';
@@ -3272,11 +3885,13 @@
         event.preventDefault();
         previewTokenId = previewTokenId === token.id ? '' : token.id;
         selectedTokenId = token.id;
+        selectedTemplateId = '';
         const linkedEntry = findEntryForToken(token.id);
         selectedEntryId = linkedEntry ? linkedEntry.id : '';
         renderInitiativeList();
         renderInitiativeDetail();
         renderTokenInspector();
+        renderToolsMenu();
         renderStage();
     };
 
@@ -3314,15 +3929,28 @@
         if (event.key === 'Escape') {
             const closedMenu = closeQuickSpawnMenu();
             const closedViewMenu = closeViewMenu();
+            const closedToolsMenu = closeToolsMenu();
             const clearedSpawn = clearSpawnDrag();
+            const clearedTemplatePlacement = clearTemplatePlacementState();
             const closedInitiativeDetail = closeInitiativeDetail();
             if (previewTokenId) {
                 previewTokenId = '';
                 renderStage();
-            } else if (closedMenu || closedViewMenu || clearedSpawn || closedInitiativeDetail) {
+                event.preventDefault();
+            } else if (closedMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail) {
                 render();
+                event.preventDefault();
             }
-            if (closedMenu || closedViewMenu || clearedSpawn || closedInitiativeDetail) event.preventDefault();
+            return;
+        }
+        if ((event.key === 'Delete' || event.key === 'Backspace') && selectedTemplateId) {
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.templates)) return;
+                scene.templates = scene.templates.filter((template) => String(template && template.id || '').trim() !== String(selectedTemplateId || '').trim());
+                selectedTemplateId = '';
+            });
+            event.preventDefault();
             return;
         }
         if (!selectedTokenId || event.defaultPrevented) return;

@@ -81,7 +81,9 @@ const fallbackSnapshot = () => ({
                 offsetY: 0,
                 cellDistance: 5
             },
+            stealthMode: false,
             tokens: [],
+            templates: [],
             fog: []
         }
     ],

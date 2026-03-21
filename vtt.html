@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260321u">
+    <link rel="stylesheet" href="css/vtt.css?v=20260321w">
 </head>
 
     <body data-player-nav="vtt">
@@ -24,7 +24,40 @@
             <button class="hero-btn ghost" data-action="zoom-out">-</button>
                 <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
                 <button class="hero-btn ghost" data-action="zoom-in">+</button>
-                <button class="hero-btn ghost" data-action="fit-view">Fit</button>
+                <div class="vtt-popover-anchor vtt-topbar-tools">
+                    <button class="hero-btn ghost" data-action="toggle-tools-menu" id="vtt-tools-menu-toggle"
+                        aria-controls="vtt-tools-menu" aria-expanded="false">Tools</button>
+                    <div class="vtt-popover vtt-tools-menu" id="vtt-tools-menu" hidden>
+                        <div class="vtt-menu-section">
+                            <div class="vtt-menu-title">Table Tools</div>
+                            <div class="vtt-tool-mode-row">
+                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="navigate" id="vtt-tool-mode-navigate"
+                                    aria-pressed="true">Navigate</button>
+                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="ruler" id="vtt-tool-mode-ruler"
+                                    aria-pressed="false">Ruler</button>
+                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="circle" id="vtt-tool-mode-circle"
+                                    aria-pressed="false">Circle</button>
+                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="cone" id="vtt-tool-mode-cone"
+                                    aria-pressed="false">Cone</button>
+                            </div>
+                            <label class="vtt-field vtt-field-tight">
+                                <span>Squares</span>
+                                <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="4">
+                            </label>
+                            <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn danger" data-action="delete-selected-template" id="vtt-template-delete"
+                                    disabled>Delete Selected Area</button>
+                            </div>
+                        </div>
+                        <div class="vtt-menu-section" data-dm-only="1">
+                            <div class="vtt-menu-title">Stealth</div>
+                            <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" data-action="toggle-stealth-mode" id="vtt-stealth-mode-toggle"
+                                    aria-pressed="false">Sight Cones: Off</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
                 <input type="color" id="accent-picker-input" class="vtt-accent-picker-input"
                     data-onchange="setAccentColor(this.value)">
@@ -161,6 +194,7 @@
                 <div class="vtt-world" id="vtt-world">
                     <div class="vtt-grid-layer" id="vtt-grid-layer"></div>
                     <div class="vtt-fog-layer" id="vtt-fog-layer"></div>
+                    <div class="vtt-template-layer" id="vtt-template-layer"></div>
                     <div class="vtt-token-layer" id="vtt-token-layer"></div>
                 </div>
                 <div class="vtt-quick-spawn-menu vtt-popover" id="vtt-quick-spawn-menu" hidden></div>
@@ -194,7 +228,7 @@
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
-    <script src="js/store.js?v=20260321e"></script>
+    <script src="js/store.js?v=20260321g"></script>
     <script src="js/player-nav.js?v=20260320c"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
@@ -226,7 +260,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260321u"></script>
+    <script src="js/vtt.js?v=20260321w"></script>
 </body>
 
 </html>

@@ -145,7 +145,9 @@
                         offsetY: 0,
                         cellDistance: 5
                     },
+                    stealthMode: false,
                     tokens: [],
+                    templates: [],
                     fog: []
                 }
             ],
@@ -602,6 +604,19 @@
         };
     };
 
+    const sanitizeVTTTemplate = (template, idx = 0) => {
+        const source = template && typeof template === 'object' ? template : {};
+        const kind = toTrimmedString(source.kind, 'circle', 20).trim().toLowerCase() === 'cone' ? 'cone' : 'circle';
+        return {
+            id: toTrimmedString(source.id, `template_${idx + 1}`, 120).trim() || `template_${idx + 1}`,
+            kind,
+            x: sanitizeVTTTokenCoordinate(source.x, 0.5),
+            y: sanitizeVTTTokenCoordinate(source.y, 0.5),
+            sizeCells: Math.max(1, Math.min(99, Math.round(toNumber(source.sizeCells, 4)))),
+            angleDeg: Math.round(toNumber(source.angleDeg, 0))
+        };
+    };
+
     const sanitizeVTTScene = (scene, idx = 0) => {
         const source = scene && typeof scene === 'object' ? scene : {};
         const id = toTrimmedString(source.id, `scene_${idx + 1}`, 120).trim() || `scene_${idx + 1}`;
@@ -619,7 +634,9 @@
                 offsetY: Math.round(legacyGrid.offsetY * legacyScaleFactor),
                 cellDistance: legacyGrid.cellDistance
             },
+            stealthMode: !!source.stealthMode,
             tokens: Array.isArray(source.tokens) ? source.tokens.map((tokenEntry, tokenIdx) => sanitizeVTTToken(tokenEntry, tokenIdx)) : [],
+            templates: Array.isArray(source.templates) ? source.templates.map((templateEntry, templateIdx) => sanitizeVTTTemplate(templateEntry, templateIdx)) : [],
             fog: Array.isArray(source.fog)
                 ? source.fog.map((maskEntry, maskIdx) => {
                     const mask = sanitizeVTTFogMask(maskEntry, maskIdx);
