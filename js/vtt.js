@@ -462,6 +462,20 @@
         if (!scene || !Array.isArray(scene.templates)) return null;
         return scene.templates.find((template) => String(template && template.id || '').trim() === String(templateId || '').trim()) || null;
     };
+    const getTemplateElementAtClientPoint = (clientX, clientY, target = null) => {
+        if (target instanceof Element) {
+            const directMatch = target.closest('.vtt-area-template');
+            if (directMatch) return directMatch;
+        }
+        if (typeof document.elementsFromPoint !== 'function') return null;
+        const hitElements = document.elementsFromPoint(clientX, clientY);
+        for (const hitEl of hitElements) {
+            if (!(hitEl instanceof Element)) continue;
+            const templateEl = hitEl.closest('.vtt-area-template');
+            if (templateEl) return templateEl;
+        }
+        return null;
+    };
     const deleteTemplateById = (templateId) => {
         const targetId = String(templateId || '').trim();
         if (!targetId) return false;
@@ -3633,6 +3647,21 @@
             return;
         }
 
+        const templateEl = event.target.closest('.vtt-area-template');
+        if (templateEl) {
+            selectedTemplateId = String(templateEl.getAttribute('data-template-id') || '').trim();
+            selectedTokenId = '';
+            selectedEntryId = '';
+            previewTokenId = '';
+            renderTokenInspector();
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
+
         if (localToolState.mode === TOOL_MODE_CIRCLE) {
             const template = buildAreaTemplate(TEMPLATE_KIND_CIRCLE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
             if (!template) return;
@@ -3673,21 +3702,6 @@
             selectedTokenId = '';
             selectedEntryId = '';
             previewTokenId = '';
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        const templateEl = event.target.closest('.vtt-area-template');
-        if (templateEl) {
-            selectedTemplateId = String(templateEl.getAttribute('data-template-id') || '').trim();
-            selectedTokenId = '';
-            selectedEntryId = '';
-            previewTokenId = '';
-            renderTokenInspector();
-            renderInitiativeList();
-            renderInitiativeDetail();
             renderToolsMenu();
             renderStage();
             event.preventDefault();
@@ -3937,7 +3951,7 @@
     const handleStageContextMenu = (event) => {
         if (!(event.target instanceof Element)) return;
         if (event.target.closest('#vtt-quick-spawn-menu')) return;
-        const templateEl = event.target.closest('.vtt-area-template');
+        const templateEl = getTemplateElementAtClientPoint(event.clientX, event.clientY, event.target);
         if (templateEl) {
             event.preventDefault();
             deleteTemplateById(String(templateEl.getAttribute('data-template-id') || '').trim());
