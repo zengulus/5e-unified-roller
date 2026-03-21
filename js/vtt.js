@@ -93,6 +93,7 @@
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
     let templatePlacementState = null;
     let templateRotateState = null;
+    let visionConeRotateState = null;
     let rulerState = null;
 
     const body = document.body;
@@ -367,6 +368,7 @@
     };
     const getVisionConeRangeCells = (token) => Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
     const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 170);
+    const getTokenVisionFacingDeg = (token) => normalizeAngleDeg(token && token.vision && token.vision.facingDeg);
     const getVisionConeGeometry = (token, scene) => {
         if (!token || !scene || !token.vision || !token.vision.enabled) return null;
         const side = String(token.side || '').trim().toLowerCase();
@@ -382,7 +384,7 @@
             top: anchor.y - halfWidth,
             width: sizePx,
             height: halfWidth * 2,
-            rotationDeg: normalizeAngleDeg(token.vision.facingDeg),
+            rotationDeg: getTokenVisionFacingDeg(token),
             arcDeg
         };
     };
@@ -489,9 +491,10 @@
         return true;
     };
     const clearTemplatePlacementState = () => {
-        if (!templatePlacementState && !templateRotateState && !rulerState) return false;
+        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState) return false;
         templatePlacementState = null;
         templateRotateState = null;
+        visionConeRotateState = null;
         rulerState = null;
         return true;
     };
@@ -1280,6 +1283,9 @@
         }
         if (templateRotateState && (!scene || templateRotateState.sceneId !== scene.id || !templates.some((template) => template.id === templateRotateState.templateId))) {
             templateRotateState = null;
+        }
+        if (visionConeRotateState && (!scene || visionConeRotateState.sceneId !== scene.id || !tokens.some((token) => token.id === visionConeRotateState.tokenId))) {
+            visionConeRotateState = null;
         }
         if (rulerState && (!scene || rulerState.sceneId !== scene.id)) {
             rulerState = null;
@@ -2369,13 +2375,33 @@
     };
 
     const buildVisionConeMarkup = (token, scene) => {
-        const geometry = getVisionConeGeometry(token, scene);
+        const renderedToken = visionConeRotateState && visionConeRotateState.tokenId === token.id
+            ? {
+                ...token,
+                vision: {
+                    ...(token.vision || {}),
+                    facingDeg: visionConeRotateState.angleDeg
+                }
+            }
+            : token;
+        const geometry = getVisionConeGeometry(renderedToken, scene);
         if (!geometry) return '';
-        const overlapsPlayers = doesVisionConeOverlapPlayers(token, scene, vttState);
+        const overlapsPlayers = doesVisionConeOverlapPlayers(renderedToken, scene, vttState);
         const fill = overlapsPlayers ? 'rgba(255, 102, 102, 0.24)' : 'rgba(94, 176, 255, 0.22)';
         const stroke = overlapsPlayers ? 'rgba(255, 132, 132, 0.82)' : 'rgba(122, 194, 255, 0.78)';
+        const classes = ['vtt-overlay-item', 'vtt-vision-cone'];
+        if (selectedTokenId === token.id) classes.push('is-selected');
+        if (visionConeRotateState && visionConeRotateState.tokenId === token.id) classes.push('is-rotating');
+        const handleMarkup = selectedTokenId === token.id && canRoleMoveToken(token)
+            ? `
+                <button class="vtt-template-rotate-handle vtt-vision-cone-rotate-handle" type="button"
+                    data-token-id="${escapeHtml(String(token.id || ''))}"
+                    aria-label="Rotate sight cone"></button>
+            `
+            : '';
         return `
-            <div class="vtt-overlay-item vtt-vision-cone"
+            <div class="${classes.join(' ')}"
+                data-token-id="${escapeHtml(String(token.id || ''))}"
                 data-world-left="${escapeHtml(String(geometry.left))}"
                 data-world-top="${escapeHtml(String(geometry.top))}"
                 data-world-width="${escapeHtml(String(geometry.width))}"
@@ -2384,6 +2410,7 @@
                 <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     <polygon points="0,50 100,0 100,100" fill="${fill}" stroke="${stroke}" stroke-width="1.8"></polygon>
                 </svg>
+                ${handleMarkup}
             </div>
         `;
     };
@@ -3622,6 +3649,31 @@
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
+        const visionRotateHandleEl = event.target.closest('.vtt-vision-cone-rotate-handle');
+        if (visionRotateHandleEl) {
+            const tokenId = String(visionRotateHandleEl.getAttribute('data-token-id') || '').trim();
+            const token = getTokenById(tokenId);
+            if (!token || !canRoleMoveToken(token, localRole)) return;
+            selectedTokenId = token.id;
+            selectedTemplateId = '';
+            selectedEntryId = '';
+            previewTokenId = '';
+            templatePlacementState = null;
+            templateRotateState = null;
+            rulerState = null;
+            visionConeRotateState = {
+                sceneId: scene.id,
+                tokenId: token.id,
+                angleDeg: getTemplateAngleFromWorldPoint(scene, getTokenCenterInCells(token), worldPoint)
+            };
+            renderTokenInspector();
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
         const rotateHandleEl = event.target.closest('.vtt-template-rotate-handle');
         if (rotateHandleEl) {
             const templateId = String(rotateHandleEl.getAttribute('data-template-id') || '').trim();
@@ -3632,6 +3684,7 @@
             selectedEntryId = '';
             previewTokenId = '';
             templatePlacementState = null;
+            visionConeRotateState = null;
             rulerState = null;
             templateRotateState = {
                 sceneId: scene.id,
@@ -3653,6 +3706,7 @@
             selectedTokenId = '';
             selectedEntryId = '';
             previewTokenId = '';
+            visionConeRotateState = null;
             renderTokenInspector();
             renderInitiativeList();
             renderInitiativeDetail();
@@ -3683,6 +3737,7 @@
             const template = buildAreaTemplate(TEMPLATE_KIND_CONE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
             if (!template) return;
             templatePlacementState = { sceneId: scene.id, template };
+            visionConeRotateState = null;
             rulerState = null;
             selectedTemplateId = '';
             selectedTokenId = '';
@@ -3698,6 +3753,7 @@
             const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
             rulerState = { sceneId: scene.id, start: anchor, end: anchor, dragging: true };
             templatePlacementState = null;
+            visionConeRotateState = null;
             selectedTemplateId = '';
             selectedTokenId = '';
             selectedEntryId = '';
@@ -3719,6 +3775,7 @@
             lastTokenPointerDownAt = now;
             selectedTokenId = token.id;
             selectedTemplateId = '';
+            visionConeRotateState = null;
             const linkedEntry = findEntryForToken(token.id);
             selectedEntryId = linkedEntry ? linkedEntry.id : '';
             renderInitiativeList();
@@ -3792,6 +3849,18 @@
                 return;
             }
             templateRotateState.angleDeg = getTemplateAngleFromWorldPoint(scene, template, screenToWorld(event.clientX, event.clientY));
+            renderStage();
+            return;
+        }
+        if (visionConeRotateState) {
+            const scene = getActiveScene();
+            const token = getTokenById(visionConeRotateState.tokenId);
+            if (!scene || !token || !canRoleMoveToken(token, localRole)) {
+                visionConeRotateState = null;
+                renderStage();
+                return;
+            }
+            visionConeRotateState.angleDeg = getTemplateAngleFromWorldPoint(scene, getTokenCenterInCells(token), screenToWorld(event.clientX, event.clientY));
             renderStage();
             return;
         }
@@ -3871,6 +3940,27 @@
                 if (!template) return;
                 template.angleDeg = normalizeAngleDeg(pendingRotation.angleDeg);
                 selectedTemplateId = template.id;
+            });
+            return;
+        }
+        if (visionConeRotateState) {
+            if (event && event.type === 'pointercancel') {
+                visionConeRotateState = null;
+                renderStage();
+                return;
+            }
+            const pendingRotation = { ...visionConeRotateState };
+            visionConeRotateState = null;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.tokens)) return;
+                const token = scene.tokens.find((entry) => entry && entry.id === pendingRotation.tokenId);
+                if (!token) return;
+                if (!token.vision || typeof token.vision !== 'object') {
+                    token.vision = { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6, passivePerception: 10 };
+                }
+                token.vision.facingDeg = normalizeAngleDeg(pendingRotation.angleDeg);
+                selectedTokenId = token.id;
             });
             return;
         }

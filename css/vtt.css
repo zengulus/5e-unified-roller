@@ -845,7 +845,9 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 }
 
 .vtt-area-template.is-rotating,
-.vtt-area-template.is-rotating .vtt-template-rotate-handle {
+.vtt-area-template.is-rotating .vtt-template-rotate-handle,
+.vtt-vision-cone.is-rotating,
+.vtt-vision-cone.is-rotating .vtt-template-rotate-handle {
     cursor: grabbing;
 }
 
@@ -882,6 +884,10 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
         0 0 0.55rem rgba(255, 211, 102, 0.28);
     transform: translate(-50%, -50%);
     cursor: grab;
+}
+
+.vtt-vision-cone .vtt-template-rotate-handle {
+    pointer-events: auto;
 }
 
 .vtt-template-rotate-handle::before {
