@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260322c">
+    <link rel="stylesheet" href="css/vtt.css?v=20260322d">
 </head>
 
     <body data-player-nav="vtt">
@@ -39,6 +39,8 @@
                                     aria-pressed="false">Circle</button>
                                 <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="cone" id="vtt-tool-mode-cone"
                                     aria-pressed="false">Cone</button>
+                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog" id="vtt-tool-mode-fog"
+                                    aria-pressed="false">Fog</button>
                             </div>
                             <label class="vtt-field vtt-field-tight">
                                 <span>Squares</span>
@@ -50,6 +52,12 @@
                             <div class="vtt-menu-list">
                                 <button class="vtt-chip-btn" data-action="toggle-stealth-mode" id="vtt-stealth-mode-toggle"
                                     aria-pressed="false">Sight Cones: Off</button>
+                            </div>
+                        </div>
+                        <div class="vtt-menu-section" data-dm-only="1">
+                            <div class="vtt-menu-title">Fog</div>
+                            <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" data-action="clear-scene-fog" id="vtt-clear-fog">Clear Fog</button>
                             </div>
                         </div>
                     </div>
@@ -179,7 +187,7 @@
             <div class="vtt-stage-toolbar">
                 <div>
                     <strong id="vtt-stage-title">Scene 1</strong>
-                    <span class="vtt-stage-meta" id="vtt-stage-meta">Drag empty space to pan. Scroll to zoom. Right-click empty space for quick spawn, then search or inspect right where you clicked.</span>
+                    <span class="vtt-stage-meta" id="vtt-stage-meta">Drag empty space to pan. Scroll to zoom. Right-click empty space for quick spawn, then search or inspect right where you clicked. Touch: long-press empty space or a token.</span>
                 </div>
             </div>
             <div class="vtt-stage" id="vtt-stage">
@@ -258,7 +266,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260322d"></script>
+    <script src="js/vtt.js?v=20260322f"></script>
 </body>
 
 </html>

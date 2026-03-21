@@ -15,12 +15,15 @@
     const TOOL_MODE_RULER = 'ruler';
     const TOOL_MODE_CIRCLE = 'circle';
     const TOOL_MODE_CONE = 'cone';
+    const TOOL_MODE_FOG = 'fog';
     const TEMPLATE_KIND_CIRCLE = 'circle';
     const TEMPLATE_KIND_CONE = 'cone';
     const DEFAULT_TOOL_SIZE_CELLS = 4;
     const DEFAULT_TEMPLATE_CONE_ARC_DEG = 53.13010235415598;
     const TEMPLATE_HOLD_PERSIST_MS = 1000;
     const TEMPLATE_SHARED_LIFETIME_MS = 5000;
+    const TOUCH_CONTEXT_HOLD_MS = 420;
+    const TOUCH_CONTEXT_MOVE_PX = 14;
     const STEALTH_STATUS_DETECTED = 'detected';
     const STEALTH_STATUS_UNSEEN = 'unseen';
     const SCENE_VIEW_SHARED = 'shared';
@@ -104,6 +107,8 @@
     let templateRotateState = null;
     let visionConeRotateState = null;
     let rulerState = null;
+    let fogPlacementState = null;
+    let pendingTouchContextState = null;
     let templateExpiryTimer = 0;
 
     const body = document.body;
@@ -151,8 +156,10 @@
     const toolModeNavigateEl = document.getElementById('vtt-tool-mode-navigate');
     const toolModeCircleEl = document.getElementById('vtt-tool-mode-circle');
     const toolModeConeEl = document.getElementById('vtt-tool-mode-cone');
+    const toolModeFogEl = document.getElementById('vtt-tool-mode-fog');
     const toolSizeInputEl = document.getElementById('vtt-tool-size-input');
     const stealthModeToggleEl = document.getElementById('vtt-stealth-mode-toggle');
+    const clearFogButtonEl = document.getElementById('vtt-clear-fog');
     const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
     const viewMenuEl = document.getElementById('vtt-view-menu');
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
@@ -447,6 +454,142 @@
         const origin = getTemplateWorldPoint(scene, template);
         return normalizeAngleDeg(Math.atan2(worldPoint.y - origin.y, worldPoint.x - origin.x) * 180 / Math.PI);
     };
+    const snapWorldPointToFogCorner = (scene, worldPoint) => {
+        if (!scene || !worldPoint) return { x: 0, y: 0 };
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        return {
+            x: Math.round((toNumber(worldPoint.x, offsetX) - offsetX) / cellPx) * cellPx + offsetX,
+            y: Math.round((toNumber(worldPoint.y, offsetY) - offsetY) / cellPx) * cellPx + offsetY
+        };
+    };
+    const buildFogMaskFromWorldPoints = (scene, startWorldPoint, endWorldPoint, id = buildId('fog')) => {
+        if (!scene || !startWorldPoint || !endWorldPoint) return null;
+        const cellPx = getSceneCellPx(scene);
+        const start = snapWorldPointToFogCorner(scene, startWorldPoint);
+        const end = snapWorldPointToFogCorner(scene, endWorldPoint);
+        const left = Math.min(start.x, end.x);
+        const top = Math.min(start.y, end.y);
+        const width = Math.max(cellPx, Math.abs(end.x - start.x));
+        const height = Math.max(cellPx, Math.abs(end.y - start.y));
+        return {
+            id: String(id || buildId('fog')).trim() || buildId('fog'),
+            x: Math.round(left),
+            y: Math.round(top),
+            w: Math.max(1, Math.round(width)),
+            h: Math.max(1, Math.round(height))
+        };
+    };
+    const findFogMaskIndexAtWorldPoint = (scene, worldPoint) => {
+        if (!scene || !worldPoint || !Array.isArray(scene.fog)) return -1;
+        const worldX = toNumber(worldPoint.x, -1);
+        const worldY = toNumber(worldPoint.y, -1);
+        for (let idx = scene.fog.length - 1; idx >= 0; idx -= 1) {
+            const mask = scene.fog[idx];
+            const left = toNumber(mask && mask.x, 0);
+            const top = toNumber(mask && mask.y, 0);
+            const width = Math.max(1, toNumber(mask && mask.w, 1));
+            const height = Math.max(1, toNumber(mask && mask.h, 1));
+            if (worldX >= left && worldX <= left + width && worldY >= top && worldY <= top + height) return idx;
+        }
+        return -1;
+    };
+    const buildFogMaskMarkup = (mask, className = '') => {
+        if (!mask) return '';
+        return `
+            <div class="vtt-fog-mask${className ? ` ${className}` : ''}"
+                data-world-left="${escapeHtml(String(mask.x))}"
+                data-world-top="${escapeHtml(String(mask.y))}"
+                data-world-width="${escapeHtml(String(mask.w))}"
+                data-world-height="${escapeHtml(String(mask.h))}"></div>
+        `;
+    };
+    const clearPendingTouchContext = () => {
+        if (!pendingTouchContextState) return null;
+        if (pendingTouchContextState.timer) {
+            window.clearTimeout(pendingTouchContextState.timer);
+        }
+        const snapshot = pendingTouchContextState;
+        pendingTouchContextState = null;
+        return snapshot;
+    };
+    const activateTokenSelection = (tokenId) => {
+        const token = getTokenById(tokenId);
+        if (!token) return null;
+        selectedTokenId = token.id;
+        selectedTemplateId = '';
+        visionConeRotateState = null;
+        const linkedEntry = findEntryForToken(token.id);
+        selectedEntryId = linkedEntry ? linkedEntry.id : '';
+        return token;
+    };
+    const beginTouchContextInteraction = (event, scene, worldPoint) => {
+        const pointerType = String(event && event.pointerType || '').toLowerCase();
+        if (!event || event.button !== 0 || (pointerType !== 'touch' && pointerType !== 'pen')) return false;
+        if (!isDM() || localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
+        clearPendingTouchContext();
+        const tokenEl = event.target instanceof Element ? event.target.closest('.vtt-token') : null;
+        if (tokenEl) {
+            const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
+            if (!token) return false;
+            const canMoveToken = canRoleMoveToken(token, localRole);
+            const state = {
+                pointerId: event.pointerId,
+                pointerType,
+                sceneId: scene.id,
+                targetKind: 'token',
+                tokenId: token.id,
+                clientX: Math.round(event.clientX),
+                clientY: Math.round(event.clientY),
+                anchorX: (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x,
+                anchorY: (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y,
+                canMoveToken,
+                originX: localView.x,
+                originY: localView.y,
+                triggered: false,
+                timer: 0
+            };
+            state.timer = window.setTimeout(() => {
+                if (pendingTouchContextState !== state) return;
+                state.triggered = true;
+                previewTokenId = '';
+                activateTokenSelection(state.tokenId);
+                openTokenInspectorPopover(state.tokenId, state.clientX, state.clientY);
+                render();
+            }, TOUCH_CONTEXT_HOLD_MS);
+            pendingTouchContextState = state;
+            activateTokenSelection(token.id);
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderTokenInspector();
+            renderToolsMenu();
+            renderStage();
+            return true;
+        }
+        const state = {
+            pointerId: event.pointerId,
+            pointerType,
+            sceneId: scene.id,
+            targetKind: 'stage',
+            clientX: Math.round(event.clientX),
+            clientY: Math.round(event.clientY),
+            originX: localView.x,
+            originY: localView.y,
+            worldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
+            triggered: false,
+            timer: 0
+        };
+        state.timer = window.setTimeout(() => {
+            if (pendingTouchContextState !== state) return;
+            state.triggered = true;
+            previewTokenId = '';
+            openQuickSpawnMenu(state.clientX, state.clientY);
+            render();
+        }, TOUCH_CONTEXT_HOLD_MS);
+        pendingTouchContextState = state;
+        return true;
+    };
     const getVisionConeRangeCells = (token) => {
         const baseRange = Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
         const passivePerception = getVisionPassivePerception(token);
@@ -555,7 +698,7 @@
     };
     const normalizeToolMode = (value) => {
         const token = String(value || '').trim().toLowerCase();
-        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE) return token;
+        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_FOG) return token;
         return TOOL_MODE_NAVIGATE;
     };
     const normalizeToolSizeCells = (value, fallback = DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
@@ -710,11 +853,12 @@
         return true;
     };
     const clearTemplatePlacementState = () => {
-        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState) return false;
+        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState && !fogPlacementState) return false;
         templatePlacementState = null;
         templateRotateState = null;
         visionConeRotateState = null;
         rulerState = null;
+        fogPlacementState = null;
         return true;
     };
     const setToolMode = (mode) => {
@@ -740,8 +884,17 @@
         if (toolModeNavigateEl) toolModeNavigateEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NAVIGATE ? 'true' : 'false');
         if (toolModeCircleEl) toolModeCircleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CIRCLE ? 'true' : 'false');
         if (toolModeConeEl) toolModeConeEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CONE ? 'true' : 'false');
+        if (toolModeFogEl) {
+            toolModeFogEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG ? 'true' : 'false');
+            toolModeFogEl.disabled = !isDM();
+        }
         if (toolSizeInputEl && document.activeElement !== toolSizeInputEl) {
             toolSizeInputEl.value = String(localToolState.sizeCells);
+        }
+        if (toolSizeInputEl) {
+            const fogActive = localToolState.mode === TOOL_MODE_FOG;
+            toolSizeInputEl.disabled = fogActive;
+            toolSizeInputEl.title = fogActive ? 'Fog placement uses the scene grid directly.' : '';
         }
         if (stealthModeToggleEl) {
             const scene = getActiveScene();
@@ -749,6 +902,12 @@
             stealthModeToggleEl.textContent = `Sight Cones: ${enabled ? 'On' : 'Off'}`;
             stealthModeToggleEl.setAttribute('aria-pressed', enabled ? 'true' : 'false');
             stealthModeToggleEl.disabled = !isDM();
+        }
+        if (clearFogButtonEl) {
+            const scene = getActiveScene();
+            const fogCount = scene && Array.isArray(scene.fog) ? scene.fog.length : 0;
+            clearFogButtonEl.disabled = !isDM() || fogCount === 0;
+            clearFogButtonEl.textContent = fogCount > 0 ? `Clear Fog (${fogCount})` : 'Clear Fog';
         }
         if (body) body.dataset.toolMode = localToolState.mode;
     };
@@ -1834,12 +1993,14 @@
             localRole = store.setVTTLocalRole(localRole, getActiveCaseId()) === 'dm' ? 'dm' : 'player';
         }
         if (localRole !== 'dm') {
+            if (localToolState.mode === TOOL_MODE_FOG) localToolState.mode = TOOL_MODE_NAVIGATE;
             closeNPCSearch();
             quickSpawnMenuState = null;
             closeTokenInspectorPopover();
             clearSpawnDrag();
             closeInitiativeDetail();
         }
+        clearPendingTouchContext();
         closeViewMenu();
         closeToolsMenu();
         clearTemplatePlacementState();
@@ -2517,6 +2678,20 @@
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="1">1x1</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="2">2x2</button>
                 </div>
+                <div class="vtt-subhead">Quick Actions</div>
+                <div class="vtt-chip-row vtt-inspector-quick-row">
+                    <button class="vtt-chip-btn" data-action="token-adjust-hp" data-id="${escapeHtml(token.id)}" data-delta="-5">-5 HP</button>
+                    <button class="vtt-chip-btn" data-action="token-adjust-hp" data-id="${escapeHtml(token.id)}" data-delta="+5">+5 HP</button>
+                    <button class="vtt-chip-btn" data-action="token-set-bloodied" data-id="${escapeHtml(token.id)}">Bloodied</button>
+                    <button class="vtt-chip-btn" data-action="token-set-full-hp" data-id="${escapeHtml(token.id)}">Full HP</button>
+                </div>
+                <div class="vtt-chip-row vtt-inspector-quick-row">
+                    <button class="vtt-chip-btn" data-action="toggle-token-hidden-quick" data-id="${escapeHtml(token.id)}">${token.hidden ? 'Reveal' : 'Hide'}</button>
+                    <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Prone">Prone</button>
+                    <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Stunned">Stunned</button>
+                    <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Poisoned">Poisoned</button>
+                    <button class="vtt-chip-btn" data-action="token-clear-conditions" data-id="${escapeHtml(token.id)}">Clear Cond</button>
+                </div>
                 <label class="vtt-inspector-check">
                     <input type="checkbox" data-token-field="hidden"${token.hidden ? ' checked' : ''}>
                     <span>Hidden In Player Mode</span>
@@ -2965,15 +3140,11 @@
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
 
-        fogLayerEl.innerHTML = Array.isArray(scene.fog)
-            ? scene.fog.map((mask) => `
-                <div class="vtt-fog-mask"
-                    data-world-left="${escapeHtml(String(mask.x))}"
-                    data-world-top="${escapeHtml(String(mask.y))}"
-                    data-world-width="${escapeHtml(String(mask.w))}"
-                    data-world-height="${escapeHtml(String(mask.h))}"></div>
-            `).join('')
+        const fogMarkup = Array.isArray(scene.fog) ? scene.fog.map((mask) => buildFogMaskMarkup(mask)).join('') : '';
+        const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
+            ? buildFogMaskMarkup(fogPlacementState.mask, 'is-preview')
             : '';
+        fogLayerEl.innerHTML = `${fogMarkup}${fogPreviewMarkup}`;
 
         const visibleTokens = getVisibleTokensForRole(scene);
         const initiative = vttState && vttState.initiative ? vttState.initiative : { activeEntryId: '' };
@@ -3035,9 +3206,11 @@
                 ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Hold for a moment to leave a 5-second shared marker.`
                 : (localToolState.mode === TOOL_MODE_CONE
                     ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Hold for a moment to leave a 5-second shared marker.`
+                    : (localToolState.mode === TOOL_MODE_FOG
+                        ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tap an existing fog block to remove it.'
                     : (isDM()
-                        ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
-                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.')));
+                        ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
+                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
@@ -3431,6 +3604,71 @@
         }
         if (action === 'toggle-grid') {
             toggleUIPreference('showGrid');
+            return;
+        }
+        if (action === 'clear-scene-fog') {
+            if (!isDM()) return;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                scene.fog = [];
+            });
+            return;
+        }
+        if (action === 'token-adjust-hp') {
+            selectedTokenId = id || selectedTokenId;
+            const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
+            updateSelectedToken((token) => {
+                const currentHp = Number.isFinite(Number(token.hpCurrent)) ? Math.round(Number(token.hpCurrent)) : 0;
+                const maxHp = Number.isFinite(Number(token.hpMax)) ? Math.max(0, Math.round(Number(token.hpMax))) : null;
+                const nextHp = Math.max(0, currentHp + delta);
+                token.hpCurrent = maxHp !== null ? Math.min(nextHp, maxHp) : nextHp;
+                if (maxHp !== null && token.hpMax === null) token.hpMax = maxHp;
+            });
+            return;
+        }
+        if (action === 'token-set-bloodied') {
+            selectedTokenId = id || selectedTokenId;
+            updateSelectedToken((token) => {
+                const maxHp = Number.isFinite(Number(token.hpMax)) ? Math.max(0, Math.round(Number(token.hpMax))) : null;
+                if (maxHp === null || maxHp <= 0) return;
+                token.hpCurrent = maxHp <= 1 ? 1 : Math.max(1, Math.floor(maxHp / 2));
+            });
+            return;
+        }
+        if (action === 'token-set-full-hp') {
+            selectedTokenId = id || selectedTokenId;
+            updateSelectedToken((token) => {
+                const maxHp = Number.isFinite(Number(token.hpMax)) ? Math.max(0, Math.round(Number(token.hpMax))) : null;
+                if (maxHp === null) return;
+                token.hpCurrent = maxHp;
+            });
+            return;
+        }
+        if (action === 'toggle-token-hidden-quick') {
+            selectedTokenId = id || selectedTokenId;
+            updateSelectedToken((token) => {
+                token.hidden = !token.hidden;
+            });
+            return;
+        }
+        if (action === 'token-apply-condition') {
+            selectedTokenId = id || selectedTokenId;
+            const conditionName = String(actionEl.dataset.condition || '').trim();
+            if (!conditionName) return;
+            updateSelectedToken((token) => {
+                if (!Array.isArray(token.conditions)) token.conditions = [];
+                if (token.conditions.some((entry) => String(entry || '').trim().toLowerCase() === conditionName.toLowerCase())) return;
+                token.conditions.push(conditionName);
+                token.conditions = token.conditions.slice(0, 24);
+            });
+            return;
+        }
+        if (action === 'token-clear-conditions') {
+            selectedTokenId = id || selectedTokenId;
+            updateSelectedToken((token) => {
+                token.conditions = [];
+            });
             return;
         }
         if (action === 'quick-spawn-custom') {
@@ -4111,6 +4349,10 @@
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
+        if (beginTouchContextInteraction(event, scene, worldPoint)) {
+            event.preventDefault();
+            return;
+        }
         const visionRotateHandleEl = getVisionConeRotateHandleElementAtClientPoint(event.clientX, event.clientY, event.target);
         if (visionRotateHandleEl) {
             const tokenId = String(visionRotateHandleEl.getAttribute('data-token-id') || '').trim();
@@ -4172,6 +4414,35 @@
             renderTokenInspector();
             renderInitiativeList();
             renderInitiativeDetail();
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
+
+        if (localToolState.mode === TOOL_MODE_FOG && isDM()) {
+            const fogIdx = findFogMaskIndexAtWorldPoint(scene, worldPoint);
+            if (fogIdx >= 0) {
+                withDraft((draft) => {
+                    const draftScene = getActiveScene(draft);
+                    if (!draftScene || !Array.isArray(draftScene.fog) || fogIdx >= draftScene.fog.length) return;
+                    draftScene.fog.splice(fogIdx, 1);
+                });
+                event.preventDefault();
+                return;
+            }
+            const initialMask = buildFogMaskFromWorldPoints(scene, worldPoint, worldPoint);
+            if (!initialMask) return;
+            fogPlacementState = {
+                sceneId: scene.id,
+                startWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
+                currentWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
+                mask: initialMask
+            };
+            templatePlacementState = null;
+            templateRotateState = null;
+            visionConeRotateState = null;
+            rulerState = null;
             renderToolsMenu();
             renderStage();
             event.preventDefault();
@@ -4291,6 +4562,52 @@
             renderSpawnGhost();
             return;
         }
+        if (pendingTouchContextState && event.pointerId === pendingTouchContextState.pointerId) {
+            if (pendingTouchContextState.triggered) return;
+            const moveDistance = Math.hypot(event.clientX - pendingTouchContextState.clientX, event.clientY - pendingTouchContextState.clientY);
+            if (moveDistance < TOUCH_CONTEXT_MOVE_PX) return;
+            const pending = clearPendingTouchContext();
+            if (!pending) return;
+            if (pending.targetKind === 'token') {
+                if (!pending.canMoveToken) {
+                    renderStage();
+                    return;
+                }
+                dragState = {
+                    tokenId: pending.tokenId,
+                    anchorX: pending.anchorX,
+                    anchorY: pending.anchorY
+                };
+                lastDragSyncAt = 0;
+                renderStage();
+                return;
+            }
+            panState = {
+                startClientX: pending.clientX,
+                startClientY: pending.clientY,
+                originX: pending.originX,
+                originY: pending.originY
+            };
+            if (stageEl) stageEl.classList.add('is-panning');
+            return;
+        }
+        if (fogPlacementState) {
+            const scene = getActiveScene();
+            if (!scene || fogPlacementState.sceneId !== scene.id) {
+                fogPlacementState = null;
+                renderStage();
+                return;
+            }
+            fogPlacementState.currentWorldPoint = screenToWorld(event.clientX, event.clientY);
+            fogPlacementState.mask = buildFogMaskFromWorldPoints(
+                scene,
+                fogPlacementState.startWorldPoint,
+                fogPlacementState.currentWorldPoint,
+                fogPlacementState.mask && fogPlacementState.mask.id
+            );
+            renderStage();
+            return;
+        }
         if (templatePlacementState) {
             const scene = getActiveScene();
             if (!scene || !templatePlacementState.template) return;
@@ -4367,6 +4684,39 @@
             if (shouldSpawn) {
                 spawnTokenFromDescriptor(descriptor.kind, descriptor.id, nextWorldPoint);
             }
+            return;
+        }
+        if (pendingTouchContextState && event && event.pointerId === pendingTouchContextState.pointerId) {
+            const pending = clearPendingTouchContext();
+            if (!pending) return;
+            if (!pending.triggered && pending.targetKind === 'token') {
+                renderTokenInspector();
+                renderInitiativeList();
+                renderInitiativeDetail();
+                renderStage();
+            }
+            return;
+        }
+        if (fogPlacementState) {
+            const pendingFog = { ...fogPlacementState };
+            fogPlacementState = null;
+            if (event && event.type === 'pointercancel') {
+                renderStage();
+                return;
+            }
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                if (!Array.isArray(scene.fog)) scene.fog = [];
+                const mask = buildFogMaskFromWorldPoints(
+                    scene,
+                    pendingFog.startWorldPoint,
+                    pendingFog.currentWorldPoint || pendingFog.startWorldPoint,
+                    pendingFog.mask && pendingFog.mask.id
+                );
+                if (!mask) return;
+                scene.fog.push(mask);
+            });
             return;
         }
         if (templatePlacementState) {

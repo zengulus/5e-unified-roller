@@ -25,7 +25,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - If you’re forking this repo, use the secret Customise panel to export fresh preload scripts for guilds/NPCs/locations, then drop them into `js/data-guilds.js`, `js/data-npcs.js`, and `js/data-locations.js`.
 - Use the accent picker before a session so all other pages inherit the same neon colorway.
 - Hide DM cards during open-table play so players only see approved utilities.
-- Import/export here touches the unified `RTF_STORE` stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Case Timeline, Ledger, Encounters, HQ). Standalone utilities like the Character Sheet, Session Tracker, Narrative Engine, and Tournament Bracket keep their own local saves.
+- Import/export here touches the unified `RTF_STORE` stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Case Timeline, Ledger, Encounters, HQ, and VTT). Standalone utilities like the Character Sheet, Narrative Engine, and Tournament Bracket keep their own local saves. Session Tracker still keeps local presets/logs, but its combat mirror can now pull canonical initiative from the active case VTT.
 - Use `🤖 Case Snapshot` for active-case exports and `🤖 Campaign Snapshot` for full-campaign exports. Both support `full`/`compact` mode prompts.
 
 ## Related Project

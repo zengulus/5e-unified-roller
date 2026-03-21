@@ -7,7 +7,7 @@
     <link rel="manifest" href="manifest.json">
     <title>GM Session Hub</title>
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
-    <link rel="stylesheet" href="css/gm.css">
+    <link rel="stylesheet" href="css/gm.css?v=20260322a">
     <link rel="stylesheet" href="css/player-nav.css?v=20260306a">
 
 </head>
@@ -55,6 +55,18 @@
                     </div>
                     <div class="gm-helper-note">*Init is final roll. Dex is score (10-20) for
                         tie-break.</div>
+                </div>
+
+                <div class="card gm-card-top-accent">
+                    <div class="section-header">VTT Initiative</div>
+                    <div class="gm-vtt-sync-stack">
+                        <div class="gm-vtt-sync-case" id="vttSyncCaseName">Active Case: Primary Case</div>
+                        <div class="gm-vtt-sync-note" id="vttSyncSummary">VTT is the canonical combat state for the active case. Pull it here when you want a Tracker mirror with the current round and turn.</div>
+                        <div class="row">
+                            <button class="btn-main gm-grow" id="btnPullVTTInitiative" data-onclick="pullInitiativeFromVTT()">Pull VTT Initiative</button>
+                            <button class="btn-sec gm-btn-w100" data-onclick="window.location.href='vtt.html'">Open VTT</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="card gm-card-top-accent">
@@ -263,7 +275,8 @@
     </div>
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
-    <script src="js/gm.js"></script>
+    <script src="js/store.js?v=20260321h"></script>
+    <script src="js/gm.js?v=20260322a"></script>
     <script src="js/player-nav.js?v=20260306a"></script>
     <script src="js/vector-field.js"></script>
 </body>

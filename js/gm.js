@@ -15,6 +15,7 @@ const DEFAULT_GM_DATA = {
 let gmData = JSON.parse(JSON.stringify(DEFAULT_GM_DATA));
 const ENCOUNTER_LAUNCH_STORAGE_PREFIX = 'rtf_gm_launch_';
 const TRACKER_INITIATIVE_QUEUE_KEY = 'rtf_tracker_initiative_queue';
+const UNIFIED_STORE_KEY = 'ravnica_unified_v1';
 
 const delegatedHandlerEvents = ['click', 'change', 'input'];
 const delegatedHandlerCache = new Map();
@@ -252,6 +253,169 @@ function getCombatantNameByIndex(idx) {
 }
 
 let trackerInitiativeQueueBound = false;
+let trackerVTTStoreStatusBound = false;
+
+function getUnifiedStore() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getVTTState !== 'function') return null;
+    return store;
+}
+
+function getActiveCaseLabelFromStore(store) {
+    const targetStore = store || getUnifiedStore();
+    if (!targetStore) return { id: 'case_primary', name: 'Primary Case' };
+    const activeCase = typeof targetStore.getActiveCase === 'function' ? targetStore.getActiveCase() : null;
+    const caseId = activeCase && activeCase.id
+        ? String(activeCase.id)
+        : (typeof targetStore.getActiveCaseId === 'function' ? String(targetStore.getActiveCaseId() || 'case_primary') : 'case_primary');
+    const caseName = activeCase && activeCase.name
+        ? String(activeCase.name)
+        : String(caseId || 'case_primary').replace(/^case_/, '').replace(/[_-]+/g, ' ').trim() || 'Primary Case';
+    return {
+        id: sanitizeString(caseId, 'case_primary', 120) || 'case_primary',
+        name: sanitizeString(caseName, 'Primary Case', 160) || 'Primary Case'
+    };
+}
+
+function getVTTInitiativeSnapshot() {
+    const store = getUnifiedStore();
+    const caseInfo = getActiveCaseLabelFromStore(store);
+    if (!store) {
+        return {
+            available: false,
+            caseId: caseInfo.id,
+            caseName: caseInfo.name,
+            entries: [],
+            round: 1,
+            activeEntryId: '',
+            activeName: ''
+        };
+    }
+    const state = store.getVTTState(caseInfo.id);
+    const initiative = state && state.initiative && typeof state.initiative === 'object' ? state.initiative : {};
+    const entries = Array.isArray(initiative.entries) ? initiative.entries.slice() : [];
+    const activeEntryId = sanitizeString(initiative.activeEntryId || '', '', 120).trim();
+    const activeEntry = entries.find((entry) => String(entry && entry.id ? entry.id : '') === activeEntryId) || null;
+    return {
+        available: true,
+        caseId: caseInfo.id,
+        caseName: caseInfo.name,
+        entries,
+        round: Math.max(1, Math.round(sanitizeNumber(initiative.round, 1, 1, 100000))),
+        activeEntryId,
+        activeName: activeEntry ? sanitizeString(activeEntry.name || 'Combatant', 'Combatant', 160) : ''
+    };
+}
+
+function mapVTTInitiativeEntryToCombatant(entry, idx) {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const hasHp = (source.hpCurrent !== null && source.hpCurrent !== undefined && source.hpCurrent !== '')
+        || (source.hpMax !== null && source.hpMax !== undefined && source.hpMax !== '');
+    const hp = hasHp ? Math.max(0, Math.round(sanitizeNumber(source.hpCurrent, 0, 0, 999999))) : null;
+    const maxHp = hasHp
+        ? Math.max(0, Math.round(sanitizeNumber(source.hpMax, hp === null ? 0 : hp, 0, 999999)))
+        : null;
+    const ac = source.ac !== null && source.ac !== undefined && source.ac !== ''
+        ? Math.max(0, Math.min(99, Math.round(sanitizeNumber(source.ac, 0, 0, 99))))
+        : null;
+    const conditions = Array.isArray(source.conditions)
+        ? source.conditions
+            .map((condition) => sanitizeString(condition || '', '', 80).trim())
+            .filter(Boolean)
+            .slice(0, 20)
+            .map((name) => ({ name, duration: null }))
+        : [];
+    return {
+        id: sanitizeString(String(source.id || `vtt_${idx + 1}`), `vtt_${idx + 1}`, 80),
+        name: sanitizeString(source.name || `Combatant ${idx + 1}`, `Combatant ${idx + 1}`, 160),
+        total: sanitizeNumber(source.total, 0, -999, 999),
+        tie: sanitizeNumber(source.tie, 10, 0, 99),
+        ac,
+        hp,
+        maxHp,
+        tags: ['vtt'],
+        conditions,
+        reactionUsed: !!source.reactionUsed,
+        concentrating: !!source.concentrating,
+        legendaryMax: 0,
+        legendaryUsed: 0,
+        sourceType: sanitizeString(source.sourceType || '', '', 30),
+        sourceId: sanitizeString(source.sourceId || '', '', 120)
+    };
+}
+
+function renderVTTSyncStatus() {
+    const caseNameEl = document.getElementById('vttSyncCaseName');
+    const summaryEl = document.getElementById('vttSyncSummary');
+    const pullButtonEl = document.getElementById('btnPullVTTInitiative');
+    if (!caseNameEl || !summaryEl || !pullButtonEl) return;
+
+    const snapshot = getVTTInitiativeSnapshot();
+    caseNameEl.textContent = `Active Case: ${snapshot.caseName}`;
+
+    if (!snapshot.available) {
+        summaryEl.textContent = 'The unified RTF store is unavailable in this browser, so Tracker can only use its local initiative list right now.';
+        pullButtonEl.disabled = true;
+        pullButtonEl.textContent = 'Pull VTT Initiative';
+        return;
+    }
+
+    const vttCount = Array.isArray(snapshot.entries) ? snapshot.entries.length : 0;
+    const trackerCount = Array.isArray(gmData.combatants) ? gmData.combatants.length : 0;
+    if (!vttCount) {
+        summaryEl.textContent = 'VTT is still the canonical combat state for this case, but there are no initiative entries there yet. Tracker can keep its own local list until you seed VTT combat.';
+        pullButtonEl.disabled = true;
+        pullButtonEl.textContent = 'Pull VTT Initiative';
+        return;
+    }
+
+    const activeText = snapshot.activeName ? ` Active turn: ${snapshot.activeName}.` : '';
+    summaryEl.textContent = `VTT currently has ${vttCount} combatant${vttCount === 1 ? '' : 's'} in round ${snapshot.round}.${activeText} Pulling replaces this Tracker mirror (${trackerCount} local).`;
+    pullButtonEl.disabled = false;
+    pullButtonEl.textContent = `Pull VTT Initiative (${vttCount})`;
+}
+
+function bindTrackerVTTStoreStatus() {
+    if (trackerVTTStoreStatusBound) return;
+    trackerVTTStoreStatusBound = true;
+    window.addEventListener('storage', (event) => {
+        if (!event || event.key !== UNIFIED_STORE_KEY) return;
+        renderVTTSyncStatus();
+    });
+    window.addEventListener('focus', () => {
+        renderVTTSyncStatus();
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        renderVTTSyncStatus();
+    });
+}
+
+function pullInitiativeFromVTT() {
+    const snapshot = getVTTInitiativeSnapshot();
+    if (!snapshot.available) {
+        alert('The unified RTF store is not available in this browser yet.');
+        return 0;
+    }
+    if (!Array.isArray(snapshot.entries) || snapshot.entries.length === 0) {
+        alert(`No VTT initiative is queued for ${snapshot.caseName} yet.`);
+        return 0;
+    }
+
+    if (Array.isArray(gmData.combatants) && gmData.combatants.length) {
+        const ok = confirm(`Replace Tracker initiative with the current VTT order for ${snapshot.caseName}?`);
+        if (!ok) return 0;
+    }
+
+    pushUndoSnapshot('Pull VTT initiative');
+    gmData.combatants = snapshot.entries.map((entry, idx) => mapVTTInitiativeEntryToCombatant(entry, idx));
+    gmData.round = snapshot.round;
+    const activeIdx = snapshot.entries.findIndex((entry) => String(entry && entry.id ? entry.id : '') === snapshot.activeEntryId);
+    gmData.activeIdx = activeIdx >= 0 ? activeIdx : 0;
+    addCombatLog(`Pulled ${snapshot.entries.length} combatant${snapshot.entries.length === 1 ? '' : 's'} from VTT (${snapshot.caseName})`);
+    commitTrackerState();
+    return snapshot.entries.length;
+}
 
 function hasProcessedInitRoll(rollId) {
     const token = sanitizeString(rollId || '', '', 120).trim();
@@ -806,9 +970,11 @@ function init() {
     renderConditions();
     if (!gmData.bestiary) gmData.bestiary = [];
     renderBestiary();
+    renderVTTSyncStatus();
     applyEncounterLaunchPayload();
     consumeTrackerInitiativeQueue();
     bindTrackerInitiativeQueueSync();
+    bindTrackerVTTStoreStatus();
 }
 
 function exportGM() {
@@ -1165,6 +1331,7 @@ function renderCombat() {
     if (!list) return;
     document.getElementById('roundVal').innerText = gmData.round;
     updateUndoButton();
+    renderVTTSyncStatus();
 
     list.innerHTML = gmData.combatants.map((c, i) => {
         const activeClass = (i === gmData.activeIdx) ? 'active' : '';
