@@ -835,6 +835,11 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-vision-cone {
     pointer-events: none;
+    overflow: visible;
+}
+
+.vtt-vision-cone.is-selected {
+    pointer-events: auto;
 }
 
 .vtt-area-template {
@@ -876,6 +881,17 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     display: block;
 }
 
+.vtt-vision-cone svg {
+    pointer-events: none;
+}
+
+.vtt-vision-cone-guide {
+    stroke: rgba(255, 227, 163, 0.82);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-dasharray: 3.5 3;
+}
+
 .vtt-template-rotate-handle {
     position: absolute;
     left: calc(100% + 0.7rem);
@@ -895,6 +911,10 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-vision-cone .vtt-template-rotate-handle {
     pointer-events: auto;
+}
+
+.vtt-vision-cone .vtt-template-rotate-handle::before {
+    display: none;
 }
 
 .vtt-template-rotate-handle::before {
@@ -965,6 +985,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     position: absolute;
     display: grid;
     place-items: center;
+    box-sizing: border-box;
     border-radius: 1rem;
     border: 2px solid rgba(255, 255, 255, 0.18);
     background:

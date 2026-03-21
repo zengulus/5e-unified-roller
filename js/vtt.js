@@ -307,6 +307,13 @@
             { x: originPoint.x + axisX * lengthPx + perpX * halfWidth, y: originPoint.y + axisY * lengthPx + perpY * halfWidth }
         ];
     };
+    const getPointOnCircle = (center, radius, angleDeg) => {
+        const radians = normalizeAngleDeg(angleDeg) * Math.PI / 180;
+        return {
+            x: center + Math.cos(radians) * radius,
+            y: center + Math.sin(radians) * radius
+        };
+    };
     const getAreaTemplateWorldGeometry = (template, scene) => {
         if (!template || !scene) return null;
         const sizePx = Math.max(1, normalizeToolSizeCells(template.sizeCells, DEFAULT_TOOL_SIZE_CELLS) * getSceneCellPx(scene));
@@ -2403,8 +2410,11 @@
         const stroke = overlapsPlayers ? 'rgba(255, 132, 132, 0.82)' : 'rgba(122, 194, 255, 0.78)';
         const classes = ['vtt-overlay-item', 'vtt-vision-cone'];
         const arcDeg = clamp(toNumber(geometry.arcDeg, 90), 1, 360);
+        const facingDeg = normalizeAngleDeg(toNumber(geometry.rotationDeg, 0));
         const center = 50;
         const radius = 49;
+        const handleGuidePoint = getPointOnCircle(center, radius, facingDeg);
+        const handlePoint = getPointOnCircle(center, 52.5, facingDeg);
         const shapeMarkup = arcDeg >= 359.5
             ? `
                 <circle cx="${center}" cy="${center}" r="${radius}"
@@ -2413,17 +2423,13 @@
                     stroke-width="1.8"></circle>
             `
             : (() => {
-                const startRad = (-arcDeg / 2) * Math.PI / 180;
-                const endRad = (arcDeg / 2) * Math.PI / 180;
-                const startX = center + Math.cos(startRad) * radius;
-                const startY = center + Math.sin(startRad) * radius;
-                const endX = center + Math.cos(endRad) * radius;
-                const endY = center + Math.sin(endRad) * radius;
+                const startPoint = getPointOnCircle(center, radius, facingDeg - arcDeg / 2);
+                const endPoint = getPointOnCircle(center, radius, facingDeg + arcDeg / 2);
                 const largeArcFlag = arcDeg > 180 ? 1 : 0;
                 const path = [
                     `M ${center} ${center}`,
-                    `L ${startX.toFixed(3)} ${startY.toFixed(3)}`,
-                    `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX.toFixed(3)} ${endY.toFixed(3)}`,
+                    `L ${startPoint.x.toFixed(3)} ${startPoint.y.toFixed(3)}`,
+                    `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endPoint.x.toFixed(3)} ${endPoint.y.toFixed(3)}`,
                     'Z'
                 ].join(' ');
                 return `
@@ -2439,7 +2445,17 @@
             ? `
                 <button class="vtt-template-rotate-handle vtt-vision-cone-rotate-handle" type="button"
                     data-token-id="${escapeHtml(String(token.id || ''))}"
+                    style="left:${escapeHtml(String(handlePoint.x))}%;top:${escapeHtml(String(handlePoint.y))}%;"
                     aria-label="Rotate sight cone"></button>
+            `
+            : '';
+        const guideMarkup = handleMarkup
+            ? `
+                <line class="vtt-vision-cone-guide"
+                    x1="${center}"
+                    y1="${center}"
+                    x2="${handleGuidePoint.x.toFixed(3)}"
+                    y2="${handleGuidePoint.y.toFixed(3)}"></line>
             `
             : '';
         return `
@@ -2448,10 +2464,10 @@
                 data-world-left="${escapeHtml(String(geometry.left))}"
                 data-world-top="${escapeHtml(String(geometry.top))}"
                 data-world-width="${escapeHtml(String(geometry.width))}"
-                data-world-height="${escapeHtml(String(geometry.height))}"
-                data-world-rotation="${escapeHtml(String(geometry.rotationDeg))}">
+                data-world-height="${escapeHtml(String(geometry.height))}">
                 <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     ${shapeMarkup}
+                    ${guideMarkup}
                 </svg>
                 ${handleMarkup}
             </div>
