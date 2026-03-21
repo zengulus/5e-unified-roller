@@ -782,7 +782,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-grid-layer,
 .vtt-fog-layer,
 .vtt-template-layer,
-.vtt-token-layer {
+.vtt-token-layer,
+.vtt-vision-layer {
     position: absolute;
 }
 
@@ -801,7 +802,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-grid-layer,
 .vtt-fog-layer,
 .vtt-template-layer,
-.vtt-token-layer {
+.vtt-token-layer,
+.vtt-vision-layer {
     inset: 0;
 }
 
@@ -820,6 +822,10 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 }
 
 .vtt-template-layer {
+    pointer-events: none;
+}
+
+.vtt-vision-layer {
     pointer-events: none;
 }
 
@@ -887,9 +893,9 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-vision-cone-guide {
     stroke: rgba(255, 227, 163, 0.82);
-    stroke-width: 1.6;
+    stroke-width: 6;
     stroke-linecap: round;
-    stroke-dasharray: 3.5 3;
+    stroke-dasharray: 18 14;
 }
 
 .vtt-template-rotate-handle {
@@ -913,7 +919,20 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     pointer-events: auto;
 }
 
+.vtt-vision-handle-overlay {
+    pointer-events: none;
+    overflow: visible;
+}
+
+.vtt-vision-handle-overlay .vtt-template-rotate-handle {
+    pointer-events: auto;
+}
+
 .vtt-vision-cone .vtt-template-rotate-handle::before {
+    display: none;
+}
+
+.vtt-vision-handle-overlay .vtt-template-rotate-handle::before {
     display: none;
 }
 

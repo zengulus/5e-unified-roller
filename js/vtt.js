@@ -109,6 +109,7 @@
     const fogLayerEl = document.getElementById('vtt-fog-layer');
     const templateLayerEl = document.getElementById('vtt-template-layer');
     const tokenLayerEl = document.getElementById('vtt-token-layer');
+    const visionLayerEl = document.getElementById('vtt-vision-layer');
     const caseNameEl = document.getElementById('vtt-case-name');
     const syncChipEl = document.getElementById('vtt-sync-chip');
     const settingsToggleEl = document.getElementById('vtt-settings-toggle');
@@ -307,11 +308,11 @@
             { x: originPoint.x + axisX * lengthPx + perpX * halfWidth, y: originPoint.y + axisY * lengthPx + perpY * halfWidth }
         ];
     };
-    const getPointOnCircle = (center, radius, angleDeg) => {
+    const getPointAtAngle = (originX, originY, radius, angleDeg) => {
         const radians = normalizeAngleDeg(angleDeg) * Math.PI / 180;
         return {
-            x: center + Math.cos(radians) * radius,
-            y: center + Math.sin(radians) * radius
+            x: originX + Math.cos(radians) * radius,
+            y: originY + Math.sin(radians) * radius
         };
     };
     const getAreaTemplateWorldGeometry = (template, scene) => {
@@ -410,21 +411,23 @@
     const getVisionConeRangeCells = (token) => Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
     const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 360);
     const getTokenVisionFacingDeg = (token) => normalizeAngleDeg(token && token.vision && token.vision.facingDeg);
-    const getVisionConeGeometry = (token, scene) => {
+    const getVisionConeGeometry = (token, scene, sceneSize = getWorldSizeForScene(scene)) => {
         if (!token || !scene || !token.vision || !token.vision.enabled) return null;
         const side = String(token.side || '').trim().toLowerCase();
         if (side !== 'enemy' && side !== 'neutral') return null;
         const rangeCells = getVisionConeRangeCells(token);
         if (!rangeCells) return null;
-        const anchor = getTemplateWorldPoint(scene, getTokenCenterInCells(token));
+        const origin = getTemplateWorldPoint(scene, getTokenCenterInCells(token));
         const radiusPx = rangeCells * getSceneCellPx(scene);
-        const diameterPx = radiusPx * 2;
         return {
-            left: anchor.x - radiusPx,
-            top: anchor.y - radiusPx,
-            width: diameterPx,
-            height: diameterPx,
-            rotationDeg: getTokenVisionFacingDeg(token),
+            left: 0,
+            top: 0,
+            width: Math.max(1, Math.round(toNumber(sceneSize && sceneSize.width, DEFAULT_WORLD_SIZE.width))),
+            height: Math.max(1, Math.round(toNumber(sceneSize && sceneSize.height, DEFAULT_WORLD_SIZE.height))),
+            centerX: origin.x,
+            centerY: origin.y,
+            radiusPx,
+            facingDeg: getTokenVisionFacingDeg(token),
             arcDeg: getVisionConeArcDeg(token)
         };
     };
@@ -515,6 +518,20 @@
             if (!(hitEl instanceof Element)) continue;
             const templateEl = hitEl.closest('.vtt-area-template');
             if (templateEl) return templateEl;
+        }
+        return null;
+    };
+    const getVisionConeRotateHandleElementAtClientPoint = (clientX, clientY, target = null) => {
+        if (target instanceof Element) {
+            const directMatch = target.closest('.vtt-vision-cone-rotate-handle');
+            if (directMatch) return directMatch;
+        }
+        if (typeof document.elementsFromPoint !== 'function') return null;
+        const hitElements = document.elementsFromPoint(clientX, clientY);
+        for (const hitEl of hitElements) {
+            if (!(hitEl instanceof Element)) continue;
+            const handleEl = hitEl.closest('.vtt-vision-cone-rotate-handle');
+            if (handleEl) return handleEl;
         }
         return null;
     };
@@ -1359,7 +1376,7 @@
     const scaleForZoom = (value) => Math.max(0, Math.round(value * localView.zoom * 1000) / 1000);
 
     const applyRenderedWorldGeometry = (scene = getActiveScene()) => {
-        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl) return;
+        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         const scaledMapWidth = scaleForZoom(mapDisplaySize.width || 0);
         const scaledMapHeight = scaleForZoom(mapDisplaySize.height || 0);
@@ -1379,6 +1396,17 @@
         });
 
         templateLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
+            if (!(itemEl instanceof HTMLElement)) return;
+            itemEl.style.left = `${scaleForZoom(toNumber(itemEl.dataset.worldLeft, 0))}px`;
+            itemEl.style.top = `${scaleForZoom(toNumber(itemEl.dataset.worldTop, 0))}px`;
+            itemEl.style.width = `${scaleForZoom(toNumber(itemEl.dataset.worldWidth, 0))}px`;
+            itemEl.style.height = `${scaleForZoom(toNumber(itemEl.dataset.worldHeight, 0))}px`;
+            if (itemEl.dataset.worldRotation !== undefined) {
+                itemEl.style.transform = `rotate(${toNumber(itemEl.dataset.worldRotation, 0)}deg)`;
+            }
+        });
+
+        visionLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
             if (!(itemEl instanceof HTMLElement)) return;
             itemEl.style.left = `${scaleForZoom(toNumber(itemEl.dataset.worldLeft, 0))}px`;
             itemEl.style.top = `${scaleForZoom(toNumber(itemEl.dataset.worldTop, 0))}px`;
@@ -2393,7 +2421,7 @@
         positionInitiativeDetail();
     };
 
-    const buildVisionConeMarkup = (token, scene) => {
+    const buildVisionConeMarkup = (token, scene, sceneSize = worldSize) => {
         const renderedToken = visionConeRotateState && visionConeRotateState.tokenId === token.id
             ? {
                 ...token,
@@ -2403,59 +2431,53 @@
                 }
             }
             : token;
-        const geometry = getVisionConeGeometry(renderedToken, scene);
+        const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
         if (!geometry) return '';
         const overlapsPlayers = doesVisionConeOverlapPlayers(renderedToken, scene, vttState);
         const fill = overlapsPlayers ? 'rgba(255, 102, 102, 0.24)' : 'rgba(94, 176, 255, 0.22)';
         const stroke = overlapsPlayers ? 'rgba(255, 132, 132, 0.82)' : 'rgba(122, 194, 255, 0.78)';
         const classes = ['vtt-overlay-item', 'vtt-vision-cone'];
         const arcDeg = clamp(toNumber(geometry.arcDeg, 90), 1, 360);
-        const facingDeg = normalizeAngleDeg(toNumber(geometry.rotationDeg, 0));
-        const center = 50;
-        const radius = 49;
-        const handleGuidePoint = getPointOnCircle(center, radius, facingDeg);
-        const handlePoint = getPointOnCircle(center, 52.5, facingDeg);
+        const facingDeg = normalizeAngleDeg(toNumber(geometry.facingDeg, 0));
+        const centerX = toNumber(geometry.centerX, 0);
+        const centerY = toNumber(geometry.centerY, 0);
+        const radiusPx = Math.max(1, toNumber(geometry.radiusPx, 0));
+        const handleGuidePoint = getPointAtAngle(centerX, centerY, radiusPx, facingDeg);
         const shapeMarkup = arcDeg >= 359.5
             ? `
-                <circle cx="${center}" cy="${center}" r="${radius}"
+                <circle cx="${centerX.toFixed(3)}" cy="${centerY.toFixed(3)}" r="${radiusPx.toFixed(3)}"
                     fill="${fill}"
                     stroke="${stroke}"
-                    stroke-width="1.8"></circle>
+                    stroke-width="8"
+                    vector-effect="non-scaling-stroke"></circle>
             `
             : (() => {
-                const startPoint = getPointOnCircle(center, radius, facingDeg - arcDeg / 2);
-                const endPoint = getPointOnCircle(center, radius, facingDeg + arcDeg / 2);
+                const startPoint = getPointAtAngle(centerX, centerY, radiusPx, facingDeg - arcDeg / 2);
+                const endPoint = getPointAtAngle(centerX, centerY, radiusPx, facingDeg + arcDeg / 2);
                 const largeArcFlag = arcDeg > 180 ? 1 : 0;
                 const path = [
-                    `M ${center} ${center}`,
+                    `M ${centerX.toFixed(3)} ${centerY.toFixed(3)}`,
                     `L ${startPoint.x.toFixed(3)} ${startPoint.y.toFixed(3)}`,
-                    `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endPoint.x.toFixed(3)} ${endPoint.y.toFixed(3)}`,
+                    `A ${radiusPx.toFixed(3)} ${radiusPx.toFixed(3)} 0 ${largeArcFlag} 1 ${endPoint.x.toFixed(3)} ${endPoint.y.toFixed(3)}`,
                     'Z'
                 ].join(' ');
                 return `
                     <path d="${path}"
                         fill="${fill}"
                         stroke="${stroke}"
-                        stroke-width="1.8"></path>
+                        stroke-width="8"
+                        vector-effect="non-scaling-stroke"></path>
                 `;
             })();
-        if (selectedTokenId === token.id) classes.push('is-selected');
         if (visionConeRotateState && visionConeRotateState.tokenId === token.id) classes.push('is-rotating');
-        const handleMarkup = selectedTokenId === token.id && canRoleMoveToken(token)
-            ? `
-                <button class="vtt-template-rotate-handle vtt-vision-cone-rotate-handle" type="button"
-                    data-token-id="${escapeHtml(String(token.id || ''))}"
-                    style="left:${escapeHtml(String(handlePoint.x))}%;top:${escapeHtml(String(handlePoint.y))}%;"
-                    aria-label="Rotate sight cone"></button>
-            `
-            : '';
-        const guideMarkup = handleMarkup
+        const guideMarkup = selectedTokenId === token.id && canRoleMoveToken(token)
             ? `
                 <line class="vtt-vision-cone-guide"
-                    x1="${center}"
-                    y1="${center}"
+                    x1="${centerX.toFixed(3)}"
+                    y1="${centerY.toFixed(3)}"
                     x2="${handleGuidePoint.x.toFixed(3)}"
-                    y2="${handleGuidePoint.y.toFixed(3)}"></line>
+                    y2="${handleGuidePoint.y.toFixed(3)}"
+                    vector-effect="non-scaling-stroke"></line>
             `
             : '';
         return `
@@ -2465,11 +2487,46 @@
                 data-world-top="${escapeHtml(String(geometry.top))}"
                 data-world-width="${escapeHtml(String(geometry.width))}"
                 data-world-height="${escapeHtml(String(geometry.height))}">
-                <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <svg viewBox="0 0 ${escapeHtml(String(geometry.width))} ${escapeHtml(String(geometry.height))}" preserveAspectRatio="none" aria-hidden="true">
                     ${shapeMarkup}
                     ${guideMarkup}
                 </svg>
-                ${handleMarkup}
+            </div>
+        `;
+    };
+
+    const buildVisionConeHandleMarkup = (token, scene, sceneSize = worldSize) => {
+        if (selectedTokenId !== token.id || !canRoleMoveToken(token)) return '';
+        const renderedToken = visionConeRotateState && visionConeRotateState.tokenId === token.id
+            ? {
+                ...token,
+                vision: {
+                    ...(token.vision || {}),
+                    facingDeg: visionConeRotateState.angleDeg
+                }
+            }
+            : token;
+        const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
+        if (!geometry) return '';
+        const handleOffsetPx = 18 / Math.max(0.25, localView.zoom);
+        const handlePoint = getPointAtAngle(
+            toNumber(geometry.centerX, 0),
+            toNumber(geometry.centerY, 0),
+            Math.max(1, toNumber(geometry.radiusPx, 0)) + handleOffsetPx,
+            normalizeAngleDeg(toNumber(geometry.facingDeg, 0))
+        );
+        const leftPercent = geometry.width ? (handlePoint.x / geometry.width) * 100 : 0;
+        const topPercent = geometry.height ? (handlePoint.y / geometry.height) * 100 : 0;
+        return `
+            <div class="vtt-overlay-item vtt-vision-handle-overlay"
+                data-world-left="${escapeHtml(String(geometry.left))}"
+                data-world-top="${escapeHtml(String(geometry.top))}"
+                data-world-width="${escapeHtml(String(geometry.width))}"
+                data-world-height="${escapeHtml(String(geometry.height))}">
+                <button class="vtt-template-rotate-handle vtt-vision-cone-rotate-handle" type="button"
+                    data-token-id="${escapeHtml(String(token.id || ''))}"
+                    style="left:${escapeHtml(String(leftPercent))}%;top:${escapeHtml(String(topPercent))}%;"
+                    aria-label="Rotate sight cone"></button>
             </div>
         `;
     };
@@ -2535,7 +2592,22 @@
         `;
     };
 
-    const renderTemplateLayer = (scene, visibleTokens) => {
+    const renderVisionLayer = (scene, visibleTokens, sceneSize = worldSize) => {
+        if (!visionLayerEl) return;
+        const showStealthCones = !!(scene && scene.stealthMode);
+        const handleMarkup = showStealthCones
+            ? visibleTokens
+                .filter((token) => {
+                    const side = String(token && token.side || '').trim().toLowerCase();
+                    return side === 'enemy' || side === 'neutral';
+                })
+                .map((token) => buildVisionConeHandleMarkup(token, scene, sceneSize))
+                .join('')
+            : '';
+        visionLayerEl.innerHTML = handleMarkup;
+    };
+
+    const renderTemplateLayer = (scene, visibleTokens, sceneSize = worldSize) => {
         if (!templateLayerEl) return;
         const showStealthCones = !!(scene && scene.stealthMode);
         const visibleTemplates = getRenderableSceneTemplates(scene);
@@ -2545,7 +2617,7 @@
                     const side = String(token && token.side || '').trim().toLowerCase();
                     return side === 'enemy' || side === 'neutral';
                 })
-                .map((token) => buildVisionConeMarkup(token, scene))
+                .map((token) => buildVisionConeMarkup(token, scene, sceneSize))
                 .join('')
             : '';
         const templateMarkup = visibleTemplates.map((template) => buildAreaTemplateMarkup(template, scene, { transient: true })).join('');
@@ -2559,7 +2631,7 @@
 
     const renderStage = () => {
         const scene = getActiveScene();
-        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl) return;
+        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
 
         loadMapForScene(scene);
         worldSize = getWorldSizeForScene(scene);
@@ -2583,7 +2655,7 @@
         const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
         const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
 
-        renderTemplateLayer(scene, visibleTokens);
+        renderTemplateLayer(scene, visibleTokens, worldSize);
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => `
             <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}"
@@ -2603,6 +2675,8 @@
                 <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
             </div>
         `).join('');
+
+        renderVisionLayer(scene, visibleTokens, worldSize);
 
         applyRenderedWorldGeometry(scene);
         if (fitViewOnNextMapLoad && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
@@ -3687,7 +3761,7 @@
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
-        const visionRotateHandleEl = event.target.closest('.vtt-vision-cone-rotate-handle');
+        const visionRotateHandleEl = getVisionConeRotateHandleElementAtClientPoint(event.clientX, event.clientY, event.target);
         if (visionRotateHandleEl) {
             const tokenId = String(visionRotateHandleEl.getAttribute('data-token-id') || '').trim();
             const token = getTokenById(tokenId);
