@@ -568,7 +568,8 @@
         const hasHpMax = source.hpMax !== null && source.hpMax !== undefined && source.hpMax !== '';
         const hasAc = source.ac !== null && source.ac !== undefined && source.ac !== '';
         const hasPassivePerception = source.passivePerception !== null && source.passivePerception !== undefined && source.passivePerception !== '';
-        const hasStealthDc = source.stealthDc !== null && source.stealthDc !== undefined && source.stealthDc !== '';
+        const rawStealthRoll = source.stealthRoll !== undefined ? source.stealthRoll : source.stealthDc;
+        const hasStealthRoll = rawStealthRoll !== null && rawStealthRoll !== undefined && rawStealthRoll !== '';
         return {
             id,
             label: toTrimmedString(source.label, `Token ${idx + 1}`, 160).trim() || `Token ${idx + 1}`,
@@ -588,7 +589,7 @@
             defences: sanitizeVTTDefences(source.defences),
             conditions: sanitizeVTTConditions(source.conditions),
             hidden: !!source.hidden,
-            stealthDc: hasStealthDc ? Math.max(0, Math.min(99, Math.round(toNumber(source.stealthDc, 10)))) : null,
+            stealthRoll: hasStealthRoll ? Math.max(0, Math.min(99, Math.round(toNumber(rawStealthRoll, 10)))) : null,
             vision: sanitizeVTTVision(source.vision)
         };
     };
@@ -661,6 +662,8 @@
         const hasHpMax = source.hpMax !== null && source.hpMax !== undefined && source.hpMax !== '';
         const hasAc = source.ac !== null && source.ac !== undefined && source.ac !== '';
         const hasPassivePerception = source.passivePerception !== null && source.passivePerception !== undefined && source.passivePerception !== '';
+        const rawStealthRoll = source.stealthRoll !== undefined ? source.stealthRoll : source.stealthDc;
+        const hasStealthRoll = rawStealthRoll !== null && rawStealthRoll !== undefined && rawStealthRoll !== '';
         return {
             id,
             name: toTrimmedString(source.name, `Combatant ${idx + 1}`, 160).trim() || `Combatant ${idx + 1}`,
@@ -675,6 +678,7 @@
             hpMax: hasHpMax ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpMax, 0)))) : null,
             ac: hasAc ? Math.max(0, Math.min(99, Math.round(toNumber(source.ac, 0)))) : null,
             passivePerception: hasPassivePerception ? Math.max(0, Math.min(99, Math.round(toNumber(source.passivePerception, 10)))) : null,
+            stealthRoll: hasStealthRoll ? Math.max(0, Math.min(99, Math.round(toNumber(rawStealthRoll, 10)))) : null,
             defences: sanitizeVTTDefences(source.defences),
             reactionUsed: !!source.reactionUsed,
             concentrating: !!source.concentrating,

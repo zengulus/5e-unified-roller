@@ -6,6 +6,7 @@
     const STORE_UPDATED_EVENT = 'rtf-store-updated';
     const DEFAULT_WORLD_SIZE = { width: 2400, height: 1600 };
     const DRAG_SYNC_INTERVAL_MS = 120;
+    const REMOTE_TOKEN_TWEEN_MS = 180;
     const TOKEN_DOUBLE_CLICK_MS = 320;
     const SIDE_OPTIONS = ['player', 'ally', 'enemy', 'neutral'];
     const MOVE_ACCESS_OPTIONS = ['dm', 'player'];
@@ -20,6 +21,8 @@
     const DEFAULT_TEMPLATE_CONE_ARC_DEG = 53.13010235415598;
     const TEMPLATE_HOLD_PERSIST_MS = 1000;
     const TEMPLATE_SHARED_LIFETIME_MS = 5000;
+    const STEALTH_STATUS_DETECTED = 'detected';
+    const STEALTH_STATUS_UNSEEN = 'unseen';
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
     const DEFAULT_VTT_CELL_PX = 70;
@@ -70,6 +73,7 @@
         localSceneId: ''
     };
     let npcSearchOpen = false;
+    let npcSearchState = null;
     let npcSearchQuery = '';
     let previewTokenId = '';
     let localView = { x: 40, y: 40, zoom: 1 };
@@ -86,12 +90,15 @@
     let pendingRemoteVTTSnapshot = null;
     let spawnDragState = null;
     let quickSpawnMenuState = null;
+    let tokenInspectorState = null;
     let initiativeDetailState = null;
     let viewMenuOpen = false;
     let toolsMenuOpen = false;
     let dmUnlockReturnFocusEl = null;
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
+    let remoteTokenTweens = new Map();
+    let remoteTokenTweenFrame = 0;
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
     let templatePlacementState = null;
     let templateRotateState = null;
@@ -126,6 +133,8 @@
     const roundPillEl = document.getElementById('vtt-round-pill');
     const selectionPillEl = document.getElementById('vtt-selection-pill');
     const tokenInspectorEl = document.getElementById('vtt-token-inspector');
+    const inspectorPanelEl = document.getElementById('vtt-inspector-panel');
+    const tokenInspectorPopoverEl = document.getElementById('vtt-token-inspector-popover');
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
     const sceneListEl = document.getElementById('vtt-scene-list');
@@ -166,6 +175,7 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     };
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const hasValue = (value) => value !== null && value !== undefined && value !== '';
     const clampMapScale = (value, fallback = 1) => {
         const parsed = Number(value);
         if (!Number.isFinite(parsed)) return clamp(Math.round(fallback * 1000) / 1000, MIN_VTT_MAP_SCALE, MAX_VTT_MAP_SCALE);
@@ -245,12 +255,33 @@
         .filter(Boolean)
         .slice(0, 24);
     const serializeHp = (current, max) => {
-        const hasCurrent = current !== null && current !== undefined && current !== '';
-        const hasMax = max !== null && max !== undefined && max !== '';
+        const hasCurrent = hasValue(current);
+        const hasMax = hasValue(max);
         if (!hasCurrent && !hasMax) return 'HP -';
         if (hasCurrent && hasMax) return `HP ${current}/${max}`;
         if (hasCurrent) return `HP ${current}`;
         return `HP -/${max}`;
+    };
+    const normalizeStealthRoll = (value, fallback = null) => {
+        if (!hasValue(value)) return fallback;
+        return clamp(Math.round(toNumber(value, 0)), 0, 99);
+    };
+    const getTokenStealthRoll = (token) => normalizeStealthRoll(
+        token && token.stealthRoll !== undefined ? token.stealthRoll : token && token.stealthDc,
+        null
+    );
+    const getEntryStealthRoll = (entry) => normalizeStealthRoll(
+        entry && entry.stealthRoll !== undefined ? entry.stealthRoll : entry && entry.stealthDc,
+        null
+    );
+    const getVisionPassivePerception = (token) => {
+        if (hasValue(token && token.passivePerception)) {
+            return clamp(Math.round(toNumber(token.passivePerception, 10)), 0, 99);
+        }
+        if (hasValue(token && token.vision && token.vision.passivePerception)) {
+            return clamp(Math.round(toNumber(token.vision.passivePerception, 10)), 0, 99);
+        }
+        return 10;
     };
     const getTokenGrayscale = (token) => {
         if (!token) return 0;
@@ -259,6 +290,14 @@
         if (!Number.isFinite(hpCurrent) || !Number.isFinite(hpMax) || hpMax <= 0) return 0;
         const ratio = clamp(hpCurrent / hpMax, 0, 1);
         return Math.round((1 - ratio) * 1000) / 1000;
+    };
+    const isTokenBloodied = (token) => {
+        if (!token) return false;
+        if (String(token.sourceType || '').trim().toLowerCase() !== 'npc') return false;
+        const hpCurrent = Number(token.hpCurrent);
+        const hpMax = Number(token.hpMax);
+        if (!Number.isFinite(hpCurrent) || !Number.isFinite(hpMax) || hpMax <= 0) return false;
+        return hpCurrent <= hpMax / 2;
     };
     const getTokenCenterInCells = (token) => ({
         x: normalizeTokenCoordinate(toNumber(token && token.x, 0) + Math.max(1, toNumber(token && token.w, 1)) / 2, 0.5),
@@ -408,7 +447,11 @@
         const origin = getTemplateWorldPoint(scene, template);
         return normalizeAngleDeg(Math.atan2(worldPoint.y - origin.y, worldPoint.x - origin.x) * 180 / Math.PI);
     };
-    const getVisionConeRangeCells = (token) => Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
+    const getVisionConeRangeCells = (token) => {
+        const baseRange = Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
+        const passivePerception = getVisionPassivePerception(token);
+        return Math.max(0, baseRange + Math.max(0, Math.floor((passivePerception - 10) / 2)));
+    };
     const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 360);
     const getTokenVisionFacingDeg = (token) => normalizeAngleDeg(token && token.vision && token.vision.facingDeg);
     const getVisionConeGeometry = (token, scene, sceneSize = getWorldSizeForScene(scene)) => {
@@ -444,13 +487,42 @@
         const delta = Math.abs((((angle - facing) + 540) % 360) - 180);
         return delta <= getVisionConeArcDeg(token) / 2;
     };
-    const doesVisionConeOverlapPlayers = (token, scene, state = vttState) => {
-        if (!token || !scene || !state || !Array.isArray(scene.tokens)) return false;
-        return scene.tokens.some((candidate) => {
-            if (!candidate || candidate.id === token.id || String(candidate.side || '').trim().toLowerCase() !== 'player') return false;
-            if (!isDM() && candidate.hidden) return false;
-            return getTokenFootprintPoints(candidate).some((point) => isCellPointInsideVisionCone(point, token));
+    const getStealthVisionTargetSummary = (token, scene, state = vttState) => {
+        const summary = { detectedIds: [], unseenIds: [] };
+        if (!token || !scene || !state || !Array.isArray(scene.tokens)) return summary;
+        const enemyPassivePerception = getVisionPassivePerception(token);
+        scene.tokens.forEach((candidate) => {
+            if (!candidate || candidate.id === token.id) return;
+            const side = String(candidate.side || '').trim().toLowerCase();
+            if (side !== 'player' && side !== 'ally') return;
+            if (!isDM() && candidate.hidden) return;
+            const intersectsCone = getTokenFootprintPoints(candidate).some((point) => isCellPointInsideVisionCone(point, token));
+            if (!intersectsCone) return;
+            const stealthRoll = getTokenStealthRoll(candidate);
+            if (stealthRoll !== null && stealthRoll > enemyPassivePerception) {
+                summary.unseenIds.push(candidate.id);
+                return;
+            }
+            summary.detectedIds.push(candidate.id);
         });
+        return summary;
+    };
+    const buildStealthStatusMap = (scene, state = vttState) => {
+        const statuses = new Map();
+        if (!scene || !scene.stealthMode || !Array.isArray(scene.tokens)) return statuses;
+        scene.tokens.forEach((token) => {
+            const side = String(token && token.side || '').trim().toLowerCase();
+            if (side !== 'enemy' && side !== 'neutral') return;
+            if (!isDM() && token.hidden) return;
+            const summary = getStealthVisionTargetSummary(token, scene, state);
+            summary.unseenIds.forEach((tokenId) => {
+                if (!statuses.has(tokenId)) statuses.set(tokenId, STEALTH_STATUS_UNSEEN);
+            });
+            summary.detectedIds.forEach((tokenId) => {
+                statuses.set(tokenId, STEALTH_STATUS_DETECTED);
+            });
+        });
+        return statuses;
     };
     const getStore = () => (window.RTF_STORE && typeof window.RTF_STORE.getVTTState === 'function' ? window.RTF_STORE : null);
     const getActiveCaseId = () => {
@@ -478,6 +550,7 @@
     const isDM = () => localRole === 'dm';
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
         npcSearchOpen = false;
+        npcSearchState = null;
         if (clearQuery) npcSearchQuery = '';
     };
     const normalizeToolMode = (value) => {
@@ -506,6 +579,95 @@
         const scene = getActiveScene(state);
         if (!scene || !Array.isArray(scene.templates)) return null;
         return scene.templates.find((template) => String(template && template.id || '').trim() === String(templateId || '').trim()) || null;
+    };
+    const buildRemoteTokenTweenKey = (sceneId, tokenId) => `${String(sceneId || '').trim()}::${String(tokenId || '').trim()}`;
+    const easeRemoteTokenTween = (progress) => 1 - Math.pow(1 - clamp(progress, 0, 1), 3);
+    const pruneRemoteTokenTweens = (now = Date.now()) => {
+        for (const [key, tween] of remoteTokenTweens.entries()) {
+            if (!tween || !Number.isFinite(tween.startedAt) || !Number.isFinite(tween.durationMs)) {
+                remoteTokenTweens.delete(key);
+                continue;
+            }
+            if (now >= tween.startedAt + tween.durationMs) {
+                remoteTokenTweens.delete(key);
+            }
+        }
+    };
+    const hasActiveSceneRemoteTweens = (sceneId = getViewedSceneId(vttState, localRole), now = Date.now()) => {
+        const targetSceneId = String(sceneId || '').trim();
+        if (!targetSceneId) return false;
+        for (const tween of remoteTokenTweens.values()) {
+            if (!tween || tween.sceneId !== targetSceneId) continue;
+            if (now < tween.startedAt + tween.durationMs) return true;
+        }
+        return false;
+    };
+    const scheduleRemoteTokenTweenRender = () => {
+        if (remoteTokenTweenFrame || !hasActiveSceneRemoteTweens()) return;
+        remoteTokenTweenFrame = window.requestAnimationFrame(() => {
+            remoteTokenTweenFrame = 0;
+            pruneRemoteTokenTweens();
+            renderStage();
+            if (hasActiveSceneRemoteTweens()) scheduleRemoteTokenTweenRender();
+        });
+    };
+    const queueRemoteTokenTween = (sceneId, tokenId, fromX, fromY, toX, toY) => {
+        const cleanSceneId = String(sceneId || '').trim();
+        const cleanTokenId = String(tokenId || '').trim();
+        if (!cleanSceneId || !cleanTokenId) return;
+        const tweenKey = buildRemoteTokenTweenKey(cleanSceneId, cleanTokenId);
+        if (fromX === toX && fromY === toY) {
+            remoteTokenTweens.delete(tweenKey);
+            return;
+        }
+        remoteTokenTweens.set(tweenKey, {
+            sceneId: cleanSceneId,
+            tokenId: cleanTokenId,
+            fromX,
+            fromY,
+            toX,
+            toY,
+            startedAt: Date.now(),
+            durationMs: REMOTE_TOKEN_TWEEN_MS
+        });
+        scheduleRemoteTokenTweenRender();
+    };
+    const queueRemoteTweensFromSnapshots = (previousState, nextState) => {
+        if (!previousState || !nextState || !Array.isArray(previousState.scenes) || !Array.isArray(nextState.scenes)) return;
+        const previousScenes = new Map(previousState.scenes.map((scene) => [String(scene && scene.id || '').trim(), scene]));
+        nextState.scenes.forEach((scene) => {
+            const cleanSceneId = String(scene && scene.id || '').trim();
+            if (!cleanSceneId || !scene || !Array.isArray(scene.tokens)) return;
+            const previousScene = previousScenes.get(cleanSceneId);
+            if (!previousScene || !Array.isArray(previousScene.tokens)) return;
+            const previousTokens = new Map(previousScene.tokens.map((token) => [String(token && token.id || '').trim(), token]));
+            scene.tokens.forEach((token) => {
+                const previousToken = previousTokens.get(String(token && token.id || '').trim());
+                if (!previousToken || !token) return;
+                const fromX = normalizeTokenCoordinate(previousToken.x, token.x);
+                const fromY = normalizeTokenCoordinate(previousToken.y, token.y);
+                const toX = normalizeTokenCoordinate(token.x, fromX);
+                const toY = normalizeTokenCoordinate(token.y, fromY);
+                queueRemoteTokenTween(cleanSceneId, token.id, fromX, fromY, toX, toY);
+            });
+        });
+    };
+    const getRenderableTokenCells = (token, scene, now = Date.now()) => {
+        if (!token || !scene) return { x: 0, y: 0 };
+        const tweenKey = buildRemoteTokenTweenKey(scene.id, token.id);
+        const tween = remoteTokenTweens.get(tweenKey);
+        if (!tween || now >= tween.startedAt + tween.durationMs) {
+            if (tween) remoteTokenTweens.delete(tweenKey);
+            return {
+                x: normalizeTokenCoordinate(token.x, 0),
+                y: normalizeTokenCoordinate(token.y, 0)
+            };
+        }
+        const progress = easeRemoteTokenTween((now - tween.startedAt) / tween.durationMs);
+        return {
+            x: Math.round((tween.fromX + (tween.toX - tween.fromX) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION,
+            y: Math.round((tween.fromY + (tween.toY - tween.fromY) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION
+        };
     };
     const getTemplateElementAtClientPoint = (clientX, clientY, target = null) => {
         if (target instanceof Element) {
@@ -592,10 +754,9 @@
     };
 
     const positionNPCSearchPopover = () => {
-        if (!npcSearchToggleEl || !npcSearchPopoverEl || npcSearchPopoverEl.hidden) return;
+        if (!npcSearchPopoverEl || npcSearchPopoverEl.hidden) return;
         const margin = 12;
         const gap = 8;
-        const toggleRect = npcSearchToggleEl.getBoundingClientRect();
         const viewportWidth = Math.max(0, window.innerWidth || document.documentElement.clientWidth || 0);
         const viewportHeight = Math.max(0, window.innerHeight || document.documentElement.clientHeight || 0);
         const maxWidth = Math.max(0, viewportWidth - margin * 2);
@@ -607,19 +768,51 @@
 
         const popoverWidth = Math.max(0, Math.min(npcSearchPopoverEl.offsetWidth || maxWidth, maxWidth));
         const popoverHeight = npcSearchPopoverEl.offsetHeight || 0;
-        let left = toggleRect.right - popoverWidth;
-        left = clamp(left, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
+        let left = margin;
+        let top = margin;
 
-        let top = toggleRect.bottom + gap;
-        if (top + popoverHeight > viewportHeight - margin) {
-            const aboveTop = toggleRect.top - popoverHeight - gap;
-            top = aboveTop >= margin
-                ? aboveTop
-                : Math.max(margin, viewportHeight - popoverHeight - margin);
+        if (npcSearchState) {
+            left = npcSearchState.clientX + 14;
+            top = npcSearchState.clientY + 14;
+            if (left + popoverWidth > viewportWidth - margin) {
+                left = Math.max(margin, npcSearchState.clientX - popoverWidth - 14);
+            }
+            if (top + popoverHeight > viewportHeight - margin) {
+                top = Math.max(margin, viewportHeight - popoverHeight - margin);
+            }
+        } else if (npcSearchToggleEl) {
+            const toggleRect = npcSearchToggleEl.getBoundingClientRect();
+            left = toggleRect.right - popoverWidth;
+            left = clamp(left, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
+
+            top = toggleRect.bottom + gap;
+            if (top + popoverHeight > viewportHeight - margin) {
+                const aboveTop = toggleRect.top - popoverHeight - gap;
+                top = aboveTop >= margin
+                    ? aboveTop
+                    : Math.max(margin, viewportHeight - popoverHeight - margin);
+            }
         }
 
         npcSearchPopoverEl.style.left = `${Math.round(left)}px`;
         npcSearchPopoverEl.style.top = `${Math.round(top)}px`;
+    };
+
+    const positionTokenInspectorPopover = () => {
+        if (!tokenInspectorPopoverEl || tokenInspectorPopoverEl.hidden || !tokenInspectorState) return;
+        const width = tokenInspectorPopoverEl.offsetWidth || 420;
+        const height = tokenInspectorPopoverEl.offsetHeight || 520;
+        const margin = 12;
+        let left = tokenInspectorState.clientX + 14;
+        let top = tokenInspectorState.clientY + 14;
+        if (left + width > window.innerWidth - margin) {
+            left = Math.max(margin, tokenInspectorState.clientX - width - 14);
+        }
+        if (top + height > window.innerHeight - margin) {
+            top = Math.max(margin, window.innerHeight - height - margin);
+        }
+        tokenInspectorPopoverEl.style.left = `${Math.round(left)}px`;
+        tokenInspectorPopoverEl.style.top = `${Math.round(top)}px`;
     };
 
     const closeInitiativeDetail = () => {
@@ -985,7 +1178,7 @@
             defences: normalizeDefences(null),
             conditions: [],
             hidden: false,
-            stealthDc: null,
+            stealthRoll: null,
             vision: {
                 enabled: true,
                 facingDeg: 0,
@@ -1017,7 +1210,7 @@
             defences: normalizeDefences(npc && npc.defences),
             conditions: [],
             hidden: false,
-            stealthDc: null,
+            stealthRoll: null,
             vision: {
                 enabled: true,
                 facingDeg: 0,
@@ -1047,7 +1240,7 @@
         defences: normalizeDefences(null),
         conditions: [],
         hidden: false,
-        stealthDc: null,
+        stealthRoll: null,
         vision: {
             enabled: true,
             facingDeg: 0,
@@ -1143,6 +1336,7 @@
         hpMax: token.hpMax,
         ac: token.ac,
         passivePerception: token.passivePerception,
+        stealthRoll: getTokenStealthRoll(token),
         defences: normalizeDefences(token.defences),
         hidden: !!token.hidden,
         conditions: Array.isArray(token.conditions) ? token.conditions.slice(0, 24) : []
@@ -1162,6 +1356,7 @@
         hpMax: token.hpMax,
         ac: token.ac,
         passivePerception: token.passivePerception,
+        stealthRoll: getTokenStealthRoll(token),
         defences: normalizeDefences(token.defences),
         reactionUsed: false,
         concentrating: false,
@@ -1322,6 +1517,11 @@
         }
         if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
             previewTokenId = '';
+        }
+        if (!isDM()) {
+            tokenInspectorState = null;
+        } else if (tokenInspectorState && !tokens.some((token) => token.id === tokenInspectorState.tokenId)) {
+            tokenInspectorState = null;
         }
         selectedTemplateId = '';
         if (templatePlacementState && (!scene || templatePlacementState.sceneId !== scene.id)) {
@@ -1511,10 +1711,60 @@
         return true;
     };
 
+    const getContextSpawnWorldPoint = () => {
+        if (quickSpawnMenuState && quickSpawnMenuState.worldPoint) return quickSpawnMenuState.worldPoint;
+        if (npcSearchState && npcSearchState.worldPoint) return npcSearchState.worldPoint;
+        return null;
+    };
+
     const closeViewMenu = () => {
         if (!viewMenuOpen) return false;
         viewMenuOpen = false;
         renderViewMenu();
+        return true;
+    };
+
+    const openNPCSearchAt = (clientX, clientY, worldPoint = null) => {
+        if (!isDM()) return false;
+        closeQuickSpawnMenu();
+        closeTokenInspectorPopover();
+        closeInitiativeDetail();
+        npcSearchOpen = true;
+        npcSearchState = {
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2)),
+            worldPoint: worldPoint && Number.isFinite(Number(worldPoint.x)) && Number.isFinite(Number(worldPoint.y))
+                ? { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) }
+                : null
+        };
+        renderNPCSearchPopover();
+        if (npcSearchInputEl) {
+            window.requestAnimationFrame(() => {
+                npcSearchInputEl.focus();
+                npcSearchInputEl.select();
+            });
+        }
+        return true;
+    };
+
+    const closeTokenInspectorPopover = () => {
+        if (!tokenInspectorState && (!tokenInspectorPopoverEl || tokenInspectorPopoverEl.hidden)) return false;
+        tokenInspectorState = null;
+        if (tokenInspectorPopoverEl) tokenInspectorPopoverEl.hidden = true;
+        return true;
+    };
+
+    const openTokenInspectorPopover = (tokenId, clientX, clientY) => {
+        const targetId = String(tokenId || '').trim();
+        if (!targetId || !isDM()) return false;
+        closeQuickSpawnMenu();
+        closeNPCSearch();
+        closeInitiativeDetail();
+        tokenInspectorState = {
+            tokenId: targetId,
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
+        };
         return true;
     };
 
@@ -1523,10 +1773,13 @@
         closeNPCSearch();
         closeViewMenu();
         closeToolsMenu();
+        closeTokenInspectorPopover();
         closeInitiativeDetail();
         const rect = stageEl.getBoundingClientRect();
         quickSpawnMenuState = {
             worldPoint: screenToWorld(clientX, clientY),
+            clientX: Math.round(clientX),
+            clientY: Math.round(clientY),
             stageX: Math.round(clientX - rect.left),
             stageY: Math.round(clientY - rect.top)
         };
@@ -1549,6 +1802,7 @@
         closeViewMenu();
         closeToolsMenu();
         closeQuickSpawnMenu();
+        closeTokenInspectorPopover();
         spawnDragState = {
             pointerId: event.pointerId,
             kind,
@@ -1582,6 +1836,7 @@
         if (localRole !== 'dm') {
             closeNPCSearch();
             quickSpawnMenuState = null;
+            closeTokenInspectorPopover();
             clearSpawnDrag();
             closeInitiativeDetail();
         }
@@ -1616,6 +1871,7 @@
         closeViewMenu();
         closeToolsMenu();
         closeQuickSpawnMenu();
+        closeTokenInspectorPopover();
         closeInitiativeDetail();
         clearSpawnDrag();
         clearTemplatePlacementState();
@@ -1727,6 +1983,7 @@
             pendingRemoteVTTSnapshot = clean;
             return;
         }
+        queueRemoteTweensFromSnapshots(vttState, clean);
         pendingRemoteVTTSnapshot = null;
         vttState = deepClone(clean);
         syncRosterLinkedPlayerPresentation(vttState);
@@ -1736,6 +1993,7 @@
 
     const applyPendingRemoteVTTSnapshot = () => {
         if (dragState || !pendingRemoteVTTSnapshot) return false;
+        queueRemoteTweensFromSnapshots(vttState, pendingRemoteVTTSnapshot);
         vttState = deepClone(pendingRemoteVTTSnapshot);
         syncRosterLinkedPlayerPresentation(vttState);
         pendingRemoteVTTSnapshot = null;
@@ -1757,11 +2015,11 @@
         }
         if (meta && meta.snapshot) {
             const store = getStore();
-            vttState = deepClone(
-                store && typeof store.normalizeVTTStateSnapshot === 'function'
-                    ? store.normalizeVTTStateSnapshot(meta.snapshot)
-                    : meta.snapshot
-            );
+            const nextSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
+                ? store.normalizeVTTStateSnapshot(meta.snapshot)
+                : meta.snapshot;
+            queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
+            vttState = deepClone(nextSnapshot);
             syncRosterLinkedPlayerPresentation(vttState);
             normalizeSelections();
             renderStage();
@@ -1774,19 +2032,26 @@
                 : []
         );
         let mutated = false;
+        const queuedTweens = [];
         (Array.isArray(changes) ? changes : []).forEach((change) => {
             const scene = sceneMap.get(String(change && change.sceneId || '').trim());
             if (!scene || !Array.isArray(scene.tokens)) return;
             const token = scene.tokens.find((entry) => entry && entry.id === String(change && change.tokenId || '').trim());
             if (!token) return;
+            const fromX = normalizeTokenCoordinate(token.x, token.x);
+            const fromY = normalizeTokenCoordinate(token.y, token.y);
             const nextX = normalizeTokenCoordinate(change.x, token.x);
             const nextY = normalizeTokenCoordinate(change.y, token.y);
             if (token.x === nextX && token.y === nextY) return;
             token.x = nextX;
             token.y = nextY;
             mutated = true;
+            queuedTweens.push({ sceneId: scene.id, tokenId: token.id, fromX, fromY, toX: nextX, toY: nextY });
         });
         if (!mutated) return;
+        queuedTweens.forEach((tween) => {
+            queueRemoteTokenTween(tween.sceneId, tween.tokenId, tween.fromX, tween.fromY, tween.toX, tween.toY);
+        });
         normalizeSelections();
         renderStage();
     };
@@ -2036,9 +2301,9 @@
     };
 
     const renderNPCSearchPopover = () => {
-        if (!npcSearchToggleEl || !npcSearchPopoverEl || !npcSearchListEl) return;
+        if (!npcSearchPopoverEl || !npcSearchListEl) return;
         const isOpen = npcSearchOpen && isDM();
-        npcSearchToggleEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (npcSearchToggleEl) npcSearchToggleEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         npcSearchPopoverEl.hidden = !isOpen;
 
         if (npcSearchInputEl && document.activeElement !== npcSearchInputEl) {
@@ -2057,9 +2322,9 @@
 
         npcSearchListEl.innerHTML = npcs.length
                 ? npcs.map((npc) => `
-                    <button class="vtt-token-spawn" type="button" data-spawn-kind="npc" data-id="${escapeHtml(String(npc.id || ''))}">
+                    <button class="vtt-token-spawn" type="button" data-action="spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
-                        <span class="vtt-token-spawn-meta">Drag onto the stage · ${escapeHtml(npc.guild || 'No guild')}</span>
+                        <span class="vtt-token-spawn-meta">${escapeHtml(npcSearchState && npcSearchState.worldPoint ? 'Spawn here' : 'Spawn token')}${npc.guild ? ` · ${escapeHtml(npc.guild)}` : ''}</span>
                     </button>
                 `).join('')
                 : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`;
@@ -2099,7 +2364,7 @@
                         <span class="vtt-token-spawn-meta">${escapeHtml(npc.guild || 'NPC')}</span>
                     </button>
                 `).join('')}
-                <button class="vtt-chip-btn" type="button" data-action="quick-spawn-open-npc-search">NPC Search</button>
+                <button class="vtt-chip-btn" type="button" data-action="quick-spawn-open-npc-search">NPC Search Here</button>
             </div>
         `;
 
@@ -2191,38 +2456,11 @@
             : '<div class="vtt-empty">No scenes yet.</div>';
     };
 
-    const renderTokenInspector = () => {
-        const token = getTokenById(selectedTokenId);
+    const buildDMTokenInspectorContent = (token) => {
         const rosterPlayer = getRosterPlayerForRecord(token);
         const isRosterManagedPlayer = !!rosterPlayer;
         const supportsSightCone = !!(token && (token.side === 'enemy' || token.side === 'neutral'));
-        if (!selectionPillEl || !tokenInspectorEl) return;
-        if (!isDM() && token && token.hidden) {
-            selectionPillEl.textContent = 'No Token';
-            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token on the map to inspect it.</div>';
-            return;
-        }
-        selectionPillEl.textContent = token ? token.label : 'No Token';
-        if (!token) {
-            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a token on the map to inspect it.</div>';
-            return;
-        }
-
-        if (!isDM()) {
-            tokenInspectorEl.innerHTML = `
-                <div class="vtt-inspector-stack">
-                    <div class="vtt-defence-chip-row">
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">AC</span><strong>${escapeHtml(String(token.ac ?? '-'))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
-                    </div>
-                    <div class="vtt-detail-note">${escapeHtml(token.label)} is selected. DM-only editing controls are hidden in Player mode.</div>
-                </div>
-            `;
-            return;
-        }
-
-        tokenInspectorEl.innerHTML = `
+        return `
             <div class="vtt-inspector-stack">
                 <label class="vtt-field">
                     <span>Label</span>
@@ -2261,6 +2499,10 @@
                     <label class="vtt-field">
                         <span>Passive Perception</span>
                         <input class="vtt-inspector-input" type="number" data-token-field="passivePerception" value="${token.passivePerception ?? ''}">
+                    </label>
+                    <label class="vtt-field">
+                        <span>Stealth Roll</span>
+                        <input class="vtt-inspector-input" type="number" data-token-field="stealthRoll" value="${getTokenStealthRoll(token) ?? ''}">
                     </label>
                     <label class="vtt-field">
                         <span>Width</span>
@@ -2311,6 +2553,81 @@
                 </div>
             </div>
         `;
+    };
+
+    const renderTokenInspector = () => {
+        const token = getTokenById(selectedTokenId);
+        if (!selectionPillEl || !tokenInspectorEl) return;
+        if (!isDM() && token && token.hidden) {
+            selectionPillEl.textContent = 'No Token';
+            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token on the map to inspect it.</div>';
+            return;
+        }
+        selectionPillEl.textContent = token ? token.label : 'No Token';
+        if (!token) {
+            tokenInspectorEl.innerHTML = isDM()
+                ? '<div class="vtt-empty">Right-click a token on the map to open its inspector near your cursor.</div>'
+                : '<div class="vtt-empty">Select a token on the map to inspect it.</div>';
+            return;
+        }
+
+        if (!isDM()) {
+            tokenInspectorEl.innerHTML = `
+                <div class="vtt-inspector-stack">
+                    <div class="vtt-defence-chip-row">
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">AC</span><strong>${escapeHtml(String(token.ac ?? '-'))}</strong></div>
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
+                    </div>
+                    <div class="vtt-detail-note">${escapeHtml(token.label)} is selected. DM-only editing controls are hidden in Player mode.</div>
+                </div>
+            `;
+            return;
+        }
+
+        tokenInspectorEl.innerHTML = tokenInspectorState && tokenInspectorState.tokenId === token.id
+            ? `
+                <div class="vtt-inspector-stack">
+                    <div class="vtt-defence-chip-row">
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">AC</span><strong>${escapeHtml(String(token.ac ?? '-'))}</strong></div>
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
+                    </div>
+                    <div class="vtt-detail-note">Editing ${escapeHtml(token.label)} in the floating inspector. Right-click another token to move it, or press Escape to close it.</div>
+                </div>
+            `
+            : `
+                <div class="vtt-inspector-stack">
+                    <div class="vtt-defence-chip-row">
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">AC</span><strong>${escapeHtml(String(token.ac ?? '-'))}</strong></div>
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
+                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
+                    </div>
+                    <div class="vtt-detail-note">Right-click ${escapeHtml(token.label)} on the map to edit it at your cursor. Shift-right-click still previews token art.</div>
+                </div>
+            `;
+    };
+
+    const renderTokenInspectorPopover = () => {
+        if (!tokenInspectorPopoverEl) return;
+        const activePopoverId = tokenInspectorState && tokenInspectorState.tokenId ? tokenInspectorState.tokenId : '';
+        const token = getTokenById(activePopoverId);
+        if (!token || !tokenInspectorState || !isDM()) {
+            tokenInspectorPopoverEl.hidden = true;
+            return;
+        }
+        tokenInspectorPopoverEl.innerHTML = `
+            <div class="vtt-panel-head vtt-popover-head">
+                <h2>Token Inspector</h2>
+                <div class="vtt-panel-head-actions">
+                    <span class="vtt-panel-pill">${escapeHtml(token.label || 'Token')}</span>
+                    <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close token inspector">X</button>
+                </div>
+            </div>
+            ${buildDMTokenInspectorContent(token)}
+        `;
+        tokenInspectorPopoverEl.hidden = false;
+        positionTokenInspectorPopover();
     };
 
     const renderInitiativeList = () => {
@@ -2390,6 +2707,10 @@
                         <input class="vtt-entry-input" type="number" data-entry-field="passivePerception" value="${entry.passivePerception ?? ''}">
                     </label>
                     <label class="vtt-field">
+                        <span>Stealth Roll</span>
+                        <input class="vtt-entry-input" type="number" data-entry-field="stealthRoll" value="${getEntryStealthRoll(entry) ?? ''}">
+                    </label>
+                    <label class="vtt-field">
                         <span>AC</span>
                         <input class="vtt-entry-input" type="number" data-entry-field="ac" value="${entry.ac ?? ''}">
                     </label>
@@ -2433,9 +2754,15 @@
             : token;
         const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
         if (!geometry) return '';
-        const overlapsPlayers = doesVisionConeOverlapPlayers(renderedToken, scene, vttState);
-        const fill = overlapsPlayers ? 'rgba(255, 102, 102, 0.24)' : 'rgba(94, 176, 255, 0.22)';
-        const stroke = overlapsPlayers ? 'rgba(255, 132, 132, 0.82)' : 'rgba(122, 194, 255, 0.78)';
+        const targetSummary = getStealthVisionTargetSummary(renderedToken, scene, vttState);
+        const hasDetectedTargets = targetSummary.detectedIds.length > 0;
+        const hasUnseenTargets = targetSummary.unseenIds.length > 0;
+        const fill = hasDetectedTargets
+            ? 'rgba(255, 102, 102, 0.24)'
+            : (hasUnseenTargets ? 'rgba(255, 211, 102, 0.24)' : 'rgba(94, 176, 255, 0.22)');
+        const stroke = hasDetectedTargets
+            ? 'rgba(255, 132, 132, 0.82)'
+            : (hasUnseenTargets ? 'rgba(255, 227, 163, 0.88)' : 'rgba(122, 194, 255, 0.78)');
         const classes = ['vtt-overlay-item', 'vtt-vision-cone'];
         const arcDeg = clamp(toNumber(geometry.arcDeg, 90), 1, 360);
         const facingDeg = normalizeAngleDeg(toNumber(geometry.facingDeg, 0));
@@ -2654,31 +2981,41 @@
         const focusedEntryToken = getVisibleSceneTokenForEntry(getEntryById(selectedEntryId), vttState, localRole);
         const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
         const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
+        const stealthStatusMap = buildStealthStatusMap(scene, vttState);
+        const renderTime = Date.now();
 
         renderTemplateLayer(scene, visibleTokens, worldSize);
 
-        tokenLayerEl.innerHTML = visibleTokens.map((token) => `
-            <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}"
-                data-token-id="${escapeHtml(token.id)}"
-                data-id="${escapeHtml(token.id)}"
-                data-action="select-token"
-                data-side="${escapeHtml(token.side || 'neutral')}"
-                data-world-left="${escapeHtml(String(scene.grid.offsetX + token.x * scene.grid.cellPx))}"
-                data-world-top="${escapeHtml(String(scene.grid.offsetY + token.y * scene.grid.cellPx))}"
-                data-world-width="${escapeHtml(String(token.w * scene.grid.cellPx))}"
-                data-world-height="${escapeHtml(String(token.h * scene.grid.cellPx))}"
-                style="--vtt-token-grayscale:${getTokenGrayscale(token)};">
-                <div class="vtt-token-face">
-                    ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
+        tokenLayerEl.innerHTML = visibleTokens.map((token) => {
+            const renderedCells = getRenderableTokenCells(token, scene, renderTime);
+            const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
+            const isBloodied = isTokenBloodied(token);
+            return `
+                <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
+                    data-token-id="${escapeHtml(token.id)}"
+                    data-id="${escapeHtml(token.id)}"
+                    data-action="select-token"
+                    data-side="${escapeHtml(token.side || 'neutral')}"
+                    data-stealth-status="${escapeHtml(stealthStatus)}"
+                    data-bloodied="${isBloodied ? '1' : '0'}"
+                    data-world-left="${escapeHtml(String(scene.grid.offsetX + renderedCells.x * scene.grid.cellPx))}"
+                    data-world-top="${escapeHtml(String(scene.grid.offsetY + renderedCells.y * scene.grid.cellPx))}"
+                    data-world-width="${escapeHtml(String(token.w * scene.grid.cellPx))}"
+                    data-world-height="${escapeHtml(String(token.h * scene.grid.cellPx))}"
+                    style="--vtt-token-grayscale:${getTokenGrayscale(token)};">
+                    <div class="vtt-token-face">
+                        ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
+                    </div>
+                    ${token.imageUrl ? `<div class="vtt-token-hover-card"><img class="vtt-token-hover-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false"></div>` : ''}
+                    <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
                 </div>
-                ${token.imageUrl ? `<div class="vtt-token-hover-card"><img class="vtt-token-hover-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false"></div>` : ''}
-                <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         renderVisionLayer(scene, visibleTokens, worldSize);
 
         applyRenderedWorldGeometry(scene);
+        if (hasActiveSceneRemoteTweens(scene.id, renderTime)) scheduleRemoteTokenTweenRender();
         if (fitViewOnNextMapLoad && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
             fitViewOnNextMapLoad = false;
             fitViewToWorld();
@@ -2698,7 +3035,9 @@
                 ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Hold for a moment to leave a 5-second shared marker.`
                 : (localToolState.mode === TOOL_MODE_CONE
                     ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Hold for a moment to leave a 5-second shared marker.`
-                    : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'));
+                    : (isDM()
+                        ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
+                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.')));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
@@ -2736,6 +3075,7 @@
         renderStage();
         renderQuickSpawnMenu();
         renderTokenInspector();
+        renderTokenInspectorPopover();
         renderInitiativeList();
         renderInitiativeDetail();
         renderSpawnGhost();
@@ -2791,6 +3131,7 @@
                     syncEntryRosterIdentity(entries[idx], getRosterPlayerForRecord(linkedToken));
                 }
                 linkedToken.passivePerception = entries[idx].passivePerception;
+                linkedToken.stealthRoll = getEntryStealthRoll(entries[idx]);
                 linkedToken.defences = normalizeDefences(entries[idx].defences);
             }
             sortInitiativeEntries(entries);
@@ -3078,6 +3419,12 @@
             toggleUIPreference('inspectorPanelCollapsed');
             return;
         }
+        if (action === 'close-token-inspector') {
+            closeTokenInspectorPopover();
+            renderTokenInspectorPopover();
+            renderTokenInspector();
+            return;
+        }
         if (action === 'toggle-token-names') {
             toggleUIPreference('showTokenNames');
             return;
@@ -3102,15 +3449,12 @@
             return;
         }
         if (action === 'quick-spawn-open-npc-search') {
+            if (!quickSpawnMenuState) return;
+            const anchorClientX = quickSpawnMenuState.clientX;
+            const anchorClientY = quickSpawnMenuState.clientY;
+            const worldPoint = quickSpawnMenuState.worldPoint || null;
             closeQuickSpawnMenu();
-            npcSearchOpen = true;
-            renderNPCSearchPopover();
-            if (npcSearchInputEl) {
-                window.requestAnimationFrame(() => {
-                    npcSearchInputEl.focus();
-                    npcSearchInputEl.select();
-                });
-            }
+            openNPCSearchAt(anchorClientX, anchorClientY, worldPoint);
             return;
         }
 
@@ -3142,14 +3486,17 @@
 
         if (action === 'toggle-npc-search') {
             if (!isDM()) return;
-            npcSearchOpen = !npcSearchOpen;
-            renderNPCSearchPopover();
-            if (npcSearchOpen && npcSearchInputEl) {
-                window.requestAnimationFrame(() => {
-                    npcSearchInputEl.focus();
-                    npcSearchInputEl.select();
-                });
+            if (npcSearchOpen) {
+                closeNPCSearch();
+                renderNPCSearchPopover();
+                return;
             }
+            const rect = npcSearchToggleEl ? npcSearchToggleEl.getBoundingClientRect() : null;
+            openNPCSearchAt(
+                rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+                rect ? rect.bottom : window.innerHeight / 2,
+                null
+            );
             return;
         }
 
@@ -3313,12 +3660,12 @@
         }
 
         if (action === 'spawn-player') {
-            spawnTokenFromDescriptor('player', id, quickSpawnMenuState && quickSpawnMenuState.worldPoint ? quickSpawnMenuState.worldPoint : null);
+            spawnTokenFromDescriptor('player', id, getContextSpawnWorldPoint());
             return;
         }
 
         if (action === 'spawn-npc') {
-            spawnTokenFromDescriptor('npc', id, quickSpawnMenuState && quickSpawnMenuState.worldPoint ? quickSpawnMenuState.worldPoint : null);
+            spawnTokenFromDescriptor('npc', id, getContextSpawnWorldPoint());
             return;
         }
 
@@ -3731,7 +4078,9 @@
             }
             return;
         }
-        vttState = readSharedVTTSnapshot() || deepClone(store.getVTTState(activeCaseId));
+        const nextSnapshot = readSharedVTTSnapshot() || deepClone(store.getVTTState(activeCaseId));
+        queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
+        vttState = nextSnapshot;
         normalizeSelections();
         render();
     };
@@ -3757,6 +4106,7 @@
         if (event.button !== 0) return;
         if (event.target.closest('#vtt-quick-spawn-menu')) return;
         closeQuickSpawnMenu();
+        closeTokenInspectorPopover();
 
         const scene = getActiveScene();
         if (!scene) return;
@@ -4125,6 +4475,10 @@
             initiativeDetailState = null;
             needsRender = true;
         }
+        if (tokenInspectorState && !event.target.closest('#vtt-token-inspector-popover') && !event.target.closest('.vtt-token')) {
+            tokenInspectorState = null;
+            needsRender = true;
+        }
 
         if (previewTokenId && !event.target.closest('.vtt-token')) {
             previewTokenId = '';
@@ -4167,23 +4521,29 @@
         }
 
         const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
-        if (!token || !token.imageUrl) {
-            if (previewTokenId) {
-                previewTokenId = '';
-                renderStage();
-            }
-            return;
-        }
+        if (!token) return;
 
         event.preventDefault();
-        previewTokenId = previewTokenId === token.id ? '' : token.id;
         selectedTokenId = token.id;
         selectedTemplateId = '';
         const linkedEntry = findEntryForToken(token.id);
         selectedEntryId = linkedEntry ? linkedEntry.id : '';
+        if (isDM()) {
+            if (event.shiftKey && token.imageUrl) {
+                previewTokenId = previewTokenId === token.id ? '' : token.id;
+            } else {
+                previewTokenId = '';
+                openTokenInspectorPopover(token.id, event.clientX, event.clientY);
+            }
+        } else if (token.imageUrl) {
+            previewTokenId = previewTokenId === token.id ? '' : token.id;
+        } else if (previewTokenId) {
+            previewTokenId = '';
+        }
         renderInitiativeList();
         renderInitiativeDetail();
         renderTokenInspector();
+        renderTokenInspectorPopover();
         renderToolsMenu();
         renderStage();
     };
@@ -4226,11 +4586,12 @@
             const clearedSpawn = clearSpawnDrag();
             const clearedTemplatePlacement = clearTemplatePlacementState();
             const closedInitiativeDetail = closeInitiativeDetail();
+            const closedTokenInspector = closeTokenInspectorPopover();
             if (previewTokenId) {
                 previewTokenId = '';
                 renderStage();
                 event.preventDefault();
-            } else if (closedMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail) {
+            } else if (closedMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector) {
                 render();
                 event.preventDefault();
             }
@@ -4285,6 +4646,7 @@
                 fitViewToWorld();
                 renderQuickSpawnMenu();
                 positionNPCSearchPopover();
+                positionTokenInspectorPopover();
                 positionInitiativeDetail();
                 return;
             }
@@ -4292,9 +4654,11 @@
             renderQuickSpawnMenu();
             renderSpawnGhost();
             positionNPCSearchPopover();
+            positionTokenInspectorPopover();
             positionInitiativeDetail();
         });
         window.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
+        window.addEventListener('scroll', positionTokenInspectorPopover, { passive: true });
         if (sidebarEl) sidebarEl.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
     };
 

@@ -144,9 +144,15 @@ body {
 }
 
 .mini-log-display {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 4px;
     text-align: right;
     min-width: 0;
     width: 100%;
+    min-height: 56px;
     box-sizing: border-box;
     padding: 8px 10px;
     border-radius: 10px;
@@ -158,33 +164,42 @@ body {
 }
 
 .mini-log-display .log-formula {
-    font-size: 0.7rem;
-    color: #888;
+    font-size: 0.64rem;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--hq-muted) 78%, rgba(255, 255, 255, 0.28));
     margin-bottom: 0;
 }
 
 .mini-log-display .log-result {
-    font-size: 1.4rem;
+    font-size: clamp(1.5rem, 2vw, 1.9rem);
+    font-weight: 900;
     line-height: 1;
+    font-variant-numeric: tabular-nums;
 }
 
 .mini-controls {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    min-width: 114px;
 }
 
 .adv-group,
 .util-group {
     display: flex;
     gap: 4px;
+    justify-content: flex-end;
+    align-items: stretch;
 }
 
 .mini-btn {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #aaa;
-    border-radius: 4px;
+    border-radius: 8px;
+    min-height: 30px;
     padding: 2px 8px;
     font-size: 0.7rem;
     cursor: pointer;
@@ -223,14 +238,14 @@ body {
 }
 
 .mini-input {
-    width: 60px;
+    width: 72px;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--gold);
-    border-radius: 4px;
+    border-radius: 8px;
     font-size: 0.75rem;
     text-align: center;
-    padding: 2px;
+    padding: 2px 8px;
 }
 
 .roller-actions {
@@ -3210,6 +3225,7 @@ button {
         min-width: 0;
         text-align: left;
         width: 100%;
+        align-items: flex-start;
     }
 
     .mini-controls {

@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260322a">
+    <link rel="stylesheet" href="css/vtt.css?v=20260322c">
 </head>
 
     <body data-player-nav="vtt">
@@ -179,7 +179,7 @@
             <div class="vtt-stage-toolbar">
                 <div>
                     <strong id="vtt-stage-title">Scene 1</strong>
-                    <span class="vtt-stage-meta" id="vtt-stage-meta">Drag empty space to pan. Scroll to zoom. Right-click a token image to preview it.</span>
+                    <span class="vtt-stage-meta" id="vtt-stage-meta">Drag empty space to pan. Scroll to zoom. Right-click empty space for quick spawn, then search or inspect right where you clicked.</span>
                 </div>
             </div>
             <div class="vtt-stage" id="vtt-stage">
@@ -222,6 +222,7 @@
         </label>
         <div class="vtt-popover-results vtt-roster-list" id="vtt-npc-search-list"></div>
     </div>
+    <div class="vtt-popover vtt-token-inspector-popover" id="vtt-token-inspector-popover" hidden></div>
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
@@ -257,7 +258,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260322a"></script>
+    <script src="js/vtt.js?v=20260322d"></script>
 </body>
 
 </html>

@@ -1017,6 +1017,69 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     overflow: visible;
 }
 
+.vtt-token::after {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 0.45rem);
+    padding: 0.16rem 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(6, 10, 16, 0.92);
+    color: rgba(244, 249, 255, 0.96);
+    font-size: calc(0.62rem * var(--vtt-token-font-scale, 1));
+    letter-spacing: 0.05em;
+    line-height: 1.1;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    opacity: 0;
+    pointer-events: none;
+    text-transform: uppercase;
+}
+
+.vtt-token::before {
+    content: "";
+    position: absolute;
+    top: -0.28rem;
+    right: -0.18rem;
+    display: grid;
+    place-items: center;
+    width: calc(1.15rem * var(--vtt-token-font-scale, 1));
+    height: calc(1.15rem * var(--vtt-token-font-scale, 1));
+    font-size: calc(0.86rem * var(--vtt-token-font-scale, 1));
+    line-height: 1;
+    border-radius: 999px;
+    background: rgba(56, 6, 12, 0.9);
+    box-shadow:
+        0 8px 16px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    opacity: 0;
+    transform: scale(0.92);
+    pointer-events: none;
+    transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.vtt-token[data-bloodied="1"]::before {
+    content: "🩸";
+    opacity: 1;
+    transform: scale(1);
+}
+
+.vtt-token[data-stealth-status="detected"]::after {
+    content: "Detected";
+    border-color: rgba(255, 132, 132, 0.38);
+    background: rgba(62, 14, 14, 0.92);
+    color: rgba(255, 229, 229, 0.98);
+    opacity: 1;
+}
+
+.vtt-token[data-stealth-status="unseen"]::after {
+    content: "Hidden";
+    border-color: rgba(130, 220, 148, 0.34);
+    background: rgba(10, 44, 24, 0.92);
+    color: rgba(229, 255, 236, 0.98);
+    opacity: 1;
+}
+
 .vtt-token.has-image {
     background: transparent;
 }
@@ -1315,6 +1378,17 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     max-height: min(80vh, 38rem);
     overflow: auto;
     z-index: 26;
+}
+
+.vtt-token-inspector-popover {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    right: auto;
+    width: min(28rem, calc(100vw - 1rem));
+    max-height: min(82vh, 42rem);
+    overflow: auto;
+    z-index: 27;
 }
 
 .vtt-popover-head {

@@ -3280,6 +3280,7 @@ function pushInitiativeToSharedVTT(payload) {
             hpMax: hpMax !== null ? hpMax : (base.hpMax ?? null),
             ac: ac !== null ? ac : (base.ac ?? null),
             passivePerception: passivePerception !== null ? passivePerception : (base.passivePerception ?? null),
+            stealthRoll: base.stealthRoll ?? base.stealthDc ?? null,
             defences: hasPacketDefences ? nextDefences : normalizeVTTInitiativeDefences(base.defences),
             reactionUsed: !!base.reactionUsed,
             concentrating: !!base.concentrating,
@@ -3350,6 +3351,7 @@ function rollInitiative() {
     const result = coreRoll(1, 20, effectiveMode);
     const total = result.total + dexMod + parsedInit.total + parsedMisc.total;
     const finalScore = (total + tieBreaker).toFixed(2);
+    const visibleScore = String(Math.round(total));
 
     let formulaText = `${result.formula} ${dexMod >= 0 ? '+' : ''}${dexMod} (Dex)`;
 
@@ -3359,7 +3361,7 @@ function rollInitiative() {
 
     if (effectiveMode !== 'norm') formulaText += ` (${effectiveMode.toUpperCase()})`;
 
-    showLog(`Init`, finalScore);
+    showLog('Init', visibleScore);
 
     sendToDiscord("Initiative", `Dice: ${formulaText}`, `**${finalScore}**`, 'check');
     const safeName = sanitizeString(data && data.meta ? data.meta.name : '', '', 160).trim()
