@@ -16,6 +16,7 @@
     const TOOL_MODE_CIRCLE = 'circle';
     const TOOL_MODE_CONE = 'cone';
     const TOOL_MODE_FOG = 'fog';
+    const TOOL_MODE_FOG_REMOVE = 'fog-remove';
     const TEMPLATE_KIND_CIRCLE = 'circle';
     const TEMPLATE_KIND_CONE = 'cone';
     const DEFAULT_TOOL_SIZE_CELLS = 4;
@@ -157,6 +158,7 @@
     const toolModeCircleEl = document.getElementById('vtt-tool-mode-circle');
     const toolModeConeEl = document.getElementById('vtt-tool-mode-cone');
     const toolModeFogEl = document.getElementById('vtt-tool-mode-fog');
+    const toolModeFogRemoveEl = document.getElementById('vtt-tool-mode-fog-remove');
     const toolSizeInputEl = document.getElementById('vtt-tool-size-input');
     const stealthModeToggleEl = document.getElementById('vtt-stealth-mode-toggle');
     const clearFogButtonEl = document.getElementById('vtt-clear-fog');
@@ -481,6 +483,132 @@
             h: Math.max(1, Math.round(height))
         };
     };
+    const buildFogCellKey = (col, row) => `${Math.round(toNumber(col, 0))},${Math.round(toNumber(row, 0))}`;
+    const parseFogCellKey = (key) => {
+        const parts = String(key || '').split(',');
+        return {
+            col: Math.round(toNumber(parts[0], 0)),
+            row: Math.round(toNumber(parts[1], 0))
+        };
+    };
+    const getFogMaskCellBounds = (scene, mask) => {
+        if (!scene || !mask) return null;
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const left = Math.round((toNumber(mask.x, offsetX) - offsetX) / cellPx);
+        const top = Math.round((toNumber(mask.y, offsetY) - offsetY) / cellPx);
+        const widthCells = Math.max(1, Math.round(Math.max(1, toNumber(mask.w, cellPx)) / cellPx));
+        const heightCells = Math.max(1, Math.round(Math.max(1, toNumber(mask.h, cellPx)) / cellPx));
+        return {
+            left,
+            top,
+            right: left + widthCells,
+            bottom: top + heightCells
+        };
+    };
+    const mutateFogCellSetForMask = (cellSet, scene, mask, add = true) => {
+        if (!(cellSet instanceof Set) || !scene || !mask) return cellSet;
+        const bounds = getFogMaskCellBounds(scene, mask);
+        if (!bounds) return cellSet;
+        for (let row = bounds.top; row < bounds.bottom; row += 1) {
+            for (let col = bounds.left; col < bounds.right; col += 1) {
+                const key = buildFogCellKey(col, row);
+                if (add) cellSet.add(key);
+                else cellSet.delete(key);
+            }
+        }
+        return cellSet;
+    };
+    const collectFogCellSet = (scene, masks = []) => {
+        const cellSet = new Set();
+        if (!scene || !Array.isArray(masks)) return cellSet;
+        masks.forEach((mask) => {
+            mutateFogCellSetForMask(cellSet, scene, mask, true);
+        });
+        return cellSet;
+    };
+    const buildFogMasksFromCellSet = (scene, cellSet) => {
+        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return [];
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const rows = new Map();
+        cellSet.forEach((key) => {
+            const parsed = parseFogCellKey(key);
+            if (!rows.has(parsed.row)) rows.set(parsed.row, []);
+            rows.get(parsed.row).push(parsed.col);
+        });
+        const sortedRows = Array.from(rows.keys()).sort((left, right) => left - right);
+        const finalized = [];
+        let openRects = new Map();
+        let prevRow = null;
+
+        sortedRows.forEach((row) => {
+            const cols = Array.from(new Set(rows.get(row) || [])).sort((left, right) => left - right);
+            const runs = [];
+            let runStart = null;
+            let runEnd = null;
+            cols.forEach((col) => {
+                if (runStart === null) {
+                    runStart = col;
+                    runEnd = col + 1;
+                    return;
+                }
+                if (col === runEnd) {
+                    runEnd = col + 1;
+                    return;
+                }
+                runs.push({ left: runStart, right: runEnd });
+                runStart = col;
+                runEnd = col + 1;
+            });
+            if (runStart !== null && runEnd !== null) runs.push({ left: runStart, right: runEnd });
+
+            const canContinue = prevRow !== null && row === prevRow + 1;
+            const nextOpenRects = new Map();
+            runs.forEach((run) => {
+                const runKey = `${run.left}:${run.right}`;
+                if (canContinue && openRects.has(runKey)) {
+                    const existingRect = openRects.get(runKey);
+                    existingRect.bottom = row + 1;
+                    nextOpenRects.set(runKey, existingRect);
+                    openRects.delete(runKey);
+                    return;
+                }
+                nextOpenRects.set(runKey, {
+                    left: run.left,
+                    right: run.right,
+                    top: row,
+                    bottom: row + 1
+                });
+            });
+
+            openRects.forEach((rect) => {
+                finalized.push(rect);
+            });
+            openRects = nextOpenRects;
+            prevRow = row;
+        });
+
+        openRects.forEach((rect) => {
+            finalized.push(rect);
+        });
+
+        return finalized.map((rect) => ({
+            id: buildId('fog'),
+            x: Math.round(offsetX + rect.left * cellPx),
+            y: Math.round(offsetY + rect.top * cellPx),
+            w: Math.max(1, Math.round((rect.right - rect.left) * cellPx)),
+            h: Math.max(1, Math.round((rect.bottom - rect.top) * cellPx))
+        }));
+    };
+    const applyFogMaskMutation = (scene, mask, mode = 'add') => {
+        if (!scene || !mask) return Array.isArray(scene && scene.fog) ? scene.fog.slice() : [];
+        const cellSet = collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
+        mutateFogCellSetForMask(cellSet, scene, mask, mode !== 'remove');
+        return buildFogMasksFromCellSet(scene, cellSet);
+    };
     const findFogMaskIndexAtWorldPoint = (scene, worldPoint) => {
         if (!scene || !worldPoint || !Array.isArray(scene.fog)) return -1;
         const worldX = toNumber(worldPoint.x, -1);
@@ -514,6 +642,18 @@
         pendingTouchContextState = null;
         return snapshot;
     };
+    const canUseTouchContextActions = (event) => {
+        if (!event || event.button !== 0 || event.isPrimary === false) return false;
+        const pointerType = String(event.pointerType || '').toLowerCase();
+        if (pointerType === 'touch') return true;
+        if (pointerType !== 'pen') return false;
+        const maxTouchPoints = Number.isFinite(Number(window.navigator && window.navigator.maxTouchPoints))
+            ? Number(window.navigator.maxTouchPoints)
+            : 0;
+        const hasCoarsePointer = typeof window.matchMedia === 'function'
+            && (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(any-pointer: coarse)').matches);
+        return hasCoarsePointer || maxTouchPoints > 0;
+    };
     const activateTokenSelection = (tokenId) => {
         const token = getTokenById(tokenId);
         if (!token) return null;
@@ -525,8 +665,8 @@
         return token;
     };
     const beginTouchContextInteraction = (event, scene, worldPoint) => {
+        if (!canUseTouchContextActions(event)) return false;
         const pointerType = String(event && event.pointerType || '').toLowerCase();
-        if (!event || event.button !== 0 || (pointerType !== 'touch' && pointerType !== 'pen')) return false;
         if (!isDM() || localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
         clearPendingTouchContext();
         const tokenEl = event.target instanceof Element ? event.target.closest('.vtt-token') : null;
@@ -698,7 +838,7 @@
     };
     const normalizeToolMode = (value) => {
         const token = String(value || '').trim().toLowerCase();
-        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_FOG) return token;
+        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_FOG || token === TOOL_MODE_FOG_REMOVE) return token;
         return TOOL_MODE_NAVIGATE;
     };
     const normalizeToolSizeCells = (value, fallback = DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
@@ -888,13 +1028,17 @@
             toolModeFogEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG ? 'true' : 'false');
             toolModeFogEl.disabled = !isDM();
         }
+        if (toolModeFogRemoveEl) {
+            toolModeFogRemoveEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG_REMOVE ? 'true' : 'false');
+            toolModeFogRemoveEl.disabled = !isDM();
+        }
         if (toolSizeInputEl && document.activeElement !== toolSizeInputEl) {
             toolSizeInputEl.value = String(localToolState.sizeCells);
         }
         if (toolSizeInputEl) {
-            const fogActive = localToolState.mode === TOOL_MODE_FOG;
-            toolSizeInputEl.disabled = fogActive;
-            toolSizeInputEl.title = fogActive ? 'Fog placement uses the scene grid directly.' : '';
+            const fogModeActive = localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE;
+            toolSizeInputEl.disabled = fogModeActive;
+            toolSizeInputEl.title = fogModeActive ? 'Fog tools use the scene grid directly.' : '';
         }
         if (stealthModeToggleEl) {
             const scene = getActiveScene();
@@ -1548,35 +1692,92 @@
         return null;
     };
 
-    const getVisibleTokensForRole = (scene, role = localRole) => {
-        if (!scene || !Array.isArray(scene.tokens)) return [];
-        if (role === 'dm') return scene.tokens;
-        return scene.tokens.filter((token) => !token.hidden);
+    const getTokenWorldRect = (token, scene) => {
+        if (!token || !scene || !scene.grid) return null;
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene.grid.offsetY, 0);
+        const left = offsetX + normalizeTokenCoordinate(token.x, 0) * cellPx;
+        const top = offsetY + normalizeTokenCoordinate(token.y, 0) * cellPx;
+        const width = Math.max(1, toNumber(token.w, 1) * cellPx);
+        const height = Math.max(1, toNumber(token.h, 1) * cellPx);
+        return {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height
+        };
     };
 
-    const getVisibleInitiativeEntriesForRole = (state = vttState, role = localRole) => {
-        const entries = state && state.initiative && Array.isArray(state.initiative.entries) ? state.initiative.entries : [];
-        if (role === 'dm') return entries;
-        return entries.filter((entry) => !entry.hidden);
+    const doWorldRectsOverlap = (leftRect, rightRect) => {
+        if (!leftRect || !rightRect) return false;
+        return leftRect.left < rightRect.right
+            && leftRect.right > rightRect.left
+            && leftRect.top < rightRect.bottom
+            && leftRect.bottom > rightRect.top;
     };
 
-    const getVisibleSceneTokenForEntry = (entry, state = vttState, role = localRole) => {
-        if (!entry) return null;
-        const scene = getActiveScene(state);
-        const visibleTokens = getVisibleTokensForRole(scene, role);
-        if (!visibleTokens.length) return null;
+    const isTokenUnderFog = (scene, token) => {
+        if (!scene || !token || !Array.isArray(scene.fog) || !scene.fog.length) return false;
+        const tokenRect = getTokenWorldRect(token, scene);
+        if (!tokenRect) return false;
+        return scene.fog.some((mask) => doWorldRectsOverlap(tokenRect, {
+            left: toNumber(mask && mask.x, 0),
+            top: toNumber(mask && mask.y, 0),
+            right: toNumber(mask && mask.x, 0) + Math.max(1, toNumber(mask && mask.w, 1)),
+            bottom: toNumber(mask && mask.y, 0) + Math.max(1, toNumber(mask && mask.h, 1))
+        }));
+    };
+
+    const isTokenHiddenForRole = (token, scene, role = localRole) => {
+        if (role === 'dm') return false;
+        return !!(token && (token.hidden || isTokenUnderFog(scene, token)));
+    };
+
+    const getSceneTokenForEntry = (scene, entry) => {
+        if (!scene || !Array.isArray(scene.tokens) || !entry) return null;
         const linkedId = String(entry.linkedTokenId || '').trim();
         if (linkedId) {
-            const linkedToken = visibleTokens.find((token) => token.id === linkedId);
+            const linkedToken = scene.tokens.find((token) => token.id === linkedId);
             if (linkedToken) return linkedToken;
         }
         const sourceType = String(entry.sourceType || '').trim();
         const sourceId = String(entry.sourceId || '').trim();
         if (!sourceType || !sourceId) return null;
-        return visibleTokens.find((token) =>
+        return scene.tokens.find((token) =>
             String(token && token.sourceType || '') === sourceType
             && String(token && token.sourceId || '') === sourceId
         ) || null;
+    };
+
+    const isEntryHiddenForRole = (entry, state = vttState, role = localRole) => {
+        if (!entry) return true;
+        if (role === 'dm') return false;
+        if (entry.hidden) return true;
+        const scene = getActiveScene(state);
+        const linkedToken = getSceneTokenForEntry(scene, entry);
+        return !!(linkedToken && isTokenHiddenForRole(linkedToken, scene, role));
+    };
+
+    const getVisibleTokensForRole = (scene, role = localRole) => {
+        if (!scene || !Array.isArray(scene.tokens)) return [];
+        if (role === 'dm') return scene.tokens;
+        return scene.tokens.filter((token) => !isTokenHiddenForRole(token, scene, role));
+    };
+
+    const getVisibleInitiativeEntriesForRole = (state = vttState, role = localRole) => {
+        const entries = state && state.initiative && Array.isArray(state.initiative.entries) ? state.initiative.entries : [];
+        if (role === 'dm') return entries;
+        return entries.filter((entry) => !isEntryHiddenForRole(entry, state, role));
+    };
+
+    const getVisibleSceneTokenForEntry = (entry, state = vttState, role = localRole) => {
+        if (!entry) return null;
+        const scene = getActiveScene(state);
+        const linkedToken = getSceneTokenForEntry(scene, entry);
+        if (!linkedToken) return null;
+        if (role !== 'dm' && isTokenHiddenForRole(linkedToken, scene, role)) return null;
+        return linkedToken;
     };
 
     const syncTokenSelectionFromEntry = (entryId, state = vttState, role = localRole) => {
@@ -1993,7 +2194,7 @@
             localRole = store.setVTTLocalRole(localRole, getActiveCaseId()) === 'dm' ? 'dm' : 'player';
         }
         if (localRole !== 'dm') {
-            if (localToolState.mode === TOOL_MODE_FOG) localToolState.mode = TOOL_MODE_NAVIGATE;
+            if (localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE) localToolState.mode = TOOL_MODE_NAVIGATE;
             closeNPCSearch();
             quickSpawnMenuState = null;
             closeTokenInspectorPopover();
@@ -2819,15 +3020,17 @@
             return;
         }
 
-        initiativeListEl.innerHTML = visibleEntries.map((entry) => `
-            <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${entry.id === initiative.activeEntryId ? ' is-active-turn' : ''}${entry.hidden ? ' is-hidden' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
+        initiativeListEl.innerHTML = visibleEntries.map((entry) => {
+            const isHiddenToPlayers = isEntryHiddenForRole(entry, vttState, 'player');
+            return `
+            <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${entry.id === initiative.activeEntryId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
                 <div class="vtt-entry-line">
                     <div class="vtt-entry-primary">
                         <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
                         <div class="vtt-entry-meta vtt-entry-meta-inline">
                             <span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>
                             ${entry.id === initiative.activeEntryId ? '<span class="vtt-entry-tag">Active Turn</span>' : ''}
-                            ${entry.hidden ? '<span class="vtt-entry-tag">Hidden</span>' : ''}
+                            ${isHiddenToPlayers ? '<span class="vtt-entry-tag">Hidden</span>' : ''}
                             ${entry.reactionUsed ? '<span class="vtt-entry-tag">Reaction Used</span>' : ''}
                             ${entry.concentrating ? '<span class="vtt-entry-tag">Concentrating</span>' : ''}
                         </div>
@@ -2838,7 +3041,8 @@
                     </div>
                 </div>
             </div>
-        `).join('');
+        `;
+        }).join('');
     };
 
     const renderInitiativeDetail = () => {
@@ -3142,7 +3346,7 @@
 
         const fogMarkup = Array.isArray(scene.fog) ? scene.fog.map((mask) => buildFogMaskMarkup(mask)).join('') : '';
         const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
-            ? buildFogMaskMarkup(fogPlacementState.mask, 'is-preview')
+            ? buildFogMaskMarkup(fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
             : '';
         fogLayerEl.innerHTML = `${fogMarkup}${fogPreviewMarkup}`;
 
@@ -3161,8 +3365,9 @@
             const renderedCells = getRenderableTokenCells(token, scene, renderTime);
             const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
             const isBloodied = isTokenBloodied(token);
+            const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
             return `
-                <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${token.hidden ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
+                <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
                     data-token-id="${escapeHtml(token.id)}"
                     data-id="${escapeHtml(token.id)}"
                     data-action="select-token"
@@ -3207,10 +3412,12 @@
                 : (localToolState.mode === TOOL_MODE_CONE
                     ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Hold for a moment to leave a 5-second shared marker.`
                     : (localToolState.mode === TOOL_MODE_FOG
-                        ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tap an existing fog block to remove it.'
+                        ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tokens under fog are hidden from players.'
+                        : (localToolState.mode === TOOL_MODE_FOG_REMOVE
+                            ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
                     : (isDM()
                         ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
-                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))));
+                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.')))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
@@ -4420,21 +4627,12 @@
             return;
         }
 
-        if (localToolState.mode === TOOL_MODE_FOG && isDM()) {
-            const fogIdx = findFogMaskIndexAtWorldPoint(scene, worldPoint);
-            if (fogIdx >= 0) {
-                withDraft((draft) => {
-                    const draftScene = getActiveScene(draft);
-                    if (!draftScene || !Array.isArray(draftScene.fog) || fogIdx >= draftScene.fog.length) return;
-                    draftScene.fog.splice(fogIdx, 1);
-                });
-                event.preventDefault();
-                return;
-            }
+        if ((localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE) && isDM()) {
             const initialMask = buildFogMaskFromWorldPoints(scene, worldPoint, worldPoint);
             if (!initialMask) return;
             fogPlacementState = {
                 sceneId: scene.id,
+                mode: localToolState.mode === TOOL_MODE_FOG_REMOVE ? 'remove' : 'add',
                 startWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
                 currentWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
                 mask: initialMask
@@ -4715,7 +4913,7 @@
                     pendingFog.mask && pendingFog.mask.id
                 );
                 if (!mask) return;
-                scene.fog.push(mask);
+                scene.fog = applyFogMaskMutation(scene, mask, pendingFog.mode === 'remove' ? 'remove' : 'add');
             });
             return;
         }

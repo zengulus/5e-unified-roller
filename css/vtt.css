@@ -709,7 +709,7 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
 
 .vtt-tool-mode-row {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.45rem;
 }
 
@@ -824,6 +824,11 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-fog-mask.is-preview {
     border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.62);
     background: rgba(var(--accent-rgb, 78, 205, 196), 0.18);
+}
+
+.vtt-fog-mask.is-remove-preview {
+    border-color: rgba(255, 107, 107, 0.72);
+    background: rgba(255, 107, 107, 0.18);
 }
 
 .vtt-template-layer {
