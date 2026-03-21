@@ -33,6 +33,10 @@
     const TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
+    const GUILDLESS_TOKEN_BUCKET = 'tokens';
+    const GUILDLESS_TOKEN_FOLDER = 'guildless';
+    const GUILDLESS_TOKEN_MIN = 1;
+    const GUILDLESS_TOKEN_MAX = 300;
     const DEFAULT_VTT_STATE = {
         activeSceneId: 'scene_1',
         scenes: [
@@ -219,6 +223,33 @@
         const raw = toImageUrl(value);
         if (!raw) return '';
         return /^https:\/\//i.test(raw) || /^data:image\//i.test(raw) ? raw : '';
+    };
+    const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
+    const randomIntInclusive = (min, max) => {
+        const safeMin = Math.min(min, max);
+        const safeMax = Math.max(min, max);
+        return Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+    };
+    const getConfiguredSupabaseUrl = () => {
+        const store = getStore();
+        if (!store || typeof store.getSyncConfig !== 'function') return '';
+        const config = store.getSyncConfig();
+        return trimTrailingSlashes(config && config.supabaseUrl ? config.supabaseUrl : '');
+    };
+    const buildSupabasePublicObjectUrl = (bucket, assetPath) => {
+        const baseUrl = getConfiguredSupabaseUrl();
+        const cleanBucket = String(bucket || '').trim().replace(/^\/+|\/+$/g, '');
+        const cleanPath = String(assetPath || '').trim().replace(/^\/+/, '');
+        if (!baseUrl || !cleanBucket || !cleanPath) return '';
+        try {
+            return new URL(`/storage/v1/object/public/${cleanBucket}/${cleanPath}`, `${baseUrl}/`).toString();
+        } catch (err) {
+            return '';
+        }
+    };
+    const buildGuildlessImageUrl = () => {
+        const imageNumber = randomIntInclusive(GUILDLESS_TOKEN_MIN, GUILDLESS_TOKEN_MAX);
+        return buildSupabasePublicObjectUrl(GUILDLESS_TOKEN_BUCKET, `${GUILDLESS_TOKEN_FOLDER}/${imageNumber}.png`);
     };
     const buildId = (prefix) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const buildInitials = (label = '') => {
@@ -1598,6 +1629,12 @@
         }
     });
 
+    const buildGuildlessToken = () => ({
+        ...buildCustomToken(),
+        label: 'Guildless',
+        imageUrl: buildGuildlessImageUrl()
+    });
+
     const findSpawnSource = (kind, id = '') => {
         const sourceId = String(id || '').trim();
         if (kind === 'player') {
@@ -1605,6 +1642,9 @@
         }
         if (kind === 'npc') {
             return getNPCs().find((entry) => String(entry && entry.id || '') === sourceId) || null;
+        }
+        if (kind === 'guildless') {
+            return { name: 'Guildless' };
         }
         if (kind === 'custom') {
             return { name: 'Custom Token' };
@@ -1617,6 +1657,7 @@
         if (source && source.name) return String(source.name).trim() || 'Token';
         if (kind === 'player') return 'Player';
         if (kind === 'npc') return 'NPC';
+        if (kind === 'guildless') return 'Guildless';
         return 'Custom Token';
     };
 
@@ -1628,6 +1669,9 @@
         if (kind === 'npc') {
             const npc = findSpawnSource('npc', id);
             return npc ? buildTokenFromNPC(npc) : null;
+        }
+        if (kind === 'guildless') {
+            return buildGuildlessToken();
         }
         if (kind === 'custom') {
             return buildCustomToken();
@@ -1647,6 +1691,42 @@
         token.x = normalizeTokenCoordinate(cellX - tokenWidth / 2, token.x);
         token.y = normalizeTokenCoordinate(cellY - tokenHeight / 2, token.y);
         return token;
+    };
+
+    const cloneTokenRecord = (token) => {
+        if (!token) return null;
+        const clone = deepClone(token);
+        clone.id = buildId('token');
+        clone.x = normalizeTokenCoordinate(toNumber(token.x, 0) + 1, toNumber(token.x, 0));
+        clone.y = normalizeTokenCoordinate(toNumber(token.y, 0) + 1, toNumber(token.y, 0));
+        clone.sourceType = '';
+        clone.sourceId = '';
+        return clone;
+    };
+
+    const cloneTokenById = (tokenId) => {
+        const targetId = String(tokenId || '').trim();
+        if (!targetId) return false;
+        let clonedTokenId = '';
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.tokens)) return;
+            const sourceToken = scene.tokens.find((entry) => String(entry && entry.id || '').trim() === targetId);
+            if (!sourceToken) return;
+            const clonedToken = cloneTokenRecord(sourceToken);
+            if (!clonedToken) return;
+            scene.tokens.push(clonedToken);
+            clonedTokenId = clonedToken.id;
+            selectedTokenId = clonedToken.id;
+            selectedEntryId = '';
+            if (tokenInspectorState && tokenInspectorState.tokenId === targetId) {
+                tokenInspectorState = {
+                    ...tokenInspectorState,
+                    tokenId: clonedToken.id
+                };
+            }
+        });
+        return !!clonedTokenId;
     };
 
     const spawnTokenFromDescriptor = (kind, id = '', worldPoint = null) => {
@@ -2751,10 +2831,15 @@
             .slice()
             .sort((left, right) => String(left && left.name || '').localeCompare(String(right && right.name || '')))
             .slice(0, 6);
+        const hasGuildlessImageSource = !!getConfiguredSupabaseUrl();
         quickSpawnMenuEl.hidden = false;
         quickSpawnMenuEl.innerHTML = `
             <div class="vtt-quick-spawn-title">Quick Spawn</div>
             <div class="vtt-quick-spawn-list">
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-guildless">
+                    <span class="vtt-token-spawn-name">Place Guildless</span>
+                    <span class="vtt-token-spawn-meta">${hasGuildlessImageSource ? 'Spawn here · random portrait 1-300' : 'Spawn here · initials fallback until sync URL is set'}</span>
+                </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-custom">
                     <span class="vtt-token-spawn-name">Custom Token</span>
                     <span class="vtt-token-spawn-meta">Spawn here</span>
@@ -2969,6 +3054,7 @@
                 ` : ''}
                 ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player token name and portrait are managed from the Hub roster.</div>' : ''}
                 <div class="vtt-inspector-actions">
+                    <button class="vtt-inline-btn" data-action="clone-token" data-id="${escapeHtml(token.id)}">Clone Token</button>
                     <button class="vtt-inline-btn" data-action="add-token-to-initiative" data-id="${escapeHtml(token.id)}">Add To Initiative</button>
                     <button class="vtt-inline-btn danger" data-action="delete-token" data-id="${escapeHtml(token.id)}">Delete Token</button>
                 </div>
@@ -3074,7 +3160,6 @@
                         <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
                         <div class="vtt-entry-meta vtt-entry-meta-inline">
                             <span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>
-                            ${entry.id === initiative.activeEntryId ? '<span class="vtt-entry-tag">Active Turn</span>' : ''}
                             ${isHiddenToPlayers ? '<span class="vtt-entry-tag">Hidden</span>' : ''}
                             ${entry.reactionUsed ? '<span class="vtt-entry-tag">Reaction Used</span>' : ''}
                             ${entry.concentrating ? '<span class="vtt-entry-tag">Concentrating</span>' : ''}
@@ -3912,6 +3997,11 @@
             spawnTokenFromDescriptor('custom', '', quickSpawnMenuState.worldPoint);
             return;
         }
+        if (action === 'quick-spawn-guildless') {
+            if (!quickSpawnMenuState) return;
+            spawnTokenFromDescriptor('guildless', '', quickSpawnMenuState.worldPoint);
+            return;
+        }
         if (action === 'quick-spawn-player') {
             if (!quickSpawnMenuState) return;
             spawnTokenFromDescriptor('player', id, quickSpawnMenuState.worldPoint);
@@ -4165,6 +4255,11 @@
                 if (selectedTokenId === id) selectedTokenId = '';
                 if (previewTokenId === id) previewTokenId = '';
             });
+            return;
+        }
+
+        if (action === 'clone-token') {
+            cloneTokenById(id || selectedTokenId);
             return;
         }
 

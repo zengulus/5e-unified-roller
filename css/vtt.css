@@ -696,12 +696,6 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
     color: #edf5ff;
 }
 
-.vtt-stage-meta {
-    margin-left: 0.65rem;
-    color: rgba(220, 229, 241, 0.7);
-    font-size: 0.82rem;
-}
-
 .vtt-tools-menu {
     display: grid;
     gap: 0.85rem;
@@ -1316,19 +1310,17 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
 
 .vtt-entry-line {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 0.75rem;
     min-width: 0;
 }
 
 .vtt-entry-primary {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
+    display: grid;
+    gap: 0.4rem;
     min-width: 0;
     flex: 1 1 auto;
-    overflow: hidden;
 }
 
 .vtt-entry-top-actions {
@@ -1336,6 +1328,7 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     align-items: center;
     gap: 0.45rem;
     flex: 0 0 auto;
+    align-self: flex-start;
 }
 
 .vtt-entry-name {
@@ -1344,6 +1337,7 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    max-width: 100%;
 }
 
 .vtt-entry-score {
@@ -1362,7 +1356,7 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
 }
 
 .vtt-entry-meta-inline {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     min-width: 0;
     overflow: hidden;
 }
