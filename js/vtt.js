@@ -778,7 +778,6 @@
             if (!candidate || candidate.id === token.id) return;
             const side = String(candidate.side || '').trim().toLowerCase();
             if (side !== 'player' && side !== 'ally') return;
-            if (!isDM() && candidate.hidden) return;
             const intersectsCone = getTokenFootprintPoints(candidate).some((point) => isCellPointInsideVisionCone(point, token));
             if (!intersectsCone) return;
             const stealthRoll = getTokenStealthRoll(candidate);
@@ -796,7 +795,7 @@
         scene.tokens.forEach((token) => {
             const side = String(token && token.side || '').trim().toLowerCase();
             if (side !== 'enemy' && side !== 'neutral') return;
-            if (!isDM() && token.hidden) return;
+            if (isTokenHiddenForRole(token, scene, 'player')) return;
             const summary = getStealthVisionTargetSummary(token, scene, state);
             summary.unseenIds.forEach((tokenId) => {
                 if (!statuses.has(tokenId)) statuses.set(tokenId, STEALTH_STATUS_UNSEEN);
@@ -865,6 +864,16 @@
     };
     const buildRemoteTokenTweenKey = (sceneId, tokenId) => `${String(sceneId || '').trim()}::${String(tokenId || '').trim()}`;
     const easeRemoteTokenTween = (progress) => 1 - Math.pow(1 - clamp(progress, 0, 1), 3);
+    const normalizeRemoteTokenFacingDeg = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return null;
+        return normalizeAngleDeg(parsed);
+    };
+    const getAngleTweenDeltaDeg = (fromDeg, toDeg) => {
+        if (fromDeg === null || toDeg === null) return 0;
+        return (((toDeg - fromDeg) + 540) % 360) - 180;
+    };
     const pruneRemoteTokenTweens = (now = Date.now()) => {
         for (const [key, tween] of remoteTokenTweens.entries()) {
             if (!tween || !Number.isFinite(tween.startedAt) || !Number.isFinite(tween.durationMs)) {
@@ -894,12 +903,15 @@
             if (hasActiveSceneRemoteTweens()) scheduleRemoteTokenTweenRender();
         });
     };
-    const queueRemoteTokenTween = (sceneId, tokenId, fromX, fromY, toX, toY) => {
+    const queueRemoteTokenTween = (sceneId, tokenId, fromX, fromY, toX, toY, fromFacingDegRaw = null, toFacingDegRaw = null) => {
         const cleanSceneId = String(sceneId || '').trim();
         const cleanTokenId = String(tokenId || '').trim();
         if (!cleanSceneId || !cleanTokenId) return;
         const tweenKey = buildRemoteTokenTweenKey(cleanSceneId, cleanTokenId);
-        if (fromX === toX && fromY === toY) {
+        const fromFacingDeg = normalizeRemoteTokenFacingDeg(fromFacingDegRaw);
+        const toFacingDeg = normalizeRemoteTokenFacingDeg(toFacingDegRaw);
+        const facingDelta = Math.abs(getAngleTweenDeltaDeg(fromFacingDeg, toFacingDeg));
+        if (fromX === toX && fromY === toY && facingDelta <= 0.001) {
             remoteTokenTweens.delete(tweenKey);
             return;
         }
@@ -910,6 +922,8 @@
             fromY,
             toX,
             toY,
+            fromFacingDeg,
+            toFacingDeg,
             startedAt: Date.now(),
             durationMs: REMOTE_TOKEN_TWEEN_MS
         });
@@ -931,7 +945,9 @@
                 const fromY = normalizeTokenCoordinate(previousToken.y, token.y);
                 const toX = normalizeTokenCoordinate(token.x, fromX);
                 const toY = normalizeTokenCoordinate(token.y, fromY);
-                queueRemoteTokenTween(cleanSceneId, token.id, fromX, fromY, toX, toY);
+                const fromFacingDeg = previousToken.vision && previousToken.vision.facingDeg;
+                const toFacingDeg = token.vision && token.vision.facingDeg;
+                queueRemoteTokenTween(cleanSceneId, token.id, fromX, fromY, toX, toY, fromFacingDeg, toFacingDeg);
             });
         });
     };
@@ -950,6 +966,35 @@
         return {
             x: Math.round((tween.fromX + (tween.toX - tween.fromX) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION,
             y: Math.round((tween.fromY + (tween.toY - tween.fromY) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION
+        };
+    };
+    const getRenderableTokenFacingDeg = (token, scene, now = Date.now()) => {
+        if (!token || !scene || !token.vision) return getTokenVisionFacingDeg(token);
+        const tweenKey = buildRemoteTokenTweenKey(scene.id, token.id);
+        const tween = remoteTokenTweens.get(tweenKey);
+        if (!tween || now >= tween.startedAt + tween.durationMs || tween.fromFacingDeg === null || tween.toFacingDeg === null) {
+            return getTokenVisionFacingDeg(token);
+        }
+        const progress = easeRemoteTokenTween((now - tween.startedAt) / tween.durationMs);
+        return normalizeAngleDeg(tween.fromFacingDeg + getAngleTweenDeltaDeg(tween.fromFacingDeg, tween.toFacingDeg) * progress);
+    };
+    const getRenderableVisionToken = (token, scene, now = Date.now()) => {
+        if (!token || !token.vision) return token;
+        if (visionConeRotateState && visionConeRotateState.tokenId === token.id) {
+            return {
+                ...token,
+                vision: {
+                    ...(token.vision || {}),
+                    facingDeg: visionConeRotateState.angleDeg
+                }
+            };
+        }
+        return {
+            ...token,
+            vision: {
+                ...(token.vision || {}),
+                facingDeg: getRenderableTokenFacingDeg(token, scene, now)
+            }
         };
     };
     const getTemplateElementAtClientPoint = (clientX, clientY, target = null) => {
@@ -3121,16 +3166,8 @@
         positionInitiativeDetail();
     };
 
-    const buildVisionConeMarkup = (token, scene, sceneSize = worldSize) => {
-        const renderedToken = visionConeRotateState && visionConeRotateState.tokenId === token.id
-            ? {
-                ...token,
-                vision: {
-                    ...(token.vision || {}),
-                    facingDeg: visionConeRotateState.angleDeg
-                }
-            }
-            : token;
+    const buildVisionConeMarkup = (token, scene, sceneSize = worldSize, now = Date.now()) => {
+        const renderedToken = getRenderableVisionToken(token, scene, now);
         const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
         if (!geometry) return '';
         const targetSummary = getStealthVisionTargetSummary(renderedToken, scene, vttState);
@@ -3201,17 +3238,9 @@
         `;
     };
 
-    const buildVisionConeHandleMarkup = (token, scene, sceneSize = worldSize) => {
+    const buildVisionConeHandleMarkup = (token, scene, sceneSize = worldSize, now = Date.now()) => {
         if (selectedTokenId !== token.id || !canRoleMoveToken(token)) return '';
-        const renderedToken = visionConeRotateState && visionConeRotateState.tokenId === token.id
-            ? {
-                ...token,
-                vision: {
-                    ...(token.vision || {}),
-                    facingDeg: visionConeRotateState.angleDeg
-                }
-            }
-            : token;
+        const renderedToken = getRenderableVisionToken(token, scene, now);
         const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
         if (!geometry) return '';
         const handleOffsetPx = 18 / Math.max(0.25, localView.zoom);
@@ -3298,7 +3327,7 @@
         `;
     };
 
-    const renderVisionLayer = (scene, visibleTokens, sceneSize = worldSize) => {
+    const renderVisionLayer = (scene, visibleTokens, sceneSize = worldSize, now = Date.now()) => {
         if (!visionLayerEl) return;
         const showStealthCones = !!(scene && scene.stealthMode);
         const handleMarkup = showStealthCones
@@ -3307,13 +3336,13 @@
                     const side = String(token && token.side || '').trim().toLowerCase();
                     return side === 'enemy' || side === 'neutral';
                 })
-                .map((token) => buildVisionConeHandleMarkup(token, scene, sceneSize))
+                .map((token) => buildVisionConeHandleMarkup(token, scene, sceneSize, now))
                 .join('')
             : '';
         visionLayerEl.innerHTML = handleMarkup;
     };
 
-    const renderTemplateLayer = (scene, visibleTokens, sceneSize = worldSize) => {
+    const renderTemplateLayer = (scene, visibleTokens, sceneSize = worldSize, now = Date.now()) => {
         if (!templateLayerEl) return;
         const showStealthCones = !!(scene && scene.stealthMode);
         const visibleTemplates = getRenderableSceneTemplates(scene);
@@ -3323,7 +3352,7 @@
                     const side = String(token && token.side || '').trim().toLowerCase();
                     return side === 'enemy' || side === 'neutral';
                 })
-                .map((token) => buildVisionConeMarkup(token, scene, sceneSize))
+                .map((token) => buildVisionConeMarkup(token, scene, sceneSize, now))
                 .join('')
             : '';
         const templateMarkup = visibleTemplates.map((template) => buildAreaTemplateMarkup(template, scene, { transient: true })).join('');
@@ -3359,7 +3388,7 @@
         const stealthStatusMap = buildStealthStatusMap(scene, vttState);
         const renderTime = Date.now();
 
-        renderTemplateLayer(scene, visibleTokens, worldSize);
+        renderTemplateLayer(scene, visibleTokens, worldSize, renderTime);
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => {
             const renderedCells = getRenderableTokenCells(token, scene, renderTime);
@@ -3388,7 +3417,7 @@
             `;
         }).join('');
 
-        renderVisionLayer(scene, visibleTokens, worldSize);
+        renderVisionLayer(scene, visibleTokens, worldSize, renderTime);
 
         applyRenderedWorldGeometry(scene);
         if (hasActiveSceneRemoteTweens(scene.id, renderTime)) scheduleRemoteTokenTweenRender();
