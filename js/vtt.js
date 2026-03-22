@@ -2152,21 +2152,36 @@
         );
     }
 
-    const readSharedVTTSnapshot = () => {
+    const readSharedVTTSnapshot = (options = {}) => {
+        const opts = options && typeof options === 'object' ? options : {};
+        const shouldSyncRosterPresentation = opts.syncRosterPresentation !== false;
         const store = getStore();
         if (!store) return null;
         if (isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function') {
             try {
                 const snapshot = deepClone(vttCollabSession.getSnapshot());
-                syncRosterLinkedPlayerPresentation(snapshot);
+                if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
                 return snapshot;
             } catch (err) {
                 console.warn('VTT collaboration snapshot read failed', err);
             }
         }
         const snapshot = deepClone(store.getVTTState(getActiveCaseId()));
-        syncRosterLinkedPlayerPresentation(snapshot);
+        if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
         return snapshot;
+    };
+
+    const ensureRosterLinkedPlayerPresentationPersisted = (snapshot, options = {}) => {
+        if (!snapshot) return { snapshot, mutated: false };
+        const opts = options && typeof options === 'object' ? options : {};
+        const mutated = syncRosterLinkedPlayerPresentation(snapshot);
+        if (!mutated) return { snapshot, mutated: false };
+        if (opts.persist === false) return { snapshot, mutated: true };
+        const saved = persistSharedVTTSnapshot(snapshot, { reason: opts.reason || 'roster-player-presentation-sync' });
+        return {
+            snapshot: deepClone(saved || snapshot),
+            mutated: true
+        };
     };
 
     const persistSharedVTTSnapshot = (payload, options = {}) => {
@@ -2694,10 +2709,10 @@
             pendingRemoteVTTSnapshot = clean;
             return;
         }
+        const synced = ensureRosterLinkedPlayerPresentationPersisted(clean, { reason: 'roster-player-presentation-sync' });
         queueRemoteTweensFromSnapshots(vttState, clean);
         pendingRemoteVTTSnapshot = null;
-        vttState = deepClone(clean);
-        syncRosterLinkedPlayerPresentation(vttState);
+        vttState = deepClone(synced.snapshot);
         normalizeSelections();
         render();
     };
@@ -2705,8 +2720,8 @@
     const applyPendingRemoteVTTSnapshot = () => {
         if (dragState || !pendingRemoteVTTSnapshot) return false;
         queueRemoteTweensFromSnapshots(vttState, pendingRemoteVTTSnapshot);
-        vttState = deepClone(pendingRemoteVTTSnapshot);
-        syncRosterLinkedPlayerPresentation(vttState);
+        const synced = ensureRosterLinkedPlayerPresentationPersisted(pendingRemoteVTTSnapshot, { reason: 'roster-player-presentation-sync' });
+        vttState = deepClone(synced.snapshot);
         pendingRemoteVTTSnapshot = null;
         normalizeSelections();
         render();
@@ -2730,8 +2745,8 @@
                 ? store.normalizeVTTStateSnapshot(meta.snapshot)
                 : meta.snapshot;
             queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
-            vttState = deepClone(nextSnapshot);
-            syncRosterLinkedPlayerPresentation(vttState);
+            const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
+            vttState = deepClone(synced.snapshot);
             normalizeSelections();
             renderStage();
             return;
@@ -2858,7 +2873,8 @@
         pendingRemoteVTTSnapshot = null;
         const store = getStore();
         if (store) {
-            vttState = readSharedVTTSnapshot() || deepClone(store.getVTTState(expectedCaseId));
+            const nextSnapshot = readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(expectedCaseId));
+            vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' }).snapshot;
             normalizeSelections();
             render();
         }
@@ -4969,14 +4985,28 @@
             });
             return;
         }
-        if (isVTTCollabReady() || dragState) {
+        if (dragState) {
             if (syncRosterLinkedPlayerPresentation(vttState)) {
                 normalizeSelections();
                 render();
             }
             return;
         }
-        const nextSnapshot = readSharedVTTSnapshot() || deepClone(store.getVTTState(activeCaseId));
+        if (isVTTCollabReady()) {
+            const synced = ensureRosterLinkedPlayerPresentationPersisted(vttState || readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)), {
+                reason: 'roster-player-presentation-sync'
+            });
+            if (synced.mutated) {
+                vttState = synced.snapshot;
+                normalizeSelections();
+                render();
+            }
+            return;
+        }
+        const nextSnapshot = ensureRosterLinkedPlayerPresentationPersisted(
+            readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)),
+            { reason: 'roster-player-presentation-sync' }
+        ).snapshot;
         queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
         vttState = nextSnapshot;
         normalizeSelections();
@@ -5678,7 +5708,8 @@
         bindEvents();
         loadRolePreference();
         loadUIPreferences();
-        vttState = readSharedVTTSnapshot() || deepClone(store.getVTTState(getActiveCaseId()));
+        const initialSnapshot = readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(getActiveCaseId()));
+        vttState = ensureRosterLinkedPlayerPresentationPersisted(initialSnapshot, { reason: 'roster-player-presentation-sync' }).snapshot;
         normalizeSelections();
         render();
         initVTTCollab().catch((err) => {
