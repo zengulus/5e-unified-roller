@@ -7,7 +7,7 @@
     <link rel="manifest" href="manifest.json">
     <title>HQ Layout Foundry</title>
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
-    <link rel="stylesheet" href="css/hq.css">
+    <link rel="stylesheet" href="css/hq.css?v=20260322a">
     <link rel="stylesheet" href="css/player-nav.css?v=20260306a">
 </head>
 
@@ -83,6 +83,12 @@
             </section>
 
             <aside class="control-panel">
+                <section class="card room-library">
+                    <div class="card-title">Add Rooms</div>
+                    <p class="card-desc">Stamp a room onto the active floor, then drag it into place and tune its slots.</p>
+                    <div id="room-type-palette" class="room-palette"></div>
+                </section>
+
                 <section class="card detail" id="detail-panel">
                     <div class="detail-empty">
                         <p>Select a room to tune its dimensions, downtime activities, and deployment caches.</p>
@@ -155,7 +161,7 @@
     <script src="js/data-npcs.js"></script>
     <script src="js/data-locations.js"></script>
     <script src="js/store.js?v=20260321a"></script>
-    <script src="js/hq.js"></script>
+    <script src="js/hq.js?v=20260322a"></script>
     <script src="js/player-nav.js?v=20260322f"></script>
     <script src="js/vector-field.js"></script>
 </body>

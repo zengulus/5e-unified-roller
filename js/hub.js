@@ -384,8 +384,20 @@ function updatePlayer(idx, field, val) {
     if (!campaign || !Array.isArray(campaign.players)) return;
     if (!campaign.players[idx]) return;
     if (!['name', 'projectName', 'projectReward', 'imageUrl'].includes(field)) return;
+    const player = campaign.players[idx];
+    if (!player) return;
+
+    if (window.RTF_STORE && typeof window.RTF_STORE.updatePlayer === 'function') {
+        const updated = window.RTF_STORE.updatePlayer(player.id, { [field]: val });
+        if (field === 'imageUrl' && String(val || '').trim() && updated && !updated.imageUrl) {
+            alert('Please provide a valid HTTP or HTTPS image URL or data:image URL.');
+        }
+        render();
+        return;
+    }
+
     campaign.players[idx][field] = val;
-    save(buildPlayerScope(campaign.players[idx].id));
+    save(buildPlayerScope(player.id));
 }
 
 
@@ -449,7 +461,7 @@ function render() {
                 <div>
                     <input type="text" value="${safeName}" data-onchange="updatePlayer(${i}, 'name', this.value)">
                     <span class="mini-label hub-player-image-label">Token Image URL</span>
-                    <input type="text" class="hub-player-image-input" placeholder="https://..." value="${safeImageUrl}" data-onchange="updatePlayer(${i}, 'imageUrl', this.value)">
+                    <input type="text" class="hub-player-image-input" placeholder="https://... or http://..." value="${safeImageUrl}" data-onchange="updatePlayer(${i}, 'imageUrl', this.value)">
                     <div class="dp-counter hub-dp-counter">${safeDP} DP</div>
                     <div class="hub-player-dp-actions">
                         <button class="btn" data-onclick="modDP(${i},-1)">Spend</button>

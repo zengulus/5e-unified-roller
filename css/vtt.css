@@ -24,6 +24,7 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
 }
 
 .vtt-topbar > div:first-child {
+    flex: 1 1 26rem;
     min-width: 0;
 }
 
@@ -36,6 +37,7 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
 }
 
 .vtt-topbar-group-right {
+    flex: 0 1 auto;
     margin-left: auto;
     justify-content: flex-end;
 }
@@ -1220,11 +1222,29 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     place-items: center;
     border-radius: inherit;
     overflow: hidden;
-    filter: grayscale(var(--vtt-token-grayscale, 0));
-    transition: filter 160ms ease;
+    isolation: isolate;
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03)),
         rgba(7, 11, 18, 0.78);
+}
+
+.vtt-token-face::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+        linear-gradient(180deg,
+            rgba(255, 82, 82, 0) 0%,
+            rgba(255, 66, 66, 0) 36%,
+            rgba(180, 18, 24, 0.28) 68%,
+            rgba(233, 42, 42, 0.74) 100%);
+    mix-blend-mode: screen;
+    opacity: calc(var(--vtt-token-damage, 0) * 0.92);
+    transform: scaleY(var(--vtt-token-damage, 0));
+    transform-origin: center bottom;
+    pointer-events: none;
+    transition: opacity 160ms ease, transform 160ms ease;
 }
 
 .vtt-token.has-image .vtt-token-face {
@@ -1282,18 +1302,21 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     top: calc(100% + 0.35rem);
     left: 50%;
     width: max-content;
+    min-width: calc(100% + 0.45rem);
     max-width: min(12rem, calc(100vw - 3rem));
     padding: 0.2rem 0.48rem;
     border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 999px;
+    border-radius: 0.9rem;
     background: rgba(4, 8, 15, 0.88);
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.24);
     color: rgba(244, 249, 255, 0.96);
     font-size: calc(0.66rem * var(--vtt-token-font-scale, 1));
     line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    text-align: center;
+    text-wrap: balance;
     transform: translateX(-50%);
     pointer-events: none;
     text-rendering: geometricPrecision;
@@ -1569,6 +1592,21 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
     .vtt-sidebar,
     .vtt-initiative-panel {
         width: min(320px, calc(100vw - 2rem));
+    }
+}
+
+@media (max-width: 1360px) {
+    .vtt-topbar {
+        align-items: flex-start;
+    }
+
+    .vtt-topbar-group {
+        width: 100%;
+    }
+
+    .vtt-topbar-group-right {
+        margin-left: 0;
+        justify-content: flex-start;
     }
 }
 

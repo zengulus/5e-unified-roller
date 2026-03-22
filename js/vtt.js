@@ -225,7 +225,7 @@
     const toSharedTokenImageUrl = (value) => {
         const raw = toImageUrl(value);
         if (!raw) return '';
-        return /^https:\/\//i.test(raw) || /^data:image\//i.test(raw) ? raw : '';
+        return /^https?:\/\//i.test(raw) || /^data:image\//i.test(raw) ? raw : '';
     };
     const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
     const randomIntInclusive = (min, max) => {
@@ -326,7 +326,7 @@
         }
         return 10;
     };
-    const getTokenGrayscale = (token) => {
+    const getTokenDamageFraction = (token) => {
         if (!token) return 0;
         const hpCurrent = Number(token.hpCurrent);
         const hpMax = Number(token.hpMax);
@@ -1969,6 +1969,24 @@
         return true;
     };
 
+    const persistRosterPlayerImageUrl = (token, rawValue) => {
+        if (!token) return null;
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        const store = getStore();
+        if (!rosterPlayer || !store || typeof store.getPlayers !== 'function' || typeof store.save !== 'function') return null;
+
+        if (typeof store.updatePlayer === 'function') {
+            return store.updatePlayer(String(rosterPlayer.id || '').trim(), { imageUrl: rawValue });
+        }
+
+        const players = Array.isArray(store.getPlayers()) ? store.getPlayers() : [];
+        const target = players.find((player) => String(player && player.id || '').trim() === String(rosterPlayer.id || '').trim());
+        if (!target) return null;
+        target.imageUrl = toSharedTokenImageUrl(rawValue);
+        store.save({ scope: `campaign.players.${target.id}` });
+        return { ...target };
+    };
+
     const linkInitiativeEntryToToken = (entry, token) => {
         if (!entry || !token) return entry;
         const next = {
@@ -3162,6 +3180,9 @@
     const buildDMTokenInspectorContent = (token) => {
         const rosterPlayer = getRosterPlayerForRecord(token);
         const isRosterManagedPlayer = !!rosterPlayer;
+        const imageUrlValue = isRosterManagedPlayer
+            ? String(rosterPlayer.imageUrl || token.imageUrl || '').trim()
+            : String(token.imageUrl || '').trim();
         const supportsSightCone = !!(token && (token.side === 'enemy' || token.side === 'neutral'));
         return `
             <div class="vtt-inspector-stack">
@@ -3185,7 +3206,7 @@
                     </label>
                     <label class="vtt-field">
                         <span>Image URL</span>
-                        <input class="vtt-inspector-input" type="text" ${isRosterManagedPlayer ? 'readonly' : 'data-token-field="imageUrl"'} value="${escapeHtml(token.imageUrl || '')}">
+                        <input class="vtt-inspector-input" type="text" data-token-field="imageUrl" value="${escapeHtml(imageUrlValue)}">
                     </label>
                     <label class="vtt-field">
                         <span>HP Current</span>
@@ -3263,7 +3284,7 @@
                         </label>
                     </div>
                 ` : ''}
-                ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player token name and portrait are managed from the Hub roster.</div>' : ''}
+                ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player token name stays synced from the roster. Updating portrait here also updates that roster entry.</div>' : ''}
                 <div class="vtt-inspector-actions">
                     <button class="vtt-inline-btn" data-action="clone-token" data-id="${escapeHtml(token.id)}">Clone Token</button>
                     <button class="vtt-inline-btn" data-action="add-token-to-initiative" data-id="${escapeHtml(token.id)}">Add To Initiative</button>
@@ -3722,7 +3743,7 @@
                     data-world-top="${escapeHtml(String(scene.grid.offsetY + renderedCells.y * scene.grid.cellPx))}"
                     data-world-width="${escapeHtml(String(token.w * scene.grid.cellPx))}"
                     data-world-height="${escapeHtml(String(token.h * scene.grid.cellPx))}"
-                    style="--vtt-token-grayscale:${getTokenGrayscale(token)};">
+                    style="--vtt-token-damage:${getTokenDamageFraction(token)};">
                     <div class="vtt-token-face">
                         ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
                     </div>
@@ -4711,7 +4732,15 @@
             const field = target.dataset.tokenField;
             const token = getTokenById(selectedTokenId);
             const rosterPlayer = getRosterPlayerForRecord(token);
-            if (rosterPlayer && (field === 'label' || field === 'imageUrl')) return;
+            if (rosterPlayer && field === 'label') return;
+            if (rosterPlayer && field === 'imageUrl') {
+                const updated = persistRosterPlayerImageUrl(token, target.value);
+                if (String(target.value || '').trim() && updated && !updated.imageUrl) {
+                    alert('Please provide a valid HTTP or HTTPS image URL or data:image URL.');
+                }
+                return;
+            }
+            if (field === 'imageUrl' && event.type !== 'change') return;
             updateSelectedToken((token) => {
                 if (field === 'hidden' && target instanceof HTMLInputElement && target.type === 'checkbox') {
                     token.hidden = target.checked;
@@ -4847,9 +4876,10 @@
                 ? findTokenAcrossScenes(draft, packet.sourceType, packet.sourceId)
                 : null;
             const entries = draft.initiative.entries;
+            const allowNameFallback = !(packet.sourceType && packet.sourceId);
             const idx = entries.findIndex((entry) =>
                 (packet.sourceType && packet.sourceId && entry.sourceType === packet.sourceType && entry.sourceId === packet.sourceId)
-                || String(entry.name || '').toLowerCase() === packet.name.toLowerCase()
+                || (allowNameFallback && String(entry.name || '').toLowerCase() === packet.name.toLowerCase())
             );
             if (idx >= 0) {
                 const base = linkedToken ? syncInitiativeEntryFromToken(entries[idx], linkedToken) : { ...entries[idx] };
@@ -4871,8 +4901,11 @@
                 if (linkedToken && packet.stealthRoll !== null) linkedToken.stealthRoll = packet.stealthRoll;
                 selectedEntryId = entries[idx].id;
             } else {
+                const deterministicEntryId = packet.sourceType && packet.sourceId
+                    ? String(`init_${packet.sourceType}_${packet.sourceId}`).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 120)
+                    : '';
                 const seed = linkedToken ? buildInitiativeEntryFromToken(linkedToken) : {
-                    id: buildId('init'),
+                    id: deterministicEntryId || buildId('init'),
                     name: packet.name,
                     linkedTokenId: linkedToken ? linkedToken.id : '',
                     side: linkedToken ? linkedToken.side : 'player',

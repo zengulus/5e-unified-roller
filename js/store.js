@@ -339,7 +339,7 @@
                 ? global.location.href
                 : undefined;
             const parsed = baseHref ? new URL(candidate, baseHref) : new URL(candidate);
-            if (parsed.protocol === 'https:') {
+            if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
                 return parsed.href;
             }
         } catch (err) {
@@ -686,6 +686,15 @@
             hidden: !!source.hidden,
             conditions: sanitizeVTTConditions(source.conditions)
         };
+    };
+
+    const sortVTTInitiativeEntries = (entries) => {
+        if (!Array.isArray(entries)) return;
+        entries.sort((left, right) =>
+            (Number(right && right.total || 0) - Number(left && left.total || 0))
+            || (Number(right && right.tie || 0) - Number(left && left.tie || 0))
+            || String(left && left.name || '').localeCompare(String(right && right.name || ''))
+        );
     };
 
     const sanitizeVTTState = (value) => {
@@ -1334,6 +1343,25 @@
     const buildCaseEventsScopePrefix = (caseId) => `cases.${sanitizeCaseId(caseId, 'case_primary')}.events`;
     const buildCaseEventEntityScope = (caseId, eventId) => buildEntityScope(buildCaseEventsScopePrefix(caseId), eventId);
     const buildCaseEventOrderScope = (caseId) => buildEntityOrderScope(buildCaseEventsScopePrefix(caseId));
+    const buildCaseVTTInitiativeEntriesScopePrefix = (caseId) => `cases.${sanitizeCaseId(caseId, 'case_primary')}.vtt.initiative.entries`;
+    const buildCaseVTTInitiativeActiveScope = (caseId) => `cases.${sanitizeCaseId(caseId, 'case_primary')}.vtt.initiative.active`;
+    const buildVTTInitiativeEntryScopeId = (entry) => {
+        const source = entry && typeof entry === 'object' ? entry : {};
+        const sourceType = normalizeEntityScopeId(source.sourceType);
+        const sourceId = normalizeEntityScopeId(source.sourceId);
+        if (sourceType && sourceId) return normalizeEntityScopeId(`${sourceType}_${sourceId}`);
+        const linkedTokenId = normalizeEntityScopeId(source.linkedTokenId);
+        if (linkedTokenId) return normalizeEntityScopeId(`token_${linkedTokenId}`);
+        const entryId = normalizeEntityScopeId(source.id);
+        return entryId ? normalizeEntityScopeId(`entry_${entryId}`) : '';
+    };
+    const buildCaseVTTInitiativeEntryScope = (caseId, entryOrScopeId) => {
+        const scopeId = typeof entryOrScopeId === 'string'
+            ? normalizeEntityScopeId(entryOrScopeId)
+            : buildVTTInitiativeEntryScopeId(entryOrScopeId);
+        if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) return '';
+        return buildEntityScope(buildCaseVTTInitiativeEntriesScopePrefix(caseId), scopeId);
+    };
     const buildCampaignMetaEventEntityScope = (eventId) => buildEntityScope(CAMPAIGN_META_EVENTS_SCOPE_PREFIX, eventId);
     const buildCampaignMetaEventOrderScope = () => buildEntityOrderScope(CAMPAIGN_META_EVENTS_SCOPE_PREFIX);
     const parseGranularNormalizedLwwScope = (scopeToken) => {
@@ -1375,6 +1403,28 @@
             };
         }
 
+        const caseVTTInitiativeEntryMatch = scope.match(/^cases\.([a-z0-9_-]+)\.vtt\.initiative\.entries\.([a-z0-9_-]+)$/);
+        if (caseVTTInitiativeEntryMatch) {
+            const caseId = sanitizeCaseId(caseVTTInitiativeEntryMatch[1], 'case_primary');
+            const entryScopeId = normalizeEntityScopeId(caseVTTInitiativeEntryMatch[2]);
+            if (!entryScopeId || entryScopeId === ENTITY_SCOPE_ORDER_TOKEN) return null;
+            return {
+                scope,
+                kind: 'case-vtt-initiative-entry',
+                caseId,
+                entryScopeId
+            };
+        }
+
+        const caseVTTInitiativeActiveMatch = scope.match(/^cases\.([a-z0-9_-]+)\.vtt\.initiative\.active$/);
+        if (caseVTTInitiativeActiveMatch) {
+            return {
+                scope,
+                kind: 'case-vtt-initiative-active',
+                caseId: sanitizeCaseId(caseVTTInitiativeActiveMatch[1], 'case_primary')
+            };
+        }
+
         return null;
     };
     const isGranularNormalizedLwwScope = (scopeToken) => !!parseGranularNormalizedLwwScope(scopeToken);
@@ -1382,6 +1432,11 @@
     const findEntityIndexByScopeId = (list, scopeId) => {
         if (!Array.isArray(list) || !scopeId) return -1;
         return list.findIndex((entry) => normalizeEntityScopeId(entry && entry.id) === scopeId);
+    };
+    const findVTTInitiativeEntryIndexByScopeId = (list, scopeId) => {
+        const cleanScopeId = normalizeEntityScopeId(scopeId);
+        if (!Array.isArray(list) || !cleanScopeId) return -1;
+        return list.findIndex((entry) => buildVTTInitiativeEntryScopeId(entry) === cleanScopeId);
     };
     const addEntityScopesToSnapshot = (map, scopePrefix, sourceList) => {
         const list = Array.isArray(sourceList) ? sourceList : [];
@@ -1496,6 +1551,54 @@
         const sourceCase = getCaseById(sourceState, cleanCaseId);
         const sourceEvents = Array.isArray(sourceCase && sourceCase.events) ? sourceCase.events : [];
         applyEntityOrderScopeFromSourceList(targetCase.events, sourceEvents);
+    };
+    const applyCaseVTTInitiativeEntryScopeFromSource = (targetState, sourceState, caseId, scopeId) => {
+        if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) return;
+        const cleanCaseId = sanitizeCaseId(caseId, 'case_primary');
+        const targetCase = ensureCaseForScope(targetState, sourceState, cleanCaseId);
+        if (!targetCase) return;
+        targetCase.vtt = sanitizeVTTState(targetCase.vtt);
+
+        const sourceCase = getCaseById(sourceState, cleanCaseId);
+        const sourceVTT = sanitizeVTTState(sourceCase && sourceCase.vtt);
+        const targetEntries = Array.isArray(targetCase.vtt && targetCase.vtt.initiative && targetCase.vtt.initiative.entries)
+            ? targetCase.vtt.initiative.entries
+            : [];
+        const sourceEntries = Array.isArray(sourceVTT && sourceVTT.initiative && sourceVTT.initiative.entries)
+            ? sourceVTT.initiative.entries
+            : [];
+        const targetIdx = findVTTInitiativeEntryIndexByScopeId(targetEntries, scopeId);
+        const sourceIdx = findVTTInitiativeEntryIndexByScopeId(sourceEntries, scopeId);
+
+        if (sourceIdx >= 0) {
+            const nextEntry = sanitizeVTTInitiativeEntry(sourceEntries[sourceIdx], sourceIdx);
+            if (targetIdx >= 0) targetEntries[targetIdx] = nextEntry;
+            else targetEntries.push(nextEntry);
+            sortVTTInitiativeEntries(targetEntries);
+        } else if (targetIdx >= 0) {
+            const removed = targetEntries.splice(targetIdx, 1)[0];
+            if (removed && targetCase.vtt && targetCase.vtt.initiative && targetCase.vtt.initiative.activeEntryId === removed.id) {
+                targetCase.vtt.initiative.activeEntryId = targetEntries[0] ? targetEntries[0].id : '';
+            }
+        }
+    };
+    const applyCaseVTTInitiativeActiveScopeFromSource = (targetState, sourceState, caseId) => {
+        const cleanCaseId = sanitizeCaseId(caseId, 'case_primary');
+        const targetCase = ensureCaseForScope(targetState, sourceState, cleanCaseId);
+        if (!targetCase) return;
+        targetCase.vtt = sanitizeVTTState(targetCase.vtt);
+
+        const sourceCase = getCaseById(sourceState, cleanCaseId);
+        const sourceVTT = sanitizeVTTState(sourceCase && sourceCase.vtt);
+        const targetEntries = Array.isArray(targetCase.vtt && targetCase.vtt.initiative && targetCase.vtt.initiative.entries)
+            ? targetCase.vtt.initiative.entries
+            : [];
+        const sourceActiveId = sourceVTT && sourceVTT.initiative
+            ? toTrimmedString(sourceVTT.initiative.activeEntryId, '', 120).trim()
+            : '';
+        targetCase.vtt.initiative.activeEntryId = sourceActiveId && targetEntries.some((entry) => entry && entry.id === sourceActiveId)
+            ? sourceActiveId
+            : '';
     };
     const getCampaignMetaEventsList = (state) => {
         if (!state.campaignMeta || typeof state.campaignMeta !== 'object') {
@@ -1615,7 +1718,18 @@
             map.set(`cases.${entry.id}.board`, stripBoardNodeLocalFields(entry.board));
             addEntityScopesToSnapshot(map, buildCaseEventsScopePrefix(entry.id), sanitizeEventList(entry.events));
             map.set(`cases.${entry.id}.leads`, sanitizeLeadList(entry.leads));
-            map.set(`cases.${entry.id}.vtt`, sanitizeVTTState(entry.vtt));
+            const vtt = sanitizeVTTState(entry.vtt);
+            map.set(`cases.${entry.id}.vtt`, vtt);
+            if (Array.isArray(vtt.initiative && vtt.initiative.entries)) {
+                vtt.initiative.entries.forEach((initiativeEntry, entryIdx) => {
+                    const scope = buildCaseVTTInitiativeEntryScope(entry.id, initiativeEntry);
+                    if (!scope) return;
+                    map.set(scope, sanitizeVTTInitiativeEntry(initiativeEntry, entryIdx));
+                });
+            }
+            if (vtt.initiative && vtt.initiative.activeEntryId) {
+                map.set(buildCaseVTTInitiativeActiveScope(entry.id), vtt.initiative.activeEntryId);
+            }
         });
         return map;
     };
@@ -1672,6 +1786,23 @@
             const entry = getCaseById(state, parsed.caseId);
             const list = entry && Array.isArray(entry.events) ? entry.events : [];
             return findEntityIndexByScopeId(list, parsed.eventId) >= 0;
+        }
+
+        if (parsed.kind === 'case-vtt-initiative-entry') {
+            const entry = getCaseById(state, parsed.caseId);
+            const list = entry && entry.vtt && entry.vtt.initiative && Array.isArray(entry.vtt.initiative.entries)
+                ? entry.vtt.initiative.entries
+                : [];
+            return findVTTInitiativeEntryIndexByScopeId(list, parsed.entryScopeId) >= 0;
+        }
+
+        if (parsed.kind === 'case-vtt-initiative-active') {
+            const entry = getCaseById(state, parsed.caseId);
+            const initiative = entry && entry.vtt && entry.vtt.initiative && typeof entry.vtt.initiative === 'object'
+                ? entry.vtt.initiative
+                : null;
+            const activeEntryId = initiative ? toTrimmedString(initiative.activeEntryId, '', 120).trim() : '';
+            return !!activeEntryId;
         }
 
         return false;
@@ -1852,6 +1983,21 @@
             const caseId = sanitizeCaseId(caseEventEntityScopeMatch[1], 'case_primary');
             const scopeId = caseEventEntityScopeMatch[2];
             if (scopeId !== ENTITY_SCOPE_ORDER_TOKEN) applyCaseEventEntityScopeFromSource(targetState, sourceState, caseId, scopeId);
+            return;
+        }
+
+        const caseVTTInitiativeEntryScopeMatch = scope.match(/^cases\.([a-z0-9_-]+)\.vtt\.initiative\.entries\.([a-z0-9_-]+)$/);
+        if (caseVTTInitiativeEntryScopeMatch) {
+            const caseId = sanitizeCaseId(caseVTTInitiativeEntryScopeMatch[1], 'case_primary');
+            const scopeId = caseVTTInitiativeEntryScopeMatch[2];
+            if (scopeId !== ENTITY_SCOPE_ORDER_TOKEN) applyCaseVTTInitiativeEntryScopeFromSource(targetState, sourceState, caseId, scopeId);
+            return;
+        }
+
+        const caseVTTInitiativeActiveScopeMatch = scope.match(/^cases\.([a-z0-9_-]+)\.vtt\.initiative\.active$/);
+        if (caseVTTInitiativeActiveScopeMatch) {
+            const caseId = sanitizeCaseId(caseVTTInitiativeActiveScopeMatch[1], 'case_primary');
+            applyCaseVTTInitiativeActiveScopeFromSource(targetState, sourceState, caseId);
             return;
         }
 
@@ -7104,6 +7250,37 @@
             });
         }
 
+        updatePlayer(id, updates) {
+            const list = this.getPlayers();
+            const idx = list.findIndex((player) => player && player.id === id);
+            if (idx < 0) return null;
+
+            const patch = sanitizePatch(updates, {
+                name: (v) => toTrimmedString(v || 'New Agent', 'New Agent', 160),
+                sheetKey: (v) => toTrimmedString(v, '', 120).trim(),
+                ac: (v) => Math.max(0, Math.min(999, Math.round(toNumber(v, list[idx].ac ?? 10)))),
+                init: (v) => Math.max(-99, Math.min(999, Math.round(toNumber(v, list[idx].init ?? 0)))),
+                hp: (v) => sanitizePlayerHp(v, list[idx].hp ?? '10'),
+                pp: (v) => Math.max(0, Math.min(999, Math.round(toNumber(v, list[idx].pp ?? 10)))),
+                dc: (v) => Math.max(0, Math.min(999, Math.round(toNumber(v, list[idx].dc ?? 10)))),
+                dp: (v) => Math.max(0, Math.min(4, Math.round(toNumber(v, list[idx].dp ?? 2)))),
+                projectClock: (v) => Math.max(0, Math.min(6, Math.round(toNumber(v, list[idx].projectClock ?? 0)))),
+                projectName: (v) => toTrimmedString(v, '', 240),
+                projectReward: (v) => toTrimmedString(v, '', 240),
+                imageUrl: (v) => toSharedVTTMediaUrl(v)
+            });
+            if (!patch) return deepClone(list[idx]);
+
+            list[idx] = sanitizePlayer({
+                ...list[idx],
+                ...patch
+            }, idx);
+
+            const scope = buildPlayerEntityScope(id);
+            this.save({ scope: scope || CAMPAIGN_ENTITY_SCOPE_PREFIXES.players });
+            return deepClone(list[idx]);
+        }
+
         addNPC(npc) {
             const source = npc && typeof npc === 'object' ? { ...npc } : {};
             const fallbackId = buildEntityId('npc');
@@ -7716,6 +7893,45 @@
 
         normalizeVTTStateSnapshot(vttState) {
             return sanitizeVTTState(vttState);
+        }
+
+        upsertVTTInitiativeEntry(entryInput, caseId = null, options = {}) {
+            const entry = this.getCaseEntry(caseId, { createIfMissing: true });
+            if (!entry) return sanitizeVTTState(null);
+
+            const opts = options && typeof options === 'object' ? options : {};
+            const nextVTT = sanitizeVTTState(entry.vtt);
+            const nextEntry = sanitizeVTTInitiativeEntry(entryInput, nextVTT.initiative.entries.length);
+            const entryScope = buildCaseVTTInitiativeEntryScope(entry.id, nextEntry);
+            const targetScopeId = buildVTTInitiativeEntryScopeId(nextEntry);
+
+            if (!entryScope || !targetScopeId) {
+                const fallbackIdx = nextVTT.initiative.entries.findIndex((candidate) => String(candidate && candidate.id || '') === String(nextEntry.id || ''));
+                if (fallbackIdx >= 0) nextVTT.initiative.entries[fallbackIdx] = nextEntry;
+                else nextVTT.initiative.entries.push(nextEntry);
+                sortVTTInitiativeEntries(nextVTT.initiative.entries);
+                if (opts.setActiveIfEmpty !== false && !nextVTT.initiative.activeEntryId && nextVTT.initiative.entries[0]) {
+                    nextVTT.initiative.activeEntryId = nextVTT.initiative.entries[0].id;
+                }
+                entry.vtt = sanitizeVTTState(nextVTT);
+                this.save({ scope: `cases.${entry.id}.vtt` });
+                return entry.vtt;
+            }
+
+            const existingIdx = findVTTInitiativeEntryIndexByScopeId(nextVTT.initiative.entries, targetScopeId);
+            if (existingIdx >= 0) nextVTT.initiative.entries[existingIdx] = nextEntry;
+            else nextVTT.initiative.entries.push(nextEntry);
+            sortVTTInitiativeEntries(nextVTT.initiative.entries);
+
+            const scopes = [entryScope];
+            if (opts.setActiveIfEmpty !== false && !nextVTT.initiative.activeEntryId && nextVTT.initiative.entries[0]) {
+                nextVTT.initiative.activeEntryId = nextVTT.initiative.entries[0].id;
+                scopes.push(buildCaseVTTInitiativeActiveScope(entry.id));
+            }
+
+            entry.vtt = sanitizeVTTState(nextVTT);
+            this.save({ scope: scopes });
+            return entry.vtt;
         }
 
         updateVTTState(vttState, caseId = null) {

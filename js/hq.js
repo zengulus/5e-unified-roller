@@ -2,12 +2,12 @@
     const STORAGE_KEY = 'task_force_hq_v1';
     const DEFAULT_GRID = { cols: 26, rows: 18, cell: 48 };
     const ROOM_TYPES = [
-        { id: 'command', label: 'Command & Control', color: '#7cdde1' },
-        { id: 'logistics', label: 'Logistics & Support', color: '#f7c266' },
-        { id: 'arcane', label: 'Arcano-Tech Lab', color: '#be9bff' },
-        { id: 'recovery', label: 'Recovery & Hearth', color: '#7ff0c7' },
-        { id: 'hangar', label: 'Motor Pool / Hangar', color: '#ff9c7f' },
-        { id: 'stealth', label: 'Stealth / Intelligence', color: '#8bb5ff' }
+        { id: 'command', label: 'Command & Control', color: '#7cdde1', defaultName: 'Command Bay', defaultWidth: 5, defaultHeight: 4, paletteText: 'Seed a command bay on this floor.' },
+        { id: 'logistics', label: 'Logistics & Support', color: '#f7c266', defaultName: 'Logistics Hub', defaultWidth: 5, defaultHeight: 4, paletteText: 'Drop in supply, staging, and admin space.' },
+        { id: 'arcane', label: 'Arcano-Tech Lab', color: '#be9bff', defaultName: 'Arcano-Tech Lab', defaultWidth: 4, defaultHeight: 4, paletteText: 'Stand up a lab for wards, sigils, and weird science.' },
+        { id: 'recovery', label: 'Recovery & Hearth', color: '#7ff0c7', defaultName: 'Recovery Suite', defaultWidth: 4, defaultHeight: 3, paletteText: 'Add med-beds, rest space, and recovery support.' },
+        { id: 'hangar', label: 'Motor Pool / Hangar', color: '#ff9c7f', defaultName: 'Hangar Deck', defaultWidth: 6, defaultHeight: 4, paletteText: 'Reserve room for vehicles, mounts, and launch prep.' },
+        { id: 'stealth', label: 'Stealth / Intelligence', color: '#8bb5ff', defaultName: 'Intel Cell', defaultWidth: 4, defaultHeight: 3, paletteText: 'Carve out recon, surveillance, and covert planning.' }
     ];
 
     const escapeHTML = (str = '') => String(str)
@@ -88,6 +88,7 @@
         duplicate: document.getElementById('btn-duplicate'),
         delete: document.getElementById('btn-delete'),
         addCustom: document.getElementById('btn-add-custom'),
+        roomPalette: document.getElementById('room-type-palette'),
         clear: document.getElementById('btn-clear'),
         exportBtn: document.getElementById('btn-export'),
         importBtn: document.getElementById('btn-import'),
@@ -147,6 +148,7 @@
         refs.toggleGrid.checked = state.snapToGrid;
         refs.juniorOpsMax.value = state.maxJuniorOperatives;
         buildTypeSelect();
+        renderRoomPalette();
         refreshAssigneeLists();
         renderFloorTabs();
         renderRooms();
@@ -291,6 +293,76 @@
             opt.textContent = t.label;
             refs.roomType.appendChild(opt);
         });
+    }
+
+    function renderRoomPalette() {
+        if (!refs.roomPalette) return;
+        const buttons = ROOM_TYPES.map((type) => {
+            const color = escapeHTML(type.color);
+            const label = escapeHTML(type.label);
+            const description = escapeHTML(type.paletteText || `Add a ${type.label.toLowerCase()} room.`);
+            return `
+                <button class="room-palette-btn" type="button" data-room-type="${escapeHTML(type.id)}" style="--room-accent:${color};">
+                    <span class="room-palette-chip"></span>
+                    <span class="room-palette-copy">
+                        <strong>${label}</strong>
+                        <small>${description}</small>
+                    </span>
+                </button>
+            `;
+        }).join('');
+        refs.roomPalette.innerHTML = `${buttons}
+            <button class="room-palette-btn room-palette-btn-custom" type="button" data-room-type="custom" style="--room-accent:var(--accent-secondary);">
+                <span class="room-palette-chip"></span>
+                <span class="room-palette-copy">
+                    <strong>Custom Room</strong>
+                    <small>Start from a blank chamber and tune it by hand.</small>
+                </span>
+            </button>
+        `;
+    }
+
+    function buildRoomPreset(typeId = ROOM_TYPES[0].id) {
+        if (typeId === 'custom') {
+            return sanitizeRoom({
+                id: uniqueId('room'),
+                name: 'Custom Chamber',
+                type: ROOM_TYPES[0].id,
+                x: 2,
+                y: 2,
+                w: 4,
+                h: 3,
+                notes: '',
+                downtimeSlots: [],
+                resourceSlots: []
+            });
+        }
+        const type = getRoomType(typeId);
+        const width = clampNumber(parseInt(type.defaultWidth, 10) || 4, 1, state.grid.cols);
+        const height = clampNumber(parseInt(type.defaultHeight, 10) || 3, 1, state.grid.rows);
+        return sanitizeRoom({
+            id: uniqueId('room'),
+            name: type.defaultName || type.label,
+            type: type.id,
+            x: 2,
+            y: 2,
+            w: width,
+            h: height,
+            notes: '',
+            downtimeSlots: [],
+            resourceSlots: []
+        });
+    }
+
+    function addRoom(typeId = ROOM_TYPES[0].id) {
+        const floor = getActiveFloor();
+        const room = buildRoomPreset(typeId);
+        nudgedPlacement(room, floor);
+        floor.rooms.push(room);
+        selectRoom(room.id);
+        persistState();
+        renderRooms();
+        renderFloorTabs();
     }
 
     function nudgedPlacement(room, floor) {
@@ -693,6 +765,13 @@
         refs.duplicate.addEventListener('click', duplicateRoom);
         refs.delete.addEventListener('click', deleteRoom);
         refs.addCustom.addEventListener('click', addCustomRoom);
+        if (refs.roomPalette) {
+            refs.roomPalette.addEventListener('click', (ev) => {
+                const button = ev.target.closest('[data-room-type]');
+                if (!button) return;
+                addRoom(button.dataset.roomType || ROOM_TYPES[0].id);
+            });
+        }
         refs.clear.addEventListener('click', clearFloor);
         refs.exportBtn.addEventListener('click', exportLayout);
         refs.importBtn.addEventListener('click', importLayout);
@@ -963,25 +1042,7 @@
     }
 
     function addCustomRoom() {
-        const floor = getActiveFloor();
-        const room = sanitizeRoom({
-            id: uniqueId('room'),
-            name: 'Custom Chamber',
-            type: ROOM_TYPES[0].id,
-            x: 2,
-            y: 2,
-            w: 4,
-            h: 3,
-            notes: '',
-            downtimeSlots: [],
-            resourceSlots: []
-        });
-        nudgedPlacement(room, floor);
-        floor.rooms.push(room);
-        selectRoom(room.id);
-        persistState();
-        renderRooms();
-        renderFloorTabs();
+        addRoom('custom');
     }
 
     function clearFloor() {

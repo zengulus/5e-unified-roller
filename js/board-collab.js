@@ -93,17 +93,48 @@ const sanitizeNodeMeta = (value) => {
     }
 };
 
-const sanitizeNodeRecord = (node, index = 0) => {
+const buildSnapshotNodeFallbackMap = (snapshot) => {
+    const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    const rawNodes = Array.isArray(source.nodes) ? source.nodes : [];
+    const map = new Map();
+
+    rawNodes.forEach((node, index) => {
+        const row = node && typeof node === 'object' ? node : {};
+        const fallbackId = `node_${index + 1}`;
+        const id = toTrimmedString(row.id, fallbackId, 120).trim() || fallbackId;
+        if (!id) return;
+        map.set(id, row);
+    });
+
+    return map;
+};
+
+const sanitizeNodeRecord = (node, index = 0, fallbackNode = null) => {
     const source = node && typeof node === 'object' ? node : {};
-    const fallbackId = `node_${index + 1}`;
+    const previous = fallbackNode && typeof fallbackNode === 'object' ? fallbackNode : {};
+    const fallbackId = toTrimmedString(previous.id, `node_${index + 1}`, 120).trim() || `node_${index + 1}`;
+    const normalizedType = toTrimmedString(source.type, '', 40).trim().toLowerCase()
+        || toTrimmedString(previous.type, '', 40).trim().toLowerCase();
     return {
         id: toTrimmedString(source.id, fallbackId, 120).trim() || fallbackId,
-        type: toTrimmedString(source.type, 'note', 40).trim().toLowerCase() || 'note',
-        x: Math.round(toFiniteNumber(source.x, 0)),
-        y: Math.round(toFiniteNumber(source.y, 0)),
-        title: toTrimmedString(source.title, '', 1000),
-        body: toTrimmedString(source.body, '', 24000),
-        meta: sanitizeNodeMeta(source.meta)
+        type: normalizedType || 'note',
+        x: Math.round(toFiniteNumber(source.x, toFiniteNumber(previous.x, 0))),
+        y: Math.round(toFiniteNumber(source.y, toFiniteNumber(previous.y, 0))),
+        title: toTrimmedString(
+            source.title,
+            toTrimmedString(previous.title, '', 1000),
+            1000
+        ),
+        body: toTrimmedString(
+            source.body,
+            toTrimmedString(previous.body, '', 24000),
+            24000
+        ),
+        meta: sanitizeNodeMeta(
+            Object.prototype.hasOwnProperty.call(source, 'meta')
+                ? source.meta
+                : previous.meta
+        )
     };
 };
 
@@ -126,8 +157,9 @@ const sanitizeConnectionRecord = (conn, index = 0) => {
     };
 };
 
-const sanitizeBoardSnapshot = (payload, defaults = {}) => {
+const sanitizeBoardSnapshot = (payload, defaults = {}, fallbackSnapshot = null) => {
     const source = payload && typeof payload === 'object' ? payload : {};
+    const fallbackNodeMap = buildSnapshotNodeFallbackMap(fallbackSnapshot);
     const scope = normalizeScope(source.scope || defaults.scope || 'case');
     const caseId = scope === 'campaign'
         ? ''
@@ -141,7 +173,16 @@ const sanitizeBoardSnapshot = (payload, defaults = {}) => {
         scope,
         caseId,
         updatedAt: Math.max(0, parseInt(source.updatedAt, 10) || parseInt(defaults.updatedAt, 10) || 0),
-        nodes: Array.isArray(source.nodes) ? source.nodes.map((node, idx) => sanitizeNodeRecord(node, idx)) : [],
+        nodes: Array.isArray(source.nodes)
+            ? source.nodes.map((node, idx) => {
+                const sourceNode = node && typeof node === 'object' ? node : {};
+                const sourceId = toTrimmedString(sourceNode.id, '', 120).trim();
+                const fallbackNode = sourceId && fallbackNodeMap.has(sourceId)
+                    ? fallbackNodeMap.get(sourceId)
+                    : null;
+                return sanitizeNodeRecord(node, idx, fallbackNode);
+            })
+            : [],
         connections: Array.isArray(source.connections)
             ? source.connections
                 .map((conn, idx) => sanitizeConnectionRecord(conn, idx))
@@ -554,13 +595,15 @@ class BoardCollabSession {
             typeof this.options.getSeedPayload === 'function'
                 ? this.options.getSeedPayload()
                 : buildDefaultSnapshot(this.scope, this.caseId),
-            { scope: this.scope, caseId: this.caseId }
+            { scope: this.scope, caseId: this.caseId },
+            localDocPayload
         );
         const livePayload = sanitizeBoardSnapshot(
             typeof this.options.getCurrentPayload === 'function'
                 ? this.options.getCurrentPayload()
                 : seedPayload,
-            { scope: this.scope, caseId: this.caseId }
+            { scope: this.scope, caseId: this.caseId },
+            localDocPayload
         );
         const livePayloadSig = buildSnapshotSignature(livePayload);
         this.lastSharedStoreSignature = livePayloadSig;
@@ -576,7 +619,7 @@ class BoardCollabSession {
             const roomPayload = sanitizeBoardSnapshot(cloudRow.snapshot.payload, {
                 scope: this.scope,
                 caseId: this.caseId
-            });
+            }, livePayloadHasContent ? livePayload : localDocPayload);
             const roomPayloadSig = buildSnapshotSignature(roomPayload);
             const localDocSig = buildSnapshotSignature(localDocPayload);
             const cloudUpdatedAt = Date.parse(cloudRow.snapshot.updatedAt || '') || cloudRow.snapshot.revision || 0;
@@ -612,7 +655,8 @@ class BoardCollabSession {
                 hasBoardContent(livePayload)
                     ? livePayload
                     : (hasBoardContent(seedPayload) ? seedPayload : localDocPayload),
-                { scope: this.scope, caseId: this.caseId }
+                { scope: this.scope, caseId: this.caseId },
+                localDocPayload
             );
             const canonicalSeedSig = buildSnapshotSignature(canonicalSeed);
             const localDocSig = buildSnapshotSignature(localDocPayload);
@@ -667,7 +711,7 @@ class BoardCollabSession {
                 const roomPayload = sanitizeBoardSnapshot(canonicalRoom.snapshot.payload, {
                     scope: this.scope,
                     caseId: this.caseId
-                });
+                }, canonicalSeed);
                 this.lastSavedRevision = Math.max(0, canonicalRoom.snapshot.revision || 0);
                 if (buildSnapshotSignature(roomPayload) !== buildSnapshotSignature(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
                     applySnapshotToDoc(
@@ -941,7 +985,7 @@ class BoardCollabSession {
         const nextPayload = sanitizeBoardSnapshot(payload.payload, {
             scope: this.scope,
             caseId: this.caseId
-        });
+        }, this.pendingSnapshot || this.lastSnapshot);
         const stamp = Date.parse(payload.updatedAt || '') || toFiniteNumber(payload.revision, Date.now()) || Date.now();
         this.roomResetRequired = false;
         applySnapshotToDoc(
@@ -1022,7 +1066,7 @@ class BoardCollabSession {
         const nextPayload = sanitizeBoardSnapshot(payload.payload, {
             scope: this.scope,
             caseId: this.caseId
-        });
+        }, this.pendingSnapshot || this.lastSnapshot);
         const nextSig = buildSnapshotSignature(nextPayload);
         if (!nextSig) return;
         const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot);
@@ -1309,7 +1353,7 @@ class BoardCollabSession {
         const next = sanitizeBoardSnapshot(payload, {
             scope: this.scope,
             caseId: this.caseId
-        });
+        }, this.pendingSnapshot || this.lastSnapshot);
         const nextSig = buildSnapshotSignature(next);
         if (opts.sharedStatePersisted && nextSig) {
             this.lastSharedStoreSignature = nextSig;
@@ -1339,7 +1383,7 @@ class BoardCollabSession {
         const next = sanitizeBoardSnapshot(payload, {
             scope: this.scope,
             caseId: this.caseId
-        });
+        }, this.pendingSnapshot || this.lastSnapshot);
         const nextSig = buildSnapshotSignature(next);
         if (nextSig) this.lastSharedStoreSignature = nextSig;
         if (nextSig && nextSig === buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot)) {

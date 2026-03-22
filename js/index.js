@@ -8,6 +8,15 @@ const stats = ['str',
 const attackStats = ['none', ...stats];
 const sheetFaces = ['front', 'inventory', 'spells', 'my-story'];
 const spellcastingAttrOptions = ['auto', ...stats];
+const statFullNames = {
+    str: 'Strength',
+    dex: 'Dexterity',
+    con: 'Constitution',
+    int: 'Intelligence',
+    wis: 'Wisdom',
+    cha: 'Charisma'
+};
+const QUICK_ACTION_SEARCH_DICE = [20, 12, 10, 8, 6, 4, 100];
 
 const skillsMap = {
     'acrobatics': 'dex', 'animal handling': 'wis', 'arcana': 'int', 'athletics': 'str',
@@ -61,11 +70,14 @@ let spellbookHideEmptyFieldsOnLoad = true;
 const QUICK_ACTION_MAX_COUNT = 60;
 const QUICK_ACTION_LONG_PRESS_MS = 550;
 const QUICK_ACTION_LONG_PRESS_MOVE_PX = 12;
+const QUICK_ACTION_SEARCH_RESULT_LIMIT = 18;
 const QUICK_ACTION_INITIATIVE_CODE = 'rollInitiative()';
 const QUICK_ACTION_INITIATIVE_SIGNATURE = `code:${QUICK_ACTION_INITIATIVE_CODE}`;
 let quickActionEventsBound = false;
 let quickActionsPanelOpen = false;
 let quickActionsPanelEventsBound = false;
+let quickActionSearchOpen = false;
+let quickActionSearchQuery = '';
 let quickActionLongPressTimer = null;
 let quickActionLongPressTarget = null;
 let quickActionLongPressPointerId = null;
@@ -900,7 +912,12 @@ function setQuickActionsPanelOpen(open) {
     toggle.classList.toggle('active', quickActionsPanelOpen);
     toggle.setAttribute('aria-expanded', quickActionsPanelOpen ? 'true' : 'false');
 
-    if (quickActionsPanelOpen) renderQuickActions();
+    if (quickActionsPanelOpen) {
+        renderQuickActions();
+        return;
+    }
+
+    setQuickActionSearchOpen(false, { clearQuery: true, focus: false });
 }
 
 function toggleQuickActionsPanel(forceOpen) {
@@ -923,7 +940,22 @@ function bindQuickActionsPanelEvents() {
     document.addEventListener('keydown', (event) => {
         if (!quickActionsPanelOpen) return;
         if (event.key !== 'Escape') return;
+        if (quickActionSearchOpen) {
+            event.preventDefault();
+            setQuickActionSearchOpen(false, { focus: false });
+            return;
+        }
         setQuickActionsPanelOpen(false);
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (!quickActionSearchOpen || event.key !== 'Enter') return;
+        const input = document.getElementById('quickActionSearchInput');
+        if (!input || event.target !== input) return;
+        const { results } = collectQuickActionSearchResults(1);
+        if (!results.length) return;
+        event.preventDefault();
+        runQuickActionSearchResult(results[0].key);
     });
 }
 
@@ -3337,6 +3369,7 @@ function pushInitiativeToSharedVTT(payload) {
         const safeNameLower = name.toLowerCase();
         let matchedBySource = false;
         const shouldPromoteToPacketSource = sourceType === 'player' && !!sourceId;
+        const allowNameFallback = !sourceId;
 
         const existingIdx = entries.findIndex((entry) => {
             const sameSource = !!(sourceId
@@ -3346,6 +3379,7 @@ function pushInitiativeToSharedVTT(payload) {
                 matchedBySource = true;
                 return true;
             }
+            if (!allowNameFallback) return false;
             return String(entry && entry.name || '').trim().toLowerCase() === safeNameLower;
         });
 
@@ -3354,10 +3388,13 @@ function pushInitiativeToSharedVTT(payload) {
             : {};
         const linkedToken = findVTTTokenBySource(draft, sourceType, sourceId);
         const hasPacketDefences = Object.values(nextDefences).some((value) => value !== null);
+        const deterministicEntryId = sourceId
+            ? sanitizeString(`init_${sourceType}_${sourceId}`, '', 120).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 120)
+            : '';
         const nextEntry = {
             id: existingIdx >= 0 && base.id
                 ? String(base.id)
-                : `init_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+                : (deterministicEntryId || `init_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`),
             name,
             linkedTokenId: linkedToken
                 ? sanitizeString(linkedToken.id, '', 120).trim()
@@ -3394,8 +3431,14 @@ function pushInitiativeToSharedVTT(payload) {
             || (Number(right && right.tie || 0) - Number(left && left.tie || 0))
             || String(left && left.name || '').localeCompare(String(right && right.name || ''))
         );
-        if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
+        const shouldSetActiveIfEmpty = !draft.initiative.activeEntryId && !!entries[0];
 
+        if (typeof store.upsertVTTInitiativeEntry === 'function') {
+            store.upsertVTTInitiativeEntry(nextEntry, caseId, { setActiveIfEmpty: shouldSetActiveIfEmpty });
+            return true;
+        }
+
+        if (shouldSetActiveIfEmpty) draft.initiative.activeEntryId = entries[0].id;
         store.updateVTTState(draft, caseId);
         return true;
     } catch (err) {
@@ -4711,7 +4754,7 @@ function getQuickActionPresentation(action) {
 }
 
 function updateQuickActionsInstructionState() {
-    const hintText = 'Right-click or long-press a die roll to add a quick action.';
+    const hintText = 'Use Find Rolls to search and roll instantly, or right-click / long-press a die roll to pin it here.';
     const toggle = document.getElementById('btnQuickActionsToggle');
     const panelHint = document.getElementById('quickActionsPanelHint');
 
@@ -4725,11 +4768,392 @@ function updateQuickActionsInstructionState() {
     }
 }
 
+function normalizeQuickActionSearchText(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function buildQuickActionSearchItem(options = {}) {
+    const key = String(options.key || '').trim();
+    if (!key) return null;
+    const baseAction = options && options.action ? options.action : null;
+    const actionId = `qa_search_${key.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    const action = sanitizeQuickActionEntry(baseAction ? { ...baseAction, id: actionId } : null);
+    if (!action) return null;
+    const label = String(options.label || action.label || 'Quick Action').trim() || action.label || 'Quick Action';
+    const summary = String(options.summary || action.summary || 'Pinned roll action').trim() || action.summary || 'Pinned roll action';
+    const category = String(options.category || 'Roll').trim() || 'Roll';
+    const detail = String(options.detail || '').trim();
+    const priority = Number.isFinite(options.priority) ? Number(options.priority) : 0;
+    const searchTerms = [
+        label,
+        summary,
+        category,
+        detail,
+        options.searchTerms || ''
+    ].join(' ');
+    return {
+        key,
+        label,
+        summary,
+        category,
+        detail,
+        priority,
+        searchText: normalizeQuickActionSearchText(searchTerms),
+        action: sanitizeQuickActionEntry({ ...action, label, summary, id: actionId })
+    };
+}
+
+function buildQuickActionSearchCodeItem(options = {}) {
+    const code = normalizeQuickActionCode(options.code || '');
+    if (!isSupportedQuickActionCode(code)) return null;
+    const meta = getQuickActionMetaForCode(code, options.label || '');
+    return buildQuickActionSearchItem({
+        ...options,
+        label: options.label || meta.label,
+        summary: options.summary || meta.summary,
+        action: {
+            kind: 'code',
+            code,
+            label: options.label || meta.label,
+            summary: options.summary || meta.summary
+        }
+    });
+}
+
+function buildQuickActionSearchSpellItem(idx, ritual = false) {
+    if (!Array.isArray(data.spellbook) || !data.spellbook[idx]) return null;
+    const spell = sanitizeSpellbookEntry(data.spellbook[idx]);
+    const spellName = String(spell.name || '').trim();
+    if (!spellName) return null;
+    if (ritual && !canRitualCastSpell(spell)) return null;
+    const level = Math.max(0, Math.min(9, parseInt(spell.lvl, 10) || 0));
+    const levelText = level === 0 ? 'Cantrip' : `Level ${level}`;
+    const label = `${ritual ? 'Ritual: ' : 'Cast: '}${spellName}`;
+    return buildQuickActionSearchItem({
+        key: `spell:${ritual ? 'ritual' : 'cast'}:${idx}`,
+        category: ritual ? 'Ritual' : 'Spell',
+        detail: levelText,
+        priority: ritual ? 610 : 620,
+        searchTerms: [
+            spellName,
+            levelText,
+            spell.school || '',
+            spell.classes || '',
+            spell.range || '',
+            spell.duration || '',
+            ritual ? 'ritual' : 'spell cast'
+        ].join(' '),
+        action: {
+            kind: 'spell',
+            castMode: ritual ? 'ritual' : 'normal',
+            spellName,
+            spellIndex: idx,
+            label,
+            summary: `${ritual ? 'Ritual cast' : 'Cast from spellbook'} • ${levelText}`
+        }
+    });
+}
+
+function hasQuickActionSearchAttack(atk) {
+    if (!atk || typeof atk !== 'object') return false;
+    return [
+        atk.name,
+        atk.dmg,
+        atk.atkBonus,
+        atk.dmgBonus,
+        atk.desc
+    ].some((value) => String(value || '').trim().length > 0)
+        || (typeof atk.atkStat === 'string' && atk.atkStat !== 'none')
+        || (typeof atk.dmgStat === 'string' && atk.dmgStat !== 'none');
+}
+
+function getQuickActionSearchCatalog() {
+    const items = [];
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'core:initiative',
+        category: 'Core',
+        code: 'rollInitiative()',
+        detail: 'Combat',
+        priority: 1300,
+        searchTerms: 'initiative init combat turn order'
+    }));
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'core:hitdie',
+        category: 'Recovery',
+        code: 'rollHitDie()',
+        detail: 'Short Rest',
+        priority: 1220,
+        searchTerms: 'hit die hd healing short rest recover'
+    }));
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'core:deathsave',
+        category: 'Recovery',
+        code: 'rollDeathSave()',
+        detail: 'Emergency',
+        priority: 1180,
+        searchTerms: 'death save dying stabilize emergency'
+    }));
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'core:custom',
+        category: 'Utility',
+        code: 'rollCustom()',
+        detail: 'Formula',
+        priority: 1140,
+        searchTerms: 'custom roll formula arbitrary dice'
+    }));
+
+    stats.forEach((stat) => {
+        const shortName = String(stat || '').toLowerCase();
+        const fullName = statFullNames[shortName] || shortName.toUpperCase();
+        items.push(buildQuickActionSearchCodeItem({
+            key: `check:${shortName}`,
+            category: 'Check',
+            code: `rollCheck('${shortName}')`,
+            label: `${fullName} Check`,
+            detail: fullName,
+            priority: 900,
+            searchTerms: `${shortName} ${fullName} ability check`
+        }));
+        items.push(buildQuickActionSearchCodeItem({
+            key: `save:${shortName}`,
+            category: 'Save',
+            code: `rollSave('${shortName}')`,
+            label: `${fullName} Save`,
+            detail: fullName,
+            priority: 880,
+            searchTerms: `${shortName} ${fullName} save saving throw`
+        }));
+    });
+
+    Object.keys(skillsMap).forEach((skillName) => {
+        const ability = String(skillsMap[skillName] || '').toLowerCase();
+        const abilityName = statFullNames[ability] || ability.toUpperCase();
+        const priority = skillName === 'perception'
+            ? 1120
+            : skillName === 'stealth'
+                ? 1110
+                : skillName === 'investigation'
+                    ? 1080
+                    : 840;
+        items.push(buildQuickActionSearchCodeItem({
+            key: `skill:${skillName}`,
+            category: 'Skill',
+            code: `rollSkill('${skillName}')`,
+            label: toTitleCaseWords(skillName),
+            detail: abilityName,
+            priority,
+            searchTerms: `${skillName} ${ability} ${abilityName} skill check`
+        }));
+    });
+
+    if (Array.isArray(data.attacks)) {
+        data.attacks.forEach((atk, idx) => {
+            if (!hasQuickActionSearchAttack(atk)) return;
+            const attackName = String(atk && atk.name ? atk.name : '').trim() || `Attack ${idx + 1}`;
+            const damageFormula = String(atk && atk.dmg ? atk.dmg : '').trim();
+            items.push(buildQuickActionSearchCodeItem({
+                key: `attack:atk:${idx}`,
+                category: 'Attack',
+                code: `rollAttack(${idx})`,
+                label: `Atk: ${attackName}`,
+                detail: damageFormula || 'Attack roll',
+                priority: 760,
+                searchTerms: `${attackName} attack weapon strike to hit ${damageFormula} ${atk && atk.desc ? atk.desc : ''}`
+            }));
+            items.push(buildQuickActionSearchCodeItem({
+                key: `attack:dmg:${idx}`,
+                category: 'Damage',
+                code: `rollDamage(${idx})`,
+                label: `Dmg: ${attackName}`,
+                summary: damageFormula ? `Roll damage • ${damageFormula}` : 'Roll damage',
+                detail: damageFormula || 'Damage',
+                priority: 750,
+                searchTerms: `${attackName} damage ${damageFormula} ${atk && atk.desc ? atk.desc : ''}`
+            }));
+        });
+    }
+
+    if (Array.isArray(data.resources)) {
+        data.resources.forEach((res, idx) => {
+            if (!res || !res.rCheck) return;
+            const resourceName = String(res.name || '').trim() || `Resource ${idx + 1}`;
+            const formula = String(res.rFormula || '1d6').trim() || '1d6';
+            items.push(buildQuickActionSearchCodeItem({
+                key: `resource:recharge:${idx}`,
+                category: 'Recharge',
+                code: `rollResRecharge(${idx})`,
+                label: `Recharge: ${resourceName}`,
+                summary: `Roll recharge • ${formula}`,
+                detail: formula,
+                priority: 700,
+                searchTerms: `${resourceName} recharge recover resource ${formula}`
+            }));
+        });
+    }
+
+    if (Array.isArray(data.spellbook)) {
+        data.spellbook.forEach((entry, idx) => {
+            items.push(buildQuickActionSearchSpellItem(idx, false));
+            items.push(buildQuickActionSearchSpellItem(idx, true));
+        });
+    }
+
+    QUICK_ACTION_SEARCH_DICE.forEach((sides) => {
+        const allowAdvantage = sides === 20;
+        items.push(buildQuickActionSearchCodeItem({
+            key: `die:${sides}`,
+            category: 'Die',
+            code: `rollDie(${sides}, 0, 'd${sides}', ${allowAdvantage ? 'true' : 'false'}, 'check')`,
+            label: `d${sides}`,
+            summary: 'Standard die roll',
+            detail: allowAdvantage ? 'Supports ADV/DIS' : 'Single die',
+            priority: 420,
+            searchTerms: `d${sides} die dice standard roll`
+        }));
+    });
+
+    return items.filter(Boolean);
+}
+
+function getQuickActionSearchScore(item, tokens = []) {
+    const normalizedLabel = normalizeQuickActionSearchText(item && item.label ? item.label : '');
+    const normalizedDetail = normalizeQuickActionSearchText(item && item.detail ? item.detail : '');
+    const normalizedCategory = normalizeQuickActionSearchText(item && item.category ? item.category : '');
+    const normalizedSearchText = normalizeQuickActionSearchText(item && item.searchText ? item.searchText : '');
+    let score = Number.isFinite(item && item.priority) ? Number(item.priority) : 0;
+    if (!tokens.length) return score;
+
+    tokens.forEach((token) => {
+        if (!token) return;
+        if (normalizedLabel === token) score += 180;
+        else if (normalizedLabel.startsWith(token)) score += 120;
+        else if (normalizedLabel.includes(token)) score += 70;
+        if (normalizedDetail.includes(token)) score += 22;
+        if (normalizedCategory.includes(token)) score += 18;
+        if (normalizedSearchText.includes(token)) score += 14;
+    });
+
+    if (tokens.every((token) => normalizedLabel.includes(token))) score += 55;
+    return score;
+}
+
+function collectQuickActionSearchResults(limit = QUICK_ACTION_SEARCH_RESULT_LIMIT) {
+    const tokens = normalizeQuickActionSearchText(quickActionSearchQuery).split(' ').filter(Boolean);
+    const results = getQuickActionSearchCatalog().filter((item) => {
+        if (!tokens.length) return true;
+        return tokens.every((token) => item.searchText.includes(token));
+    }).sort((a, b) => {
+        const scoreDiff = getQuickActionSearchScore(b, tokens) - getQuickActionSearchScore(a, tokens);
+        if (scoreDiff !== 0) return scoreDiff;
+        return a.label.localeCompare(b.label);
+    });
+
+    return {
+        totalCount: results.length,
+        results: results.slice(0, limit)
+    };
+}
+
+function findQuickActionSearchItem(key) {
+    const token = String(key || '').trim();
+    if (!token) return null;
+    return getQuickActionSearchCatalog().find((item) => item && item.key === token) || null;
+}
+
+function isQuickActionSaved(action) {
+    if (!action) return false;
+    ensureQuickActionsState();
+    return data.quickActions.some((entry) => entry && entry.signature === action.signature);
+}
+
+function setQuickActionSearchOpen(open, options = {}) {
+    const nextOpen = !!open && quickActionsPanelOpen;
+    quickActionSearchOpen = nextOpen;
+    if (options && options.clearQuery) quickActionSearchQuery = '';
+    renderQuickActionSearchPopover();
+    if (!quickActionSearchOpen || options.focus === false) return;
+    requestAnimationFrame(() => {
+        const input = document.getElementById('quickActionSearchInput');
+        if (!input) return;
+        input.focus();
+        input.select();
+    });
+}
+
+function toggleQuickActionSearchPopover(forceOpen) {
+    const nextState = typeof forceOpen === 'boolean' ? forceOpen : !quickActionSearchOpen;
+    setQuickActionSearchOpen(nextState, { focus: nextState });
+}
+
+function updateQuickActionSearchQuery(value) {
+    quickActionSearchQuery = String(value || '');
+    renderQuickActionSearchPopover();
+}
+
+function renderQuickActionSearchPopover() {
+    const popover = document.getElementById('quickActionSearchPopover');
+    const trigger = document.getElementById('btnQuickActionSearch');
+    const input = document.getElementById('quickActionSearchInput');
+    const resultsEl = document.getElementById('quickActionSearchResults');
+    const countEl = document.getElementById('quickActionSearchCount');
+    if (trigger) {
+        trigger.classList.toggle('active', quickActionSearchOpen);
+        trigger.setAttribute('aria-expanded', quickActionSearchOpen ? 'true' : 'false');
+    }
+    if (popover) popover.hidden = !quickActionSearchOpen;
+    if (input && input.value !== quickActionSearchQuery) input.value = quickActionSearchQuery;
+    if (!resultsEl) return;
+
+    const { totalCount, results } = collectQuickActionSearchResults();
+    if (countEl) {
+        if (quickActionSearchQuery.trim()) {
+            countEl.textContent = totalCount > results.length
+                ? `${results.length} of ${totalCount}`
+                : `${totalCount} match${totalCount === 1 ? '' : 'es'}`;
+        } else {
+            countEl.textContent = `${results.length} ready`;
+        }
+    }
+
+    if (!quickActionSearchOpen) return;
+
+    if (!results.length) {
+        const queryText = quickActionSearchQuery.trim();
+        resultsEl.innerHTML = `<div class="quick-actions-search-empty">${queryText
+            ? `No rolls match "${escapeHtml(queryText)}" yet.`
+            : 'No searchable rolls are available on this sheet yet.'}</div>`;
+        return;
+    }
+
+    resultsEl.innerHTML = results.map((item) => {
+        const safeKey = escapeJsString(item.key);
+        const pinned = isQuickActionSaved(item.action);
+        const pinClass = pinned ? 'quick-actions-search-pin is-pinned' : 'quick-actions-search-pin';
+        const pinLabel = pinned ? 'Pinned' : 'Pin';
+        const pinDisabled = pinned ? ' disabled' : '';
+        const detailMarkup = item.detail
+            ? `<span class="quick-actions-search-detail">${escapeHtml(item.detail)}</span>`
+            : '';
+        return `<div class="quick-actions-search-item">
+            <button type="button" class="quick-actions-search-run" data-onclick="runQuickActionSearchResult('${safeKey}')">
+                <span class="quick-actions-search-meta">
+                    <span class="quick-actions-search-kind">${escapeHtml(item.category)}</span>
+                    ${detailMarkup}
+                </span>
+                <span class="quick-actions-search-label">${escapeHtml(item.label)}</span>
+                <span class="quick-actions-search-summary">${escapeHtml(item.summary)}</span>
+            </button>
+            <button type="button" class="${pinClass}" data-onclick="pinQuickActionSearchResult('${safeKey}')"${pinDisabled}>${pinLabel}</button>
+        </div>`;
+    }).join('');
+}
+
 function renderQuickActions() {
     const list = document.getElementById('quickActionsList');
     if (!list) return;
     ensureQuickActionsState();
     updateQuickActionsInstructionState();
+    renderQuickActionSearchPopover();
 
     if (!data.quickActions.length) {
         list.innerHTML = '<div class="quick-action-empty">No quick actions yet. Right-click or long-press a roll button to pin one.</div>';
@@ -4787,23 +5211,28 @@ function executeQuickActionCode(code) {
     }
 }
 
-async function runQuickAction(id) {
-    ensureQuickActionsState();
-    const action = data.quickActions.find((entry) => entry && entry.id === id);
-    if (!action) return;
+async function runQuickActionEntry(action) {
+    if (!action) return false;
 
     if (action.kind === 'spell') {
         const spellIdx = findQuickActionSpellIndex(action);
         if (spellIdx < 0) {
             showLog('Quick Action', 'Spell Missing');
-            return;
+            return false;
         }
         if (action.castMode === 'ritual') await castSpellRitual(spellIdx);
         else await castSpell(spellIdx);
-        return;
+        return true;
     }
 
-    executeQuickActionCode(action.code);
+    return executeQuickActionCode(action.code);
+}
+
+async function runQuickAction(id) {
+    ensureQuickActionsState();
+    const action = data.quickActions.find((entry) => entry && entry.id === id);
+    if (!action) return;
+    await runQuickActionEntry(action);
 }
 
 function removeQuickAction(id) {
@@ -4858,26 +5287,49 @@ function buildQuickActionFromControl(control) {
     });
 }
 
-function addQuickActionFromControl(control) {
+function addQuickActionEntry(action, options = {}) {
     ensureQuickActionsState();
-    const action = buildQuickActionFromControl(control);
-    if (!action) return false;
+    const sanitized = sanitizeQuickActionEntry({
+        ...(action || {}),
+        id: generateQuickActionId()
+    });
+    if (!sanitized) return false;
 
-    if (data.quickActions.some((entry) => entry && entry.signature === action.signature)) {
-        showLog('Quick Action', 'Already Saved');
+    if (data.quickActions.some((entry) => entry && entry.signature === sanitized.signature)) {
+        if (!options.silentDuplicate) showLog('Quick Action', 'Already Saved');
         return false;
     }
 
     if (data.quickActions.length >= QUICK_ACTION_MAX_COUNT) {
-        showLog('Quick Action', 'List Full');
+        if (!options.silentFull) showLog('Quick Action', 'List Full');
         return false;
     }
 
-    data.quickActions.push(action);
+    data.quickActions.push(sanitized);
     save();
     renderQuickActions();
-    showLog('Quick Action', `Saved: ${action.label}`);
+    if (!options.silentSuccess) showLog('Quick Action', `Saved: ${sanitized.label}`);
     return true;
+}
+
+function addQuickActionFromControl(control) {
+    const action = buildQuickActionFromControl(control);
+    if (!action) return false;
+    return addQuickActionEntry(action);
+}
+
+async function runQuickActionSearchResult(key) {
+    const item = findQuickActionSearchItem(key);
+    if (!item || !item.action) return;
+    await runQuickActionEntry(item.action);
+    setQuickActionSearchOpen(false);
+}
+
+function pinQuickActionSearchResult(key) {
+    const item = findQuickActionSearchItem(key);
+    if (!item || !item.action) return;
+    const pinned = addQuickActionEntry(item.action);
+    if (!pinned) renderQuickActionSearchPopover();
 }
 
 function getQuickActionControlTarget(target) {
@@ -6480,5 +6932,9 @@ window.matchSpellbookEntriesByName = matchSpellbookEntriesByName;
 window.sanitizeSpellbookEntry = sanitizeSpellbookEntry;
 window.syncSpellbookWithSrd = syncSpellbookWithSrd;
 window.toggleQuickActionsPanel = toggleQuickActionsPanel;
+window.toggleQuickActionSearchPopover = toggleQuickActionSearchPopover;
+window.updateQuickActionSearchQuery = updateQuickActionSearchQuery;
 window.runQuickAction = runQuickAction;
+window.runQuickActionSearchResult = runQuickActionSearchResult;
+window.pinQuickActionSearchResult = pinQuickActionSearchResult;
 window.removeQuickAction = removeQuickAction;
