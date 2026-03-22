@@ -1752,6 +1752,48 @@
         return true;
     };
 
+    const spawnAllPlayersAtWorldPoint = (worldPoint = null) => {
+        const players = getPlayers().filter(Boolean);
+        if (!players.length) return false;
+        closeNPCSearch();
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene) return;
+            if (!Array.isArray(scene.tokens)) scene.tokens = [];
+            const safeWorldPoint = worldPoint && typeof worldPoint === 'object'
+                ? { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) }
+                : null;
+            const cellPx = Math.max(1, toNumber(scene && scene.grid && scene.grid.cellPx, DEFAULT_VTT_CELL_PX));
+            const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(players.length))));
+            const columnCenter = (columns - 1) / 2;
+            let firstTokenId = '';
+
+            players.forEach((player, idx) => {
+                const token = buildTokenFromPlayer(player);
+                if (!token) return;
+                if (safeWorldPoint) {
+                    const col = idx % columns;
+                    const row = Math.floor(idx / columns);
+                    positionTokenAtWorldPoint(token, scene, {
+                        x: safeWorldPoint.x + (col - columnCenter) * cellPx * 2,
+                        y: safeWorldPoint.y + row * cellPx * 2
+                    });
+                } else {
+                    const existingCount = Array.isArray(scene.tokens) ? scene.tokens.length : 0;
+                    token.x = existingCount * 2;
+                    token.y = 0;
+                }
+                scene.tokens.push(token);
+                if (!firstTokenId) firstTokenId = token.id;
+            });
+
+            selectedTokenId = firstTokenId;
+            selectedEntryId = '';
+            quickSpawnMenuState = null;
+        });
+        return true;
+    };
+
     const syncInitiativeEntryFromToken = (entry, token) => ({
         ...entry,
         name: token.label,
@@ -2832,10 +2874,15 @@
             .sort((left, right) => String(left && left.name || '').localeCompare(String(right && right.name || '')))
             .slice(0, 6);
         const hasGuildlessImageSource = !!getConfiguredSupabaseUrl();
+        const playerCount = players.length;
         quickSpawnMenuEl.hidden = false;
         quickSpawnMenuEl.innerHTML = `
             <div class="vtt-quick-spawn-title">Quick Spawn</div>
             <div class="vtt-quick-spawn-list">
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-all-players"${playerCount ? '' : ' disabled'}>
+                    <span class="vtt-token-spawn-name">Spawn All Players</span>
+                    <span class="vtt-token-spawn-meta">${playerCount ? `Spawn ${playerCount} rostered player${playerCount === 1 ? '' : 's'} here` : 'No rostered players yet'}</span>
+                </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-guildless">
                     <span class="vtt-token-spawn-name">Place Guildless</span>
                     <span class="vtt-token-spawn-meta">${hasGuildlessImageSource ? 'Spawn here · random portrait 1-300' : 'Spawn here · initials fallback until sync URL is set'}</span>
@@ -3995,6 +4042,11 @@
         if (action === 'quick-spawn-custom') {
             if (!quickSpawnMenuState) return;
             spawnTokenFromDescriptor('custom', '', quickSpawnMenuState.worldPoint);
+            return;
+        }
+        if (action === 'quick-spawn-all-players') {
+            if (!quickSpawnMenuState) return;
+            spawnAllPlayersAtWorldPoint(quickSpawnMenuState.worldPoint);
             return;
         }
         if (action === 'quick-spawn-guildless') {
