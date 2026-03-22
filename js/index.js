@@ -85,6 +85,10 @@ const MY_STORY_MSG = Object.freeze({
     POINTER: 'rtf-my-story:pointer'
 });
 
+function buildSheetIdentity() {
+    return `sheet_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function updateRollerStickyOffset() {
     const hero = document.getElementById('rollerBar');
     const root = document.documentElement;
@@ -1001,7 +1005,7 @@ function ensureQuickActionsState() {
 function getDefaultChar() {
     let char = {
         meta: {
-            player: '', name: 'New Character', level: 1, casterLevel: 1, casterType: 'none', webhook: '', discordActive: false, init: 0, speed: '', spellAttr: 'auto'
+            player: '', name: 'New Character', level: 1, casterLevel: 1, casterType: 'none', webhook: '', discordActive: false, init: 0, speed: '', spellAttr: 'auto', sheetKey: buildSheetIdentity(), stealthRoll: null
         }
 
         ,
@@ -1539,6 +1543,11 @@ function sanitizeCharacterData(rawChar) {
     out.meta.discordActive = sanitizeBoolean(out.meta.discordActive, false);
     out.meta.init = sanitizeString(String(out.meta.init ?? ''), '', 24);
     out.meta.speed = sanitizeString(String(out.meta.speed ?? ''), '', 24);
+    const sheetKey = sanitizeString(String(out.meta.sheetKey ?? ''), '', 120).trim();
+    out.meta.sheetKey = sheetKey || buildSheetIdentity();
+    out.meta.stealthRoll = out.meta.stealthRoll === null || out.meta.stealthRoll === undefined || out.meta.stealthRoll === ''
+        ? null
+        : Math.max(0, Math.min(99, Math.round(sanitizeNumber(out.meta.stealthRoll, 0, 0, 99))));
     const spellAttrRaw = sanitizeString(String(out.meta.spellAttr ?? 'auto'), 'auto', 16).toLowerCase();
     out.meta.spellAttr = spellcastingAttrOptions.includes(spellAttrRaw) ? spellAttrRaw : 'auto';
 
@@ -2338,6 +2347,7 @@ function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check', cus
         `Dice: ${formulaText}`, `**${total}**`, type, customDesc);
 
     if (consumedInsp) consumeInspiration();
+    return { total, formulaText, result, effectiveMode };
 }
 
 function parseComplexBonus(str) {
@@ -3211,6 +3221,85 @@ function normalizeVTTInitiativeDefences(defences) {
     }, {});
 }
 
+function findVTTTokenBySource(state, sourceType = '', sourceId = '') {
+    if (!state || !Array.isArray(state.scenes)) return null;
+    const cleanSourceType = sanitizeString(sourceType, '', 40).trim();
+    const cleanSourceId = sanitizeString(sourceId, '', 120).trim();
+    if (!cleanSourceType || !cleanSourceId) return null;
+    for (const scene of state.scenes) {
+        if (!scene || !Array.isArray(scene.tokens)) continue;
+        const match = scene.tokens.find((token) =>
+            sanitizeString(token && token.sourceType ? String(token.sourceType) : '', '', 40).trim() === cleanSourceType
+            && sanitizeString(token && token.sourceId ? String(token.sourceId) : '', '', 120).trim() === cleanSourceId
+        );
+        if (match) return match;
+    }
+    return null;
+}
+
+function normalizeSheetInitiativeIdentityName(value) {
+    return sanitizeString(value, '', 160).trim().toLowerCase();
+}
+
+function getCurrentSheetIdentity() {
+    if (!data || typeof data !== 'object') return buildSheetIdentity();
+    if (!data.meta || typeof data.meta !== 'object') data.meta = {};
+    let sheetKey = sanitizeString(String(data.meta.sheetKey ?? ''), '', 120).trim();
+    if (!sheetKey) {
+        sheetKey = buildSheetIdentity();
+        data.meta.sheetKey = sheetKey;
+        if (allData && allData.characters && allData.activeId) {
+            allData.characters[allData.activeId] = data;
+            saveGlobal();
+        }
+    }
+    return sheetKey;
+}
+
+function persistRosterPlayerSheetKey(player, sheetKey) {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getPlayers !== 'function') return null;
+    const cleanSheetKey = sanitizeString(String(sheetKey ?? ''), '', 120).trim();
+    const playerId = sanitizeString(player && player.id ? String(player.id) : '', '', 120).trim();
+    if (!cleanSheetKey || !playerId || typeof store.save !== 'function') return null;
+    const players = Array.isArray(store.getPlayers()) ? store.getPlayers() : [];
+    const target = players.find((entry) => sanitizeString(entry && entry.id ? String(entry.id) : '', '', 120).trim() === playerId);
+    if (!target) return null;
+    if (sanitizeString(String(target.sheetKey ?? ''), '', 120).trim() === cleanSheetKey) return target;
+    target.sheetKey = cleanSheetKey;
+    store.save({ scope: `campaign.players.${target.id}` });
+    return target;
+}
+
+function findRosterPlayerForSheetInitiative(candidateNames = [], sheetKey = '') {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getPlayers !== 'function') return null;
+    const players = Array.isArray(store.getPlayers()) ? store.getPlayers() : [];
+    const cleanSheetKey = sanitizeString(String(sheetKey ?? ''), '', 120).trim();
+    if (cleanSheetKey) {
+        const bySheetKey = players.filter((player) =>
+            sanitizeString(String((player && player.sheetKey) ?? ''), '', 120).trim() === cleanSheetKey
+        );
+        if (bySheetKey.length === 1) return bySheetKey[0];
+    }
+    const names = new Set(
+        (Array.isArray(candidateNames) ? candidateNames : [candidateNames])
+            .map((entry) => normalizeSheetInitiativeIdentityName(entry))
+            .filter(Boolean)
+    );
+    if (!names.size) return null;
+
+    const matches = new Map();
+    players.forEach((player) => {
+        const playerId = sanitizeString(player && player.id ? String(player.id) : '', '', 120).trim();
+        const playerName = normalizeSheetInitiativeIdentityName(player && player.name);
+        if (!playerId || !playerName || !names.has(playerName)) return;
+        matches.set(playerId, player);
+    });
+
+    return matches.size === 1 ? Array.from(matches.values())[0] : null;
+}
+
 function pushInitiativeToSharedVTT(payload) {
     const packet = payload && typeof payload === 'object' ? payload : null;
     const store = window.RTF_STORE;
@@ -3240,10 +3329,14 @@ function pushInitiativeToSharedVTT(payload) {
         const passivePerception = packet.passivePerception === null || packet.passivePerception === undefined || packet.passivePerception === ''
             ? null
             : Math.max(0, Math.min(99, Math.round(sanitizeNumber(packet.passivePerception, 10, 0, 99))));
+        const stealthRoll = packet.stealthRoll === null || packet.stealthRoll === undefined || packet.stealthRoll === ''
+            ? null
+            : Math.max(0, Math.min(99, Math.round(sanitizeNumber(packet.stealthRoll, 0, 0, 99))));
         const nextDefences = normalizeVTTInitiativeDefences(packet.defences);
         const entries = draft.initiative.entries;
         const safeNameLower = name.toLowerCase();
         let matchedBySource = false;
+        const shouldPromoteToPacketSource = sourceType === 'player' && !!sourceId;
 
         const existingIdx = entries.findIndex((entry) => {
             const sameSource = !!(sourceId
@@ -3259,19 +3352,22 @@ function pushInitiativeToSharedVTT(payload) {
         const base = existingIdx >= 0 && entries[existingIdx] && typeof entries[existingIdx] === 'object'
             ? entries[existingIdx]
             : {};
+        const linkedToken = findVTTTokenBySource(draft, sourceType, sourceId);
         const hasPacketDefences = Object.values(nextDefences).some((value) => value !== null);
         const nextEntry = {
             id: existingIdx >= 0 && base.id
                 ? String(base.id)
                 : `init_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
             name,
-            linkedTokenId: sanitizeString(base.linkedTokenId, '', 120).trim(),
+            linkedTokenId: linkedToken
+                ? sanitizeString(linkedToken.id, '', 120).trim()
+                : sanitizeString(base.linkedTokenId, '', 120).trim(),
             side: sanitizeString(base.side, 'player', 20).trim().toLowerCase() || 'player',
             imageUrl: String(base.imageUrl || '').trim(),
-            sourceType: matchedBySource || existingIdx < 0
+            sourceType: matchedBySource || existingIdx < 0 || shouldPromoteToPacketSource
                 ? sourceType
                 : (sanitizeString(base.sourceType, sourceType, 40).trim() || sourceType),
-            sourceId: matchedBySource || existingIdx < 0
+            sourceId: matchedBySource || existingIdx < 0 || shouldPromoteToPacketSource
                 ? sourceId
                 : sanitizeString(base.sourceId, '', 120).trim(),
             total,
@@ -3280,13 +3376,15 @@ function pushInitiativeToSharedVTT(payload) {
             hpMax: hpMax !== null ? hpMax : (base.hpMax ?? null),
             ac: ac !== null ? ac : (base.ac ?? null),
             passivePerception: passivePerception !== null ? passivePerception : (base.passivePerception ?? null),
-            stealthRoll: base.stealthRoll ?? base.stealthDc ?? null,
+            stealthRoll: stealthRoll !== null ? stealthRoll : (base.stealthRoll ?? base.stealthDc ?? null),
             defences: hasPacketDefences ? nextDefences : normalizeVTTInitiativeDefences(base.defences),
             reactionUsed: !!base.reactionUsed,
             concentrating: !!base.concentrating,
             hidden: !!base.hidden,
             conditions: Array.isArray(base.conditions) ? base.conditions.slice(0, 24) : []
         };
+
+        if (linkedToken && stealthRoll !== null) linkedToken.stealthRoll = stealthRoll;
 
         if (existingIdx >= 0) entries[existingIdx] = nextEntry;
         else entries.push(nextEntry);
@@ -3364,10 +3462,21 @@ function rollInitiative() {
     showLog('Init', visibleScore);
 
     sendToDiscord("Initiative", `Dice: ${formulaText}`, `**${finalScore}**`, 'check');
-    const safeName = sanitizeString(data && data.meta ? data.meta.name : '', '', 160).trim()
-        || sanitizeString(data && data.meta ? data.meta.player : '', '', 160).trim()
+    const sheetCharacterName = sanitizeString(data && data.meta ? data.meta.name : '', '', 160).trim();
+    const sheetPlayerName = sanitizeString(data && data.meta ? data.meta.player : '', '', 160).trim();
+    const safeName = sheetCharacterName
+        || sheetPlayerName
         || 'Unnamed PC';
-    const sourceId = sanitizeString(`sheet_${allData && allData.activeId ? allData.activeId : 'unknown'}`, 'sheet_unknown', 80).replace(/[^A-Za-z0-9_-]/g, '') || 'sheet_unknown';
+    const sheetKey = getCurrentSheetIdentity();
+    const matchedRosterPlayer = findRosterPlayerForSheetInitiative([safeName, sheetCharacterName, sheetPlayerName], sheetKey);
+    if (matchedRosterPlayer) persistRosterPlayerSheetKey(matchedRosterPlayer, sheetKey);
+    const sourceType = matchedRosterPlayer ? 'player' : 'sheet';
+    const sourceId = matchedRosterPlayer
+        ? sanitizeString(matchedRosterPlayer && matchedRosterPlayer.id ? String(matchedRosterPlayer.id) : '', '', 120).trim()
+        : sheetKey;
+    const packetName = matchedRosterPlayer
+        ? (sanitizeString(matchedRosterPlayer && matchedRosterPlayer.name ? matchedRosterPlayer.name : '', '', 160).trim() || safeName)
+        : safeName;
     const hpCurrent = Number.isFinite(Number(data && data.vitals ? data.vitals.curr : null))
         ? Math.max(0, Math.round(Number(data.vitals.curr)))
         : null;
@@ -3381,16 +3490,20 @@ function rollInitiative() {
     const acParsed = parseInt(acDisplayEl ? String(acDisplayEl.textContent || '').trim() : '', 10);
     const acValue = Number.isFinite(acParsed) ? Math.max(0, Math.min(99, acParsed)) : null;
     const passivePerception = Math.max(0, Math.min(99, 10 + getComputedSkillBonus('perception')));
+    const stealthRoll = data && data.meta && data.meta.stealthRoll !== null && data.meta.stealthRoll !== undefined && data.meta.stealthRoll !== ''
+        ? Math.max(0, Math.min(99, Math.round(sanitizeNumber(data.meta.stealthRoll, 0, 0, 99))))
+        : null;
     const defences = getComputedDefences();
     const initiativePacket = {
         rollId: `init_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-        source: 'sheet',
+        source: sourceType,
         sourceId,
-        name: safeName,
+        name: packetName,
         total: Math.round(sanitizeNumber(total, 0, -999, 999)),
         tie: dexScore,
         ac: acValue,
         passivePerception,
+        stealthRoll,
         defences,
         hp: hpCurrent,
         maxHp: hpMax,
@@ -5301,7 +5414,13 @@ function rollSkill(skill) {
         else label += ` +Bonus`;
     }
 
-    rollDie(20, mod + (profLevel * pb) + misc, label, true, 'check');
+    const rollResult = rollDie(20, mod + (profLevel * pb) + misc, label, true, 'check');
+    if (skill === 'stealth' && rollResult && Number.isFinite(Number(rollResult.total))) {
+        data.meta.stealthRoll = Math.max(0, Math.min(99, Math.round(Number(rollResult.total))));
+        if (allData && allData.characters && allData.activeId) {
+            allData.characters[allData.activeId] = data;
+        }
+    }
 }
 
 function rollAttack(idx) {

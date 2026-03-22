@@ -475,6 +475,7 @@
         return {
             id: toTrimmedString(source.id, fallbackId, 80).trim() || fallbackId,
             name: toTrimmedString(source.name || 'New Agent', 'New Agent', 160),
+            sheetKey: toTrimmedString(source.sheetKey, '', 120).trim(),
             ac: Math.max(0, Math.min(999, Math.round(toNumber(source.ac, 10)))),
             init: Math.max(-99, Math.min(999, Math.round(toNumber(source.init, 0)))),
             hp: sanitizePlayerHp(source.hp, '10'),
@@ -7970,6 +7971,7 @@
                     players: compactEntity(campaign.players, (entry) => ({
                         id: toTrimmedString(entry.id, '', 80),
                         name: toTrimmedString(entry.name, '', 160),
+                        sheetKey: toTrimmedString(entry.sheetKey, '', 120),
                         dp: toNumber(entry.dp, 0),
                         hp: entry.hp,
                         ac: toNumber(entry.ac, 0),

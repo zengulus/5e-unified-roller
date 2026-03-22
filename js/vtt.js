@@ -1859,6 +1859,139 @@
         return null;
     };
 
+    const findSceneForTokenId = (state, tokenId) => {
+        if (!state || !Array.isArray(state.scenes)) return null;
+        const targetId = String(tokenId || '').trim();
+        if (!targetId) return null;
+        for (const scene of state.scenes) {
+            if (!scene || !Array.isArray(scene.tokens)) continue;
+            if (scene.tokens.some((token) => String(token && token.id || '').trim() === targetId)) {
+                return scene;
+            }
+        }
+        return null;
+    };
+
+    const hasAnyDefenceValues = (defences) => DEFENCE_KEYS.some((key) => hasValue(defences && defences[key]));
+
+    const getAssignedTokenForEntry = (entry, state = vttState) => {
+        if (!entry) return null;
+        const linkedToken = findTokenByIdAcrossScenes(state, entry.linkedTokenId);
+        if (linkedToken) return linkedToken;
+        if (entry.sourceType && entry.sourceId) {
+            return findTokenAcrossScenes(state, entry.sourceType, entry.sourceId);
+        }
+        return null;
+    };
+
+    const buildTokenAssignmentLabel = (token, scene, state = vttState) => {
+        if (!token) return 'Unlinked';
+        const cleanScene = scene || findSceneForTokenId(state, token.id);
+        const sceneName = cleanScene && cleanScene.name ? cleanScene.name : 'Scene';
+        const roleBits = [];
+        const activeScene = getActiveScene(state);
+        const sharedSceneId = getSharedSceneId(state);
+        if (activeScene && cleanScene && cleanScene.id === activeScene.id) roleBits.push('current');
+        if (cleanScene && cleanScene.id === sharedSceneId) roleBits.push('players');
+        const meta = roleBits.length ? ` (${roleBits.join(', ')})` : '';
+        return `${String(token.label || 'Token').trim() || 'Token'} - ${sceneName}${meta}`;
+    };
+
+    const getInitiativeTokenAssignmentOptions = (state = vttState) => {
+        if (!state || !Array.isArray(state.scenes)) return [];
+        const activeScene = getActiveScene(state);
+        const sharedSceneId = getSharedSceneId(state);
+        const options = [];
+        state.scenes.forEach((scene, sceneIdx) => {
+            if (!scene || !Array.isArray(scene.tokens)) return;
+            scene.tokens.forEach((token, tokenIdx) => {
+                if (!token || !token.id) return;
+                const sceneName = String(scene.name || 'Scene').trim() || 'Scene';
+                const tokenName = String(token.label || 'Token').trim() || 'Token';
+                const tags = [];
+                if (activeScene && scene.id === activeScene.id) tags.push('current');
+                if (scene.id === sharedSceneId) tags.push('players');
+                if (token.sourceType) tags.push(String(token.sourceType).trim());
+                options.push({
+                    tokenId: String(token.id),
+                    label: `${tokenName} - ${sceneName}${tags.length ? ` (${tags.join(', ')})` : ''}`,
+                    sortScene: scene.id === (activeScene && activeScene.id) ? -1 : sceneIdx,
+                    sortToken: tokenIdx,
+                    sortLabel: tokenName.toLowerCase()
+                });
+            });
+        });
+        return options.sort((left, right) =>
+            (left.sortScene - right.sortScene)
+            || left.sortLabel.localeCompare(right.sortLabel)
+            || (left.sortToken - right.sortToken)
+        );
+    };
+
+    const persistSheetIdentityForLinkedPlayer = (entry, token) => {
+        if (!entry || !token) return false;
+        if (String(entry.sourceType || '').trim() !== 'sheet') return false;
+        const sheetKey = String(entry.sourceId || '').trim();
+        if (!sheetKey) return false;
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        const store = getStore();
+        if (!rosterPlayer || !store || typeof store.getPlayers !== 'function' || typeof store.save !== 'function') return false;
+        const players = Array.isArray(store.getPlayers()) ? store.getPlayers() : [];
+        const target = players.find((player) => String(player && player.id || '').trim() === String(rosterPlayer.id || '').trim());
+        if (!target) return false;
+        if (String(target.sheetKey || '').trim() === sheetKey) return false;
+        target.sheetKey = sheetKey;
+        store.save({ scope: `campaign.players.${target.id}` });
+        return true;
+    };
+
+    const linkInitiativeEntryToToken = (entry, token) => {
+        if (!entry || !token) return entry;
+        const next = {
+            ...entry,
+            linkedTokenId: token.id,
+            side: token.side || entry.side || 'neutral',
+            imageUrl: token.imageUrl || entry.imageUrl || '',
+            sourceType: token.sourceType || entry.sourceType || '',
+            sourceId: token.sourceId || entry.sourceId || '',
+            hidden: !!token.hidden
+        };
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        const tokenStealthRoll = getTokenStealthRoll(token);
+        const tokenDefences = normalizeDefences(token.defences);
+        const entryStealthRoll = getEntryStealthRoll(next);
+
+        if (rosterPlayer) {
+            syncTokenRosterIdentity(token, rosterPlayer);
+            syncEntryRosterIdentity(next, rosterPlayer);
+        } else if (!hasValue(next.name)) {
+            next.name = String(token.label || 'Combatant').trim() || 'Combatant';
+        }
+
+        if (!hasValue(next.hpCurrent) && hasValue(token.hpCurrent)) next.hpCurrent = token.hpCurrent;
+        if (!hasValue(next.hpMax) && hasValue(token.hpMax)) next.hpMax = token.hpMax;
+        if (!hasValue(next.ac) && hasValue(token.ac)) next.ac = token.ac;
+        if (!hasValue(next.passivePerception) && hasValue(token.passivePerception)) next.passivePerception = token.passivePerception;
+        if (entryStealthRoll === null && tokenStealthRoll !== null) next.stealthRoll = tokenStealthRoll;
+        if (!hasAnyDefenceValues(next.defences) && hasAnyDefenceValues(tokenDefences)) next.defences = tokenDefences;
+        if ((!Array.isArray(next.conditions) || !next.conditions.length) && Array.isArray(token.conditions) && token.conditions.length) {
+            next.conditions = token.conditions.slice(0, 24);
+        }
+
+        if (!rosterPlayer && hasValue(next.name)) {
+            token.label = String(next.name || token.label || 'Token').trim() || 'Token';
+        }
+        if (hasValue(next.hpCurrent)) token.hpCurrent = next.hpCurrent;
+        if (hasValue(next.hpMax)) token.hpMax = next.hpMax;
+        if (hasValue(next.ac)) token.ac = next.ac;
+        if (hasValue(next.passivePerception)) token.passivePerception = next.passivePerception;
+        if (getEntryStealthRoll(next) !== null) token.stealthRoll = getEntryStealthRoll(next);
+        if (hasAnyDefenceValues(next.defences)) token.defences = normalizeDefences(next.defences);
+        if (Array.isArray(next.conditions) && next.conditions.length) token.conditions = next.conditions.slice(0, 24);
+
+        return next;
+    };
+
     const getTokenWorldRect = (token, scene) => {
         if (!token || !scene || !scene.grid) return null;
         const cellPx = getSceneCellPx(scene);
@@ -3226,6 +3359,12 @@
         if (!initiativeDetailPanelEl) return;
         const activePopoverId = initiativeDetailState && initiativeDetailState.entryId ? initiativeDetailState.entryId : '';
         const entry = getEntryById(activePopoverId);
+        const assignedToken = getAssignedTokenForEntry(entry, vttState);
+        const assignedTokenScene = assignedToken ? findSceneForTokenId(vttState, assignedToken.id) : null;
+        const assignmentSummary = assignedToken
+            ? buildTokenAssignmentLabel(assignedToken, assignedTokenScene, vttState)
+            : (entry && entry.linkedTokenId ? `Missing token (${entry.linkedTokenId})` : 'Unlinked');
+        const tokenAssignmentOptions = getInitiativeTokenAssignmentOptions(vttState);
         const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
         const isRosterManagedPlayer = !!rosterPlayer;
         if (!entry || !initiativeDetailState || !isDM()) {
@@ -3272,8 +3411,20 @@
                     </label>
                     <label class="vtt-field">
                         <span>Linked Token</span>
-                        <input class="vtt-entry-input" type="text" value="${escapeHtml(entry.linkedTokenId || 'Unlinked')}" readonly>
+                        <input class="vtt-entry-input" type="text" value="${escapeHtml(assignmentSummary)}" readonly>
                     </label>
+                    <label class="vtt-field">
+                        <span>Assign To Token</span>
+                        <select class="vtt-entry-input" data-entry-token-link="1">
+                            <option value="">Choose token...</option>
+                            ${tokenAssignmentOptions.map((option) => `
+                                <option value="${escapeHtml(option.tokenId)}"${assignedToken && option.tokenId === assignedToken.id ? ' selected' : ''}>${escapeHtml(option.label)}</option>
+                            `).join('')}
+                        </select>
+                    </label>
+                </div>
+                <div class="vtt-entry-actions">
+                    <button class="vtt-inline-btn" data-action="assign-entry-selected-token" data-id="${escapeHtml(entry.id)}"${selectedTokenId ? '' : ' disabled'}>${selectedTokenId ? 'Assign Selected Token' : 'Select A Token On The Map'}</button>
                 </div>
                 <div>
                     <div class="vtt-subhead">Defences</div>
@@ -3287,6 +3438,7 @@
                     </div>
                 </div>
                 ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player initiative names and portraits stay synced to the Hub roster.</div>' : ''}
+                <div class="vtt-detail-note">Assigning a player or NPC token also stores its roster identity, so matching spawns in other scenes can resolve this entry automatically.</div>
                 <div class="vtt-entry-actions">
                     <button class="vtt-inline-btn" data-action="move-entry-up" data-id="${escapeHtml(entry.id)}">Move Up</button>
                     <button class="vtt-inline-btn" data-action="move-entry-down" data-id="${escapeHtml(entry.id)}">Move Down</button>
@@ -3677,6 +3829,25 @@
             }
             sortInitiativeEntries(entries);
         });
+    };
+
+    const assignSelectedEntryToToken = (tokenId) => {
+        const targetTokenId = String(tokenId || '').trim();
+        if (!selectedEntryId || !targetTokenId) return false;
+        let assigned = false;
+        withDraft((draft) => {
+            const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
+            const idx = entries.findIndex((entry) => String(entry && entry.id || '').trim() === String(selectedEntryId || '').trim());
+            if (idx < 0) return;
+            const token = findTokenByIdAcrossScenes(draft, targetTokenId);
+            if (!token) return;
+            persistSheetIdentityForLinkedPlayer(entries[idx], token);
+            entries[idx] = linkInitiativeEntryToToken(entries[idx], token);
+            selectedTokenId = token.id;
+            assigned = true;
+            sortInitiativeEntries(entries);
+        });
+        return assigned;
     };
 
     const findReplacementTokenForIdentity = (state, removedToken) => {
@@ -4380,6 +4551,13 @@
             updateSelectedEntry((entry) => {
                 entry.concentrating = !entry.concentrating;
             });
+            return;
+        }
+
+        if (action === 'assign-entry-selected-token') {
+            selectedEntryId = id || selectedEntryId;
+            if (!selectedEntryId || !selectedTokenId) return;
+            assignSelectedEntryToToken(selectedTokenId);
         }
     };
 
@@ -4467,6 +4645,14 @@
                 if (!scene) return;
                 scene.grid[field] = Math.round(toNumber(target.value, scene.grid[field] || 0));
             });
+            return;
+        }
+
+        if (selectedEntryId && target instanceof HTMLSelectElement && target.dataset.entryTokenLink) {
+            if (event.type !== 'change') return;
+            const tokenId = String(target.value || '').trim();
+            if (!tokenId) return;
+            assignSelectedEntryToToken(tokenId);
             return;
         }
 
@@ -4568,6 +4754,7 @@
         const name = String(source.name || '').trim();
         if (!rollId || !name) return null;
         const defences = normalizeDefences(source.defences);
+        const rawStealthRoll = source.stealthRoll !== undefined ? source.stealthRoll : source.stealthDc;
         return {
             rollId,
             sourceType: String(source.source || source.sourceType || 'sheet').trim() || 'sheet',
@@ -4579,6 +4766,7 @@
             hpCurrent: source.hp === null || source.hp === undefined || source.hp === '' ? null : clamp(Math.round(toNumber(source.hp, 0)), 0, 999999),
             hpMax: source.maxHp === null || source.maxHp === undefined || source.maxHp === '' ? null : clamp(Math.round(toNumber(source.maxHp, 0)), 0, 999999),
             passivePerception: source.passivePerception === null || source.passivePerception === undefined || source.passivePerception === '' ? null : clamp(Math.round(toNumber(source.passivePerception, 10)), 0, 99),
+            stealthRoll: rawStealthRoll === null || rawStealthRoll === undefined || rawStealthRoll === '' ? null : clamp(Math.round(toNumber(rawStealthRoll, 0)), 0, 99),
             defences
         };
     };
@@ -4623,11 +4811,13 @@
                     hpCurrent: packet.hpCurrent !== null ? packet.hpCurrent : base.hpCurrent,
                     hpMax: packet.hpMax !== null ? packet.hpMax : base.hpMax,
                     passivePerception: packet.passivePerception !== null ? packet.passivePerception : base.passivePerception,
+                    stealthRoll: packet.stealthRoll !== null ? packet.stealthRoll : (base.stealthRoll ?? null),
                     defences: normalizeDefences(packet.defences && Object.values(packet.defences).some((value) => value !== null) ? packet.defences : base.defences),
                     linkedTokenId: linkedToken ? linkedToken.id : base.linkedTokenId,
                     sourceType: packet.sourceType || base.sourceType,
                     sourceId: packet.sourceId || base.sourceId
                 };
+                if (linkedToken && packet.stealthRoll !== null) linkedToken.stealthRoll = packet.stealthRoll;
                 selectedEntryId = entries[idx].id;
             } else {
                 const seed = linkedToken ? buildInitiativeEntryFromToken(linkedToken) : {
@@ -4644,6 +4834,7 @@
                     hpMax: null,
                     ac: null,
                     passivePerception: null,
+                    stealthRoll: null,
                     defences: normalizeDefences(null),
                     reactionUsed: false,
                     concentrating: false,
@@ -4659,8 +4850,10 @@
                     hpCurrent: packet.hpCurrent !== null ? packet.hpCurrent : seed.hpCurrent,
                     hpMax: packet.hpMax !== null ? packet.hpMax : seed.hpMax,
                     passivePerception: packet.passivePerception !== null ? packet.passivePerception : seed.passivePerception,
+                    stealthRoll: packet.stealthRoll !== null ? packet.stealthRoll : (seed.stealthRoll ?? null),
                     defences: normalizeDefences(packet.defences)
                 };
+                if (linkedToken && packet.stealthRoll !== null) linkedToken.stealthRoll = packet.stealthRoll;
                 entries.push(nextEntry);
                 selectedEntryId = nextEntry.id;
             }
