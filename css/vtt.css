@@ -703,7 +703,7 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
 
 .vtt-tool-mode-row {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(5.75rem, 1fr));
     gap: 0.45rem;
 }
 
@@ -711,9 +711,21 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
 .vtt-tools-menu .vtt-menu-list .vtt-chip-btn {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     width: 100%;
     border-radius: 1rem;
+    min-width: 0;
+}
+
+.vtt-tool-mode-row .vtt-chip-btn {
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vtt-tools-menu .vtt-menu-list .vtt-chip-btn {
+    justify-content: space-between;
     text-align: left;
 }
 

@@ -878,14 +878,30 @@
         return result < 0 ? result + 360 : result;
     };
     const getSceneCellPx = (scene) => Math.max(1, toNumber(scene && scene.grid && scene.grid.cellPx, DEFAULT_VTT_CELL_PX));
-    const snapTemplateCellCoordinate = (value) => Math.max(0.5, Math.round(toNumber(value, 0.5) - 0.5) + 0.5);
+    const snapTemplateCenterCellCoordinate = (value) => Math.max(0.5, Math.round(toNumber(value, 0.5) - 0.5) + 0.5);
+    const snapTemplateIntersectionCellCoordinate = (value) => Math.max(0, Math.round(toNumber(value, 0)));
     const snapWorldPointToTemplateAnchor = (scene, worldPoint) => {
         const cellPx = getSceneCellPx(scene);
         const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
         const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const rawX = (toNumber(worldPoint && worldPoint.x, 0) - offsetX) / cellPx;
+        const rawY = (toNumber(worldPoint && worldPoint.y, 0) - offsetY) / cellPx;
+        const centerAnchor = {
+            x: snapTemplateCenterCellCoordinate(rawX),
+            y: snapTemplateCenterCellCoordinate(rawY)
+        };
+        const intersectionAnchor = {
+            x: snapTemplateIntersectionCellCoordinate(rawX),
+            y: snapTemplateIntersectionCellCoordinate(rawY)
+        };
+        const centerDistanceSq = Math.pow(rawX - centerAnchor.x, 2) + Math.pow(rawY - centerAnchor.y, 2);
+        const intersectionDistanceSq = Math.pow(rawX - intersectionAnchor.x, 2) + Math.pow(rawY - intersectionAnchor.y, 2);
+        if (intersectionDistanceSq < centerDistanceSq) {
+            return intersectionAnchor;
+        }
         return {
-            x: snapTemplateCellCoordinate((toNumber(worldPoint && worldPoint.x, 0) - offsetX) / cellPx),
-            y: snapTemplateCellCoordinate((toNumber(worldPoint && worldPoint.y, 0) - offsetY) / cellPx)
+            x: centerAnchor.x,
+            y: centerAnchor.y
         };
     };
     const getTemplateById = (templateId, state = vttState) => {
@@ -3721,9 +3737,9 @@
         const toolMeta = localToolState.mode === TOOL_MODE_RULER
             ? 'Ruler active: click and hold on the stage to measure squares and feet.'
             : (localToolState.mode === TOOL_MODE_CIRCLE
-                ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Hold for a moment to leave a 5-second shared marker.`
+                ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
                 : (localToolState.mode === TOOL_MODE_CONE
-                    ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Hold for a moment to leave a 5-second shared marker.`
+                    ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
                     : (localToolState.mode === TOOL_MODE_FOG
                         ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tokens under fog are hidden from players.'
                         : (localToolState.mode === TOOL_MODE_FOG_REMOVE

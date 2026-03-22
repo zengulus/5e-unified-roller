@@ -65,8 +65,14 @@ let boardCollabInitPromise = null;
 let pendingRemoteBoardSnapshot = null;
 let activeBoardEditNodeId = '';
 let lastClearedBoardPayload = null;
+let boardFrameRequestId = 0;
+let boardRenderDirty = true;
+let boardCollabPositionSyncTimer = 0;
+let boardCollabPendingPositionChanges = [];
+let boardCollabLastPositionSyncAt = 0;
 const MOBILE_NODE_ACTION_HOLD_MS = 420;
 const MOBILE_DRAG_START_THRESHOLD_PX = 10;
+const BOARD_COLLAB_POSITION_SYNC_INTERVAL_MS = 50;
 
 const touchState = {
     dragTouchId: null,
@@ -697,12 +703,89 @@ function syncBoardCollabDragPreview(changes = []) {
     }
 }
 
+function clearBoardCollabPositionSyncState() {
+    if (boardCollabPositionSyncTimer) {
+        window.clearTimeout(boardCollabPositionSyncTimer);
+        boardCollabPositionSyncTimer = 0;
+    }
+    boardCollabPendingPositionChanges = [];
+    boardCollabLastPositionSyncAt = 0;
+}
+
+function flushBoardCollabPositionSync() {
+    if (boardCollabPositionSyncTimer) {
+        window.clearTimeout(boardCollabPositionSyncTimer);
+        boardCollabPositionSyncTimer = 0;
+    }
+    if (!isBoardCollabReady()) {
+        boardCollabPendingPositionChanges = [];
+        return;
+    }
+    if (!boardCollabPendingPositionChanges.length || typeof boardCollabSession.updateNodePositions !== 'function') return;
+    const changes = boardCollabPendingPositionChanges.slice();
+    boardCollabPendingPositionChanges = [];
+    boardCollabLastPositionSyncAt = Date.now();
+    boardCollabSession.updateNodePositions(changes);
+}
+
+function syncBoardCollabLivePositions(changes = [], options = {}) {
+    if (!isBoardCollabReady() || typeof boardCollabSession.updateNodePositions !== 'function') return;
+    const cleanChanges = Array.isArray(changes)
+        ? changes
+            .map((change) => {
+                if (!change || typeof change !== 'object') return null;
+                const id = String(change.id || '').trim();
+                const x = Math.round(Number(change.x));
+                const y = Math.round(Number(change.y));
+                if (!id || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+                return { id, x, y };
+            })
+            .filter(Boolean)
+        : [];
+    if (!cleanChanges.length) return;
+    boardCollabPendingPositionChanges = cleanChanges;
+    const opts = options && typeof options === 'object' ? options : {};
+    const now = Date.now();
+    if (opts.force || (now - boardCollabLastPositionSyncAt) >= BOARD_COLLAB_POSITION_SYNC_INTERVAL_MS) {
+        flushBoardCollabPositionSync();
+        return;
+    }
+    if (boardCollabPositionSyncTimer) return;
+    const waitMs = Math.max(0, BOARD_COLLAB_POSITION_SYNC_INTERVAL_MS - (now - boardCollabLastPositionSyncAt));
+    boardCollabPositionSyncTimer = window.setTimeout(() => {
+        boardCollabPositionSyncTimer = 0;
+        flushBoardCollabPositionSync();
+    }, waitMs);
+}
+
+function buildDraggedNodePositionChanges(dx = 0, dy = 0) {
+    if (!draggedNode) return [];
+    const changes = [{
+        id: draggedNode.id,
+        x: Math.round(dragStart.nodeX + dx),
+        y: Math.round(dragStart.nodeY + dy)
+    }];
+    if (draggedNodeFollowers.length) {
+        for (let i = 0; i < draggedNodeFollowers.length; i += 1) {
+            const follower = draggedNodeFollowers[i];
+            if (!follower) continue;
+            changes.push({
+                id: follower.id,
+                x: Math.round(follower.startX + dx),
+                y: Math.round(follower.startY + dy)
+            });
+        }
+    }
+    return changes;
+}
+
 function applyPendingRemoteBoardSnapshot() {
     if (!pendingRemoteBoardSnapshot || isBoardInteractionBusy()) return;
     const snapshot = pendingRemoteBoardSnapshot;
     pendingRemoteBoardSnapshot = null;
     loadBoard({ preserveOptimizeSnapshot: true }, snapshot);
     updateViewCSS();
+    markBoardRenderDirty();
 }
 
 function applyBoardCollabPositionChanges(changes = []) {
@@ -722,6 +805,7 @@ function applyBoardCollabPositionChanges(changes = []) {
         updateNodeCache(id);
     });
     syncBoardCollabDecorations();
+    markBoardRenderDirty();
 }
 
 function applyBoardCollabRemoteSnapshot(payload) {
@@ -733,6 +817,7 @@ function applyBoardCollabRemoteSnapshot(payload) {
     pendingRemoteBoardSnapshot = null;
     loadBoard({ preserveOptimizeSnapshot: true }, clean);
     updateViewCSS();
+    markBoardRenderDirty();
 }
 
 async function initBoardCollab() {
@@ -1758,8 +1843,6 @@ function writeHostBoardPayload(payload) {
 function readStoreBoardPayload() {
     const hostPayload = readHostBoardPayload();
     if (hostPayload) return hostPayload;
-    const collabPayload = getBoardCollabSnapshot();
-    if (collabPayload) return collabPayload;
     if (!window.RTF_STORE) return null;
     if (isCampaignBoardView() && typeof window.RTF_STORE.getCampaignMetaBoard === 'function') {
         return sanitizeBoardPayload(window.RTF_STORE.getCampaignMetaBoard());
@@ -2364,7 +2447,7 @@ window.addEventListener('load', async () => {
     initCaseNameTracking();
     window.addEventListener('rtf-store-updated', handleRemoteStoreUpdate);
     initBoardCollab().catch(() => { });
-    requestAnimationFrame(loop);
+    markBoardRenderDirty();
 });
 
 window.addEventListener('resize', () => handleBoardResize());
@@ -2372,6 +2455,28 @@ window.addEventListener('resize', () => handleBoardResize());
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    boardRenderDirty = true;
+}
+
+function hasActiveBoardPhysics() {
+    for (let i = 0; i < allocatedCount; i += 1) {
+        if (sleepState[i] !== 0) return true;
+    }
+    return false;
+}
+
+function shouldAnimateBoardFrame() {
+    return isConnecting || !!draggedNode || isPanning || hasActiveBoardPhysics();
+}
+
+function scheduleBoardFrame() {
+    if (boardFrameRequestId) return;
+    boardFrameRequestId = requestAnimationFrame(loop);
+}
+
+function markBoardRenderDirty() {
+    boardRenderDirty = true;
+    scheduleBoardFrame();
 }
 
 function isBoardExternalUpdateSource(source) {
@@ -2393,7 +2498,13 @@ function handleRemoteStoreUpdate(event) {
     if (!event || !event.detail) return;
     if (!isBoardExternalUpdateSource(event.detail.source)) return;
     if (isBoardCollabReady()) {
-        refreshBoardCollabRoomIfNeeded().catch(() => { });
+        refreshBoardCollabRoomIfNeeded()
+            .then((session) => {
+                if (!session || typeof session.applySharedStoreSnapshot !== 'function') return;
+                const sharedSnapshot = readStoreBoardPayload() || getEmptyBoardPayload();
+                session.applySharedStoreSnapshot(sharedSnapshot);
+            })
+            .catch(() => { });
         refreshBoardSharedPopups();
         updateViewCSS();
         return;
@@ -3402,9 +3513,13 @@ function renderBoardRequisitions() {
 // --- CORE LOOPS ---
 
 function loop() {
-    updatePhysics();
+    boardFrameRequestId = 0;
+    const animate = shouldAnimateBoardFrame();
+    if (!animate && !boardRenderDirty) return;
+    if (animate) updatePhysics();
     drawLayer();
-    requestAnimationFrame(loop);
+    boardRenderDirty = false;
+    if (animate || boardRenderDirty) scheduleBoardFrame();
 }
 
 function updatePhysics() {
@@ -3827,6 +3942,7 @@ function registerConnection(conn) {
     if (!nodeGraph.has(conn.to)) nodeGraph.set(conn.to, new Set());
     nodeGraph.get(conn.from).add(conn.id);
     nodeGraph.get(conn.to).add(conn.id);
+    markBoardRenderDirty();
 }
 
 function wakeConnected(nodeId) {
@@ -3837,6 +3953,7 @@ function wakeConnected(nodeId) {
             if (idx !== undefined) sleepState[idx] = 1;
         });
     }
+    markBoardRenderDirty();
 }
 
 // --- DOM & INTERACTION ---
@@ -3996,6 +4113,7 @@ function updateNodeCache(id) {
 
 function startDragNode(e, el) {
     if (el.classList.contains('editing') || (e.button !== undefined && e.button !== 0)) return;
+    clearBoardCollabPositionSyncState();
     draggedNode = el;
     draggedNodeFollowers = isGroupNodeEl(el) ? collectGroupedFollowerNodes(el) : [];
     syncBoardCollabSelection([el.id]);
@@ -4042,18 +4160,8 @@ function updateDraggedNodeFromClient(clientX, clientY) {
     wakeConnected(draggedNode.id);
 
     if (isBoardCollabReady()) {
-        const changes = [{ id: draggedNode.id, x: Math.round(newX), y: Math.round(newY) }];
-        if (draggedNodeFollowers.length) {
-            for (let i = 0; i < draggedNodeFollowers.length; i += 1) {
-                const follower = draggedNodeFollowers[i];
-                if (!follower) continue;
-                changes.push({
-                    id: follower.id,
-                    x: Math.round(follower.startX + dx),
-                    y: Math.round(follower.startY + dy)
-                });
-            }
-        }
+        const changes = buildDraggedNodePositionChanges(dx, dy);
+        syncBoardCollabLivePositions(changes);
         syncBoardCollabDragPreview(changes);
     }
 }
@@ -4095,6 +4203,7 @@ function finalizeDraggedNode(clientX, clientY, options = {}) {
         canNodeTypesConnect(sourceNodeType, dropNodeType);
 
     if (canCreateConnection) {
+        syncBoardCollabLivePositions(buildDraggedNodePositionChanges(0, 0), { force: true });
         sourceNode.style.left = dragStart.nodeX + 'px';
         sourceNode.style.top = dragStart.nodeY + 'px';
         sourceNode.style.transform = 'none';
@@ -4112,6 +4221,7 @@ function finalizeDraggedNode(clientX, clientY, options = {}) {
         }
         createConnectionBetweenNodes(sourceNodeId, dropNode.id);
     } else {
+        syncBoardCollabLivePositions(buildDraggedNodePositionChanges(dx, dy), { force: true });
         sourceNode.style.left = finalX + 'px';
         sourceNode.style.top = finalY + 'px';
         sourceNode.style.transform = 'none';
@@ -4128,11 +4238,12 @@ function finalizeDraggedNode(clientX, clientY, options = {}) {
             }
         }
         if (isGroupNodeType(sourceNodeType)) syncGroupNodeMeta(sourceNode);
-        saveBoard();
+        saveBoard({ flushNow: true });
     }
 
     draggedNode = null;
     draggedNodeFollowers = [];
+    clearBoardCollabPositionSyncState();
     syncBoardCollabDragPreview([]);
     applyPendingRemoteBoardSnapshot();
 }
@@ -4338,6 +4449,7 @@ document.addEventListener('mouseup', (e) => {
             }
         }
         isConnecting = false;
+        markBoardRenderDirty();
     }
     if (isPanning) {
         isPanning = false;
@@ -4652,6 +4764,7 @@ function startConnectionDrag(e, node, port) {
         currentX: wp.x,
         currentY: wp.y
     };
+    markBoardRenderDirty();
 }
 
 function syncPortPreviewState(isAltHeld) {
@@ -4871,6 +4984,7 @@ function updateViewCSS() {
     container.style.transform = t;
     labelContainer.style.transform = t;
     syncBoardCollabDecorations();
+    markBoardRenderDirty();
 }
 
 function toggleToolbar() {
@@ -4996,17 +5110,22 @@ function buildBoardPayloadFromDom(trackNameChange = true) {
 function persistBoardPayload(payload, options = {}) {
     const clean = sanitizeBoardPayload(payload || getEmptyBoardPayload());
     const opts = options && typeof options === 'object' ? options : {};
+    const wroteSharedStore = writeStoreBoardPayload(clean);
     if (isBoardCollabReady() && typeof boardCollabSession.syncSnapshot === 'function') {
         boardCollabSession.syncSnapshot(clean, {
             flushNow: !!opts.flushNow,
             forceHistory: !!opts.forceHistory,
-            historyReason: opts.historyReason || ''
+            historyReason: opts.historyReason || '',
+            sharedStatePersisted: wroteSharedStore
         }).catch((err) => {
             console.warn('Board collaboration sync failed', err);
         });
+        if (!wroteSharedStore) {
+            localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(clean));
+        }
         return clean;
     }
-    if (!writeStoreBoardPayload(clean)) {
+    if (!wroteSharedStore) {
         localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(clean));
     }
     return clean;
@@ -5014,6 +5133,7 @@ function persistBoardPayload(payload, options = {}) {
 
 function saveBoard(options = {}) {
     const data = buildBoardPayloadFromDom(true);
+    markBoardRenderDirty();
     return persistBoardPayload(data, options);
 }
 

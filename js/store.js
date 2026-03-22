@@ -5303,12 +5303,11 @@
                 reason
             });
 
-            this.mirrorBoardSnapshotToState({
-                roomId: target.roomId,
-                scope: target.scope,
-                caseId: target.caseId,
-                payload
-            });
+            if (target.scope === 'campaign') {
+                this.updateCampaignMetaBoard(payload);
+            } else {
+                this.updateBoard(payload, target.caseId);
+            }
 
             const broadcast = await this.sendBoardRoomAdminEvent({
                 roomId: target.roomId,

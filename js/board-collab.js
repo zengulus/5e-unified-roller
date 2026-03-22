@@ -171,6 +171,17 @@ const stableStringify = (value) => {
     }
 };
 
+const buildSnapshotSignature = (snapshot) => {
+    const clean = sanitizeBoardSnapshot(snapshot);
+    return stableStringify({
+        name: clean.name,
+        scope: clean.scope,
+        caseId: clean.caseId,
+        nodes: clean.nodes,
+        connections: clean.connections
+    });
+};
+
 const roundCursor = (value) => Math.round(toFiniteNumber(value, 0) * CURSOR_PRECISION) / CURSOR_PRECISION;
 
 const encodeBase64 = (bytes) => {
@@ -441,7 +452,9 @@ class BoardCollabSession {
         this.pendingSnapshot = null;
         this.remotePresence = new Map();
         this.lastHistorySignature = '';
+        this.lastSharedStoreSignature = '';
         this.lastHistoryCapturedAt = 0;
+        this.initialCloudFlushRequired = false;
         this.roomResetRequired = false;
         this.status = {
             state: 'local',
@@ -456,6 +469,7 @@ class BoardCollabSession {
         this.originPosition = { kind: 'board-collab-local-position' };
         this.originRemoteSync = { kind: 'board-collab-remote-sync' };
         this.originRemoteRestore = { kind: 'board-collab-remote-restore' };
+        this.originSharedStore = { kind: 'board-collab-shared-store' };
         this.originManualFlush = { kind: 'board-collab-manual-flush' };
 
         this.lastSnapshot = buildDefaultSnapshot(this.scope, this.caseId);
@@ -543,6 +557,9 @@ class BoardCollabSession {
                 : seedPayload,
             { scope: this.scope, caseId: this.caseId }
         );
+        const livePayloadSig = buildSnapshotSignature(livePayload);
+        this.lastSharedStoreSignature = livePayloadSig;
+        const livePayloadHasContent = hasBoardContent(livePayload);
 
         const cloudRow = await this.store.loadBoardRoomSnapshot({
             roomId: this.roomId,
@@ -551,18 +568,39 @@ class BoardCollabSession {
         });
 
         if (cloudRow.ok && cloudRow.snapshot) {
+            const roomPayload = sanitizeBoardSnapshot(cloudRow.snapshot.payload, {
+                scope: this.scope,
+                caseId: this.caseId
+            });
+            const roomPayloadSig = buildSnapshotSignature(roomPayload);
+            const localDocSig = buildSnapshotSignature(localDocPayload);
             const cloudUpdatedAt = Date.parse(cloudRow.snapshot.updatedAt || '') || cloudRow.snapshot.revision || 0;
             const localUpdatedAt = Math.max(0, localDocPayload.updatedAt || 0);
             this.lastSavedRevision = Math.max(0, cloudRow.snapshot.revision || 0);
-            if (!hasBoardContent(localDocPayload) || cloudUpdatedAt > localUpdatedAt) {
-                applySnapshotToDoc(
-                    this.doc,
-                    cloudRow.snapshot.payload,
-                    this.scope,
-                    this.caseId,
-                    this.originRemoteRestore,
-                    cloudUpdatedAt || Date.now()
-                );
+            if (livePayloadHasContent) {
+                if (!hasBoardContent(localDocPayload) || localDocSig !== livePayloadSig) {
+                    applySnapshotToDoc(
+                        this.doc,
+                        livePayload,
+                        this.scope,
+                        this.caseId,
+                        this.originBootstrap,
+                        Math.max(Date.now(), livePayload.updatedAt || cloudUpdatedAt || 0)
+                    );
+                }
+                this.initialCloudFlushRequired = roomPayloadSig !== livePayloadSig;
+            } else {
+                if (!hasBoardContent(localDocPayload) || cloudUpdatedAt > localUpdatedAt) {
+                    applySnapshotToDoc(
+                        this.doc,
+                        roomPayload,
+                        this.scope,
+                        this.caseId,
+                        this.originRemoteRestore,
+                        cloudUpdatedAt || Date.now()
+                    );
+                }
+                this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
             }
         } else if (cloudRow.ok) {
             const canonicalSeed = sanitizeBoardSnapshot(
@@ -571,8 +609,8 @@ class BoardCollabSession {
                     : (hasBoardContent(seedPayload) ? seedPayload : localDocPayload),
                 { scope: this.scope, caseId: this.caseId }
             );
-            const canonicalSeedSig = stableStringify(canonicalSeed);
-            const localDocSig = stableStringify(localDocPayload);
+            const canonicalSeedSig = buildSnapshotSignature(canonicalSeed);
+            const localDocSig = buildSnapshotSignature(localDocPayload);
             const seedStamp = Math.max(Date.now(), canonicalSeed.updatedAt || 0);
 
             if (!hasBoardContent(localDocPayload) || localDocSig !== canonicalSeedSig) {
@@ -604,9 +642,10 @@ class BoardCollabSession {
                 });
                 if (seedHistory && seedHistory.ok) {
                     this.lastHistoryCapturedAt = Date.now();
-                    this.lastHistorySignature = stableStringify(canonicalSeed);
+                    this.lastHistorySignature = canonicalSeedSig;
                 }
             }
+            this.persistSnapshotToSharedState(canonicalSeed, canonicalSeedSig);
 
             if (!seeded.ok && seeded.reason !== 'exists') {
                 console.warn('RTF_BOARD_COLLAB: Failed seeding board room', seeded.error || seeded.reason);
@@ -625,7 +664,7 @@ class BoardCollabSession {
                     caseId: this.caseId
                 });
                 this.lastSavedRevision = Math.max(0, canonicalRoom.snapshot.revision || 0);
-                if (stableStringify(roomPayload) !== stableStringify(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
+                if (buildSnapshotSignature(roomPayload) !== buildSnapshotSignature(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
                     applySnapshotToDoc(
                         this.doc,
                         roomPayload,
@@ -645,9 +684,9 @@ class BoardCollabSession {
             caseId: this.caseId
         });
         this.pendingSnapshot = this.lastSnapshot;
-        if (!this.lastHistorySignature) this.lastHistorySignature = stableStringify(this.lastSnapshot);
+        if (!this.lastHistorySignature) this.lastHistorySignature = buildSnapshotSignature(this.lastSnapshot);
 
-        if (stableStringify(this.lastSnapshot) !== stableStringify(livePayload)
+        if (buildSnapshotSignature(this.lastSnapshot) !== livePayloadSig
             && typeof this.options.applySnapshot === 'function') {
             this.options.applySnapshot(this.lastSnapshot, { origin: this.originRemoteRestore });
         }
@@ -670,7 +709,10 @@ class BoardCollabSession {
             peerCount: this.remotePresence.size
         });
         this.scheduleMirror();
-        this.scheduleCloudFlush();
+        if (this.initialCloudFlushRequired) {
+            this.initialCloudFlushRequired = false;
+            this.scheduleCloudFlush();
+        }
         this.renderRemoteState();
         document.addEventListener('visibilitychange', this.handleVisibilityChange);
         window.addEventListener('beforeunload', this.handleBeforeUnload);
@@ -897,7 +939,7 @@ class BoardCollabSession {
             stamp
         );
         this.lastSavedRevision = Math.max(this.lastSavedRevision, toFiniteNumber(payload.revision, 0) || 0);
-        this.lastHistorySignature = stableStringify(nextPayload);
+        this.lastHistorySignature = buildSnapshotSignature(nextPayload);
         this.lastHistoryCapturedAt = Date.now();
         this.updateStatus({
             state: this.connected ? 'live' : 'degraded',
@@ -999,7 +1041,15 @@ class BoardCollabSession {
 
         if (this.ready) {
             this.scheduleMirror();
-            this.scheduleCloudFlush();
+            const shouldQueueCloudFlush = !this.roomResetRequired && (
+                !origin
+                || origin === this.originLocalSnapshot
+                || origin === this.originSharedStore
+                || origin === this.originManualFlush
+            );
+            if (shouldQueueCloudFlush) {
+                this.scheduleCloudFlush();
+            }
         }
 
         const shouldDispatchSnapshot = origin !== this.originBootstrap
@@ -1044,6 +1094,27 @@ class BoardCollabSession {
         }, CLOUD_FLUSH_DELAY_MS);
     }
 
+    persistSnapshotToSharedState(snapshot, signature = '') {
+        if (!snapshot || !this.store) return false;
+        const snapshotSig = signature || buildSnapshotSignature(snapshot);
+        if (!snapshotSig || snapshotSig === this.lastSharedStoreSignature) return false;
+        try {
+            if (this.scope === 'campaign' && typeof this.store.updateCampaignMetaBoard === 'function') {
+                this.store.updateCampaignMetaBoard(snapshot);
+                this.lastSharedStoreSignature = snapshotSig;
+                return true;
+            }
+            if (typeof this.store.updateBoard === 'function') {
+                this.store.updateBoard(snapshot, this.caseId);
+                this.lastSharedStoreSignature = snapshotSig;
+                return true;
+            }
+        } catch (err) {
+            console.warn('RTF_BOARD_COLLAB: Shared store snapshot persist failed', err);
+        }
+        return false;
+    }
+
     async flushSnapshotNow(options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
         if (this.pendingFlushPromise) return this.pendingFlushPromise;
@@ -1058,7 +1129,7 @@ class BoardCollabSession {
             scope: this.scope,
             caseId: this.caseId
         });
-        const snapshotSig = stableStringify(snapshotToSave);
+        const snapshotSig = buildSnapshotSignature(snapshotToSave);
         const shouldCaptureHistory = !!(
             typeof this.store.appendBoardRoomHistorySnapshot === 'function'
             && snapshotSig
@@ -1079,6 +1150,7 @@ class BoardCollabSession {
         }).then((result) => {
             if (result && result.ok) {
                 this.lastSavedRevision = Math.max(this.lastSavedRevision, result.revision || 0);
+                this.persistSnapshotToSharedState(snapshotToSave, snapshotSig);
             }
             if (!result || !result.ok || !shouldCaptureHistory) return result;
             return this.store.appendBoardRoomHistorySnapshot({
@@ -1132,8 +1204,25 @@ class BoardCollabSession {
 
     syncSnapshot(payload, options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
+        const next = sanitizeBoardSnapshot(payload, {
+            scope: this.scope,
+            caseId: this.caseId
+        });
+        const nextSig = buildSnapshotSignature(next);
+        if (opts.sharedStatePersisted && nextSig) {
+            this.lastSharedStoreSignature = nextSig;
+        }
+        if (nextSig && nextSig === buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot)) {
+            if (opts.flushNow) {
+                return this.flushSnapshotNow({
+                    forceHistory: !!opts.forceHistory,
+                    historyReason: opts.historyReason || ''
+                });
+            }
+            return Promise.resolve({ ok: true, reason: 'unchanged' });
+        }
         const stamp = Date.now();
-        applySnapshotToDoc(this.doc, payload, this.scope, this.caseId, this.originLocalSnapshot, stamp);
+        applySnapshotToDoc(this.doc, next, this.scope, this.caseId, this.originLocalSnapshot, stamp);
         if (opts.flushNow) {
             return this.flushSnapshotNow({
                 forceHistory: !!opts.forceHistory,
@@ -1141,6 +1230,30 @@ class BoardCollabSession {
             });
         }
         return Promise.resolve({ ok: true });
+    }
+
+    applySharedStoreSnapshot(payload, options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
+        const next = sanitizeBoardSnapshot(payload, {
+            scope: this.scope,
+            caseId: this.caseId
+        });
+        const nextSig = buildSnapshotSignature(next);
+        if (nextSig) this.lastSharedStoreSignature = nextSig;
+        if (nextSig && nextSig === buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot)) {
+            return false;
+        }
+        const stamp = Math.max(Date.now(), next.updatedAt || 0);
+        applySnapshotToDoc(this.doc, next, this.scope, this.caseId, this.originSharedStore, stamp);
+        if (opts.flushNow) {
+            this.flushSnapshotNow({
+                forceHistory: !!opts.forceHistory,
+                historyReason: opts.historyReason || 'shared-store'
+            }).catch((err) => {
+                console.warn('RTF_BOARD_COLLAB: Shared-store flush failed', err);
+            });
+        }
+        return true;
     }
 
     updateNodePositions(changes, options = {}) {
