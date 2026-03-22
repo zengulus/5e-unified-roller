@@ -1,14 +1,13 @@
 (function () {
-    const ENABLE_VTT_NAV = false;
     const PRIMARY_NAV_ITEMS = [
         { id: 'sheet', label: 'Character Sheet', href: 'index.html', description: 'Command-console character sheet with combat, inventory, spells, and roller history.', keywords: 'character player sheet' },
-        ...(ENABLE_VTT_NAV ? [{
+        {
             id: 'vtt',
             label: 'Light VTT',
             href: 'vtt.html',
             description: 'Scene map, token staging, and canonical initiative with DM-only detail inspection.',
             keywords: 'vtt initiative tokens map'
-        }] : []),
+        },
         { id: 'board', label: 'Case Board', href: 'board.html', description: 'Case board linking clues, theories, NPCs, locations, events, and requisitions.', keywords: 'case board evidence' },
         { id: 'timeline', label: 'Case Timeline', href: 'timeline.html', description: 'Case-scoped mission log for beats, fallout, deadlines, certainty, and heat.', keywords: 'timeline case mission' },
         { id: 'leads', label: 'Lead Queue', href: 'leads.html', description: 'Lead triage queue with voting, status control, and concrete next steps.', keywords: 'leads investigation queue' },
@@ -631,6 +630,18 @@
         return panel;
     }
 
+    function buildPinnedShortcut(item, options = {}) {
+        if (!item || !item.href) return null;
+        const opts = options && typeof options === 'object' ? options : {};
+        const link = document.createElement('a');
+        link.href = item.href;
+        link.className = 'hero-btn ghost';
+        link.textContent = opts.label || item.label;
+        link.title = item.description ? `${item.label}: ${item.description}` : item.label;
+        if (opts.ariaLabel) link.setAttribute('aria-label', opts.ariaLabel);
+        return link;
+    }
+
     function moveAddButtonsBelowHero(bars) {
         const addButtons = [];
         bars.forEach((bar) => {
@@ -685,6 +696,15 @@
 
         const controls = document.createElement('div');
         controls.className = 'hero-menu-controls';
+
+        const sheetNavItem = PRIMARY_NAV_ITEMS.find((item) => item.id === 'sheet');
+        if (sheetNavItem && activeId !== 'sheet') {
+            const sheetShortcut = buildPinnedShortcut(sheetNavItem, {
+                label: 'Sheet',
+                ariaLabel: 'Open Character Sheet'
+            });
+            if (sheetShortcut) controls.appendChild(sheetShortcut);
+        }
 
         const compassBtn = document.createElement('button');
         compassBtn.type = 'button';

@@ -9,12 +9,117 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260322f">
+    <link rel="stylesheet" href="css/vtt.css?v=20260322g">
 </head>
 
     <body data-player-nav="vtt">
         <header class="hero-header vtt-topbar">
             <div class="vtt-topbar-group">
+                <div class="vtt-popover-anchor vtt-topbar-nav">
+                    <button class="hero-btn ghost" data-action="toggle-nav-menu" id="vtt-nav-menu-toggle"
+                        aria-controls="vtt-nav-menu" aria-expanded="false" aria-label="Open navigation menu"
+                        title="Navigation">🧭</button>
+                    <div class="vtt-popover vtt-nav-menu" id="vtt-nav-menu" hidden>
+                        <div class="vtt-menu-section">
+                            <div class="vtt-menu-title">Player Pages</div>
+                            <nav class="vtt-menu-list vtt-nav-list" aria-label="Player pages">
+                                <a class="vtt-nav-link" href="index.html">
+                                    <span class="vtt-nav-link-label">Character Sheet</span>
+                                    <span class="vtt-nav-link-desc">Command-console character sheet with combat, inventory, spells, and roller history.</span>
+                                </a>
+                                <a class="vtt-nav-link is-active" href="vtt.html" aria-current="page">
+                                    <span class="vtt-nav-link-label">Light VTT</span>
+                                    <span class="vtt-nav-link-desc">Scene map, token staging, and canonical initiative with DM-only detail inspection.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="board.html">
+                                    <span class="vtt-nav-link-label">Case Board</span>
+                                    <span class="vtt-nav-link-desc">Case board linking clues, theories, NPCs, locations, events, and requisitions.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="timeline.html">
+                                    <span class="vtt-nav-link-label">Case Timeline</span>
+                                    <span class="vtt-nav-link-desc">Case-scoped mission log for beats, fallout, deadlines, certainty, and heat.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="leads.html">
+                                    <span class="vtt-nav-link-label">Lead Queue</span>
+                                    <span class="vtt-nav-link-desc">Lead triage queue with voting, status control, and concrete next steps.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="roster.html">
+                                    <span class="vtt-nav-link-label">NPC Roster</span>
+                                    <span class="vtt-nav-link-desc">NPC roster with guild tags, wants, leverage notes, filters, and board jumps.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="locations.html">
+                                    <span class="vtt-nav-link-label">Locations Database</span>
+                                    <span class="vtt-nav-link-desc">Location database for districts, notes, filtering, and board linking.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="ledger.html">
+                                    <span class="vtt-nav-link-label">Campaign Ledger</span>
+                                    <span class="vtt-nav-link-desc">Pinned immutable facts your table has locked in as true.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="requisitions.html">
+                                    <span class="vtt-nav-link-label">Requisition Vault</span>
+                                    <span class="vtt-nav-link-desc">Shared requisition pipeline for requests, priority, approvals, and delivery.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="player-dashboard.html">
+                                    <span class="vtt-nav-link-label">Player Dashboard</span>
+                                    <span class="vtt-nav-link-desc">Editable party grid for HP, AC, passives, and save DC at a glance.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="prep-procedure.html">
+                                    <span class="vtt-nav-link-label">Prep &amp; Procedure Clocks</span>
+                                    <span class="vtt-nav-link-desc">Prep/procedure clocks with token spend and timeline logging actions.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="hq.html">
+                                    <span class="vtt-nav-link-label">HQ Layout Foundry</span>
+                                    <span class="vtt-nav-link-desc">HQ layout foundry with floor plans, downtime slots, and resource staging.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="campaign-timeline.html">
+                                    <span class="vtt-nav-link-label">Campaign Timeline</span>
+                                    <span class="vtt-nav-link-desc">Campaign-level timeline for cross-case beats, blockers, and decisions.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="campaign-board.html">
+                                    <span class="vtt-nav-link-label">Campaign Board</span>
+                                    <span class="vtt-nav-link-desc">Campaign meta-board for cross-case links, scope references, and arc mapping.</span>
+                                </a>
+                            </nav>
+                        </div>
+                        <div class="vtt-menu-section">
+                            <div class="vtt-menu-title">GM Pages</div>
+                            <nav class="vtt-menu-list vtt-nav-list" aria-label="GM pages">
+                                <a class="vtt-nav-link" href="gm.html">
+                                    <span class="vtt-nav-link-label">GM Session Hub</span>
+                                    <span class="vtt-nav-link-desc">Session tracker for initiative, quick mobs, rollers, loot, and combat log.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="tools.html">
+                                    <span class="vtt-nav-link-label">Campaign Hub (Tools)</span>
+                                    <span class="vtt-nav-link-desc">Campaign context hub for scope sequencing, import/export, cloud sync, and workflow actions.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="hub.html">
+                                    <span class="vtt-nav-link-label">Campaign Strategic Hub</span>
+                                    <span class="vtt-nav-link-desc">Campaign strategic dashboard for heat, faction standing, and downtime.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="dm-screen.html">
+                                    <span class="vtt-nav-link-label">Narrative Engine (DM Screen)</span>
+                                    <span class="vtt-nav-link-desc">Narrative engine for incident prompts, sensory texture, hazards, and fallout.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="encounters.html">
+                                    <span class="vtt-nav-link-label">Encounter Recipes</span>
+                                    <span class="vtt-nav-link-desc">Modular encounter recipe cards with tier/location/objective planning.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="clocks.html">
+                                    <span class="vtt-nav-link-label">Generic Clocks</span>
+                                    <span class="vtt-nav-link-desc">Standalone progress and danger clocks with segment control and PNG export.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="clue.html">
+                                    <span class="vtt-nav-link-label">Clue Generator</span>
+                                    <span class="vtt-nav-link-desc">Signal-vs-noise clue intersection generator by guild and modality.</span>
+                                </a>
+                                <a class="vtt-nav-link" href="tourney.html">
+                                    <span class="vtt-nav-link-label">Tournament Bracket</span>
+                                    <span class="vtt-nav-link-desc">Double-elimination bracket manager with auto-advance and score updates.</span>
+                                </a>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
                 <a class="hero-btn ghost" href="index.html">Character Sheet</a>
                 <span class="vtt-topbar-case">Case <strong id="vtt-case-name">Primary Case</strong></span>
                 <span class="vtt-sync-chip" id="vtt-sync-chip">Local</span>
@@ -236,7 +341,7 @@
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
     <script src="js/store.js?v=20260321h"></script>
-    <script src="js/player-nav.js?v=20260320c"></script>
+    <script src="js/player-nav.js?v=20260322f"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
         window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260321c')
@@ -267,7 +372,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260322i"></script>
+    <script src="js/vtt.js?v=20260322j"></script>
 </body>
 
 </html>

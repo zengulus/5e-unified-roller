@@ -100,6 +100,7 @@
     let quickSpawnMenuState = null;
     let tokenInspectorState = null;
     let initiativeDetailState = null;
+    let navMenuOpen = false;
     let viewMenuOpen = false;
     let toolsMenuOpen = false;
     let dmUnlockReturnFocusEl = null;
@@ -155,6 +156,8 @@
     const npcSearchListEl = document.getElementById('vtt-npc-search-list');
     const quickSpawnMenuEl = document.getElementById('vtt-quick-spawn-menu');
     const spawnGhostEl = document.getElementById('vtt-spawn-ghost');
+    const navMenuToggleEl = document.getElementById('vtt-nav-menu-toggle');
+    const navMenuEl = document.getElementById('vtt-nav-menu');
     const toolsMenuToggleEl = document.getElementById('vtt-tools-menu-toggle');
     const toolsMenuEl = document.getElementById('vtt-tools-menu');
     const rulerToggleEl = document.getElementById('vtt-ruler-toggle');
@@ -1102,6 +1105,11 @@
         toolsMenuOpen = false;
         renderToolsMenu();
         return true;
+    };
+
+    const renderNavMenu = () => {
+        if (navMenuEl) navMenuEl.hidden = !navMenuOpen;
+        if (navMenuToggleEl) navMenuToggleEl.setAttribute('aria-expanded', navMenuOpen ? 'true' : 'false');
     };
 
     const renderViewMenu = () => {
@@ -2397,6 +2405,13 @@
         if (!viewMenuOpen) return false;
         viewMenuOpen = false;
         renderViewMenu();
+        return true;
+    };
+
+    const closeNavMenu = () => {
+        if (!navMenuOpen) return false;
+        navMenuOpen = false;
+        renderNavMenu();
         return true;
     };
 
@@ -3777,6 +3792,7 @@
     const render = () => {
         normalizeSelections();
         renderSceneControls();
+        renderNavMenu();
         renderViewMenu();
         renderToolsMenu();
         renderSpawnLists();
@@ -4096,16 +4112,35 @@
             closeInitiativeDetail();
             return;
         }
+        if (action === 'toggle-nav-menu') {
+            navMenuOpen = !navMenuOpen;
+            if (navMenuOpen) {
+                viewMenuOpen = false;
+                toolsMenuOpen = false;
+            }
+            renderNavMenu();
+            renderViewMenu();
+            renderToolsMenu();
+            return;
+        }
         if (action === 'toggle-view-menu') {
             viewMenuOpen = !viewMenuOpen;
-            if (viewMenuOpen) toolsMenuOpen = false;
+            if (viewMenuOpen) {
+                navMenuOpen = false;
+                toolsMenuOpen = false;
+            }
+            renderNavMenu();
             renderViewMenu();
             renderToolsMenu();
             return;
         }
         if (action === 'toggle-tools-menu') {
             toolsMenuOpen = !toolsMenuOpen;
-            if (toolsMenuOpen) viewMenuOpen = false;
+            if (toolsMenuOpen) {
+                navMenuOpen = false;
+                viewMenuOpen = false;
+            }
+            renderNavMenu();
             renderViewMenu();
             renderToolsMenu();
             return;
@@ -5396,6 +5431,10 @@
             quickSpawnMenuState = null;
             needsRender = true;
         }
+        if (navMenuOpen && !event.target.closest('.vtt-topbar-nav')) {
+            navMenuOpen = false;
+            needsRender = true;
+        }
         if (viewMenuOpen && !event.target.closest('.vtt-topbar-menu')) {
             viewMenuOpen = false;
             needsRender = true;
@@ -5514,6 +5553,7 @@
         }
         if (event.key === 'Escape') {
             const closedMenu = closeQuickSpawnMenu();
+            const closedNavMenu = closeNavMenu();
             const closedViewMenu = closeViewMenu();
             const closedToolsMenu = closeToolsMenu();
             const clearedSpawn = clearSpawnDrag();
@@ -5524,7 +5564,7 @@
                 previewTokenId = '';
                 renderStage();
                 event.preventDefault();
-            } else if (closedMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector) {
+            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector) {
                 render();
                 event.preventDefault();
             }
