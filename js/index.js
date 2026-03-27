@@ -943,6 +943,17 @@ function bindQuickActionsPanelEvents() {
     if (quickActionsPanelEventsBound) return;
     quickActionsPanelEventsBound = true;
 
+    const input = document.getElementById('quickActionSearchInput');
+    if (input && input.dataset.boundQuickActionFocus !== '1') {
+        input.dataset.boundQuickActionFocus = '1';
+        input.addEventListener('focus', () => {
+            setQuickActionSearchOpen(true, { focus: false });
+        });
+        input.addEventListener('click', () => {
+            setQuickActionSearchOpen(true, { focus: false });
+        });
+    }
+
     document.addEventListener('click', (event) => {
         const shell = document.getElementById('quickActionsHeader');
         const target = event.target instanceof Node ? event.target : null;
@@ -5111,6 +5122,12 @@ function toggleQuickActionSearchPopover(forceOpen) {
 
 function updateQuickActionSearchQuery(value) {
     quickActionSearchQuery = String(value || '');
+    const input = document.getElementById('quickActionSearchInput');
+    const shouldOpen = !!quickActionSearchQuery.trim() || (input && document.activeElement === input);
+    if (shouldOpen !== quickActionSearchOpen) {
+        setQuickActionSearchOpen(shouldOpen, { focus: false });
+        return;
+    }
     renderQuickActionSearchPopover();
 }
 

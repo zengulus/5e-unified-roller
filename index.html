@@ -10,7 +10,7 @@
 
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/index.css?v=20260322b">
+    <link rel="stylesheet" href="css/index.css?v=20260328a">
 
 </head>
 
@@ -72,42 +72,46 @@
                     <section class="play-surface-card" id="playSurface">
                         <div class="play-surface-head">
                             <div>
-                                <p class="play-surface-eyebrow">Play Surface</p>
-                                <h2>Roll fast, then pin the ones you use every round.</h2>
+                                <p class="play-surface-eyebrow">Play Console</p>
+                                <h2>Search any roll. Pin what you use.</h2>
                             </div>
-                            <p class="play-surface-copy">Find checks, skills, attacks, spell casts, recharge rolls, and dice without digging through the sheet.</p>
+                            <div class="play-surface-meta">
+                                <span class="play-surface-chip">Enter = roll top match</span>
+                                <span class="play-surface-chip">Right-click / long-press = pin</span>
+                            </div>
                         </div>
                         <div class="quick-actions-header" id="quickActionsHeader" data-quick-actions-mode="persistent">
                             <div class="quick-actions-panel" id="quickActionsPanel">
-                                <div class="quick-actions-panel-toolbar">
-                                    <button type="button" class="quick-actions-search-trigger" id="btnQuickActionSearch"
-                                        data-onclick="toggleQuickActionSearchPopover()"
-                                        aria-controls="quickActionSearchPopover" aria-expanded="false">
-                                        <span class="quick-actions-search-trigger-title">FIND ROLLS</span>
-                                        <span class="quick-actions-search-trigger-subtitle">Search checks, skills, attacks, spells, and more.</span>
-                                    </button>
-                                    <div class="quick-actions-search-popover" id="quickActionSearchPopover" hidden>
-                                        <div class="quick-actions-search-head">
-                                            <div>
-                                                <div class="quick-actions-search-title">Find Rolls</div>
-                                                <div class="quick-actions-search-subtitle">Roll now from search, or pin a result into Quick Actions.</div>
-                                            </div>
-                                            <button type="button" class="quick-actions-search-close"
-                                                data-onclick="toggleQuickActionSearchPopover(false)"
-                                                aria-label="Close roll search">&times;</button>
-                                        </div>
-                                        <div class="quick-actions-search-input-shell">
+                                <div class="play-surface-console">
+                                    <div class="quick-actions-panel-toolbar play-surface-search-block">
+                                        <label class="play-surface-search-label" for="quickActionSearchInput">Find Rolls</label>
+                                        <div class="play-surface-search-copy">Type a skill, save, spell, attack, recharge, or die roll.</div>
+                                        <div class="quick-actions-search-input-shell play-surface-search-shell">
                                             <input id="quickActionSearchInput" class="quick-actions-search-input" type="search"
                                                 placeholder="Search checks, skills, attacks, damage, spells..."
                                                 autocomplete="off" spellcheck="false"
                                                 data-oninput="updateQuickActionSearchQuery(this.value)">
                                             <span class="quick-actions-search-count" id="quickActionSearchCount">0 ready</span>
                                         </div>
-                                        <div class="quick-actions-search-results" id="quickActionSearchResults"></div>
+                                        <div class="quick-actions-search-popover" id="quickActionSearchPopover" hidden>
+                                            <div class="quick-actions-search-head play-surface-search-head">
+                                                <div>
+                                                    <div class="quick-actions-search-title">Top Matches</div>
+                                                    <div class="quick-actions-search-subtitle">Roll now from search, or pin a result into your combat strip.</div>
+                                                </div>
+                                            </div>
+                                            <div class="quick-actions-search-results" id="quickActionSearchResults"></div>
+                                        </div>
+                                    </div>
+                                    <div class="play-surface-pinned-block">
+                                        <div class="play-surface-pinned-head">
+                                            <div class="play-surface-pinned-title">Pinned Quick Actions</div>
+                                            <div class="play-surface-pinned-copy">Your repeat-use combat strip.</div>
+                                        </div>
+                                        <div class="quick-actions-panel-hint" id="quickActionsPanelHint" hidden></div>
+                                        <div class="quick-actions-list" id="quickActionsList"></div>
                                     </div>
                                 </div>
-                                <div class="quick-actions-panel-hint" id="quickActionsPanelHint" hidden></div>
-                                <div class="quick-actions-list" id="quickActionsList"></div>
                             </div>
                         </div>
                     </section>
@@ -652,7 +656,7 @@
     <script src="js/pdf.min.js"></script>
     <script src="js/importer.js?v=20260222e"></script>
     <script src="js/store.js?v=20260322i"></script>
-    <script src="js/index.js?v=20260322c"></script>
+    <script src="js/index.js?v=20260328a"></script>
     <script src="js/player-nav.js?v=20260322f"></script>
     <script src="js/vector-field.js?v=20260224h"></script>
 </body>
