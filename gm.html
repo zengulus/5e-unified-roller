@@ -181,11 +181,25 @@
                 </button>
             </div>
 
-            <div class="section-header gm-section-divider">Arbitrary
-                Roll</div>
-            <div class="row">
-                <input type="number" id="manualBonus" placeholder="Mod (+/-)" class="gm-input-bold">
-                <button class="btn-sec gm-btn-w100" data-onclick="rollManual()">Roll</button>
+            <div class="section-header gm-section-divider">Arbitrary Roller</div>
+            <div class="gm-arbitrary-stack">
+                <input type="text" id="manualLabel" placeholder="Roll label (e.g. Wild Magic Surge)"
+                    data-onkeydown="handleManualRollKeydown(event)">
+                <div class="row">
+                    <input type="text" id="manualFormula" placeholder="Formula (e.g. 2d6 + 3, d8 + 1d4)"
+                        data-onkeydown="handleManualRollKeydown(event)">
+                    <button class="btn-sec gm-btn-w100" data-onclick="rollManual()">Roll</button>
+                </div>
+                <div class="gm-arbitrary-dice-row">
+                    <span class="gm-label-muted-nowrap">Add die:</span>
+                    <button class="btn-sec btn-sm gm-die-btn" type="button" data-onclick="appendManualDie(4)">d4</button>
+                    <button class="btn-sec btn-sm gm-die-btn" type="button" data-onclick="appendManualDie(6)">d6</button>
+                    <button class="btn-sec btn-sm gm-die-btn" type="button" data-onclick="appendManualDie(8)">d8</button>
+                    <button class="btn-sec btn-sm gm-die-btn" type="button" data-onclick="appendManualDie(10)">d10</button>
+                    <button class="btn-sec btn-sm gm-die-btn" type="button" data-onclick="appendManualDie(12)">d12</button>
+                    <button class="btn-sec btn-sm gm-clear-btn" type="button" data-onclick="clearManualFormula()">Clear</button>
+                </div>
+                <div class="gm-helper-note-soft">Supports flat bonuses plus roll modifiers like <code>4d6r1</code>, <code>2d20kh1</code>, or <code>3d8dl1 + 2</code>.</div>
             </div>
 
             <div class="webhook-box">

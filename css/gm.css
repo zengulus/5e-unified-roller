@@ -822,6 +822,28 @@
             padding-top: 10px;
         }
 
+        .gm-arbitrary-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .gm-arbitrary-dice-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .gm-die-btn {
+            min-width: 56px;
+            padding: 0 10px;
+        }
+
+        .gm-clear-btn {
+            margin-left: auto;
+        }
+
         .gm-check-label {
             display: flex;
             align-items: center;

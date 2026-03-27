@@ -6,7 +6,7 @@ The Tracker tab is intentionally optimized for widescreen/tabletop displays rath
 ## Tabs & Panels
 - **Tracker Tab** – Add single combatants with init/dex/HP, roll whole mobs with auto-numbering, and maintain an ordered list of actors. Track per-entity conditions (with round durations), reaction/concentration/legendary state, and use Undo + Combat Log to recover from mistakes.
 - **VTT Initiative Pull** – Pull the active case's canonical VTT initiative into Tracker, including order, round, active turn, HP, AC, conditions, and reaction/concentration state. Pulling replaces the local Tracker encounter list.
-- **Roller Tab** – Inline log shows the latest result, name/reason, and modifiers. Configure advantage state, custom bonuses, "secret" spoiler rolls, and luck bias. Tier buttons roll preset difficulty bands (Crap → Master) and a manual panel handles arbitrary bonuses or DC estimation sliders.
+- **Roller Tab** – Inline log shows the latest result, name/reason, and modifiers. Configure advantage state, custom bonuses, "secret" spoiler rolls, and luck bias. Tier buttons roll preset difficulty bands (Crap → Master), and the arbitrary roller now supports labeled dice formulas plus quick die-builder buttons (`d4`–`d12`) before you drop into the DC estimator.
 - **Ref & Loot Tab** – Save/load Mob presets, fire off quick loot tables (pocket lint vs trinket) with optional multipliers, manage data export/import, keep a scratchpad, and browse an auto-populated Conditions reference list.
 
 ## Utilities

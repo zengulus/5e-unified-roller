@@ -44,49 +44,12 @@
                     </div>
                 </div>
             </div>
-            <div class="quick-actions-header" id="quickActionsHeader">
-                <button type="button" class="hero-btn quick-actions-toggle" id="btnQuickActionsToggle"
-                    data-onclick="toggleQuickActionsPanel()" aria-controls="quickActionsPanel" aria-expanded="false">
-                    <span class="quick-actions-toggle-title">OPEN QUICK ACTIONS</span>
-                </button>
-                <div class="quick-actions-panel" id="quickActionsPanel" hidden>
-                    <div class="quick-actions-panel-toolbar">
-                        <button type="button" class="quick-actions-search-trigger" id="btnQuickActionSearch"
-                            data-onclick="toggleQuickActionSearchPopover()"
-                            aria-controls="quickActionSearchPopover" aria-expanded="false">
-                            <span class="quick-actions-search-trigger-title">FIND ROLLS</span>
-                            <span class="quick-actions-search-trigger-subtitle">Search checks, skills, attacks, spells, and more.</span>
-                        </button>
-                        <div class="quick-actions-search-popover" id="quickActionSearchPopover" hidden>
-                            <div class="quick-actions-search-head">
-                                <div>
-                                    <div class="quick-actions-search-title">Find Rolls</div>
-                                    <div class="quick-actions-search-subtitle">Roll now from search, or pin a result into Quick Actions.</div>
-                                </div>
-                                <button type="button" class="quick-actions-search-close"
-                                    data-onclick="toggleQuickActionSearchPopover(false)"
-                                    aria-label="Close roll search">&times;</button>
-                            </div>
-                            <div class="quick-actions-search-input-shell">
-                                <input id="quickActionSearchInput" class="quick-actions-search-input" type="search"
-                                    placeholder="Search checks, skills, attacks, damage, spells..."
-                                    autocomplete="off" spellcheck="false"
-                                    data-oninput="updateQuickActionSearchQuery(this.value)">
-                                <span class="quick-actions-search-count" id="quickActionSearchCount">0 ready</span>
-                            </div>
-                            <div class="quick-actions-search-results" id="quickActionSearchResults"></div>
-                        </div>
-                    </div>
-                    <div class="quick-actions-panel-hint" id="quickActionsPanelHint" hidden></div>
-                    <div class="quick-actions-list" id="quickActionsList"></div>
-                </div>
-            </div>
         </div>
 
         <div class="hero-actions roller-actions">
             <div class="sheet-nav-group" role="tablist" aria-label="Sheet Views">
                 <button class="hero-btn ghost sheet-nav-btn active" id="btnSheetMain" data-onclick="setSheetFace('front')"
-                    data-face="front" role="tab" aria-selected="true" aria-pressed="true">Main</button>
+                    data-face="front" role="tab" aria-selected="true" aria-pressed="true">Play</button>
                 <button class="hero-btn ghost sheet-nav-btn" id="btnSheetInventory"
                     data-onclick="setSheetFace('inventory')" data-face="inventory" role="tab" aria-selected="false"
                     aria-pressed="false">Inventory</button>
@@ -106,6 +69,48 @@
         <div class="sheet-flipper view-front" id="sheetFlipper">
             <div class="face front">
                 <div class="sheet-container">
+                    <section class="play-surface-card" id="playSurface">
+                        <div class="play-surface-head">
+                            <div>
+                                <p class="play-surface-eyebrow">Play Surface</p>
+                                <h2>Roll fast, then pin the ones you use every round.</h2>
+                            </div>
+                            <p class="play-surface-copy">Find checks, skills, attacks, spell casts, recharge rolls, and dice without digging through the sheet.</p>
+                        </div>
+                        <div class="quick-actions-header" id="quickActionsHeader" data-quick-actions-mode="persistent">
+                            <div class="quick-actions-panel" id="quickActionsPanel">
+                                <div class="quick-actions-panel-toolbar">
+                                    <button type="button" class="quick-actions-search-trigger" id="btnQuickActionSearch"
+                                        data-onclick="toggleQuickActionSearchPopover()"
+                                        aria-controls="quickActionSearchPopover" aria-expanded="false">
+                                        <span class="quick-actions-search-trigger-title">FIND ROLLS</span>
+                                        <span class="quick-actions-search-trigger-subtitle">Search checks, skills, attacks, spells, and more.</span>
+                                    </button>
+                                    <div class="quick-actions-search-popover" id="quickActionSearchPopover" hidden>
+                                        <div class="quick-actions-search-head">
+                                            <div>
+                                                <div class="quick-actions-search-title">Find Rolls</div>
+                                                <div class="quick-actions-search-subtitle">Roll now from search, or pin a result into Quick Actions.</div>
+                                            </div>
+                                            <button type="button" class="quick-actions-search-close"
+                                                data-onclick="toggleQuickActionSearchPopover(false)"
+                                                aria-label="Close roll search">&times;</button>
+                                        </div>
+                                        <div class="quick-actions-search-input-shell">
+                                            <input id="quickActionSearchInput" class="quick-actions-search-input" type="search"
+                                                placeholder="Search checks, skills, attacks, damage, spells..."
+                                                autocomplete="off" spellcheck="false"
+                                                data-oninput="updateQuickActionSearchQuery(this.value)">
+                                            <span class="quick-actions-search-count" id="quickActionSearchCount">0 ready</span>
+                                        </div>
+                                        <div class="quick-actions-search-results" id="quickActionSearchResults"></div>
+                                    </div>
+                                </div>
+                                <div class="quick-actions-panel-hint" id="quickActionsPanelHint" hidden></div>
+                                <div class="quick-actions-list" id="quickActionsList"></div>
+                            </div>
+                        </div>
+                    </section>
                     <!-- START CREATE BUTTON --><button data-onclick="openCharCreator()" class="ix-inl-002">✨
                         Start a new character </button>
                     <button data-onclick="Importer.triggerImport()" class="ix-inl-003">📂

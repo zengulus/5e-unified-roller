@@ -17,7 +17,7 @@ const ENCOUNTER_LAUNCH_STORAGE_PREFIX = 'rtf_gm_launch_';
 const TRACKER_INITIATIVE_QUEUE_KEY = 'rtf_tracker_initiative_queue';
 const UNIFIED_STORE_KEY = 'ravnica_unified_v1';
 
-const delegatedHandlerEvents = ['click', 'change', 'input'];
+const delegatedHandlerEvents = ['click', 'change', 'input', 'keydown'];
 const delegatedHandlerCache = new Map();
 let delegatedHandlersBound = false;
 
@@ -1078,6 +1078,116 @@ function setLuck(luckStr) {
     updateBonuses();
 }
 
+function updateRollDisplay(name, reasonText, total, formula) {
+    document.getElementById('rollLabel').innerText = `${name} - ${reasonText}`;
+    document.getElementById('rollVal').innerText = total;
+    document.getElementById('rollFormula').innerText = formula;
+}
+
+function publishRollToDiscord(name, reasonText, total, formula) {
+    if (!(gmData.discordActive && gmData.webhook)) return;
+    const isSecret = document.getElementById('secretRoll').checked;
+    let content = `**${total}**\n${formula}`;
+    if (isSecret) content = `||${content}||`;
+
+    let color = 16777215;
+    if (total >= 20) color = 3066993;
+    else if (total <= 5) color = 15158332;
+
+    sendDiscord(name, reasonText, content, isSecret ? 3447003 : color);
+}
+
+function gmParseRollModifiers(str) {
+    const mods = { r: 0, dl: 0, kh: 0 };
+    if (!str) return mods;
+    const rMatch = str.match(/r(\d+)/i);
+    if (rMatch) mods.r = parseInt(rMatch[1], 10) || 0;
+    const dlMatch = str.match(/d[l]?(\d+)/i);
+    if (dlMatch) mods.dl = parseInt(dlMatch[1], 10) || 0;
+    const khMatch = str.match(/k[h]?(\d+)/i);
+    if (khMatch) mods.kh = parseInt(khMatch[1], 10) || 0;
+    return mods;
+}
+
+function gmCoreRoll(count, sides, mods = {}) {
+    let total = 0;
+    const rollObjs = [];
+
+    for (let i = 0; i < count; i++) {
+        let value = Math.floor(Math.random() * sides) + 1;
+        if (mods.r > 0) {
+            let safety = 0;
+            while (value <= mods.r && safety < 50) {
+                value = Math.floor(Math.random() * sides) + 1;
+                safety++;
+            }
+        }
+        rollObjs.push({ value, dropped: false });
+    }
+
+    if (mods.dl > 0 || mods.kh > 0) {
+        const sorted = [...rollObjs].sort((a, b) => a.value - b.value);
+        let dropCount = mods.dl;
+        if (mods.kh > 0) {
+            const calculatedDrop = count - mods.kh;
+            if (calculatedDrop > dropCount) dropCount = calculatedDrop;
+        }
+        for (let i = 0; i < dropCount; i++) {
+            if (sorted[i]) sorted[i].dropped = true;
+        }
+    }
+
+    const formula = `[${rollObjs.map((roll) => {
+        if (!roll.dropped) total += roll.value;
+        return roll.dropped ? `~~${roll.value}~~` : String(roll.value);
+    }).join('+')}]`;
+
+    return { total, formula };
+}
+
+function gmParseComplexFormula(str) {
+    const source = String(str || '').trim();
+    if (!source) return { total: 0, text: '' };
+
+    let total = 0;
+    const parts = [];
+    const diceRegex = /([+-]?)\s*(\d*)d(\d+)\s*([a-z0-9]*)/gi;
+    const pushPart = (sign, text) => {
+        const cleanText = String(text || '').trim();
+        if (!cleanText) return;
+        if (!parts.length) {
+            parts.push(sign === -1 ? `-${cleanText}` : cleanText);
+            return;
+        }
+        parts.push(`${sign === -1 ? '-' : '+'} ${cleanText}`);
+    };
+
+    let match;
+    while ((match = diceRegex.exec(source)) !== null) {
+        const sign = (match[1] || '').trim() === '-' ? -1 : 1;
+        const count = Math.max(1, parseInt(match[2], 10) || 1);
+        const sides = Math.max(2, parseInt(match[3], 10) || 2);
+        const modStr = match[4] || '';
+        const result = gmCoreRoll(count, sides, gmParseRollModifiers(modStr));
+        total += result.total * sign;
+        pushPart(sign, modStr ? `${result.formula}${modStr}` : result.formula);
+    }
+
+    const staticSource = source.replace(diceRegex, ' ');
+    const staticRegex = /([+-]?)\s*(\d+)(?!\s*d)/gi;
+    while ((match = staticRegex.exec(staticSource)) !== null) {
+        const sign = (match[1] || '').trim() === '-' ? -1 : 1;
+        const value = parseInt(match[2], 10) || 0;
+        total += value * sign;
+        pushPart(sign, value);
+    }
+
+    return {
+        total,
+        text: parts.join(' ').trim()
+    };
+}
+
 // SHARED ROLL FUNCTION
 function performRoll(bonus, reasonText) {
     const name = document.getElementById('adhocName').value || "GM";
@@ -1106,23 +1216,8 @@ function performRoll(bonus, reasonText) {
     const total = rawResult + bonus;
     if (bonus !== 0) formula += ` ${bonus >= 0 ? '+' : ''}${bonus}`;
 
-    // UI Update
-    document.getElementById('rollLabel').innerText = `${name} - ${reasonText}`;
-    document.getElementById('rollVal').innerText = total;
-    document.getElementById('rollFormula').innerText = formula;
-
-    // Discord
-    if (gmData.discordActive && gmData.webhook) {
-        const isSecret = document.getElementById('secretRoll').checked;
-        let content = `**${total}**\n${formula}`;
-        if (isSecret) content = `||${content}||`;
-
-        let color = 16777215; // White
-        if (total >= 20) color = 3066993; // Green
-        else if (total <= 5) color = 15158332; // Red
-
-        sendDiscord(name, reasonText, content, isSecret ? 3447003 : color);
-    }
+    updateRollDisplay(name, reasonText, total, formula);
+    publishRollToDiscord(name, reasonText, total, formula);
 }
 
 function rollTier(tier) {
@@ -1151,12 +1246,52 @@ function rollTier(tier) {
 }
 
 function rollManual() {
-    const val = document.getElementById('manualBonus').value;
-    const bonus = parseInt(val) || 0;
-    const reasonInput = document.getElementById('adhocReason').value;
-    const reason = reasonInput || "Manual Roll";
+    const formulaField = document.getElementById('manualFormula');
+    const labelField = document.getElementById('manualLabel');
+    const formula = formulaField ? String(formulaField.value || '').trim() : '';
+    const reasonInput = labelField ? String(labelField.value || '').trim() : '';
+    const fallbackReason = String(document.getElementById('adhocReason').value || '').trim();
+    const reason = reasonInput || fallbackReason || "Arbitrary Roll";
+    const name = document.getElementById('adhocName').value || "GM";
+    const parsed = gmParseComplexFormula(formula);
 
-    performRoll(bonus, reason);
+    if (!parsed.text) {
+        updateRollDisplay(name, reason, 'Invalid', 'Enter a dice formula like 2d6 + 3');
+        return;
+    }
+
+    updateRollDisplay(name, reason, parsed.total, parsed.text);
+    publishRollToDiscord(name, reason, parsed.total, parsed.text);
+}
+
+function appendManualDie(sides) {
+    const field = document.getElementById('manualFormula');
+    if (!field) return;
+    const current = String(field.value || '');
+    const token = `d${sides}`;
+    if (!current.trim()) {
+        field.value = token;
+    } else if (/[+\-*/(]\s*$/.test(current)) {
+        field.value = `${current}${token}`;
+    } else {
+        field.value = `${current.trimEnd()} + ${token}`;
+    }
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+}
+
+function clearManualFormula() {
+    const formulaField = document.getElementById('manualFormula');
+    if (formulaField) formulaField.value = '';
+    const labelField = document.getElementById('manualLabel');
+    if (labelField) labelField.value = '';
+    if (formulaField) formulaField.focus();
+}
+
+function handleManualRollKeydown(event) {
+    if (!event || event.key !== 'Enter') return;
+    event.preventDefault();
+    rollManual();
 }
 
 function sendDiscord(name, title, desc, color) {

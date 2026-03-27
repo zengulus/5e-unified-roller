@@ -287,6 +287,7 @@ function applySheetFaceState(face) {
     data.uiState.sheetFace = nextFace;
     // Legacy compatibility for stored v4.8 data.
     data.uiState.isFlipped = nextFace !== 'front';
+    if (nextFace !== 'front') setQuickActionSearchOpen(false, { focus: false });
 }
 
 function setSheetFace(face) {
@@ -902,15 +903,23 @@ function enforceInitiativeQuickAction(actions) {
     return [initiative, ...rest].slice(0, QUICK_ACTION_MAX_COUNT);
 }
 
+function isPersistentQuickActionsLayout() {
+    const shell = document.getElementById('quickActionsHeader');
+    return !!(shell && shell.getAttribute('data-quick-actions-mode') === 'persistent');
+}
+
 function setQuickActionsPanelOpen(open) {
-    quickActionsPanelOpen = !!open;
+    const persistent = isPersistentQuickActionsLayout();
+    quickActionsPanelOpen = persistent ? true : !!open;
     const panel = document.getElementById('quickActionsPanel');
     const toggle = document.getElementById('btnQuickActionsToggle');
-    if (!panel || !toggle) return;
+    if (!panel) return;
 
-    panel.hidden = !quickActionsPanelOpen;
-    toggle.classList.toggle('active', quickActionsPanelOpen);
-    toggle.setAttribute('aria-expanded', quickActionsPanelOpen ? 'true' : 'false');
+    panel.hidden = persistent ? false : !quickActionsPanelOpen;
+    if (toggle) {
+        toggle.classList.toggle('active', quickActionsPanelOpen);
+        toggle.setAttribute('aria-expanded', quickActionsPanelOpen ? 'true' : 'false');
+    }
 
     if (quickActionsPanelOpen) {
         renderQuickActions();
@@ -921,6 +930,11 @@ function setQuickActionsPanelOpen(open) {
 }
 
 function toggleQuickActionsPanel(forceOpen) {
+    if (isPersistentQuickActionsLayout()) {
+        setQuickActionsPanelOpen(true);
+        if (forceOpen === false) setQuickActionSearchOpen(false, { clearQuery: true, focus: false });
+        return;
+    }
     const nextState = typeof forceOpen === 'boolean' ? forceOpen : !quickActionsPanelOpen;
     setQuickActionsPanelOpen(nextState);
 }
@@ -930,21 +944,24 @@ function bindQuickActionsPanelEvents() {
     quickActionsPanelEventsBound = true;
 
     document.addEventListener('click', (event) => {
-        if (!quickActionsPanelOpen) return;
         const shell = document.getElementById('quickActionsHeader');
         const target = event.target instanceof Node ? event.target : null;
         if (shell && target && shell.contains(target)) return;
+        if (quickActionSearchOpen) {
+            setQuickActionSearchOpen(false, { focus: false });
+        }
+        if (!quickActionsPanelOpen || isPersistentQuickActionsLayout()) return;
         setQuickActionsPanelOpen(false);
     });
 
     document.addEventListener('keydown', (event) => {
-        if (!quickActionsPanelOpen) return;
         if (event.key !== 'Escape') return;
         if (quickActionSearchOpen) {
             event.preventDefault();
             setQuickActionSearchOpen(false, { focus: false });
             return;
         }
+        if (!quickActionsPanelOpen || isPersistentQuickActionsLayout()) return;
         setQuickActionsPanelOpen(false);
     });
 
@@ -4755,12 +4772,7 @@ function getQuickActionPresentation(action) {
 
 function updateQuickActionsInstructionState() {
     const hintText = 'Use Find Rolls to search and roll instantly, or right-click / long-press a die roll to pin it here.';
-    const toggle = document.getElementById('btnQuickActionsToggle');
     const panelHint = document.getElementById('quickActionsPanelHint');
-
-    if (toggle) {
-        toggle.removeAttribute('title');
-    }
 
     if (panelHint) {
         panelHint.hidden = false;
@@ -4839,8 +4851,20 @@ function buildQuickActionSearchSpellItem(idx, ritual = false) {
             levelText,
             spell.school || '',
             spell.classes || '',
+            spell.actionType || '',
+            spell.castingTime || '',
+            spell.castingTrigger || '',
             spell.range || '',
             spell.duration || '',
+            spell.components || '',
+            spell.material || '',
+            spell.damageFormula || '',
+            spell.save || '',
+            spell.concentration ? 'concentration' : '',
+            spell.ritual ? 'ritual' : '',
+            spell.description || '',
+            spell.higherLevelSlot || '',
+            spell.cantripUpgrade || '',
             ritual ? 'ritual' : 'spell cast'
         ].join(' '),
         action: {
