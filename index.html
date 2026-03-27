@@ -10,7 +10,7 @@
 
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/index.css?v=20260328a">
+    <link rel="stylesheet" href="css/index.css?v=20260328b">
 
 </head>
 
@@ -115,10 +115,26 @@
                             </div>
                         </div>
                     </section>
-                    <!-- START CREATE BUTTON --><button data-onclick="openCharCreator()" class="ix-inl-002">✨
-                        Start a new character </button>
-                    <button data-onclick="Importer.triggerImport()" class="ix-inl-003">📂
-                        Import from PDF</button>
+                    <div class="sheet-setup-actions">
+                        <div class="sheet-setup-grid">
+                            <button data-onclick="openCharCreator()" class="sheet-setup-btn primary">
+                                <span class="sheet-setup-icon">✨</span>
+                                <span class="sheet-setup-copy">
+                                    <strong>Start a new character</strong>
+                                    <small>Guided setup for stats, class, skills, and starter features.</small>
+                                </span>
+                            </button>
+                            <button data-onclick="openLevelUpWizard()" class="sheet-setup-btn secondary">
+                                <span class="sheet-setup-icon">⬆</span>
+                                <span class="sheet-setup-copy">
+                                    <strong>Level up selected character</strong>
+                                    <small>Guided workflow for HP, hit dice, skills, features, and caster progression.</small>
+                                </span>
+                            </button>
+                        </div>
+                        <button data-onclick="Importer.triggerImport()" class="sheet-setup-import">📂
+                            Import from PDF</button>
+                    </div>
                     <div class="card" id="card-vitals">
                         <div class="drag-grip"></div>
                         <div class="header-grid vitals-header-grid">
@@ -651,12 +667,157 @@
             </div>
         </div>
     </div>
+    <div class="modal-overlay" id="levelUpModal">
+        <div class="modal-content level-up-modal-content">
+            <div class="modal-header">
+                <span>⬆ Level Up Character</span>
+                <span data-onclick="closeLevelUpWizard()" class="ix-inl-047">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="wizard-step active" id="luStep1">
+                    <h3 class="ix-inl-048">1. Choose the New Level</h3>
+                    <div class="level-up-hero">
+                        <div class="level-up-character-card">
+                            <div class="level-up-kicker">Selected Character</div>
+                            <strong id="luCharName">Character</strong>
+                            <div id="luCharMeta" class="level-up-meta"></div>
+                        </div>
+                        <div class="level-up-target-card">
+                            <label>Target Level</label>
+                            <input type="number" id="luTargetLevel" min="1" max="20"
+                                data-oninput="luHandleTargetLevelInput(this.value)"
+                                data-onchange="luHandleTargetLevelInput(this.value)">
+                            <div id="luLevelDeltaCopy" class="level-up-delta-copy"></div>
+                        </div>
+                    </div>
+                    <div class="level-up-note-card">
+                        This wizard updates the current sheet in place. It does not create a new save format or replace your character.
+                    </div>
+                </div>
+                <div class="wizard-step" id="luStep2">
+                    <h3 class="ix-inl-048">2. HP and Hit Dice</h3>
+                    <div class="level-up-toggle-card">
+                        <label class="level-up-inline-check">
+                            <input type="checkbox" id="luAutoHP" data-onchange="luUpdateHpPreview()">
+                            Use auto HP formula for this character
+                        </label>
+                        <div class="level-up-subcopy">
+                            Auto HP uses hit die size, Constitution, and bonus-per-level settings. Manual mode applies a flat max HP gain instead.
+                        </div>
+                    </div>
+                    <div class="header-grid ix-inl-050">
+                        <div class="field-group" id="luHitDieGroup">
+                            <label>Hit Die</label>
+                            <select id="luHdDie" data-onchange="luUpdateHpPreview()">
+                                <option value="6">d6</option>
+                                <option value="8">d8</option>
+                                <option value="10">d10</option>
+                                <option value="12">d12</option>
+                            </select>
+                        </div>
+                        <div class="field-group" id="luBonusHpGroup">
+                            <label>Bonus HP / Level</label>
+                            <input type="number" id="luHpBonusPerLevel" value="0" data-oninput="luUpdateHpPreview()">
+                        </div>
+                        <div class="field-group" id="luManualHpGroup">
+                            <label>Manual Max HP Gain</label>
+                            <input type="number" id="luManualHpGain" value="0" data-oninput="luUpdateHpPreview()">
+                        </div>
+                    </div>
+                    <label class="level-up-inline-check">
+                        <input type="checkbox" id="luApplyHpGainCurrent" checked data-onchange="luUpdateHpPreview()">
+                        Add the HP gain to current HP too
+                    </label>
+                    <div class="level-up-preview-grid">
+                        <div class="level-up-preview-card">
+                            <div class="level-up-preview-title">Projected HP</div>
+                            <div id="luHpPreview" class="level-up-preview-body"></div>
+                        </div>
+                        <div class="level-up-preview-card">
+                            <div class="level-up-preview-title">Projected Hit Dice</div>
+                            <div id="luHitDicePreview" class="level-up-preview-body"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="wizard-step" id="luStep3">
+                    <h3 class="ix-inl-048">3. Stats, Skills, and New Gains</h3>
+                    <div class="creator-section-title">Ability Score Adjustments</div>
+                    <div class="level-up-stat-grid">
+                        <div class="race-mod-input"><label>STR</label><input type="number" id="luStatDeltaStr" value="0" data-oninput="luUpdateDerivedDisplays()"></div>
+                        <div class="race-mod-input"><label>DEX</label><input type="number" id="luStatDeltaDex" value="0" data-oninput="luUpdateDerivedDisplays()"></div>
+                        <div class="race-mod-input"><label>CON</label><input type="number" id="luStatDeltaCon" value="0" data-oninput="luUpdateDerivedDisplays()"></div>
+                        <div class="race-mod-input"><label>INT</label><input type="number" id="luStatDeltaInt" value="0" data-oninput="luUpdateDerivedDisplays()"></div>
+                        <div class="race-mod-input"><label>WIS</label><input type="number" id="luStatDeltaWis" value="0" data-oninput="luUpdateDerivedDisplays()"></div>
+                        <div class="race-mod-input"><label>CHA</label><input type="number" id="luStatDeltaCha" value="0" data-oninput="luUpdateDerivedDisplays()"></div>
+                    </div>
+                    <div class="creator-section-title">Skill Changes</div>
+                    <div class="level-up-skills-copy">Click a skill to cycle: Untrained -> Proficient -> Expertise.</div>
+                    <div class="level-up-skill-legend">
+                        <span>U = Untrained</span>
+                        <span>P = Proficient</span>
+                        <span>E = Expertise</span>
+                    </div>
+                    <div id="luSkillsGrid" class="skills-grid"></div>
+                    <div class="creator-section-title">New Features, Feats, or Notes</div>
+                    <div id="luFeatureList" class="cc-feat-list"></div>
+                    <div class="ix-inl-025">
+                        <input type="text" id="luFeatureName" placeholder="Feature or feat name" class="ix-inl-051">
+                        <button data-onclick="addLuFeature()" class="ix-inl-052">Add</button>
+                    </div>
+                    <textarea id="luFeatureDesc" placeholder="Description, reminder text, or rules notes..." class="ix-inl-053"></textarea>
+                </div>
+                <div class="wizard-step" id="luStep4">
+                    <h3 class="ix-inl-048">4. Spellcasting Progression</h3>
+                    <div class="header-grid ix-inl-054">
+                        <div class="field-group">
+                            <label>Caster Type</label>
+                            <select id="luCasterType" data-onchange="luUpdateCasterControls()">
+                                <option value="none">None</option>
+                                <option value="full">Full Caster</option>
+                                <option value="half">Half Caster</option>
+                                <option value="third">1/3 Caster</option>
+                                <option value="pact">Pact Magic</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label>Caster Level</label>
+                            <input type="number" id="luCasterLevel" min="0" max="20" value="1" data-oninput="luUpdateDerivedDisplays()">
+                        </div>
+                    </div>
+                    <label class="level-up-inline-check">
+                        <input type="checkbox" id="luSyncCasterLevel" data-onchange="luUpdateCasterControls()">
+                        Keep caster level synced to the new character level
+                    </label>
+                    <label class="level-up-inline-check">
+                        <input type="checkbox" id="luAutoCalcSlots" checked data-onchange="luUpdateDerivedDisplays()">
+                        Auto-calc spell slots after applying the level-up
+                    </label>
+                    <div class="level-up-note-card">
+                        This updates slot trackers only. Your spellbook entries stay as-is so you can add or swap spells manually.
+                    </div>
+                    <div id="luSpellcastingPreview" class="level-up-preview-card level-up-preview-card-wide">
+                        <div class="level-up-preview-title">Spellcasting Summary</div>
+                        <div class="level-up-preview-body"></div>
+                    </div>
+                </div>
+                <div class="wizard-step" id="luStep5">
+                    <h3 class="ix-inl-048">5. Review and Apply</h3>
+                    <div id="luReviewSummary" class="ix-inl-061"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="luBtnPrev" data-onclick="luPrev()" class="ix-inl-062">Previous</button>
+                <button id="luBtnNext" data-onclick="luNext()" class="ix-inl-063">Next</button>
+                <button id="luBtnFinish" data-onclick="luFinish()" class="ix-inl-064">Apply Level Up</button>
+            </div>
+        </div>
+    </div>
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
     <script src="js/pdf.min.js"></script>
     <script src="js/importer.js?v=20260222e"></script>
     <script src="js/store.js?v=20260322i"></script>
-    <script src="js/index.js?v=20260328a"></script>
+    <script src="js/index.js?v=20260328b"></script>
     <script src="js/player-nav.js?v=20260322f"></script>
     <script src="js/vector-field.js?v=20260224h"></script>
 </body>

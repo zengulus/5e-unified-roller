@@ -2780,6 +2780,21 @@ function toggleAutoHP() {
     }
 }
 
+function parseHitDieSides(value, fallback = 8) {
+    const sides = parseInt(String(value || '').replace(/\D/g, ''), 10) || fallback;
+    return Math.max(1, sides);
+}
+
+function calculateAutoHpMaxForLevel(level, hitDieSides, conVal, bonusPerLevel = 0) {
+    const safeLevel = Math.max(1, Math.min(20, parseInt(level, 10) || 1));
+    const safeSides = Math.max(1, parseInt(hitDieSides, 10) || 8);
+    const safeCon = parseInt(conVal, 10) || 10;
+    const safeBonus = parseInt(bonusPerLevel, 10) || 0;
+    const conMod = Math.floor((safeCon - 10) / 2);
+    const avg = (safeSides / 2) + 1;
+    return Math.max(1, (safeSides + conMod + safeBonus) + ((safeLevel - 1) * (avg + conMod + safeBonus)));
+}
+
 function updateHP() {
     let curr = parseInt(document.getElementById('hpCurr').value) || 0;
     let maxVal = parseInt(document.getElementById('hpMax').value) || 0;
@@ -2805,24 +2820,15 @@ function updateHP() {
     if (isAuto) {
         const lvl = parseInt(data.meta.level) || 1;
         const conVal = parseInt(data.stats.con.val) || 10;
-        const conMod = Math.floor((conVal - 10) / 2);
-
-        // Get Die Side from input
         let sides = 8;
 
         if (document.getElementById('hdDie')) {
             const hdStr = document.getElementById('hdDie').value || "d8";
-            sides = parseInt(hdStr.replace(/\D/g, '')) || 8;
+            sides = parseHitDieSides(hdStr, 8);
         }
 
         const bonus = data.vitals.hpAutoState.bonus;
-
-        // Avg = sides/2 + 1
-        const avg = (sides / 2) + 1;
-
-        // Lvl 1 is Max, others Avg
-        calcMax = (sides + conMod + bonus) + ((lvl - 1) * (avg + conMod + bonus));
-        calcMax = Math.max(1, calcMax);
+        calcMax = calculateAutoHpMaxForLevel(lvl, sides, conVal, bonus);
 
         // Update the input if auto is on
         maxVal = calcMax;
@@ -4604,27 +4610,39 @@ function calcSpellSlots() {
     if (casterLevelInput) casterLevelInput.value = casterLevel;
     if (!data.meta) data.meta = {};
     data.meta.casterLevel = casterLevel;
+    if (!applySpellSlotProgression(type, casterLevel, { confirmClear: true })) return;
 
-    if (type === 'none') {
-        if (!confirm("Clear all spell slots?")) return;
+    save();
+    renderSpells();
+    showLog("Slots", "Updated");
+}
+
+function applySpellSlotProgression(type, casterLevel, options = {}) {
+    normalizeSpellSlots();
+    const settings = {
+        confirmClear: true,
+        ...options
+    };
+    const nextType = ['none', 'full', 'half', 'third', 'pact'].includes(type) ? type : 'none';
+    const safeCasterLevel = clampCasterLevel(casterLevel, data && data.meta ? data.meta.level : 1);
+
+    if (nextType === 'none') {
+        if (settings.confirmClear && !confirm("Clear all spell slots?")) return false;
         data.spells.forEach((slot) => {
             slot.max = 0;
             slot.used = 0;
         });
-        save();
-        renderSpells();
-        return;
+        return true;
     }
 
     let effectiveLvl = 0;
     let tableToUse = spellSlotTable.full;
 
-    if (type === 'full') effectiveLvl = casterLevel;
-    else if (type === 'half') effectiveLvl = Math.floor(casterLevel / 2);
-    else if (type === 'third') effectiveLvl = Math.ceil(casterLevel / 3);
-
-    else if (type === 'pact') {
-        effectiveLvl = casterLevel;
+    if (nextType === 'full') effectiveLvl = safeCasterLevel;
+    else if (nextType === 'half') effectiveLvl = Math.floor(safeCasterLevel / 2);
+    else if (nextType === 'third') effectiveLvl = Math.ceil(safeCasterLevel / 3);
+    else if (nextType === 'pact') {
+        effectiveLvl = safeCasterLevel;
         tableToUse = spellSlotTable.pact;
     }
 
@@ -4635,32 +4653,26 @@ function calcSpellSlots() {
             slot.max = 0;
             slot.used = 0;
         });
+        return true;
     }
 
-    else {
-        const slots = tableToUse[effectiveLvl - 1] || [];
-
-        if (type === 'pact') {
-            const slotLvl = getPactSpellSlotLevel(casterLevel);
-            const slotCount = Math.max(0, parseInt(slots[0], 10) || 0);
-            data.spells.forEach((slot, index) => {
-                slot.max = (index === slotLvl - 1) ? slotCount : 0;
-                if (index !== slotLvl - 1) slot.used = 0;
-                slot.used = Math.min(slot.max, slot.used);
-            });
-        }
-
-        else {
-            data.spells.forEach((s, i) => {
-                s.max = slots[i] || 0;
-                s.used = Math.min(s.max, s.used);
-            });
-        }
+    const slots = tableToUse[effectiveLvl - 1] || [];
+    if (nextType === 'pact') {
+        const slotLvl = getPactSpellSlotLevel(safeCasterLevel);
+        const slotCount = Math.max(0, parseInt(slots[0], 10) || 0);
+        data.spells.forEach((slot, index) => {
+            slot.max = (index === slotLvl - 1) ? slotCount : 0;
+            if (index !== slotLvl - 1) slot.used = 0;
+            slot.used = Math.min(slot.max, slot.used);
+        });
+        return true;
     }
 
-    save();
-    renderSpells();
-    showLog("Slots", "Updated");
+    data.spells.forEach((slot, index) => {
+        slot.max = slots[index] || 0;
+        slot.used = Math.min(slot.max, slot.used);
+    });
+    return true;
 }
 
 function renderResources() {
@@ -6369,6 +6381,559 @@ async function importData() {
     }
 }
 
+// --- LEVEL UP WIZARD ---
+let luStep = 1;
+let luNewFeatures = [];
+let luSkillLevels = {};
+let luOriginalSkillLevels = {};
+
+function clampSkillTrainingLevel(value) {
+    return Math.max(0, Math.min(2, parseInt(value, 10) || 0));
+}
+
+function getLevelUpCurrentLevel() {
+    return Math.max(1, Math.min(20, parseInt(data && data.meta ? data.meta.level : 1, 10) || 1));
+}
+
+function getLevelUpMinimumTargetLevel() {
+    return Math.min(20, getLevelUpCurrentLevel() + 1);
+}
+
+function getLevelUpTargetLevel() {
+    const input = document.getElementById('luTargetLevel');
+    const minimum = getLevelUpMinimumTargetLevel();
+    const rawValue = input ? input.value : minimum;
+    const nextLevel = Math.max(minimum, Math.min(20, parseInt(rawValue, 10) || minimum));
+    if (input && String(input.value) !== String(nextLevel)) input.value = nextLevel;
+    return nextLevel;
+}
+
+function getSheetInputNumber(id, fallback = 0) {
+    const input = document.getElementById(id);
+    const rawValue = input ? input.value : fallback;
+    const parsed = parseInt(rawValue, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getLevelUpStatDeltas() {
+    return {
+        str: getSheetInputNumber('luStatDeltaStr', 0),
+        dex: getSheetInputNumber('luStatDeltaDex', 0),
+        con: getSheetInputNumber('luStatDeltaCon', 0),
+        int: getSheetInputNumber('luStatDeltaInt', 0),
+        wis: getSheetInputNumber('luStatDeltaWis', 0),
+        cha: getSheetInputNumber('luStatDeltaCha', 0)
+    };
+}
+
+function formatSkillTrainingLevel(level) {
+    if (level === 2) return 'Expertise';
+    if (level === 1) return 'Proficient';
+    return 'Untrained';
+}
+
+function formatSkillTrainingShort(level) {
+    if (level === 2) return 'E';
+    if (level === 1) return 'P';
+    return 'U';
+}
+
+function formatSkillLabel(skill) {
+    return skill.split(' ').map((part) => part ? part.charAt(0).toUpperCase() + part.slice(1) : '').join(' ');
+}
+
+function getProjectedLevelUpConScore() {
+    const baseCon = parseInt(data && data.stats && data.stats.con ? data.stats.con.val : 10, 10) || 10;
+    return baseCon + getLevelUpStatDeltas().con;
+}
+
+function getSuggestedManualHpGain() {
+    const currentLevel = getLevelUpCurrentLevel();
+    const targetLevel = getLevelUpTargetLevel();
+    const sides = parseHitDieSides(document.getElementById('luHdDie') ? document.getElementById('luHdDie').value : (data && data.vitals ? data.vitals.hdDie : 'd8'), 8);
+    const bonus = getSheetInputNumber('luHpBonusPerLevel', (data && data.vitals && data.vitals.hpAutoState) ? data.vitals.hpAutoState.bonus : 0);
+    const currentCon = getProjectedLevelUpConScore();
+    const currentMax = calculateAutoHpMaxForLevel(currentLevel, sides, currentCon, bonus);
+    const nextMax = calculateAutoHpMaxForLevel(targetLevel, sides, currentCon, bonus);
+    return Math.max(0, nextMax - currentMax);
+}
+
+function syncLuManualHpSuggestion(force = false) {
+    const input = document.getElementById('luManualHpGain');
+    if (!input) return;
+    const suggestion = getSuggestedManualHpGain();
+    const currentValue = parseInt(input.value, 10);
+    const lastSuggested = parseInt(input.dataset.lastSuggested || '', 10);
+    if (force || input.value === '' || (!Number.isNaN(lastSuggested) && currentValue === lastSuggested)) {
+        input.value = suggestion;
+    }
+    input.dataset.lastSuggested = String(suggestion);
+}
+
+function getLevelUpPreviewState() {
+    const currentLevel = getLevelUpCurrentLevel();
+    const targetLevel = getLevelUpTargetLevel();
+    const levelDelta = Math.max(1, targetLevel - currentLevel);
+    const statDeltas = getLevelUpStatDeltas();
+    const currentHpMax = getSheetInputNumber('hpMax', parseInt(data && data.vitals ? data.vitals.max : 0, 10) || 0);
+    const currentHpCurr = getSheetInputNumber('hpCurr', parseInt(data && data.vitals ? data.vitals.curr : 0, 10) || 0);
+    const currentHdMax = getSheetInputNumber('hdMax', parseInt(data && data.vitals ? data.vitals.hdMax : 0, 10) || 0);
+    const currentHdCurr = getSheetInputNumber('hdCurr', parseInt(data && data.vitals ? data.vitals.hdCurr : 0, 10) || 0);
+    const autoHp = !!(document.getElementById('luAutoHP') && document.getElementById('luAutoHP').checked);
+    const hitDieSides = parseHitDieSides(document.getElementById('luHdDie') ? document.getElementById('luHdDie').value : (data && data.vitals ? data.vitals.hdDie : 'd8'), 8);
+    const hpBonus = getSheetInputNumber('luHpBonusPerLevel', (data && data.vitals && data.vitals.hpAutoState) ? data.vitals.hpAutoState.bonus : 0);
+    const projectedCon = getProjectedLevelUpConScore();
+
+    let hpGain = getSheetInputNumber('luManualHpGain', 0);
+    let nextHpMax = Math.max(1, currentHpMax + hpGain);
+    if (autoHp) {
+        nextHpMax = calculateAutoHpMaxForLevel(targetLevel, hitDieSides, projectedCon, hpBonus);
+        hpGain = nextHpMax - currentHpMax;
+    }
+
+    const applyHpGainToCurrent = !!(document.getElementById('luApplyHpGainCurrent') && document.getElementById('luApplyHpGainCurrent').checked);
+    let nextHpCurr = applyHpGainToCurrent ? currentHpCurr + hpGain : currentHpCurr;
+    nextHpCurr = Math.max(0, Math.min(nextHpMax, nextHpCurr));
+
+    const nextHdMax = Math.max(0, currentHdMax + levelDelta);
+    const nextHdCurr = Math.max(0, Math.min(nextHdMax, currentHdCurr + levelDelta));
+
+    const casterTypeInput = document.getElementById('luCasterType');
+    const casterType = casterTypeInput ? casterTypeInput.value : (data && data.meta ? data.meta.casterType : 'none');
+    const syncCasterLevel = !!(document.getElementById('luSyncCasterLevel') && document.getElementById('luSyncCasterLevel').checked);
+    const casterLevelInput = document.getElementById('luCasterLevel');
+    const casterLevel = casterType === 'none'
+        ? 0
+        : (syncCasterLevel
+            ? targetLevel
+            : clampCasterLevel(casterLevelInput ? casterLevelInput.value : getCasterLevel(), targetLevel));
+    const autoCalcSlots = !!(document.getElementById('luAutoCalcSlots') && document.getElementById('luAutoCalcSlots').checked);
+
+    const skillChanges = Object.keys(skillsMap).filter((skill) => clampSkillTrainingLevel(luSkillLevels[skill]) !== clampSkillTrainingLevel(luOriginalSkillLevels[skill])).map((skill) => ({
+        skill,
+        before: clampSkillTrainingLevel(luOriginalSkillLevels[skill]),
+        after: clampSkillTrainingLevel(luSkillLevels[skill])
+    }));
+
+    const statChanges = stats.filter((stat) => statDeltas[stat] !== 0).map((stat) => {
+        const currentValue = parseInt(data && data.stats && data.stats[stat] ? data.stats[stat].val : 10, 10) || 10;
+        const nextValue = currentValue + statDeltas[stat];
+        return {
+            stat,
+            delta: statDeltas[stat],
+            currentValue,
+            nextValue
+        };
+    });
+
+    return {
+        currentLevel,
+        targetLevel,
+        levelDelta,
+        statDeltas,
+        statChanges,
+        autoHp,
+        hitDieSides,
+        hpBonus,
+        currentHpCurr,
+        currentHpMax,
+        nextHpCurr,
+        nextHpMax,
+        hpGain,
+        currentHdCurr,
+        currentHdMax,
+        nextHdCurr,
+        nextHdMax,
+        casterType,
+        casterLevel,
+        syncCasterLevel,
+        autoCalcSlots,
+        skillChanges
+    };
+}
+
+function syncLevelUpHeader() {
+    const currentLevel = getLevelUpCurrentLevel();
+    const targetLevel = getLevelUpTargetLevel();
+    const delta = targetLevel - currentLevel;
+    const nameEl = document.getElementById('luCharName');
+    const metaEl = document.getElementById('luCharMeta');
+    const deltaEl = document.getElementById('luLevelDeltaCopy');
+    if (nameEl) nameEl.textContent = data && data.meta && data.meta.name ? data.meta.name : 'Unnamed Character';
+    if (metaEl) {
+        const metaBits = [];
+        if (data && data.meta && data.meta.class) metaBits.push(data.meta.class);
+        metaBits.push(`Level ${currentLevel}`);
+        if (data && data.meta && data.meta.race) metaBits.push(data.meta.race);
+        metaEl.textContent = metaBits.join(' • ');
+    }
+    if (deltaEl) {
+        deltaEl.textContent = delta === 1
+            ? `Advancing from level ${currentLevel} to ${targetLevel}.`
+            : `Advancing ${delta} levels, from ${currentLevel} to ${targetLevel}.`;
+    }
+}
+
+function renderLuSkills() {
+    const container = document.getElementById('luSkillsGrid');
+    if (!container) return;
+    container.innerHTML = Object.keys(skillsMap).map((skill) => {
+        const level = clampSkillTrainingLevel(luSkillLevels[skill]);
+        const previousLevel = clampSkillTrainingLevel(luOriginalSkillLevels[skill]);
+        const classes = ['skill-select-item', 'lu-skill-pill'];
+        if (level === 1) classes.push('selected');
+        if (level === 2) classes.push('lu-skill-pill-expertise');
+        if (level !== previousLevel) classes.push('lu-skill-pill-changed');
+        return `<div class="${classes.join(' ')}" data-onclick="cycleLuSkill('${skill}')">
+                    <span>${escapeHtml(formatSkillLabel(skill))}</span>
+                    <span class="lu-skill-pill-meta">
+                        <strong>${formatSkillTrainingShort(level)}</strong>
+                        <span>${escapeHtml(formatSkillTrainingLevel(level))}</span>
+                    </span>
+                </div>`;
+    }).join('');
+}
+
+function cycleLuSkill(skill) {
+    luSkillLevels[skill] = (clampSkillTrainingLevel(luSkillLevels[skill]) + 1) % 3;
+    renderLuSkills();
+    if (luStep === 5) renderLuReview();
+}
+
+function renderLuFeatures() {
+    const list = document.getElementById('luFeatureList');
+    if (!list) return;
+    if (!luNewFeatures.length) {
+        list.innerHTML = '<div class="level-up-empty-state">No new features or feat notes queued yet.</div>';
+        return;
+    }
+    list.innerHTML = luNewFeatures.map((feature, index) => `
+                <div class="cc-feat-item">
+                    <div>
+                        <strong>${escapeHtml(feature.name || '')}</strong>
+                        <div class="cc-feat-desc">${escapeHtml(feature.desc || '')}</div>
+                    </div>
+                    <button class="cc-feat-btn" data-onclick="removeLuFeature(${index})">&times;</button>
+                </div>
+            `).join('');
+}
+
+function addLuFeature() {
+    const nameEl = document.getElementById('luFeatureName');
+    const descEl = document.getElementById('luFeatureDesc');
+    if (!nameEl || !descEl) return;
+    const name = nameEl.value.trim();
+    const desc = descEl.value.trim();
+    if (!name) {
+        alert("Please enter a feature or feat name.");
+        return;
+    }
+    luNewFeatures.push({ name, desc });
+    nameEl.value = '';
+    descEl.value = '';
+    renderLuFeatures();
+    if (luStep === 5) renderLuReview();
+}
+
+function removeLuFeature(index) {
+    luNewFeatures.splice(index, 1);
+    renderLuFeatures();
+    if (luStep === 5) renderLuReview();
+}
+
+function syncLuHpModeUI() {
+    const autoHp = !!(document.getElementById('luAutoHP') && document.getElementById('luAutoHP').checked);
+    const manualGroup = document.getElementById('luManualHpGroup');
+    const hitDieGroup = document.getElementById('luHitDieGroup');
+    const bonusGroup = document.getElementById('luBonusHpGroup');
+    if (manualGroup) manualGroup.style.display = autoHp ? 'none' : 'block';
+    if (hitDieGroup) hitDieGroup.style.display = 'block';
+    if (bonusGroup) bonusGroup.style.display = autoHp ? 'block' : 'none';
+}
+
+function luUpdateHpPreview() {
+    syncLuHpModeUI();
+    syncLuManualHpSuggestion(false);
+    const state = getLevelUpPreviewState();
+    const hpPreview = document.getElementById('luHpPreview');
+    const hitDicePreview = document.getElementById('luHitDicePreview');
+    if (hpPreview) {
+        hpPreview.innerHTML = `${state.currentHpCurr}/${state.currentHpMax} -> <strong>${state.nextHpCurr}/${state.nextHpMax}</strong><br><span class="cc-review-meta">${state.hpGain >= 0 ? '+' : ''}${state.hpGain} max HP</span>`;
+    }
+    if (hitDicePreview) {
+        hitDicePreview.innerHTML = `${state.currentHdCurr}/${state.currentHdMax} -> <strong>${state.nextHdCurr}/${state.nextHdMax}</strong><br><span class="cc-review-meta">+${state.levelDelta} total hit dice</span>`;
+    }
+    if (luStep === 5) renderLuReview();
+}
+
+function luUpdateSpellcastingPreview() {
+    const card = document.getElementById('luSpellcastingPreview');
+    if (!card) return;
+    const body = card.querySelector('.level-up-preview-body');
+    if (!body) return;
+    const state = getLevelUpPreviewState();
+    let slotCopy = 'Slot trackers stay as they are.';
+    if (state.casterType === 'none') slotCopy = state.autoCalcSlots ? 'Spell slots will be cleared.' : 'Spell slots stay unchanged until you clear them manually.';
+    else if (state.autoCalcSlots) slotCopy = 'Spell slots will be recalculated after apply.';
+    body.innerHTML = `Type: <strong>${escapeHtml(state.casterType)}</strong><br>Caster Level: <strong>${state.casterLevel}</strong><br>${slotCopy}`;
+    if (luStep === 5) renderLuReview();
+}
+
+function luUpdateCasterControls() {
+    const state = getLevelUpPreviewState();
+    const type = state.casterType;
+    const syncToggle = document.getElementById('luSyncCasterLevel');
+    const casterLevelInput = document.getElementById('luCasterLevel');
+    const autoCalcSlots = document.getElementById('luAutoCalcSlots');
+    if (syncToggle) syncToggle.disabled = type === 'none';
+    if (casterLevelInput) {
+        if (type === 'none') {
+            casterLevelInput.disabled = true;
+            casterLevelInput.value = '0';
+        } else if (syncToggle && syncToggle.checked) {
+            casterLevelInput.disabled = true;
+            casterLevelInput.value = String(getLevelUpTargetLevel());
+        } else {
+            casterLevelInput.disabled = false;
+            casterLevelInput.value = String(clampCasterLevel(casterLevelInput.value, getLevelUpTargetLevel()));
+        }
+    }
+    if (autoCalcSlots) {
+        autoCalcSlots.disabled = type === 'none';
+        if (type === 'none') autoCalcSlots.checked = false;
+    }
+    luUpdateSpellcastingPreview();
+}
+
+function luUpdateDerivedDisplays() {
+    syncLevelUpHeader();
+    syncLuManualHpSuggestion(false);
+    luUpdateHpPreview();
+    luUpdateSpellcastingPreview();
+}
+
+function renderLuReview() {
+    const container = document.getElementById('luReviewSummary');
+    if (!container) return;
+    const state = getLevelUpPreviewState();
+    const statLines = state.statChanges.length
+        ? state.statChanges.map((entry) => `<div class="level-up-review-line">${escapeHtml(statFullNames[entry.stat] || entry.stat.toUpperCase())}: ${entry.currentValue} -> <strong>${entry.nextValue}</strong> (${entry.delta >= 0 ? '+' : ''}${entry.delta})</div>`).join('')
+        : '<div class="level-up-review-line">No ability score changes.</div>';
+    const skillLines = state.skillChanges.length
+        ? state.skillChanges.map((entry) => `<div class="level-up-review-line">${escapeHtml(formatSkillLabel(entry.skill))}: ${escapeHtml(formatSkillTrainingLevel(entry.before))} -> <strong>${escapeHtml(formatSkillTrainingLevel(entry.after))}</strong></div>`).join('')
+        : '<div class="level-up-review-line">No skill training changes.</div>';
+    const featureLines = luNewFeatures.length
+        ? luNewFeatures.map((feature) => `<div class="level-up-review-line"><strong>${escapeHtml(feature.name || 'Unnamed')}</strong>${feature.desc ? ` - ${escapeHtml(feature.desc)}` : ''}</div>`).join('')
+        : '<div class="level-up-review-line">No new features or feat notes queued.</div>';
+    const slotCopy = state.casterType === 'none'
+        ? (state.autoCalcSlots ? 'Spell slots will be cleared.' : 'Spell slots remain untouched.')
+        : (state.autoCalcSlots ? 'Spell slots will be auto-calculated.' : 'Spell slots remain untouched.');
+
+    container.innerHTML = `
+        <div class="level-up-review-section">
+            <div class="level-up-review-title">Level Plan</div>
+            <div class="level-up-review-line">Level ${state.currentLevel} -> <strong>Level ${state.targetLevel}</strong></div>
+        </div>
+        <div class="level-up-review-section">
+            <div class="level-up-review-title">Vitals</div>
+            <div class="level-up-review-line">HP: ${state.currentHpCurr}/${state.currentHpMax} -> <strong>${state.nextHpCurr}/${state.nextHpMax}</strong></div>
+            <div class="level-up-review-line">Hit Dice: ${state.currentHdCurr}/${state.currentHdMax} -> <strong>${state.nextHdCurr}/${state.nextHdMax}</strong></div>
+            <div class="level-up-review-line">${state.autoHp ? `Auto HP stays on with d${state.hitDieSides} and ${state.hpBonus >= 0 ? '+' : ''}${state.hpBonus} bonus/level.` : `Manual HP gain: ${state.hpGain >= 0 ? '+' : ''}${state.hpGain}.`}</div>
+        </div>
+        <div class="level-up-review-section">
+            <div class="level-up-review-title">Ability Scores</div>
+            ${statLines}
+        </div>
+        <div class="level-up-review-section">
+            <div class="level-up-review-title">Skills</div>
+            ${skillLines}
+        </div>
+        <div class="level-up-review-section">
+            <div class="level-up-review-title">Features and Feats</div>
+            ${featureLines}
+        </div>
+        <div class="level-up-review-section">
+            <div class="level-up-review-title">Spellcasting</div>
+            <div class="level-up-review-line">Caster type: <strong>${escapeHtml(state.casterType)}</strong></div>
+            <div class="level-up-review-line">Caster level: <strong>${state.casterLevel}</strong></div>
+            <div class="level-up-review-line">${slotCopy}</div>
+        </div>
+    `;
+}
+
+function updateLevelUpWizard() {
+    for (let i = 1; i <= 5; i += 1) {
+        const step = document.getElementById(`luStep${i}`);
+        if (step) step.classList.remove('active');
+    }
+    const activeStep = document.getElementById(`luStep${luStep}`);
+    if (activeStep) activeStep.classList.add('active');
+
+    const prev = document.getElementById('luBtnPrev');
+    const next = document.getElementById('luBtnNext');
+    const finish = document.getElementById('luBtnFinish');
+    if (prev) prev.style.display = luStep === 1 ? 'none' : 'block';
+    if (next) next.style.display = luStep === 5 ? 'none' : 'block';
+    if (finish) finish.style.display = luStep === 5 ? 'block' : 'none';
+
+    syncLevelUpHeader();
+    renderLuFeatures();
+    renderLuSkills();
+    luUpdateHpPreview();
+    luUpdateCasterControls();
+    if (luStep === 5) renderLuReview();
+}
+
+function openLevelUpWizard() {
+    const currentLevel = getLevelUpCurrentLevel();
+    if (currentLevel >= 20) {
+        alert("This character is already level 20.");
+        return;
+    }
+
+    luStep = 1;
+    luNewFeatures = [];
+    luOriginalSkillLevels = {};
+    luSkillLevels = {};
+    Object.keys(skillsMap).forEach((skill) => {
+        const level = clampSkillTrainingLevel(data && data.skills ? data.skills[skill] : 0);
+        luOriginalSkillLevels[skill] = level;
+        luSkillLevels[skill] = level;
+    });
+
+    const targetLevel = Math.min(20, currentLevel + 1);
+    const hpAutoState = (data && data.vitals && data.vitals.hpAutoState) ? data.vitals.hpAutoState : {};
+    const autoHp = !!hpAutoState.enabled;
+    const hitDieSides = parseHitDieSides(data && data.vitals ? data.vitals.hdDie : 'd8', 8);
+    const casterType = (data && data.meta && data.meta.casterType) ? data.meta.casterType : 'none';
+    const currentCasterLevel = getCasterLevel();
+    const shouldSyncCasterLevel = casterType !== 'none' && currentCasterLevel === currentLevel;
+
+    const targetInput = document.getElementById('luTargetLevel');
+    if (targetInput) targetInput.value = targetLevel;
+    const autoHpToggle = document.getElementById('luAutoHP');
+    if (autoHpToggle) autoHpToggle.checked = autoHp;
+    const hitDieInput = document.getElementById('luHdDie');
+    if (hitDieInput) hitDieInput.value = String(hitDieSides);
+    const bonusInput = document.getElementById('luHpBonusPerLevel');
+    if (bonusInput) bonusInput.value = parseInt(hpAutoState.bonus, 10) || 0;
+    const applyCurrentToggle = document.getElementById('luApplyHpGainCurrent');
+    if (applyCurrentToggle) applyCurrentToggle.checked = true;
+    const casterTypeInput = document.getElementById('luCasterType');
+    if (casterTypeInput) casterTypeInput.value = casterType;
+    const syncToggle = document.getElementById('luSyncCasterLevel');
+    if (syncToggle) syncToggle.checked = shouldSyncCasterLevel;
+    const casterLevelInput = document.getElementById('luCasterLevel');
+    if (casterLevelInput) casterLevelInput.value = shouldSyncCasterLevel ? targetLevel : currentCasterLevel;
+    const autoCalcSlotsToggle = document.getElementById('luAutoCalcSlots');
+    if (autoCalcSlotsToggle) autoCalcSlotsToggle.checked = casterType !== 'none';
+
+    stats.forEach((stat) => {
+        const input = document.getElementById(`luStatDelta${stat.charAt(0).toUpperCase() + stat.slice(1)}`);
+        if (input) input.value = '0';
+    });
+
+    const featureName = document.getElementById('luFeatureName');
+    const featureDesc = document.getElementById('luFeatureDesc');
+    const review = document.getElementById('luReviewSummary');
+    if (featureName) featureName.value = '';
+    if (featureDesc) featureDesc.value = '';
+    if (review) review.innerHTML = '';
+
+    syncLuManualHpSuggestion(true);
+    document.getElementById('levelUpModal').style.display = 'flex';
+    updateLevelUpWizard();
+}
+
+function closeLevelUpWizard() {
+    const modal = document.getElementById('levelUpModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function luHandleTargetLevelInput(value) {
+    const input = document.getElementById('luTargetLevel');
+    const minimum = getLevelUpMinimumTargetLevel();
+    const nextLevel = Math.max(minimum, Math.min(20, parseInt(value, 10) || minimum));
+    if (input && String(input.value) !== String(nextLevel)) input.value = nextLevel;
+    const syncToggle = document.getElementById('luSyncCasterLevel');
+    const casterLevelInput = document.getElementById('luCasterLevel');
+    if (syncToggle && syncToggle.checked && casterLevelInput) casterLevelInput.value = String(nextLevel);
+    syncLuManualHpSuggestion(false);
+    syncLevelUpHeader();
+    luUpdateHpPreview();
+    luUpdateCasterControls();
+}
+
+function luNext() {
+    if (luStep === 1 && getLevelUpTargetLevel() <= getLevelUpCurrentLevel()) {
+        alert("Choose a higher target level.");
+        return;
+    }
+    luStep = Math.min(5, luStep + 1);
+    updateLevelUpWizard();
+}
+
+function luPrev() {
+    luStep = Math.max(1, luStep - 1);
+    updateLevelUpWizard();
+}
+
+function luFinish() {
+    const state = getLevelUpPreviewState();
+    if (state.targetLevel <= state.currentLevel) {
+        alert("Choose a higher target level.");
+        return;
+    }
+    if (!confirm(`Apply this level up and set the character to level ${state.targetLevel}?`)) return;
+
+    if (!data.meta) data.meta = {};
+    if (!data.vitals) data.vitals = {};
+    if (!data.vitals.hpAutoState) data.vitals.hpAutoState = {};
+    if (!Array.isArray(data.features)) data.features = [];
+
+    data.meta.level = state.targetLevel;
+    data.meta.casterType = state.casterType;
+    data.meta.casterLevel = state.casterLevel;
+
+    stats.forEach((stat) => {
+        const currentValue = parseInt(data && data.stats && data.stats[stat] ? data.stats[stat].val : 10, 10) || 10;
+        data.stats[stat].val = currentValue + state.statDeltas[stat];
+    });
+
+    data.vitals.hpAutoState.enabled = state.autoHp;
+    data.vitals.hpAutoState.bonus = state.hpBonus;
+    data.vitals.hdDie = `d${state.hitDieSides}`;
+    data.vitals.hdMax = state.nextHdMax;
+    data.vitals.hdCurr = state.nextHdCurr;
+    data.vitals.max = state.nextHpMax;
+    data.vitals.curr = state.nextHpCurr;
+
+    Object.keys(skillsMap).forEach((skill) => {
+        data.skills[skill] = clampSkillTrainingLevel(luSkillLevels[skill]);
+    });
+
+    luNewFeatures.forEach((feature) => {
+        data.features.push({
+            name: feature.name,
+            desc: feature.desc
+        });
+    });
+
+    if (state.autoCalcSlots) {
+        applySpellSlotProgression(state.casterType, state.casterLevel, { confirmClear: false });
+    }
+
+    allData.characters[allData.activeId] = data;
+    saveGlobal();
+
+    closeLevelUpWizard();
+    init();
+    setTimeout(() => {
+        updateHP();
+    }, 100);
+    showLog("Character", `Leveled to ${state.targetLevel}`);
+}
+
 // --- CHARACTER CREATOR ---
 let ccStep = 1;
 let ccPool = [];
@@ -6584,10 +7149,7 @@ function ccUpdateHPPreview() {
     const raceMod = parseInt(document.getElementById('ccModCon').value) || 0;
     const totalCon = baseCon + raceMod;
     const conMod = Math.floor((totalCon - 10) / 2);
-
-    const avg = (hd / 2) + 1;
-    let max = (hd + conMod + bonus) + ((lvl - 1) * (avg + conMod + bonus));
-    max = Math.max(1, max);
+    const max = calculateAutoHpMaxForLevel(lvl, hd, totalCon, bonus);
 
     document.getElementById('ccHpPreview').innerHTML = `Calculated Max HP: <span class="cc-hp-max">${max
         }</span> (Con Mod: ${conMod >= 0 ? '+' : ''}${conMod})`;

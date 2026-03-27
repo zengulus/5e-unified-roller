@@ -1219,6 +1219,92 @@ textarea:focus {
     border-bottom: 1px solid #333;
 }
 
+.sheet-setup-actions {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.sheet-setup-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.sheet-setup-btn,
+.sheet-setup-import {
+    border-radius: 16px;
+    border: 1px solid var(--btn-border);
+    color: var(--text);
+    box-shadow: var(--btn-glow);
+    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.sheet-setup-btn {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 18px 20px;
+    text-align: left;
+    background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0)),
+        color-mix(in srgb, var(--card-bg) 88%, var(--accent) 12%);
+}
+
+.sheet-setup-btn.primary {
+    border-color: color-mix(in srgb, var(--accent) 68%, rgba(255, 255, 255, 0.16));
+    background:
+        linear-gradient(145deg, color-mix(in srgb, var(--accent) 18%, rgba(255, 255, 255, 0.05)), rgba(0, 0, 0, 0)),
+        color-mix(in srgb, var(--card-bg) 84%, var(--accent) 16%);
+}
+
+.sheet-setup-btn.secondary {
+    background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0)),
+        color-mix(in srgb, var(--card-bg) 90%, var(--accent) 10%);
+}
+
+.sheet-setup-btn:hover,
+.sheet-setup-import:hover {
+    transform: translateY(-1px);
+    border-color: var(--accent);
+}
+
+.sheet-setup-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+.sheet-setup-copy {
+    display: grid;
+    gap: 6px;
+}
+
+.sheet-setup-copy strong {
+    font-size: 1rem;
+    color: #fff;
+}
+
+.sheet-setup-copy small {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
+.sheet-setup-import {
+    padding: 12px 16px;
+    justify-self: start;
+    background: var(--btn-surface-muted);
+}
+
 .settings-character-switcher {
     margin-bottom: 12px;
 }
@@ -2653,6 +2739,152 @@ button {
     font-size: 0.9rem;
     font-weight: bold;
     margin-top: 15px;
+}
+
+.level-up-modal-content {
+    max-width: 720px;
+}
+
+.level-up-hero,
+.level-up-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.level-up-character-card,
+.level-up-target-card,
+.level-up-note-card,
+.level-up-toggle-card,
+.level-up-preview-card {
+    background: rgba(0, 0, 0, 0.24);
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.level-up-kicker {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 6px;
+}
+
+.level-up-character-card strong {
+    display: block;
+    font-size: 1.15rem;
+    margin-bottom: 4px;
+    color: #fff;
+}
+
+.level-up-meta,
+.level-up-subcopy,
+.level-up-delta-copy,
+.level-up-skills-copy,
+.level-up-preview-body {
+    color: rgba(255, 255, 255, 0.74);
+    line-height: 1.5;
+}
+
+.level-up-note-card,
+.level-up-toggle-card,
+.level-up-preview-card {
+    margin-top: 14px;
+}
+
+.level-up-inline-check {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 12px;
+    color: #fff;
+    text-transform: none;
+    font-size: 0.92rem;
+}
+
+.level-up-inline-check input {
+    margin-top: 2px;
+}
+
+.level-up-preview-title {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.54);
+    margin-bottom: 8px;
+}
+
+.level-up-preview-card-wide {
+    margin-top: 14px;
+}
+
+.level-up-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.level-up-skill-legend {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 8px 0 12px;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 0.78rem;
+}
+
+.lu-skill-pill {
+    align-items: flex-start;
+    justify-content: space-between;
+    min-height: 72px;
+}
+
+.lu-skill-pill-meta {
+    display: grid;
+    gap: 4px;
+    text-align: right;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.lu-skill-pill.selected .lu-skill-pill-meta {
+    color: rgba(0, 0, 0, 0.78);
+}
+
+.lu-skill-pill-expertise {
+    background: color-mix(in srgb, var(--gold) 72%, #1d1d1d 28%);
+    border-color: color-mix(in srgb, var(--gold) 65%, rgba(255, 255, 255, 0.15));
+    color: #111;
+    font-weight: bold;
+}
+
+.lu-skill-pill-expertise .lu-skill-pill-meta {
+    color: rgba(17, 17, 17, 0.75);
+}
+
+.lu-skill-pill-changed {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.level-up-empty-state {
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 0.86rem;
+    padding: 10px;
+}
+
+.level-up-review-section {
+    margin-bottom: 14px;
+}
+
+.level-up-review-title {
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.level-up-review-line + .level-up-review-line {
+    margin-top: 4px;
 }
 
 /* Fixed HP Label Alignment */
@@ -4120,6 +4352,17 @@ button {
     .ix-inl-064 {
         min-width: 0;
         width: 100%;
+    }
+
+    .sheet-setup-grid,
+    .level-up-hero,
+    .level-up-preview-grid,
+    .level-up-stat-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .sheet-setup-import {
+        justify-self: stretch;
     }
 
     .inventory-card-header,
