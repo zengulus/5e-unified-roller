@@ -5812,6 +5812,14 @@
 
         lastTokenPointerDownId = '';
         lastTokenPointerDownAt = 0;
+        if (localToolState.mode === TOOL_MODE_NAVIGATE && selectedEvidenceNoteId) {
+            selectedEvidenceNoteId = '';
+            renderTokenInspector();
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderToolsMenu();
+            renderStage();
+        }
         if (selectedTemplateId) {
             selectedTemplateId = '';
             renderToolsMenu();
