@@ -148,6 +148,7 @@
                     stealthMode: false,
                     tokens: [],
                     templates: [],
+                    evidenceNotes: [],
                     fog: []
                 }
             ],
@@ -620,6 +621,27 @@
         };
     };
 
+    const sanitizeVTTEvidenceNote = (note, idx = 0) => {
+        const source = note && typeof note === 'object' ? note : {};
+        const rawHighlightColor = toTrimmedString(source.highlightColor, '#ffd778', 24).trim();
+        const highlightColor = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(rawHighlightColor)
+            ? (rawHighlightColor.length === 4
+                ? `#${rawHighlightColor.slice(1).split('').map((char) => char + char).join('')}`.toLowerCase()
+                : rawHighlightColor.toLowerCase())
+            : '#ffd778';
+        return {
+            id: toTrimmedString(source.id, `evidence_${idx + 1}`, 120).trim() || `evidence_${idx + 1}`,
+            title: toTrimmedString(source.title, `Evidence ${idx + 1}`, 160).trim() || `Evidence ${idx + 1}`,
+            body: toTrimmedString(source.body, '', 6000).trim(),
+            x: Math.round(toNumber(source.x, 0)),
+            y: Math.round(toNumber(source.y, 0)),
+            w: Math.max(1, Math.round(toNumber(source.w, 1))),
+            h: Math.max(1, Math.round(toNumber(source.h, 1))),
+            hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
+            highlightColor
+        };
+    };
+
     const sanitizeVTTScene = (scene, idx = 0) => {
         const source = scene && typeof scene === 'object' ? scene : {};
         const id = toTrimmedString(source.id, `scene_${idx + 1}`, 120).trim() || `scene_${idx + 1}`;
@@ -640,6 +662,18 @@
             stealthMode: !!source.stealthMode,
             tokens: Array.isArray(source.tokens) ? source.tokens.map((tokenEntry, tokenIdx) => sanitizeVTTToken(tokenEntry, tokenIdx)) : [],
             templates: Array.isArray(source.templates) ? source.templates.map((templateEntry, templateIdx) => sanitizeVTTTemplate(templateEntry, templateIdx)) : [],
+            evidenceNotes: Array.isArray(source.evidenceNotes)
+                ? source.evidenceNotes.map((noteEntry, noteIdx) => {
+                    const note = sanitizeVTTEvidenceNote(noteEntry, noteIdx);
+                    return {
+                        ...note,
+                        x: Math.round(note.x * legacyScaleFactor),
+                        y: Math.round(note.y * legacyScaleFactor),
+                        w: Math.max(1, Math.round(note.w * legacyScaleFactor)),
+                        h: Math.max(1, Math.round(note.h * legacyScaleFactor))
+                    };
+                })
+                : [],
             fog: Array.isArray(source.fog)
                 ? source.fog.map((maskEntry, maskIdx) => {
                     const mask = sanitizeVTTFogMask(maskEntry, maskIdx);

@@ -15,6 +15,7 @@
     const TOOL_MODE_RULER = 'ruler';
     const TOOL_MODE_CIRCLE = 'circle';
     const TOOL_MODE_CONE = 'cone';
+    const TOOL_MODE_NOTE = 'note';
     const TOOL_MODE_FOG = 'fog';
     const TOOL_MODE_FOG_REMOVE = 'fog-remove';
     const TEMPLATE_KIND_CIRCLE = 'circle';
@@ -30,6 +31,7 @@
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
     const DEFAULT_VTT_CELL_PX = 70;
+    const DEFAULT_EVIDENCE_NOTE_COLOR = '#ffd778';
     const TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
@@ -54,6 +56,7 @@
                 stealthMode: false,
                 tokens: [],
                 templates: [],
+                evidenceNotes: [],
                 fog: []
             }
         ],
@@ -68,6 +71,7 @@
     let selectedTokenId = '';
     let selectedEntryId = '';
     let selectedTemplateId = '';
+    let selectedEvidenceNoteId = '';
     let localRole = 'player';
     let uiState = {
         settingsCollapsed: false,
@@ -114,6 +118,7 @@
     let visionConeRotateState = null;
     let rulerState = null;
     let fogPlacementState = null;
+    let evidenceNotePlacementState = null;
     let pendingTouchContextState = null;
     let templateExpiryTimer = 0;
 
@@ -125,6 +130,7 @@
     const mapImageEl = document.getElementById('vtt-map-image');
     const gridLayerEl = document.getElementById('vtt-grid-layer');
     const fogLayerEl = document.getElementById('vtt-fog-layer');
+    const noteLayerEl = document.getElementById('vtt-note-layer');
     const templateLayerEl = document.getElementById('vtt-template-layer');
     const tokenLayerEl = document.getElementById('vtt-token-layer');
     const visionLayerEl = document.getElementById('vtt-vision-layer');
@@ -164,6 +170,7 @@
     const toolModeNavigateEl = document.getElementById('vtt-tool-mode-navigate');
     const toolModeCircleEl = document.getElementById('vtt-tool-mode-circle');
     const toolModeConeEl = document.getElementById('vtt-tool-mode-cone');
+    const toolModeNoteEl = document.getElementById('vtt-tool-mode-note');
     const toolModeFogEl = document.getElementById('vtt-tool-mode-fog');
     const toolModeFogRemoveEl = document.getElementById('vtt-tool-mode-fog-remove');
     const toolSizeInputEl = document.getElementById('vtt-tool-size-input');
@@ -274,6 +281,10 @@
             ...template,
             id: buildId('template')
         }));
+        const clonedEvidenceNotes = deepClone(Array.isArray(source && source.evidenceNotes) ? source.evidenceNotes : []).map((note) => ({
+            ...note,
+            id: buildId('evidence')
+        }));
         return {
             id: buildId('scene'),
             name: nextName,
@@ -288,6 +299,7 @@
             stealthMode: !!(source && source.stealthMode),
             tokens: clonedTokens,
             templates: clonedTemplates,
+            evidenceNotes: clonedEvidenceNotes,
             fog: deepClone(Array.isArray(source && source.fog) ? source.fog : [])
         };
     };
@@ -667,6 +679,134 @@
                 data-world-height="${escapeHtml(String(mask.h))}"></div>
         `;
     };
+    const normalizeEvidenceNoteTitle = (value, fallback = 'Evidence Note') => {
+        const clean = String(value || '').trim().slice(0, 160);
+        return clean || fallback;
+    };
+    const normalizeEvidenceNoteBody = (value) => String(value || '').trim().slice(0, 6000);
+    const normalizeEvidenceNoteHighlightColor = (value, fallback = DEFAULT_EVIDENCE_NOTE_COLOR) => {
+        const raw = String(value || fallback || DEFAULT_EVIDENCE_NOTE_COLOR).trim();
+        const match = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+        if (!match) return DEFAULT_EVIDENCE_NOTE_COLOR;
+        if (raw.length === 4) {
+            return `#${raw.slice(1).split('').map((char) => char + char).join('')}`.toLowerCase();
+        }
+        return raw.toLowerCase();
+    };
+    const getEvidenceNoteHighlightRgb = (note) => {
+        const hex = normalizeEvidenceNoteHighlightColor(note && note.highlightColor);
+        const clean = hex.slice(1);
+        const normalized = clean.length === 3
+            ? clean.split('').map((char) => char + char).join('')
+            : clean;
+        const value = parseInt(normalized, 16);
+        if (!Number.isFinite(value)) return '255, 215, 120';
+        return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
+    };
+    const getSceneEvidenceNotes = (scene) => (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes : []);
+    const buildEvidenceNoteFromCellBounds = (scene, bounds, source = {}) => {
+        if (!scene || !bounds) return null;
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const left = Math.round(toNumber(bounds.left, 0));
+        const top = Math.round(toNumber(bounds.top, 0));
+        const widthCells = Math.max(1, Math.round(toNumber(bounds.widthCells, 1)));
+        const heightCells = Math.max(1, Math.round(toNumber(bounds.heightCells, 1)));
+        return {
+            id: String(source.id || buildId('evidence')).trim() || buildId('evidence'),
+            title: normalizeEvidenceNoteTitle(source.title, 'Evidence Note'),
+            body: normalizeEvidenceNoteBody(source.body),
+            hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
+            highlightColor: normalizeEvidenceNoteHighlightColor(source.highlightColor),
+            x: Math.round(offsetX + left * cellPx),
+            y: Math.round(offsetY + top * cellPx),
+            w: Math.max(1, Math.round(widthCells * cellPx)),
+            h: Math.max(1, Math.round(heightCells * cellPx))
+        };
+    };
+    const buildEvidenceNoteFromWorldPoints = (scene, startWorldPoint, endWorldPoint, id = buildId('evidence'), source = {}) => {
+        if (!scene || !startWorldPoint || !endWorldPoint) return null;
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const start = snapWorldPointToFogCorner(scene, startWorldPoint);
+        const end = snapWorldPointToFogCorner(scene, endWorldPoint);
+        const startCol = Math.round((start.x - offsetX) / cellPx);
+        const startRow = Math.round((start.y - offsetY) / cellPx);
+        const endCol = Math.round((end.x - offsetX) / cellPx);
+        const endRow = Math.round((end.y - offsetY) / cellPx);
+        return buildEvidenceNoteFromCellBounds(scene, {
+            left: Math.min(startCol, endCol),
+            top: Math.min(startRow, endRow),
+            widthCells: Math.max(1, Math.abs(endCol - startCol)),
+            heightCells: Math.max(1, Math.abs(endRow - startRow))
+        }, {
+            ...source,
+            id
+        });
+    };
+    const getEvidenceNoteCellBounds = (scene, note) => {
+        if (!scene || !note) return null;
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const left = Math.round((toNumber(note.x, offsetX) - offsetX) / cellPx);
+        const top = Math.round((toNumber(note.y, offsetY) - offsetY) / cellPx);
+        const widthCells = Math.max(1, Math.round(Math.max(1, toNumber(note.w, cellPx)) / cellPx));
+        const heightCells = Math.max(1, Math.round(Math.max(1, toNumber(note.h, cellPx)) / cellPx));
+        return {
+            left,
+            top,
+            widthCells,
+            heightCells,
+            right: left + widthCells,
+            bottom: top + heightCells
+        };
+    };
+    const isEvidenceNoteCoveredByFog = (scene, note, fogCellSet = null) => {
+        if (!scene || !note) return false;
+        const cellSet = fogCellSet instanceof Set ? fogCellSet : collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
+        if (!cellSet.size) return false;
+        const bounds = getEvidenceNoteCellBounds(scene, note);
+        if (!bounds) return false;
+        for (let row = bounds.top; row < bounds.bottom; row += 1) {
+            for (let col = bounds.left; col < bounds.right; col += 1) {
+                if (!cellSet.has(buildFogCellKey(col, row))) return false;
+            }
+        }
+        return true;
+    };
+    const isEvidenceNoteVisibleToRole = (note, scene, role = localRole, fogCellSet = null) => {
+        if (!note) return false;
+        if (role === 'dm') return true;
+        if (note.hidden) return false;
+        return !isEvidenceNoteCoveredByFog(scene, note, fogCellSet);
+    };
+    const getVisibleEvidenceNotesForRole = (scene, role = localRole) => {
+        const notes = getSceneEvidenceNotes(scene);
+        if (role === 'dm') return notes;
+        const fogCellSet = collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
+        return notes.filter((note) => isEvidenceNoteVisibleToRole(note, scene, role, fogCellSet));
+    };
+    const getEvidenceNoteById = (noteId, state = vttState, role = localRole) => {
+        const targetId = String(noteId || '').trim();
+        if (!targetId) return null;
+        const scene = getActiveScene(state);
+        if (!scene) return null;
+        return getVisibleEvidenceNotesForRole(scene, role).find((note) => String(note && note.id || '').trim() === targetId) || null;
+    };
+    const buildEvidenceNoteExcerpt = (note, maxLength = 96) => {
+        const body = String(note && note.body || '').replace(/\s+/g, ' ').trim();
+        if (!body) return '';
+        if (body.length <= maxLength) return body;
+        return `${body.slice(0, Math.max(1, maxLength - 1)).trimEnd()}...`;
+    };
+    const buildEvidenceNoteAreaLabel = (note, scene) => {
+        const bounds = getEvidenceNoteCellBounds(scene, note);
+        if (!bounds) return '1 x 1 sq';
+        return `${bounds.widthCells} x ${bounds.heightCells} sq`;
+    };
     const clearPendingTouchContext = () => {
         if (!pendingTouchContextState) return null;
         if (pendingTouchContextState.timer) {
@@ -693,10 +833,22 @@
         if (!token) return null;
         selectedTokenId = token.id;
         selectedTemplateId = '';
+        selectedEvidenceNoteId = '';
         visionConeRotateState = null;
         const linkedEntry = findEntryForToken(token.id);
         selectedEntryId = linkedEntry ? linkedEntry.id : '';
         return token;
+    };
+    const activateEvidenceNoteSelection = (noteId) => {
+        const note = getEvidenceNoteById(noteId);
+        if (!note) return null;
+        selectedEvidenceNoteId = note.id;
+        selectedTokenId = '';
+        selectedEntryId = '';
+        selectedTemplateId = '';
+        previewTokenId = '';
+        visionConeRotateState = null;
+        return note;
     };
     const beginTouchContextInteraction = (event, scene, worldPoint) => {
         if (!canUseTouchContextActions(event)) return false;
@@ -871,7 +1023,7 @@
     };
     const normalizeToolMode = (value) => {
         const token = String(value || '').trim().toLowerCase();
-        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_FOG || token === TOOL_MODE_FOG_REMOVE) return token;
+        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_NOTE || token === TOOL_MODE_FOG || token === TOOL_MODE_FOG_REMOVE) return token;
         return TOOL_MODE_NAVIGATE;
     };
     const normalizeToolSizeCells = (value, fallback = DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
@@ -1088,12 +1240,13 @@
         return true;
     };
     const clearTemplatePlacementState = () => {
-        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState && !fogPlacementState) return false;
+        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState && !fogPlacementState && !evidenceNotePlacementState) return false;
         templatePlacementState = null;
         templateRotateState = null;
         visionConeRotateState = null;
         rulerState = null;
         fogPlacementState = null;
+        evidenceNotePlacementState = null;
         return true;
     };
     const setToolMode = (mode) => {
@@ -1124,6 +1277,10 @@
         if (toolModeNavigateEl) toolModeNavigateEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NAVIGATE ? 'true' : 'false');
         if (toolModeCircleEl) toolModeCircleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CIRCLE ? 'true' : 'false');
         if (toolModeConeEl) toolModeConeEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CONE ? 'true' : 'false');
+        if (toolModeNoteEl) {
+            toolModeNoteEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NOTE ? 'true' : 'false');
+            toolModeNoteEl.disabled = !isDM();
+        }
         if (toolModeFogEl) {
             toolModeFogEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG ? 'true' : 'false');
             toolModeFogEl.disabled = !isDM();
@@ -1136,9 +1293,9 @@
             toolSizeInputEl.value = String(localToolState.sizeCells);
         }
         if (toolSizeInputEl) {
-            const fogModeActive = localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE;
-            toolSizeInputEl.disabled = fogModeActive;
-            toolSizeInputEl.title = fogModeActive ? 'Fog tools use the scene grid directly.' : '';
+            const dragAreaModeActive = localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE || localToolState.mode === TOOL_MODE_NOTE;
+            toolSizeInputEl.disabled = dragAreaModeActive;
+            toolSizeInputEl.title = dragAreaModeActive ? 'Fog and Evidence tools use drag area selection on the scene grid.' : '';
         }
         if (stealthModeToggleEl) {
             const scene = getActiveScene();
@@ -1743,6 +1900,7 @@
             clonedTokenId = clonedToken.id;
             selectedTokenId = clonedToken.id;
             selectedEntryId = '';
+            selectedEvidenceNoteId = '';
             if (tokenInspectorState && tokenInspectorState.tokenId === targetId) {
                 tokenInspectorState = {
                     ...tokenInspectorState,
@@ -1771,6 +1929,7 @@
             }
             scene.tokens.push(token);
             selectedTokenId = token.id;
+            selectedEvidenceNoteId = '';
             quickSpawnMenuState = null;
         });
         return true;
@@ -1813,6 +1972,7 @@
 
             selectedTokenId = firstTokenId;
             selectedEntryId = '';
+            selectedEvidenceNoteId = '';
             quickSpawnMenuState = null;
         });
         return true;
@@ -2126,6 +2286,7 @@
         const entry = getEntryById(entryId, state);
         const token = getVisibleSceneTokenForEntry(entry, state, role);
         selectedTokenId = token ? token.id : '';
+        if (token) selectedEvidenceNoteId = '';
         return token;
     };
 
@@ -2213,6 +2374,7 @@
     const normalizeSelections = () => {
         const scene = getActiveScene();
         const tokens = getVisibleTokensForRole(scene);
+        const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
         const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
         if (isDM() && uiState.sceneViewMode === SCENE_VIEW_LOCAL) {
             const viewedSceneId = getViewedSceneId(vttState, localRole);
@@ -2232,6 +2394,9 @@
         if (!tokens.some((token) => token.id === selectedTokenId)) {
             selectedTokenId = '';
         }
+        if (!visibleEvidenceNotes.some((note) => note.id === selectedEvidenceNoteId)) {
+            selectedEvidenceNoteId = '';
+        }
         if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
             previewTokenId = '';
         }
@@ -2250,6 +2415,9 @@
         }
         if (rulerState && (!scene || rulerState.sceneId !== scene.id)) {
             rulerState = null;
+        }
+        if (evidenceNotePlacementState && (!scene || evidenceNotePlacementState.sceneId !== scene.id)) {
+            evidenceNotePlacementState = null;
         }
         if (body) {
             body.dataset.vttRole = localRole;
@@ -2284,6 +2452,12 @@
                 height = Math.max(height, grid.offsetY + (token.y + token.h + 4) * grid.cellPx);
             });
         }
+        if (Array.isArray(scene.evidenceNotes) && scene.evidenceNotes.length) {
+            scene.evidenceNotes.forEach((note) => {
+                width = Math.max(width, toNumber(note && note.x, 0) + Math.max(1, toNumber(note && note.w, grid.cellPx)) + grid.cellPx * 2);
+                height = Math.max(height, toNumber(note && note.y, 0) + Math.max(1, toNumber(note && note.h, grid.cellPx)) + grid.cellPx * 2);
+            });
+        }
         return {
             width: Math.max(1, Math.round(width)),
             height: Math.max(1, Math.round(height))
@@ -2293,7 +2467,7 @@
     const scaleForZoom = (value) => Math.max(0, Math.round(value * localView.zoom * 1000) / 1000);
 
     const applyRenderedWorldGeometry = (scene = getActiveScene()) => {
-        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
+        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !noteLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         const scaledMapWidth = scaleForZoom(mapDisplaySize.width || 0);
         const scaledMapHeight = scaleForZoom(mapDisplaySize.height || 0);
@@ -2310,6 +2484,14 @@
             maskEl.style.top = `${scaleForZoom(toNumber(maskEl.dataset.worldTop, 0))}px`;
             maskEl.style.width = `${scaleForZoom(toNumber(maskEl.dataset.worldWidth, 0))}px`;
             maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
+        });
+
+        noteLayerEl.querySelectorAll('.vtt-map-note').forEach((noteEl) => {
+            if (!(noteEl instanceof HTMLElement)) return;
+            noteEl.style.left = `${scaleForZoom(toNumber(noteEl.dataset.worldLeft, 0))}px`;
+            noteEl.style.top = `${scaleForZoom(toNumber(noteEl.dataset.worldTop, 0))}px`;
+            noteEl.style.width = `${scaleForZoom(toNumber(noteEl.dataset.worldWidth, 0))}px`;
+            noteEl.style.height = `${scaleForZoom(toNumber(noteEl.dataset.worldHeight, 0))}px`;
         });
 
         templateLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
@@ -2558,7 +2740,9 @@
             localRole = store.setVTTLocalRole(localRole, getActiveCaseId()) === 'dm' ? 'dm' : 'player';
         }
         if (localRole !== 'dm') {
-            if (localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE) localToolState.mode = TOOL_MODE_NAVIGATE;
+            if (localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE || localToolState.mode === TOOL_MODE_NOTE) {
+                localToolState.mode = TOOL_MODE_NAVIGATE;
+            }
             closeNPCSearch();
             quickSpawnMenuState = null;
             closeTokenInspectorPopover();
@@ -3135,7 +3319,8 @@
 
     const describeScene = (scene) => {
         const tokenCount = scene && Array.isArray(scene.tokens) ? scene.tokens.length : 0;
-        return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'}`;
+        const evidenceNoteCount = scene && Array.isArray(scene.evidenceNotes) ? scene.evidenceNotes.length : 0;
+        return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'} - ${evidenceNoteCount} note${evidenceNoteCount === 1 ? '' : 's'}`;
     };
 
     const renderSceneList = () => {
@@ -3310,19 +3495,94 @@
         `;
     };
 
+    const buildDMEvidenceNoteInspectorContent = (note, scene) => {
+        const bounds = getEvidenceNoteCellBounds(scene, note) || {
+            left: 0,
+            top: 0,
+            widthCells: 1,
+            heightCells: 1
+        };
+        return `
+            <div class="vtt-inspector-stack">
+                <label class="vtt-field">
+                    <span>Title</span>
+                    <input class="vtt-inspector-input" type="text" data-note-field="title" value="${escapeHtml(note.title || 'Evidence Note')}">
+                </label>
+                <label class="vtt-field">
+                    <span>Details</span>
+                    <textarea class="vtt-inspector-textarea" data-note-field="body" placeholder="What was found here?">${escapeHtml(note.body || '')}</textarea>
+                </label>
+                <div class="vtt-inspector-grid">
+                    <label class="vtt-field">
+                        <span>Grid X</span>
+                        <input class="vtt-inspector-input" type="number" data-note-field="gridX" value="${escapeHtml(String(bounds.left))}">
+                    </label>
+                    <label class="vtt-field">
+                        <span>Grid Y</span>
+                        <input class="vtt-inspector-input" type="number" data-note-field="gridY" value="${escapeHtml(String(bounds.top))}">
+                    </label>
+                    <label class="vtt-field">
+                        <span>Cells Wide</span>
+                        <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsWide" value="${escapeHtml(String(bounds.widthCells))}">
+                    </label>
+                    <label class="vtt-field">
+                        <span>Cells High</span>
+                        <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsHigh" value="${escapeHtml(String(bounds.heightCells))}">
+                    </label>
+                    <label class="vtt-field">
+                        <span>Highlight Color</span>
+                        <input class="vtt-inspector-input" type="color" data-note-field="highlightColor" value="${escapeHtml(normalizeEvidenceNoteHighlightColor(note.highlightColor))}">
+                    </label>
+                </div>
+                <label class="vtt-inspector-check">
+                    <input type="checkbox" data-note-field="hidden"${note.hidden ? ' checked' : ''}>
+                    <span>Hidden In Player Mode</span>
+                </label>
+                <div class="vtt-detail-note">
+                    ${note.hidden
+                        ? 'Hidden notes stay DM-only until you reveal them.'
+                        : 'Revealed notes still stay hidden from players while their tagged area is fully covered by fog.'}
+                </div>
+                <div class="vtt-inspector-actions">
+                    <button class="vtt-inline-btn" data-action="toggle-evidence-hidden-quick" data-id="${escapeHtml(String(note.id || ''))}">${note.hidden ? 'Reveal To Players' : 'Hide From Players'}</button>
+                    <button class="vtt-inline-btn danger" data-action="delete-evidence-note" data-id="${escapeHtml(String(note.id || ''))}">Delete Note</button>
+                </div>
+            </div>
+        `;
+    };
+
+    const buildEvidenceNoteViewerContent = (note, scene) => `
+        <div class="vtt-inspector-stack">
+            <div class="vtt-subhead">Evidence Note</div>
+            <div class="vtt-chip-row">
+                <span class="vtt-panel-pill">${escapeHtml(buildEvidenceNoteAreaLabel(note, scene))}</span>
+            </div>
+            <div class="vtt-note-view-body">${escapeHtml(note && note.body ? note.body : 'No details shared yet.')}</div>
+        </div>
+    `;
+
     const renderTokenInspector = () => {
         const token = getTokenById(selectedTokenId);
+        const scene = getActiveScene();
+        const note = getEvidenceNoteById(selectedEvidenceNoteId);
         if (!selectionPillEl || !tokenInspectorEl) return;
         if (!isDM() && token && token.hidden) {
-            selectionPillEl.textContent = 'No Token';
-            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token on the map to inspect it.</div>';
+            selectionPillEl.textContent = 'No Selection';
+            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token or evidence note on the map to inspect it.</div>';
             return;
         }
-        selectionPillEl.textContent = token ? token.label : 'No Token';
+        if (note && !token) {
+            selectionPillEl.textContent = note.title || 'Evidence Note';
+            tokenInspectorEl.innerHTML = isDM()
+                ? buildDMEvidenceNoteInspectorContent(note, scene)
+                : buildEvidenceNoteViewerContent(note, scene);
+            return;
+        }
+        selectionPillEl.textContent = token ? token.label : 'No Selection';
         if (!token) {
             tokenInspectorEl.innerHTML = isDM()
-                ? '<div class="vtt-empty">Right-click a token on the map to open its inspector near your cursor.</div>'
-                : '<div class="vtt-empty">Select a token on the map to inspect it.</div>';
+                ? '<div class="vtt-empty">Right-click a token to edit it near your cursor, or click an evidence note to edit the tagged map area here.</div>'
+                : '<div class="vtt-empty">Select a token or evidence note on the map to inspect it.</div>';
             return;
         }
 
@@ -3658,6 +3918,33 @@
         `;
     };
 
+    const buildEvidenceNoteMarkup = (note, scene, { preview = false, selected = false } = {}) => {
+        if (!note || !scene) return '';
+        const classes = ['vtt-overlay-item', 'vtt-map-note'];
+        if (preview) classes.push('is-preview');
+        if (selected) classes.push('is-selected');
+        if (note.hidden) classes.push('is-hidden');
+        const excerpt = buildEvidenceNoteExcerpt(note, 88);
+        const meta = excerpt || buildEvidenceNoteAreaLabel(note, scene);
+        const highlightColor = normalizeEvidenceNoteHighlightColor(note.highlightColor);
+        const highlightRgb = getEvidenceNoteHighlightRgb(note);
+        return `
+            <div class="${classes.join(' ')}"
+                data-note-id="${escapeHtml(String(note.id || ''))}"
+                data-world-left="${escapeHtml(String(note.x || 0))}"
+                data-world-top="${escapeHtml(String(note.y || 0))}"
+                data-world-width="${escapeHtml(String(note.w || 1))}"
+                data-world-height="${escapeHtml(String(note.h || 1))}"
+                style="--vtt-note-color:${escapeHtml(highlightColor)};--vtt-note-rgb:${escapeHtml(highlightRgb)};">
+                <div class="vtt-map-note-chip">
+                    <span class="vtt-map-note-kicker">${escapeHtml(note.hidden ? 'Hidden' : 'Evidence')}</span>
+                    <strong class="vtt-map-note-title">${escapeHtml(note.title || 'Evidence Note')}</strong>
+                    <span class="vtt-map-note-meta">${escapeHtml(meta)}</span>
+                </div>
+            </div>
+        `;
+    };
+
     const buildRulerMarkup = (scene) => {
         if (!scene || !rulerState || !rulerState.dragging || rulerState.sceneId !== scene.id || !rulerState.start || !rulerState.end) return '';
         const start = getTemplateWorldPoint(scene, rulerState.start);
@@ -3718,7 +4005,7 @@
 
     const renderStage = () => {
         const scene = getActiveScene();
-        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
+        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !noteLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
 
         loadMapForScene(scene);
         worldSize = getWorldSizeForScene(scene);
@@ -3730,6 +4017,15 @@
             ? buildFogMaskMarkup(fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
             : '';
         fogLayerEl.innerHTML = `${fogMarkup}${fogPreviewMarkup}`;
+
+        const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
+        const evidenceMarkup = visibleEvidenceNotes
+            .map((note) => buildEvidenceNoteMarkup(note, scene, { selected: note.id === selectedEvidenceNoteId }))
+            .join('');
+        const evidencePreviewMarkup = evidenceNotePlacementState && evidenceNotePlacementState.sceneId === scene.id && evidenceNotePlacementState.note
+            ? buildEvidenceNoteMarkup(evidenceNotePlacementState.note, scene, { preview: true, selected: true })
+            : '';
+        noteLayerEl.innerHTML = `${evidenceMarkup}${evidencePreviewMarkup}`;
 
         const visibleTokens = getVisibleTokensForRole(scene);
         const initiative = vttState && vttState.initiative ? vttState.initiative : { activeEntryId: '' };
@@ -3792,13 +4088,15 @@
                 ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
                 : (localToolState.mode === TOOL_MODE_CONE
                     ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
+                    : (localToolState.mode === TOOL_MODE_NOTE
+                        ? 'Evidence tool active: drag a rectangle on the map to pin an evidence note to that area. Notes can be shared to players or kept DM-only.'
                     : (localToolState.mode === TOOL_MODE_FOG
                         ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tokens under fog are hidden from players.'
                         : (localToolState.mode === TOOL_MODE_FOG_REMOVE
                             ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
                     : (isDM()
                         ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
-                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell. Right-click a token image to preview it.')))));
+                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click evidence notes to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
@@ -3841,6 +4139,17 @@
         renderInitiativeList();
         renderInitiativeDetail();
         renderSpawnGhost();
+    };
+
+    const updateSelectedEvidenceNote = (mutator) => {
+        if (!selectedEvidenceNoteId) return;
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.evidenceNotes)) return;
+            const idx = scene.evidenceNotes.findIndex((note) => String(note && note.id || '').trim() === selectedEvidenceNoteId);
+            if (idx < 0) return;
+            mutator(scene.evidenceNotes[idx], draft, scene);
+        });
     };
 
     const updateSelectedToken = (mutator) => {
@@ -3900,6 +4209,18 @@
         });
     };
 
+    const deleteEvidenceNoteById = (noteId) => {
+        const targetId = String(noteId || '').trim();
+        if (!targetId) return false;
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.evidenceNotes)) return;
+            scene.evidenceNotes = scene.evidenceNotes.filter((note) => String(note && note.id || '').trim() !== targetId);
+            if (selectedEvidenceNoteId === targetId) selectedEvidenceNoteId = '';
+        });
+        return true;
+    };
+
     const assignSelectedEntryToToken = (tokenId) => {
         const targetTokenId = String(tokenId || '').trim();
         if (!selectedEntryId || !targetTokenId) return false;
@@ -3913,6 +4234,7 @@
             persistSheetIdentityForLinkedPlayer(entries[idx], token);
             entries[idx] = linkInitiativeEntryToToken(entries[idx], token);
             selectedTokenId = token.id;
+            selectedEvidenceNoteId = '';
             assigned = true;
             sortInitiativeEntries(entries);
         });
@@ -4189,6 +4511,8 @@
         }
         if (action === 'set-tool-mode') {
             const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
+            if (nextMode === TOOL_MODE_NOTE && !isDM()) return;
+            if ((nextMode === TOOL_MODE_FOG || nextMode === TOOL_MODE_FOG_REMOVE) && !isDM()) return;
             setToolMode(nextMode);
             render();
             return;
@@ -4240,6 +4564,19 @@
                 if (!scene) return;
                 scene.fog = [];
             });
+            return;
+        }
+        if (action === 'toggle-evidence-hidden-quick') {
+            if (!isDM()) return;
+            selectedEvidenceNoteId = id || selectedEvidenceNoteId;
+            updateSelectedEvidenceNote((note) => {
+                note.hidden = !note.hidden;
+            });
+            return;
+        }
+        if (action === 'delete-evidence-note') {
+            if (!isDM()) return;
+            deleteEvidenceNoteById(id || selectedEvidenceNoteId);
             return;
         }
         if (action === 'token-adjust-hp') {
@@ -4545,9 +4882,7 @@
         }
 
         if (action === 'select-token') {
-            selectedTokenId = id;
-            const linkedEntry = findEntryForToken(id);
-            selectedEntryId = linkedEntry ? linkedEntry.id : '';
+            activateTokenSelection(id);
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
@@ -4601,6 +4936,7 @@
 
         if (action === 'select-entry') {
             selectedEntryId = id;
+            selectedEvidenceNoteId = '';
             if (initiativeDetailState && initiativeDetailState.entryId !== id) {
                 initiativeDetailState = null;
             }
@@ -4812,6 +5148,42 @@
                     return;
                 }
                 token.vision[field] = nextValue === '' ? 0 : Math.round(toNumber(nextValue, 0));
+            });
+            return;
+        }
+
+        if (selectedEvidenceNoteId && target.dataset.noteField) {
+            const field = target.dataset.noteField;
+            updateSelectedEvidenceNote((note, draft, scene) => {
+                if (field === 'hidden' && target instanceof HTMLInputElement && target.type === 'checkbox') {
+                    note.hidden = target.checked;
+                    return;
+                }
+                if (field === 'title') {
+                    note.title = normalizeEvidenceNoteTitle(target.value, 'Evidence Note');
+                    return;
+                }
+                if (field === 'body' && target instanceof HTMLTextAreaElement) {
+                    note.body = normalizeEvidenceNoteBody(target.value);
+                    return;
+                }
+                if (field === 'highlightColor' && target instanceof HTMLInputElement) {
+                    note.highlightColor = normalizeEvidenceNoteHighlightColor(target.value);
+                    return;
+                }
+                const bounds = getEvidenceNoteCellBounds(scene, note) || {
+                    left: 0,
+                    top: 0,
+                    widthCells: 1,
+                    heightCells: 1
+                };
+                const nextValue = Math.round(toNumber(target.value, 0));
+                if (field === 'gridX') bounds.left = Math.max(0, nextValue);
+                else if (field === 'gridY') bounds.top = Math.max(0, nextValue);
+                else if (field === 'cellsWide') bounds.widthCells = Math.max(1, nextValue);
+                else if (field === 'cellsHigh') bounds.heightCells = Math.max(1, nextValue);
+                const nextNote = buildEvidenceNoteFromCellBounds(scene, bounds, note);
+                if (nextNote) Object.assign(note, nextNote);
             });
             return;
         }
@@ -5039,6 +5411,18 @@
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
+        const noteEl = event.target.closest('.vtt-map-note');
+        if (noteEl && localToolState.mode === TOOL_MODE_NAVIGATE) {
+            const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
+            if (!activateEvidenceNoteSelection(noteId)) return;
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderTokenInspector();
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
         if (beginTouchContextInteraction(event, scene, worldPoint)) {
             event.preventDefault();
             return;
@@ -5050,6 +5434,7 @@
             if (!token || !canRoleMoveToken(token, localRole)) return;
             selectedTokenId = token.id;
             selectedTemplateId = '';
+            selectedEvidenceNoteId = '';
             selectedEntryId = '';
             previewTokenId = '';
             templatePlacementState = null;
@@ -5075,6 +5460,7 @@
             if (!template || template.kind !== TEMPLATE_KIND_CONE) return;
             selectedTemplateId = template.id;
             selectedTokenId = '';
+            selectedEvidenceNoteId = '';
             selectedEntryId = '';
             previewTokenId = '';
             templatePlacementState = null;
@@ -5098,6 +5484,7 @@
         if (templateEl) {
             selectedTemplateId = String(templateEl.getAttribute('data-template-id') || '').trim();
             selectedTokenId = '';
+            selectedEvidenceNoteId = '';
             selectedEntryId = '';
             previewTokenId = '';
             visionConeRotateState = null;
@@ -5120,10 +5507,33 @@
                 currentWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
                 mask: initialMask
             };
+            selectedEvidenceNoteId = '';
+            evidenceNotePlacementState = null;
             templatePlacementState = null;
             templateRotateState = null;
             visionConeRotateState = null;
             rulerState = null;
+            renderToolsMenu();
+            renderStage();
+            event.preventDefault();
+            return;
+        }
+
+        if (localToolState.mode === TOOL_MODE_NOTE && isDM()) {
+            const initialNote = buildEvidenceNoteFromWorldPoints(scene, worldPoint, worldPoint);
+            if (!initialNote) return;
+            evidenceNotePlacementState = {
+                sceneId: scene.id,
+                startWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
+                currentWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
+                note: initialNote
+            };
+            selectedEvidenceNoteId = '';
+            templatePlacementState = null;
+            templateRotateState = null;
+            visionConeRotateState = null;
+            rulerState = null;
+            fogPlacementState = null;
             renderToolsMenu();
             renderStage();
             event.preventDefault();
@@ -5184,11 +5594,7 @@
             const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
             lastTokenPointerDownId = token.id;
             lastTokenPointerDownAt = now;
-            selectedTokenId = token.id;
-            selectedTemplateId = '';
-            visionConeRotateState = null;
-            const linkedEntry = findEntryForToken(token.id);
-            selectedEntryId = linkedEntry ? linkedEntry.id : '';
+            activateTokenSelection(token.id);
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
@@ -5285,6 +5691,24 @@
                 fogPlacementState.startWorldPoint,
                 fogPlacementState.currentWorldPoint,
                 fogPlacementState.mask && fogPlacementState.mask.id
+            );
+            renderStage();
+            return;
+        }
+        if (evidenceNotePlacementState) {
+            const scene = getActiveScene();
+            if (!scene || evidenceNotePlacementState.sceneId !== scene.id) {
+                evidenceNotePlacementState = null;
+                renderStage();
+                return;
+            }
+            evidenceNotePlacementState.currentWorldPoint = screenToWorld(event.clientX, event.clientY);
+            evidenceNotePlacementState.note = buildEvidenceNoteFromWorldPoints(
+                scene,
+                evidenceNotePlacementState.startWorldPoint,
+                evidenceNotePlacementState.currentWorldPoint,
+                evidenceNotePlacementState.note && evidenceNotePlacementState.note.id,
+                evidenceNotePlacementState.note || {}
             );
             renderStage();
             return;
@@ -5400,6 +5824,32 @@
             });
             return;
         }
+        if (evidenceNotePlacementState) {
+            const pendingNote = { ...evidenceNotePlacementState };
+            evidenceNotePlacementState = null;
+            if (event && event.type === 'pointercancel') {
+                renderStage();
+                return;
+            }
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                if (!Array.isArray(scene.evidenceNotes)) scene.evidenceNotes = [];
+                const note = buildEvidenceNoteFromWorldPoints(
+                    scene,
+                    pendingNote.startWorldPoint,
+                    pendingNote.currentWorldPoint || pendingNote.startWorldPoint,
+                    pendingNote.note && pendingNote.note.id,
+                    pendingNote.note || {}
+                );
+                if (!note) return;
+                scene.evidenceNotes.push(note);
+                selectedEvidenceNoteId = note.id;
+                selectedTokenId = '';
+                selectedEntryId = '';
+            });
+            return;
+        }
         if (templatePlacementState) {
             const pendingTemplateState = templatePlacementState;
             templatePlacementState = null;
@@ -5429,6 +5879,7 @@
                 if (!template) return;
                 template.angleDeg = normalizeAngleDeg(pendingRotation.angleDeg);
                 selectedTemplateId = template.id;
+                selectedEvidenceNoteId = '';
             });
             return;
         }
@@ -5450,6 +5901,7 @@
                 }
                 token.vision.facingDeg = normalizeAngleDeg(pendingRotation.angleDeg);
                 selectedTokenId = token.id;
+                selectedEvidenceNoteId = '';
             });
             return;
         }
@@ -5542,6 +5994,21 @@
             event.preventDefault();
             return;
         }
+        const noteEl = event.target.closest('.vtt-map-note');
+        if (noteEl) {
+            const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
+            if (!noteId) return;
+            event.preventDefault();
+            closeTokenInspectorPopover();
+            activateEvidenceNoteSelection(noteId);
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderTokenInspector();
+            renderTokenInspectorPopover();
+            renderToolsMenu();
+            renderStage();
+            return;
+        }
         const tokenEl = event.target.closest('.vtt-token');
         if (!tokenEl) {
             if (previewTokenId) previewTokenId = '';
@@ -5559,10 +6026,7 @@
         if (!token) return;
 
         event.preventDefault();
-        selectedTokenId = token.id;
-        selectedTemplateId = '';
-        const linkedEntry = findEntryForToken(token.id);
-        selectedEntryId = linkedEntry ? linkedEntry.id : '';
+        activateTokenSelection(token.id);
         if (isDM()) {
             if (event.shiftKey && token.imageUrl) {
                 previewTokenId = previewTokenId === token.id ? '' : token.id;

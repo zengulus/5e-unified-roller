@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260322i">
+    <link rel="stylesheet" href="css/vtt.css?v=20260404b">
 </head>
 
     <body data-player-nav="vtt">
@@ -144,6 +144,8 @@
                                     aria-pressed="false">Circle</button>
                                 <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="cone" id="vtt-tool-mode-cone"
                                     aria-pressed="false">Cone</button>
+                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="note" id="vtt-tool-mode-note"
+                                    aria-pressed="false">Evidence</button>
                                 <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog" id="vtt-tool-mode-fog"
                                     aria-pressed="false">Fog</button>
                                 <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog-remove" id="vtt-tool-mode-fog-remove"
@@ -279,9 +281,9 @@
 
             <section class="vtt-panel" id="vtt-inspector-panel">
                 <div class="vtt-panel-head">
-                    <h2>Token Inspector</h2>
+                    <h2>Inspector</h2>
                     <div class="vtt-panel-head-actions">
-                        <span class="vtt-panel-pill" id="vtt-selection-pill">No Token</span>
+                        <span class="vtt-panel-pill" id="vtt-selection-pill">No Selection</span>
                     </div>
                 </div>
                 <div class="vtt-panel-body" id="vtt-inspector-panel-body">
@@ -304,6 +306,7 @@
                 <div class="vtt-world" id="vtt-world">
                     <div class="vtt-grid-layer" id="vtt-grid-layer"></div>
                     <div class="vtt-fog-layer" id="vtt-fog-layer"></div>
+                    <div class="vtt-note-layer" id="vtt-note-layer"></div>
                     <div class="vtt-template-layer" id="vtt-template-layer"></div>
                     <div class="vtt-token-layer" id="vtt-token-layer"></div>
                     <div class="vtt-vision-layer" id="vtt-vision-layer"></div>
@@ -340,7 +343,7 @@
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
-    <script src="js/store.js?v=20260322k"></script>
+    <script src="js/store.js?v=20260404b"></script>
     <script src="js/player-nav.js?v=20260322f"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
@@ -372,7 +375,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260322o"></script>
+    <script src="js/vtt.js?v=20260404b"></script>
 </body>
 
 </html>
