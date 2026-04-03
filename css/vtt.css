@@ -961,8 +961,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
         0 16px 28px rgba(0, 0, 0, 0.24);
 }
 
-.vtt-map-note:hover,
-.vtt-map-note:focus-within {
+.vtt-map-note:focus-within,
+.vtt-map-note.is-selected {
     z-index: 4;
 }
 
@@ -1003,8 +1003,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
         background-color 180ms ease;
 }
 
-.vtt-map-note:hover .vtt-map-note-chip,
-.vtt-map-note:focus-within .vtt-map-note-chip {
+.vtt-map-note:focus-within .vtt-map-note-chip,
+.vtt-map-note.is-selected .vtt-map-note-chip {
     max-width: min(28rem, calc(100vw - 3rem));
     padding: 0.38rem 0.52rem 0.44rem;
     border-color: rgba(var(--vtt-note-rgb), 0.46);
@@ -1034,12 +1034,12 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     max-width: 100%;
 }
 
-.vtt-map-note.is-icon-only:not(:hover):not(:focus-within) .vtt-map-note-chip {
+.vtt-map-note.is-icon-only:not(:focus-within):not(.is-selected) .vtt-map-note-chip {
     align-items: center;
     text-align: center;
 }
 
-.vtt-map-note.is-icon-only:not(:hover):not(:focus-within) .vtt-map-note-title {
+.vtt-map-note.is-icon-only:not(:focus-within):not(.is-selected) .vtt-map-note-title {
     font-size: 0;
     line-height: 1;
     width: 1rem;
@@ -1048,7 +1048,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     white-space: nowrap;
 }
 
-.vtt-map-note.is-icon-only:not(:hover):not(:focus-within) .vtt-map-note-title::before {
+.vtt-map-note.is-icon-only:not(:focus-within):not(.is-selected) .vtt-map-note-title::before {
     content: "!";
     font-size: 0.9rem;
     font-weight: 700;
@@ -1075,26 +1075,26 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     display: none;
 }
 
-.vtt-map-note:hover .vtt-map-note-kicker,
-.vtt-map-note:hover .vtt-map-note-body,
-.vtt-map-note:hover .vtt-map-note-meta,
 .vtt-map-note:focus-within .vtt-map-note-kicker,
 .vtt-map-note:focus-within .vtt-map-note-body,
-.vtt-map-note:focus-within .vtt-map-note-meta {
+.vtt-map-note:focus-within .vtt-map-note-meta,
+.vtt-map-note.is-selected .vtt-map-note-kicker,
+.vtt-map-note.is-selected .vtt-map-note-body,
+.vtt-map-note.is-selected .vtt-map-note-meta {
     display: block;
     margin-top: 0.18rem;
     animation: vtt-note-detail-reveal 180ms ease both;
 }
 
-.vtt-map-note:hover .vtt-map-note-title,
-.vtt-map-note:focus-within .vtt-map-note-title {
+.vtt-map-note:focus-within .vtt-map-note-title,
+.vtt-map-note.is-selected .vtt-map-note-title {
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
 }
 
-.vtt-map-note:hover .vtt-map-note-body,
-.vtt-map-note:focus-within .vtt-map-note-body {
+.vtt-map-note:focus-within .vtt-map-note-body,
+.vtt-map-note.is-selected .vtt-map-note-body {
     display: block;
 }
 
