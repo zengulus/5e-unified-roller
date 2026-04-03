@@ -24,6 +24,7 @@
     const DEFAULT_TEMPLATE_CONE_ARC_DEG = 53.13010235415598;
     const TEMPLATE_HOLD_PERSIST_MS = 1000;
     const TEMPLATE_SHARED_LIFETIME_MS = 5000;
+    const LIVE_STATUS_DROPOUT_GRACE_MS = 5000;
     const TOUCH_CONTEXT_HOLD_MS = 420;
     const TOUCH_CONTEXT_MOVE_PX = 14;
     const STEALTH_STATUS_DETECTED = 'detected';
@@ -99,6 +100,10 @@
     let unsubscribeSyncStatus = null;
     let vttCollabSession = null;
     let vttCollabInitPromise = null;
+    let vttCollabPendingStatus = null;
+    let vttCollabDropoutStartedAt = 0;
+    let vttCollabDropoutTimer = 0;
+    let lastStableLiveSyncChipLabel = '';
     let pendingRemoteVTTSnapshot = null;
     let spawnDragState = null;
     let quickSpawnMenuState = null;
@@ -855,7 +860,8 @@
         const pointerType = String(event && event.pointerType || '').toLowerCase();
         if (!isDM() || localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
         clearPendingTouchContext();
-        const tokenEl = event.target instanceof Element ? event.target.closest('.vtt-token') : null;
+        const targetEl = getEventTargetElement(event);
+        const tokenEl = targetEl ? targetEl.closest('.vtt-token') : null;
         if (tokenEl) {
             const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
             if (!token) return false;
@@ -1198,6 +1204,26 @@
                 facingDeg: getRenderableTokenFacingDeg(token, scene, now)
             }
         };
+    };
+    const getEventTargetElement = (event) => {
+        const target = event && event.target;
+        if (target instanceof Element) return target;
+        if (target instanceof Node) return target.parentElement;
+        return null;
+    };
+    const getEvidenceNoteElementAtClientPoint = (clientX, clientY, target = null) => {
+        if (target instanceof Element) {
+            const directMatch = target.closest('.vtt-map-note');
+            if (directMatch) return directMatch;
+        }
+        if (typeof document.elementsFromPoint !== 'function') return null;
+        const hitElements = document.elementsFromPoint(clientX, clientY);
+        for (const hitEl of hitElements) {
+            if (!(hitEl instanceof Element)) continue;
+            const noteEl = hitEl.closest('.vtt-map-note');
+            if (noteEl) return noteEl;
+        }
+        return null;
     };
     const getTemplateElementAtClientPoint = (clientX, clientY, target = null) => {
         if (target instanceof Element) {
@@ -2884,6 +2910,22 @@
         syncChipEl.tabIndex = retryable ? 0 : -1;
     };
 
+    const clearVTTCollabDropoutTimer = () => {
+        if (!vttCollabDropoutTimer) return;
+        clearTimeout(vttCollabDropoutTimer);
+        vttCollabDropoutTimer = 0;
+    };
+
+    const scheduleVTTCollabDropoutRefresh = (delayMs) => {
+        if (vttCollabDropoutTimer || !Number.isFinite(delayMs) || delayMs <= 0) return;
+        vttCollabDropoutTimer = window.setTimeout(() => {
+            vttCollabDropoutTimer = 0;
+            if (vttCollabPendingStatus) {
+                setVTTCollabStatus(vttCollabPendingStatus);
+            }
+        }, delayMs);
+    };
+
     const updateStoreSyncChip = (status) => {
         const hasActiveCollabSession = !!(vttCollabSession
             && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive()));
@@ -2906,24 +2948,54 @@
 
     const setVTTCollabStatus = (status = {}) => {
         const source = status && typeof status === 'object' ? status : {};
+        vttCollabPendingStatus = source;
         const state = source.state === 'live'
             ? 'live'
             : (source.state === 'connecting'
                 ? 'connecting'
                 : (source.state === 'degraded' ? 'degraded' : 'local'));
         const peerCount = Number.isFinite(source.peerCount) ? Math.max(0, source.peerCount) : 0;
+        const detail = String(source.detail || '').trim();
         let label = 'Local';
         if (state === 'live') {
             label = peerCount > 0 ? `Live · ${peerCount}` : 'Live';
+            lastStableLiveSyncChipLabel = label;
+            vttCollabDropoutStartedAt = 0;
+            clearVTTCollabDropoutTimer();
         } else if (state === 'connecting') {
             label = 'Live...';
         } else if (state === 'degraded') {
             label = 'Live Off';
         }
+
+        if (state === 'local') {
+            vttCollabDropoutStartedAt = 0;
+            lastStableLiveSyncChipLabel = '';
+            clearVTTCollabDropoutTimer();
+        } else if (state !== 'live' && lastStableLiveSyncChipLabel) {
+            const now = Date.now();
+            if (!vttCollabDropoutStartedAt) {
+                vttCollabDropoutStartedAt = now;
+            }
+            const elapsedMs = Math.max(0, now - vttCollabDropoutStartedAt);
+            const remainingMs = LIVE_STATUS_DROPOUT_GRACE_MS - elapsedMs;
+            if (remainingMs > 0) {
+                scheduleVTTCollabDropoutRefresh(remainingMs);
+                setSyncChipState({
+                    state: 'live',
+                    label: lastStableLiveSyncChipLabel,
+                    detail: detail || lastStableLiveSyncChipLabel,
+                    retryable: false
+                });
+                return;
+            }
+            clearVTTCollabDropoutTimer();
+            label = 'Live...';
+        }
         setSyncChipState({
             state,
             label,
-            detail: String(source.detail || '').trim() || label,
+            detail: detail || label,
             retryable: state === 'local' || state === 'degraded'
         });
     };
@@ -3316,11 +3388,6 @@
         }
 
         const players = getPlayers();
-        const featuredNPCs = getNPCs()
-            .slice()
-            .sort((left, right) => String(left && left.name || '').localeCompare(String(right && right.name || '')))
-            .slice(0, 6);
-        const hasGuildlessImageSource = !!getConfiguredSupabaseUrl();
         const playerCount = players.length;
         quickSpawnMenuEl.hidden = false;
         quickSpawnMenuEl.innerHTML = `
@@ -3330,31 +3397,18 @@
                     <span class="vtt-token-spawn-name">Spawn All Players</span>
                     <span class="vtt-token-spawn-meta">${playerCount ? `Spawn ${playerCount} rostered player${playerCount === 1 ? '' : 's'} here` : 'No rostered players yet'}</span>
                 </button>
-                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-guildless">
-                    <span class="vtt-token-spawn-name">Place Guildless</span>
-                    <span class="vtt-token-spawn-meta">${hasGuildlessImageSource ? 'Spawn here · random portrait 1-300' : 'Spawn here · initials fallback until sync URL is set'}</span>
-                </button>
-                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note">
-                    <span class="vtt-token-spawn-name">Add Evidence Note</span>
-                    <span class="vtt-token-spawn-meta">Create a 1x1 note here and open it</span>
-                </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-custom">
                     <span class="vtt-token-spawn-name">Custom Token</span>
                     <span class="vtt-token-spawn-meta">Spawn here</span>
                 </button>
-                ${players.map((player) => `
-                    <button class="vtt-token-spawn" type="button" data-action="quick-spawn-player" data-id="${escapeHtml(String(player.id || ''))}">
-                        <span class="vtt-token-spawn-name">${escapeHtml(player.name || 'Player')}</span>
-                        <span class="vtt-token-spawn-meta">Spawn here</span>
-                    </button>
-                `).join('')}
-                ${featuredNPCs.map((npc) => `
-                    <button class="vtt-token-spawn" type="button" data-action="quick-spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
-                        <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
-                        <span class="vtt-token-spawn-meta">${escapeHtml(npc.guild || 'NPC')}</span>
-                    </button>
-                `).join('')}
-                <button class="vtt-chip-btn" type="button" data-action="quick-spawn-open-npc-search">NPC Search Here</button>
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note">
+                    <span class="vtt-token-spawn-name">Evidence Note</span>
+                    <span class="vtt-token-spawn-meta">Create a 1x1 note here and open it</span>
+                </button>
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-open-npc-search">
+                    <span class="vtt-token-spawn-name">NPC Search Here</span>
+                    <span class="vtt-token-spawn-meta">Search the roster and spawn at this spot</span>
+                </button>
             </div>
         `;
 
@@ -4015,8 +4069,8 @@
         if (preview) classes.push('is-preview');
         if (selected) classes.push('is-selected');
         if (note.hidden) classes.push('is-hidden');
-        const excerpt = buildEvidenceNoteExcerpt(note, 88);
-        const meta = excerpt || buildEvidenceNoteAreaLabel(note, scene);
+        const description = buildEvidenceNoteExcerpt(note, 220);
+        const areaLabel = buildEvidenceNoteAreaLabel(note, scene);
         const highlightColor = normalizeEvidenceNoteHighlightColor(note.highlightColor);
         const highlightRgb = getEvidenceNoteHighlightRgb(note);
         return `
@@ -4030,7 +4084,8 @@
                 <div class="vtt-map-note-chip">
                     <span class="vtt-map-note-kicker">${escapeHtml(note.hidden ? 'Hidden' : 'Evidence')}</span>
                     <strong class="vtt-map-note-title">${escapeHtml(note.title || 'Evidence Note')}</strong>
-                    <span class="vtt-map-note-meta">${escapeHtml(meta)}</span>
+                    <span class="vtt-map-note-body">${escapeHtml(description || 'No details shared yet.')}</span>
+                    <span class="vtt-map-note-meta">${escapeHtml(areaLabel)}</span>
                 </div>
             </div>
         `;
@@ -5504,16 +5559,17 @@
     };
 
     const handleStagePointerDown = (event) => {
-        if (!(event.target instanceof Element)) return;
+        const targetEl = getEventTargetElement(event);
+        if (!targetEl) return;
         if (event.button !== 0) return;
-        if (event.target.closest('#vtt-quick-spawn-menu')) return;
+        if (targetEl.closest('#vtt-quick-spawn-menu')) return;
         closeQuickSpawnMenu();
         closeTokenInspectorPopover();
 
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
-        const noteEl = event.target.closest('.vtt-map-note');
+        const noteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
         if (noteEl && localToolState.mode === TOOL_MODE_NAVIGATE) {
             const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
             if (!activateEvidenceNoteSelection(noteId)) return;
@@ -5529,7 +5585,7 @@
             event.preventDefault();
             return;
         }
-        const visionRotateHandleEl = getVisionConeRotateHandleElementAtClientPoint(event.clientX, event.clientY, event.target);
+        const visionRotateHandleEl = getVisionConeRotateHandleElementAtClientPoint(event.clientX, event.clientY, targetEl);
         if (visionRotateHandleEl) {
             const tokenId = String(visionRotateHandleEl.getAttribute('data-token-id') || '').trim();
             const token = getTokenById(tokenId);
@@ -5555,7 +5611,7 @@
             event.preventDefault();
             return;
         }
-        const rotateHandleEl = event.target.closest('.vtt-template-rotate-handle');
+        const rotateHandleEl = targetEl.closest('.vtt-template-rotate-handle');
         if (rotateHandleEl) {
             const templateId = String(rotateHandleEl.getAttribute('data-template-id') || '').trim();
             const template = getTemplateById(templateId);
@@ -5582,7 +5638,7 @@
             return;
         }
 
-        const templateEl = event.target.closest('.vtt-area-template');
+        const templateEl = targetEl.closest('.vtt-area-template');
         if (templateEl) {
             selectedTemplateId = String(templateEl.getAttribute('data-template-id') || '').trim();
             selectedTokenId = '';
@@ -5687,7 +5743,7 @@
             return;
         }
 
-        const tokenEl = event.target.closest('.vtt-token');
+        const tokenEl = targetEl.closest('.vtt-token');
         if (tokenEl) {
             const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
             if (!token) return;
@@ -6027,8 +6083,9 @@
     };
 
     const handleDocumentPointerDown = (event) => {
-        if (!(event.target instanceof Element)) return;
-        const spawnEl = event.button === 0 ? event.target.closest('[data-spawn-kind]') : null;
+        const targetEl = getEventTargetElement(event);
+        if (!targetEl) return;
+        const spawnEl = event.button === 0 ? targetEl.closest('[data-spawn-kind]') : null;
         if (spawnEl instanceof HTMLElement) {
             const kind = String(spawnEl.dataset.spawnKind || '').trim();
             const id = String(spawnEl.dataset.id || '').trim();
@@ -6039,40 +6096,40 @@
         }
         let needsRender = false;
 
-        if (npcSearchOpen && !event.target.closest('.vtt-popover-anchor') && !event.target.closest('#vtt-npc-search-popover')) {
+        if (npcSearchOpen && !targetEl.closest('.vtt-popover-anchor') && !targetEl.closest('#vtt-npc-search-popover')) {
             closeNPCSearch();
             needsRender = true;
         }
 
-        if (quickSpawnMenuState && !event.target.closest('#vtt-quick-spawn-menu')) {
+        if (quickSpawnMenuState && !targetEl.closest('#vtt-quick-spawn-menu')) {
             quickSpawnMenuState = null;
             needsRender = true;
         }
-        if (navMenuOpen && !event.target.closest('.vtt-topbar-nav')) {
+        if (navMenuOpen && !targetEl.closest('.vtt-topbar-nav')) {
             navMenuOpen = false;
             needsRender = true;
         }
-        if (viewMenuOpen && !event.target.closest('.vtt-topbar-menu')) {
+        if (viewMenuOpen && !targetEl.closest('.vtt-topbar-menu')) {
             viewMenuOpen = false;
             needsRender = true;
         }
-        if (toolsMenuOpen && !event.target.closest('.vtt-topbar-tools')) {
+        if (toolsMenuOpen && !targetEl.closest('.vtt-topbar-tools')) {
             toolsMenuOpen = false;
             needsRender = true;
         }
-        if (initiativeDetailState && !event.target.closest('#vtt-initiative-detail-panel') && !event.target.closest('.vtt-entry')) {
+        if (initiativeDetailState && !targetEl.closest('#vtt-initiative-detail-panel') && !targetEl.closest('.vtt-entry')) {
             initiativeDetailState = null;
             needsRender = true;
         }
         if (tokenInspectorState
-            && !event.target.closest('#vtt-token-inspector-popover')
-            && !event.target.closest('.vtt-token')
-            && !event.target.closest('.vtt-map-note')) {
+            && !targetEl.closest('#vtt-token-inspector-popover')
+            && !targetEl.closest('.vtt-token')
+            && !targetEl.closest('.vtt-map-note')) {
             tokenInspectorState = null;
             needsRender = true;
         }
 
-        if (previewTokenId && !event.target.closest('.vtt-token')) {
+        if (previewTokenId && !targetEl.closest('.vtt-token')) {
             previewTokenId = '';
             needsRender = true;
         }
@@ -6093,13 +6150,10 @@
     };
 
     const handleStageContextMenu = (event) => {
-        if (!(event.target instanceof Element)) return;
-        if (event.target.closest('#vtt-quick-spawn-menu')) return;
-        if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
-            event.preventDefault();
-            return;
-        }
-        const noteEl = event.target.closest('.vtt-map-note');
+        const targetEl = getEventTargetElement(event);
+        if (!targetEl) return;
+        if (targetEl.closest('#vtt-quick-spawn-menu')) return;
+        const noteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
         if (noteEl) {
             const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
             if (!noteId) return;
@@ -6119,48 +6173,52 @@
             renderStage();
             return;
         }
-        const tokenEl = event.target.closest('.vtt-token');
-        if (!tokenEl) {
-            if (previewTokenId) previewTokenId = '';
-            if (!isDM()) {
-                renderStage();
-                return;
-            }
+        const tokenEl = targetEl.closest('.vtt-token');
+        if (tokenEl) {
+            const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
+            if (!token) return;
+
             event.preventDefault();
-            openQuickSpawnMenu(event.clientX, event.clientY);
+            activateTokenSelection(token.id);
+            if (isDM()) {
+                if (event.shiftKey && token.imageUrl) {
+                    previewTokenId = previewTokenId === token.id ? '' : token.id;
+                } else {
+                    previewTokenId = '';
+                    openTokenInspectorPopover(token.id, event.clientX, event.clientY);
+                }
+            } else if (token.imageUrl) {
+                previewTokenId = previewTokenId === token.id ? '' : token.id;
+            } else if (previewTokenId) {
+                previewTokenId = '';
+            }
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderTokenInspector();
+            renderTokenInspectorPopover();
+            renderToolsMenu();
             renderStage();
             return;
         }
-
-        const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
-        if (!token) return;
-
-        event.preventDefault();
-        activateTokenSelection(token.id);
-        if (isDM()) {
-            if (event.shiftKey && token.imageUrl) {
-                previewTokenId = previewTokenId === token.id ? '' : token.id;
-            } else {
-                previewTokenId = '';
-                openTokenInspectorPopover(token.id, event.clientX, event.clientY);
-            }
-        } else if (token.imageUrl) {
-            previewTokenId = previewTokenId === token.id ? '' : token.id;
-        } else if (previewTokenId) {
-            previewTokenId = '';
+        if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
+            event.preventDefault();
+            return;
         }
-        renderInitiativeList();
-        renderInitiativeDetail();
-        renderTokenInspector();
-        renderTokenInspectorPopover();
-        renderToolsMenu();
+        if (previewTokenId) previewTokenId = '';
+        if (!isDM()) {
+            renderStage();
+            return;
+        }
+        event.preventDefault();
+        openQuickSpawnMenu(event.clientX, event.clientY);
         renderStage();
     };
 
     const handleInitiativeContextMenu = (event) => {
-        if (!(event.target instanceof Element)) return;
-        if (event.target.closest('#vtt-initiative-detail-panel')) return;
-        const entryEl = event.target.closest('.vtt-entry');
+        const targetEl = getEventTargetElement(event);
+        if (!targetEl) return;
+        if (targetEl.closest('#vtt-initiative-detail-panel')) return;
+        const entryEl = targetEl.closest('.vtt-entry');
         if (!entryEl) return;
         if (!isDM()) return;
         const entryId = String(entryEl.getAttribute('data-id') || entryEl.getAttribute('data-entry-id') || '').trim();
