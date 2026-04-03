@@ -688,6 +688,11 @@
         const clean = String(value || '').trim().slice(0, 160);
         return clean || fallback;
     };
+    const EVIDENCE_NOTE_COLLAPSED_TITLE = '⚠️';
+    const EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX = 26;
+    const EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX = 220;
+    const EVIDENCE_NOTE_CHIP_ESTIMATED_CHAR_WIDTH_PX = 6.8;
+    const EVIDENCE_NOTE_CHIP_ESTIMATED_PADDING_PX = 22;
     const normalizeEvidenceNoteBody = (value) => String(value || '').trim().slice(0, 6000);
     const normalizeEvidenceNoteHighlightColor = (value, fallback = DEFAULT_EVIDENCE_NOTE_COLOR) => {
         const raw = String(value || fallback || DEFAULT_EVIDENCE_NOTE_COLOR).trim();
@@ -811,6 +816,25 @@
         const bounds = getEvidenceNoteCellBounds(scene, note);
         if (!bounds) return '1 x 1 sq';
         return `${bounds.widthCells} x ${bounds.heightCells} sq`;
+    };
+    const applyEvidenceNoteChipPresentation = (noteEl) => {
+        if (!(noteEl instanceof HTMLElement)) return;
+        const titleEl = noteEl.querySelector('.vtt-map-note-title');
+        if (!(titleEl instanceof HTMLElement)) return;
+        const fullTitle = normalizeEvidenceNoteTitle(noteEl.dataset.noteTitle, 'Evidence Note');
+        const noteWidthPx = Math.max(1, Math.round(noteEl.offsetWidth || toNumber(noteEl.dataset.worldWidth, 1) * localView.zoom));
+        const availableWidthPx = clamp(noteWidthPx - 14, EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX, EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX);
+        const estimatedTitleWidthPx = Math.max(
+            EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX,
+            Math.round(fullTitle.length * EVIDENCE_NOTE_CHIP_ESTIMATED_CHAR_WIDTH_PX + EVIDENCE_NOTE_CHIP_ESTIMATED_PADDING_PX)
+        );
+        const collapsed = estimatedTitleWidthPx > availableWidthPx;
+        noteEl.classList.toggle('is-icon-only', collapsed);
+        noteEl.style.setProperty('--vtt-note-chip-max-width', `${collapsed ? EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX : availableWidthPx}px`);
+        noteEl.style.setProperty('--vtt-note-detail-max-width', `${Math.max(collapsed ? 120 : availableWidthPx, Math.min(availableWidthPx + 56, 220))}px`);
+        titleEl.textContent = collapsed ? EVIDENCE_NOTE_COLLAPSED_TITLE : fullTitle;
+        titleEl.setAttribute('aria-label', fullTitle);
+        titleEl.title = fullTitle;
     };
     const clearPendingTouchContext = () => {
         if (!pendingTouchContextState) return null;
@@ -2555,6 +2579,7 @@
             noteEl.style.top = `${scaleForZoom(toNumber(noteEl.dataset.worldTop, 0))}px`;
             noteEl.style.width = `${scaleForZoom(toNumber(noteEl.dataset.worldWidth, 0))}px`;
             noteEl.style.height = `${scaleForZoom(toNumber(noteEl.dataset.worldHeight, 0))}px`;
+            applyEvidenceNoteChipPresentation(noteEl);
         });
 
         templateLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
@@ -3409,6 +3434,10 @@
                     <span class="vtt-token-spawn-name">NPC Search Here</span>
                     <span class="vtt-token-spawn-meta">Search the roster and spawn at this spot</span>
                 </button>
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-guildless">
+                    <span class="vtt-token-spawn-name">Spawn Guildless</span>
+                    <span class="vtt-token-spawn-meta">Spawn here</span>
+                </button>
             </div>
         `;
 
@@ -4076,6 +4105,7 @@
         return `
             <div class="${classes.join(' ')}"
                 data-note-id="${escapeHtml(String(note.id || ''))}"
+                data-note-title="${escapeHtml(note.title || 'Evidence Note')}"
                 data-world-left="${escapeHtml(String(note.x || 0))}"
                 data-world-top="${escapeHtml(String(note.y || 0))}"
                 data-world-width="${escapeHtml(String(note.w || 1))}"

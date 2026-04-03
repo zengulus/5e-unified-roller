@@ -982,11 +982,12 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-map-note-chip {
     position: absolute;
-    left: 0.45rem;
-    top: 0.45rem;
-    width: min(11rem, calc(100vw - 3rem));
-    max-width: min(20rem, calc(100vw - 3rem));
-    padding: 0.4rem 0.55rem 0.45rem;
+    left: 0.35rem;
+    top: 0.35rem;
+    width: fit-content;
+    min-width: 1.45rem;
+    max-width: min(var(--vtt-note-chip-max-width, 10rem), calc(100vw - 3rem));
+    padding: 0.26rem 0.42rem 0.3rem;
     border: 1px solid rgba(var(--vtt-note-rgb), 0.28);
     border-radius: 0.85rem;
     background: rgba(7, 11, 19, 0.94);
@@ -1004,8 +1005,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-map-note:hover .vtt-map-note-chip,
 .vtt-map-note:focus-within .vtt-map-note-chip {
-    width: min(18rem, calc(100vw - 3rem));
-    padding: 0.5rem 0.65rem 0.6rem;
+    max-width: min(var(--vtt-note-detail-max-width, 14rem), calc(100vw - 3rem));
+    padding: 0.38rem 0.52rem 0.44rem;
     border-color: rgba(var(--vtt-note-rgb), 0.46);
     box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
 }
@@ -1024,13 +1025,23 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-map-note-title {
     font-size: 0.74rem;
-    line-height: 1.2;
+    line-height: 1.15;
     color: rgba(247, 251, 255, 0.98);
-    display: -webkit-box;
+    display: block;
     overflow: hidden;
     text-overflow: ellipsis;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.vtt-map-note.is-icon-only .vtt-map-note-chip {
+    align-items: center;
+    text-align: center;
+}
+
+.vtt-map-note.is-icon-only .vtt-map-note-title {
+    font-size: 0.95rem;
+    line-height: 1;
 }
 
 .vtt-map-note-body {
