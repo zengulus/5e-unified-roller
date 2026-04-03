@@ -1005,7 +1005,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-map-note:hover .vtt-map-note-chip,
 .vtt-map-note:focus-within .vtt-map-note-chip {
-    max-width: min(var(--vtt-note-detail-max-width, 14rem), calc(100vw - 3rem));
+    max-width: min(28rem, calc(100vw - 3rem));
     padding: 0.38rem 0.52rem 0.44rem;
     border-color: rgba(var(--vtt-note-rgb), 0.46);
     box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
@@ -1034,25 +1034,35 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     max-width: 100%;
 }
 
-.vtt-map-note.is-icon-only .vtt-map-note-chip {
+.vtt-map-note.is-icon-only:not(:hover):not(:focus-within) .vtt-map-note-chip {
     align-items: center;
     text-align: center;
 }
 
-.vtt-map-note.is-icon-only .vtt-map-note-title {
-    font-size: 0.95rem;
+.vtt-map-note.is-icon-only:not(:hover):not(:focus-within) .vtt-map-note-title {
+    font-size: 0;
     line-height: 1;
+    width: 1rem;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+}
+
+.vtt-map-note.is-icon-only:not(:hover):not(:focus-within) .vtt-map-note-title::before {
+    content: "!";
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1;
+    color: rgba(247, 251, 255, 0.98);
 }
 
 .vtt-map-note-body {
     font-size: 0.66rem;
     line-height: 1.4;
     color: rgba(233, 240, 249, 0.88);
-    white-space: normal;
-    overflow: hidden;
+    white-space: pre-wrap;
+    overflow: visible;
     display: none;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
 }
 
 .vtt-map-note-meta {
@@ -1076,9 +1086,16 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     animation: vtt-note-detail-reveal 180ms ease both;
 }
 
+.vtt-map-note:hover .vtt-map-note-title,
+.vtt-map-note:focus-within .vtt-map-note-title {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+}
+
 .vtt-map-note:hover .vtt-map-note-body,
 .vtt-map-note:focus-within .vtt-map-note-body {
-    display: -webkit-box;
+    display: block;
 }
 
 @keyframes vtt-note-detail-reveal {

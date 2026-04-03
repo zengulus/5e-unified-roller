@@ -688,7 +688,6 @@
         const clean = String(value || '').trim().slice(0, 160);
         return clean || fallback;
     };
-    const EVIDENCE_NOTE_COLLAPSED_TITLE = '⚠️';
     const EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX = 26;
     const EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX = 220;
     const EVIDENCE_NOTE_CHIP_ESTIMATED_CHAR_WIDTH_PX = 6.8;
@@ -831,8 +830,7 @@
         const collapsed = estimatedTitleWidthPx > availableWidthPx;
         noteEl.classList.toggle('is-icon-only', collapsed);
         noteEl.style.setProperty('--vtt-note-chip-max-width', `${collapsed ? EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX : availableWidthPx}px`);
-        noteEl.style.setProperty('--vtt-note-detail-max-width', `${Math.max(collapsed ? 120 : availableWidthPx, Math.min(availableWidthPx + 56, 220))}px`);
-        titleEl.textContent = collapsed ? EVIDENCE_NOTE_COLLAPSED_TITLE : fullTitle;
+        titleEl.textContent = fullTitle;
         titleEl.setAttribute('aria-label', fullTitle);
         titleEl.title = fullTitle;
     };
@@ -4098,7 +4096,7 @@
         if (preview) classes.push('is-preview');
         if (selected) classes.push('is-selected');
         if (note.hidden) classes.push('is-hidden');
-        const description = buildEvidenceNoteExcerpt(note, 220);
+        const description = String(note && note.body || '').trim();
         const areaLabel = buildEvidenceNoteAreaLabel(note, scene);
         const highlightColor = normalizeEvidenceNoteHighlightColor(note.highlightColor);
         const highlightRgb = getEvidenceNoteHighlightRgb(note);
