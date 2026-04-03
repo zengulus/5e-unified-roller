@@ -1789,11 +1789,18 @@ function sanitizeRichText(html = '') {
 
 function sanitizeBoardPayload(payload) {
     const source = payload && typeof payload === 'object' ? payload : {};
-    return {
+    const clean = {
         name: typeof source.name === 'string' && source.name ? source.name : 'UNNAMED CASE',
         nodes: Array.isArray(source.nodes) ? source.nodes : [],
         connections: Array.isArray(source.connections) ? source.connections : []
     };
+    const updatedAt = Math.max(0, parseInt(source.updatedAt, 10) || 0);
+    const scope = String(source.scope || '').trim().toLowerCase();
+    const caseId = typeof source.caseId === 'string' ? source.caseId.trim() : '';
+    if (updatedAt) clean.updatedAt = updatedAt;
+    if (scope === 'campaign' || scope === 'case') clean.scope = scope;
+    if (caseId) clean.caseId = caseId;
+    return clean;
 }
 
 function getBoardHostAdapter() {
@@ -2498,13 +2505,7 @@ function handleRemoteStoreUpdate(event) {
     if (!event || !event.detail) return;
     if (!isBoardExternalUpdateSource(event.detail.source)) return;
     if (isBoardCollabReady()) {
-        refreshBoardCollabRoomIfNeeded()
-            .then((session) => {
-                if (!session || typeof session.applySharedStoreSnapshot !== 'function') return;
-                const sharedSnapshot = readStoreBoardPayload() || getEmptyBoardPayload();
-                session.applySharedStoreSnapshot(sharedSnapshot);
-            })
-            .catch(() => { });
+        refreshBoardCollabRoomIfNeeded().catch(() => { });
         refreshBoardSharedPopups();
         updateViewCSS();
         return;
@@ -5108,7 +5109,11 @@ function buildBoardPayloadFromDom(trackNameChange = true) {
 }
 
 function persistBoardPayload(payload, options = {}) {
-    const clean = sanitizeBoardPayload(payload || getEmptyBoardPayload());
+    const source = payload && typeof payload === 'object' ? payload : getEmptyBoardPayload();
+    const clean = sanitizeBoardPayload({
+        ...source,
+        updatedAt: Math.max(Date.now(), parseInt(source.updatedAt, 10) || 0)
+    });
     const opts = options && typeof options === 'object' ? options : {};
     const wroteSharedStore = writeStoreBoardPayload(clean);
     if (isBoardCollabReady() && typeof boardCollabSession.syncSnapshot === 'function') {

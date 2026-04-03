@@ -1901,9 +1901,10 @@
             selectedTokenId = clonedToken.id;
             selectedEntryId = '';
             selectedEvidenceNoteId = '';
-            if (tokenInspectorState && tokenInspectorState.tokenId === targetId) {
+            if (tokenInspectorState && tokenInspectorState.kind === 'token' && tokenInspectorState.targetId === targetId) {
                 tokenInspectorState = {
                     ...tokenInspectorState,
+                    targetId: clonedToken.id,
                     tokenId: clonedToken.id
                 };
             }
@@ -1932,6 +1933,35 @@
             selectedEvidenceNoteId = '';
             quickSpawnMenuState = null;
         });
+        return true;
+    };
+
+    const createEvidenceNoteAtWorldPoint = (worldPoint = null, options = {}) => {
+        if (!isDM()) return false;
+        const opts = options && typeof options === 'object' ? options : {};
+        const safeWorldPoint = worldPoint && Number.isFinite(Number(worldPoint.x)) && Number.isFinite(Number(worldPoint.y))
+            ? { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) }
+            : getContextSpawnWorldPoint();
+        if (!safeWorldPoint) return false;
+        let createdNoteId = '';
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene) return;
+            if (!Array.isArray(scene.evidenceNotes)) scene.evidenceNotes = [];
+            const note = buildEvidenceNoteFromWorldPoints(scene, safeWorldPoint, safeWorldPoint);
+            if (!note) return;
+            scene.evidenceNotes.push(note);
+            createdNoteId = note.id;
+            selectedEvidenceNoteId = note.id;
+            selectedTokenId = '';
+            selectedEntryId = '';
+            quickSpawnMenuState = null;
+        });
+        if (!createdNoteId) return false;
+        if (opts.openPopover !== false) {
+            openEvidenceNoteInspectorPopover(createdNoteId, opts.clientX, opts.clientY);
+            render();
+        }
         return true;
     };
 
@@ -2402,8 +2432,15 @@
         }
         if (!isDM()) {
             tokenInspectorState = null;
-        } else if (tokenInspectorState && !tokens.some((token) => token.id === tokenInspectorState.tokenId)) {
-            tokenInspectorState = null;
+        } else if (tokenInspectorState) {
+            const popoverTargetId = String(tokenInspectorState.targetId || tokenInspectorState.tokenId || '').trim();
+            if (!popoverTargetId) {
+                tokenInspectorState = null;
+            } else if (tokenInspectorState.kind === 'note') {
+                if (!visibleEvidenceNotes.some((note) => note.id === popoverTargetId)) tokenInspectorState = null;
+            } else if (!tokens.some((token) => token.id === popoverTargetId)) {
+                tokenInspectorState = null;
+            }
         }
         selectedTemplateId = '';
         if (templatePlacementState && (!scene || templatePlacementState.sceneId !== scene.id)) {
@@ -2667,7 +2704,24 @@
         closeNPCSearch();
         closeInitiativeDetail();
         tokenInspectorState = {
+            kind: 'token',
+            targetId,
             tokenId: targetId,
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
+        };
+        return true;
+    };
+
+    const openEvidenceNoteInspectorPopover = (noteId, clientX, clientY) => {
+        const targetId = String(noteId || '').trim();
+        if (!targetId || !isDM()) return false;
+        closeQuickSpawnMenu();
+        closeNPCSearch();
+        closeInitiativeDetail();
+        tokenInspectorState = {
+            kind: 'note',
+            targetId,
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
         };
@@ -2831,7 +2885,9 @@
     };
 
     const updateStoreSyncChip = (status) => {
-        if (vttCollabSession || vttCollabInitPromise) return;
+        const hasActiveCollabSession = !!(vttCollabSession
+            && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive()));
+        if (hasActiveCollabSession || vttCollabInitPromise) return;
         const source = status && status.connected
             ? (status.pendingPush ? 'Syncing' : 'Shared')
             : 'Local';
@@ -2967,6 +3023,9 @@
     };
 
     const initVTTCollab = async () => {
+        if (vttCollabSession && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive())) {
+            return vttCollabSession;
+        }
         if (vttCollabInitPromise) return vttCollabInitPromise;
         const store = getStore();
         if (!store || !window.RTF_VTT_COLLAB_READY || typeof window.RTF_VTT_COLLAB_READY.then !== 'function') {
@@ -2988,7 +3047,7 @@
             peerCount: 0
         });
 
-        vttCollabInitPromise = Promise.resolve(window.RTF_VTT_COLLAB_READY)
+        const initPromise = Promise.resolve(window.RTF_VTT_COLLAB_READY)
             .then((api) => {
                 if (!api || typeof api.createSession !== 'function') return null;
                 return api.createSession({
@@ -3025,9 +3084,15 @@
                     peerCount: 0
                 });
                 return null;
+            })
+            .finally(() => {
+                if (vttCollabInitPromise === initPromise) {
+                    vttCollabInitPromise = null;
+                }
             });
 
-        return vttCollabInitPromise;
+        vttCollabInitPromise = initPromise;
+        return initPromise;
     };
 
     const refreshVTTCollabRoomIfNeeded = async () => {
@@ -3268,6 +3333,10 @@
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-guildless">
                     <span class="vtt-token-spawn-name">Place Guildless</span>
                     <span class="vtt-token-spawn-meta">${hasGuildlessImageSource ? 'Spawn here · random portrait 1-300' : 'Spawn here · initials fallback until sync URL is set'}</span>
+                </button>
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note">
+                    <span class="vtt-token-spawn-name">Add Evidence Note</span>
+                    <span class="vtt-token-spawn-meta">Create a 1x1 note here and open it</span>
                 </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-custom">
                     <span class="vtt-token-spawn-name">Custom Token</span>
@@ -3573,15 +3642,21 @@
         }
         if (note && !token) {
             selectionPillEl.textContent = note.title || 'Evidence Note';
-            tokenInspectorEl.innerHTML = isDM()
-                ? buildDMEvidenceNoteInspectorContent(note, scene)
-                : buildEvidenceNoteViewerContent(note, scene);
+            tokenInspectorEl.innerHTML = isDM() && tokenInspectorState && tokenInspectorState.kind === 'note' && tokenInspectorState.targetId === note.id
+                ? `
+                    <div class="vtt-inspector-stack">
+                        <div class="vtt-detail-note">Editing ${escapeHtml(note.title || 'Evidence Note')} in the floating inspector. Right-click another evidence note to move it, or press Escape to close it.</div>
+                    </div>
+                `
+                : (isDM()
+                    ? buildDMEvidenceNoteInspectorContent(note, scene)
+                    : buildEvidenceNoteViewerContent(note, scene));
             return;
         }
         selectionPillEl.textContent = token ? token.label : 'No Selection';
         if (!token) {
             tokenInspectorEl.innerHTML = isDM()
-                ? '<div class="vtt-empty">Right-click a token to edit it near your cursor, or click an evidence note to edit the tagged map area here.</div>'
+                ? '<div class="vtt-empty">Right-click a token or evidence note to edit it near your cursor, or click an evidence note to edit the tagged map area here.</div>'
                 : '<div class="vtt-empty">Select a token or evidence note on the map to inspect it.</div>';
             return;
         }
@@ -3600,7 +3675,7 @@
             return;
         }
 
-        tokenInspectorEl.innerHTML = tokenInspectorState && tokenInspectorState.tokenId === token.id
+        tokenInspectorEl.innerHTML = tokenInspectorState && tokenInspectorState.kind === 'token' && tokenInspectorState.targetId === token.id
             ? `
                 <div class="vtt-inspector-stack">
                     <div class="vtt-defence-chip-row">
@@ -3625,22 +3700,38 @@
 
     const renderTokenInspectorPopover = () => {
         if (!tokenInspectorPopoverEl) return;
-        const activePopoverId = tokenInspectorState && tokenInspectorState.tokenId ? tokenInspectorState.tokenId : '';
-        const token = getTokenById(activePopoverId);
-        if (!token || !tokenInspectorState || !isDM()) {
+        const activePopoverKind = tokenInspectorState && tokenInspectorState.kind === 'note' ? 'note' : 'token';
+        const activePopoverId = tokenInspectorState
+            ? String(tokenInspectorState.targetId || tokenInspectorState.tokenId || '').trim()
+            : '';
+        const scene = getActiveScene();
+        const token = activePopoverKind === 'token' ? getTokenById(activePopoverId) : null;
+        const note = activePopoverKind === 'note' ? getEvidenceNoteById(activePopoverId) : null;
+        if (!tokenInspectorState || !isDM() || (!token && !note)) {
             tokenInspectorPopoverEl.hidden = true;
             return;
         }
-        tokenInspectorPopoverEl.innerHTML = `
-            <div class="vtt-panel-head vtt-popover-head">
-                <h2>Token Inspector</h2>
-                <div class="vtt-panel-head-actions">
-                    <span class="vtt-panel-pill">${escapeHtml(token.label || 'Token')}</span>
-                    <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close token inspector">X</button>
+        tokenInspectorPopoverEl.innerHTML = activePopoverKind === 'note'
+            ? `
+                <div class="vtt-panel-head vtt-popover-head">
+                    <h2>Evidence Note</h2>
+                    <div class="vtt-panel-head-actions">
+                        <span class="vtt-panel-pill">${escapeHtml(note && note.title ? note.title : 'Evidence Note')}</span>
+                        <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close evidence note inspector">X</button>
+                    </div>
                 </div>
-            </div>
-            ${buildDMTokenInspectorContent(token)}
-        `;
+                ${buildDMEvidenceNoteInspectorContent(note, scene)}
+            `
+            : `
+                <div class="vtt-panel-head vtt-popover-head">
+                    <h2>Token Inspector</h2>
+                    <div class="vtt-panel-head-actions">
+                        <span class="vtt-panel-pill">${escapeHtml(token.label || 'Token')}</span>
+                        <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close token inspector">X</button>
+                    </div>
+                </div>
+                ${buildDMTokenInspectorContent(token)}
+            `;
         tokenInspectorPopoverEl.hidden = false;
         positionTokenInspectorPopover();
     };
@@ -4217,6 +4308,9 @@
             if (!scene || !Array.isArray(scene.evidenceNotes)) return;
             scene.evidenceNotes = scene.evidenceNotes.filter((note) => String(note && note.id || '').trim() !== targetId);
             if (selectedEvidenceNoteId === targetId) selectedEvidenceNoteId = '';
+            if (tokenInspectorState && tokenInspectorState.kind === 'note' && tokenInspectorState.targetId === targetId) {
+                tokenInspectorState = null;
+            }
         });
         return true;
     };
@@ -4648,6 +4742,14 @@
         if (action === 'quick-spawn-guildless') {
             if (!quickSpawnMenuState) return;
             spawnTokenFromDescriptor('guildless', '', quickSpawnMenuState.worldPoint);
+            return;
+        }
+        if (action === 'quick-spawn-evidence-note') {
+            if (!quickSpawnMenuState) return;
+            createEvidenceNoteAtWorldPoint(quickSpawnMenuState.worldPoint, {
+                clientX: quickSpawnMenuState.clientX,
+                clientY: quickSpawnMenuState.clientY
+            });
             return;
         }
         if (action === 'quick-spawn-player') {
@@ -5962,7 +6064,10 @@
             initiativeDetailState = null;
             needsRender = true;
         }
-        if (tokenInspectorState && !event.target.closest('#vtt-token-inspector-popover') && !event.target.closest('.vtt-token')) {
+        if (tokenInspectorState
+            && !event.target.closest('#vtt-token-inspector-popover')
+            && !event.target.closest('.vtt-token')
+            && !event.target.closest('.vtt-map-note')) {
             tokenInspectorState = null;
             needsRender = true;
         }
@@ -5999,8 +6104,13 @@
             const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
             if (!noteId) return;
             event.preventDefault();
-            closeTokenInspectorPopover();
             activateEvidenceNoteSelection(noteId);
+            if (isDM()) {
+                previewTokenId = '';
+                openEvidenceNoteInspectorPopover(noteId, event.clientX, event.clientY);
+            } else {
+                closeTokenInspectorPopover();
+            }
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();

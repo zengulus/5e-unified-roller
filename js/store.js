@@ -755,11 +755,18 @@
 
     const sanitizeBoard = (board) => {
         const source = board && typeof board === 'object' ? board : {};
-        return {
+        const clean = {
             name: typeof source.name === 'string' && source.name ? source.name : DEFAULT_BOARD_STATE.name,
             nodes: Array.isArray(source.nodes) ? source.nodes : [],
             connections: Array.isArray(source.connections) ? source.connections : []
         };
+        const updatedAt = Math.max(0, parseInt(source.updatedAt, 10) || 0);
+        const scope = String(source.scope || '').trim().toLowerCase();
+        const caseId = typeof source.caseId === 'string' ? source.caseId.trim() : '';
+        if (updatedAt) clean.updatedAt = updatedAt;
+        if (scope === 'campaign' || scope === 'case') clean.scope = scope;
+        if (caseId) clean.caseId = caseId;
+        return clean;
     };
     const sanitizeBoardHistoryReason = (value, fallback = 'snapshot') => {
         const clean = toTrimmedString(value, fallback, 80).trim().toLowerCase();

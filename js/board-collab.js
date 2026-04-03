@@ -226,6 +226,43 @@ const buildSnapshotSignature = (snapshot) => {
     });
 };
 
+const getSnapshotStamp = (snapshot, fallback = 0) => {
+    const clean = sanitizeBoardSnapshot(snapshot);
+    return Math.max(
+        0,
+        parseInt(clean.updatedAt, 10) || 0,
+        parseInt(fallback, 10) || 0
+    );
+};
+
+const chooseCanonicalSnapshot = (entries = [], fallbackEntry = null) => {
+    const candidates = Array.isArray(entries)
+        ? entries.filter((entry) => entry && entry.snapshot)
+        : [];
+    if (!candidates.length) return fallbackEntry;
+
+    let best = candidates[0];
+    for (let i = 1; i < candidates.length; i += 1) {
+        const next = candidates[i];
+        const bestHasContent = hasBoardContent(best.snapshot);
+        const nextHasContent = hasBoardContent(next.snapshot);
+        if (nextHasContent && !bestHasContent) {
+            best = next;
+            continue;
+        }
+        if (bestHasContent && !nextHasContent) continue;
+        if ((next.stamp || 0) > (best.stamp || 0)) {
+            best = next;
+            continue;
+        }
+        if ((next.stamp || 0) === (best.stamp || 0) && (next.priority || 0) > (best.priority || 0)) {
+            best = next;
+        }
+    }
+
+    return best;
+};
+
 const roundCursor = (value) => Math.round(toFiniteNumber(value, 0) * CURSOR_PRECISION) / CURSOR_PRECISION;
 
 const encodeBase64 = (bytes) => {
@@ -625,29 +662,53 @@ class BoardCollabSession {
             const cloudUpdatedAt = Date.parse(cloudRow.snapshot.updatedAt || '') || cloudRow.snapshot.revision || 0;
             const localUpdatedAt = Math.max(0, localDocPayload.updatedAt || 0);
             this.lastSavedRevision = Math.max(0, cloudRow.snapshot.revision || 0);
-            if (livePayloadHasContent) {
-                if (!hasBoardContent(localDocPayload) || localDocSig !== livePayloadSig) {
-                    applySnapshotToDoc(
-                        this.doc,
-                        livePayload,
-                        this.scope,
-                        this.caseId,
-                        this.originBootstrap,
-                        Math.max(Date.now(), livePayload.updatedAt || cloudUpdatedAt || 0)
-                    );
+            const canonical = chooseCanonicalSnapshot([
+                {
+                    kind: 'room',
+                    snapshot: roomPayload,
+                    stamp: getSnapshotStamp(roomPayload, cloudUpdatedAt),
+                    priority: 30
+                },
+                {
+                    kind: 'local-doc',
+                    snapshot: localDocPayload,
+                    stamp: getSnapshotStamp(localDocPayload, localUpdatedAt),
+                    priority: 20
+                },
+                {
+                    kind: 'live-store',
+                    snapshot: livePayload,
+                    stamp: getSnapshotStamp(livePayload),
+                    priority: 10
                 }
-                this.initialCloudFlushRequired = roomPayloadSig !== livePayloadSig;
+            ], {
+                kind: 'room',
+                snapshot: roomPayload,
+                stamp: getSnapshotStamp(roomPayload, cloudUpdatedAt),
+                priority: 30
+            });
+
+            const canonicalPayload = canonical && canonical.snapshot ? canonical.snapshot : roomPayload;
+            const canonicalSig = buildSnapshotSignature(canonicalPayload);
+            const canonicalStamp = canonical && Number.isFinite(canonical.stamp) ? canonical.stamp : (cloudUpdatedAt || Date.now());
+            const canonicalOrigin = canonical && canonical.kind === 'room'
+                ? this.originRemoteRestore
+                : this.originBootstrap;
+
+            if (!hasBoardContent(localDocPayload) || localDocSig !== canonicalSig) {
+                applySnapshotToDoc(
+                    this.doc,
+                    canonicalPayload,
+                    this.scope,
+                    this.caseId,
+                    canonicalOrigin,
+                    canonicalStamp || Date.now()
+                );
+            }
+
+            if (canonical && canonical.kind !== 'room' && roomPayloadSig !== canonicalSig) {
+                this.initialCloudFlushRequired = true;
             } else {
-                if (!hasBoardContent(localDocPayload) || cloudUpdatedAt > localUpdatedAt) {
-                    applySnapshotToDoc(
-                        this.doc,
-                        roomPayload,
-                        this.scope,
-                        this.caseId,
-                        this.originRemoteRestore,
-                        cloudUpdatedAt || Date.now()
-                    );
-                }
                 this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
             }
         } else if (cloudRow.ok) {

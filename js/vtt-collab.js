@@ -83,6 +83,7 @@ const fallbackSnapshot = () => ({
             },
             stealthMode: false,
             tokens: [],
+            evidenceNotes: [],
             templates: [],
             fog: []
         }
@@ -142,6 +143,7 @@ class VTTCollabSession {
         this.store = opts.store || null;
         this.client = null;
         this.channel = null;
+        this.connectConfig = null;
         this.connected = false;
         this.ready = false;
         this.destroyed = false;
@@ -153,6 +155,8 @@ class VTTCollabSession {
         this.pendingMirrorTimer = null;
         this.pendingFlushTimer = null;
         this.pendingFlushPromise = null;
+        this.pendingReconnectTimer = null;
+        this.reconnectAttempts = 0;
         this.pendingSnapshot = null;
         this.lastSnapshot = this.coerceSnapshot(
             typeof this.options.getSeedPayload === 'function'
@@ -208,6 +212,46 @@ class VTTCollabSession {
         }
     }
 
+    async disposeChannel(channel = this.channel) {
+        if (!channel || !this.client) return;
+        try {
+            if (typeof channel.untrack === 'function') {
+                try { await channel.untrack(); } catch (err) { }
+            }
+            await this.client.removeChannel(channel);
+        } catch (err) {
+            console.warn('RTF_VTT_COLLAB: Failed removing channel', err);
+        } finally {
+            if (this.channel === channel) {
+                this.channel = null;
+            }
+        }
+    }
+
+    scheduleReconnect(detail = 'Reconnecting live VTT...') {
+        if (this.destroyed || this.connected || !this.connectConfig || this.pendingReconnectTimer) return;
+        const delayMs = Math.min(8000, 1200 * Math.max(1, this.reconnectAttempts + 1));
+        this.reconnectAttempts = Math.min(this.reconnectAttempts + 1, 6);
+        this.updateStatus({
+            state: 'connecting',
+            detail,
+            peerCount: this.remotePresence.size
+        });
+        this.pendingReconnectTimer = setTimeout(() => {
+            this.pendingReconnectTimer = null;
+            this.connectChannel(this.connectConfig).catch((err) => {
+                console.warn('RTF_VTT_COLLAB: Reconnect failed', err);
+                this.connected = false;
+                this.updateStatus({
+                    state: 'degraded',
+                    detail: 'Live VTT is unavailable right now. Retrying...',
+                    peerCount: this.remotePresence.size
+                });
+                this.scheduleReconnect('Retrying live VTT connection...');
+            });
+        }, delayMs);
+    }
+
     buildLocalPresence() {
         return {
             instanceId: this.instanceId,
@@ -250,6 +294,7 @@ class VTTCollabSession {
         }
 
         this.client = ensured.client;
+        this.connectConfig = ensured.config || null;
         this.instanceId = toTrimmedString(ensured.instanceId, '', 120).trim();
         this.userId = toTrimmedString(ensured.userId, '', 120).trim();
         this.profileName = toTrimmedString(ensured.profileName, '', 120).trim();
@@ -318,22 +363,26 @@ class VTTCollabSession {
         }
 
         try {
-            await this.connectChannel(ensured.config);
+            await this.connectChannel(this.connectConfig);
         } catch (err) {
             console.warn('RTF_VTT_COLLAB: Channel connect failed', err);
-            this.updateStatus({
-                state: 'degraded',
-                detail: 'Live VTT unavailable. Shared VTT mirror still works.',
-                peerCount: this.remotePresence.size
-            });
         }
 
         this.ready = true;
-        this.updateStatus({
-            state: this.connected ? 'live' : 'degraded',
-            detail: this.connected ? 'Live VTT connected.' : 'Live VTT unavailable. Shared VTT mirror still works.',
-            peerCount: this.remotePresence.size
-        });
+        if (this.connected) {
+            this.updateStatus({
+                state: 'live',
+                detail: 'Live VTT connected.',
+                peerCount: this.remotePresence.size
+            });
+        } else {
+            this.updateStatus({
+                state: 'degraded',
+                detail: 'Live VTT unavailable. Retrying connection...',
+                peerCount: this.remotePresence.size
+            });
+            this.scheduleReconnect('Retrying live VTT connection...');
+        }
         this.scheduleMirror();
         document.addEventListener('visibilitychange', this.handleVisibilityChange);
         window.addEventListener('beforeunload', this.handleBeforeUnload);
@@ -342,6 +391,15 @@ class VTTCollabSession {
 
     async connectChannel(config) {
         if (!this.client || !config) return;
+        if (this.pendingReconnectTimer) {
+            clearTimeout(this.pendingReconnectTimer);
+            this.pendingReconnectTimer = null;
+        }
+        if (this.channel) {
+            await this.disposeChannel(this.channel);
+        }
+        this.connected = false;
+        this.remotePresence = new Map();
         const channelName = `rtf-vtt-${config.campaignId}-${this.roomId}`;
         const channel = this.client.channel(channelName, {
             config: {
@@ -349,18 +407,23 @@ class VTTCollabSession {
                 presence: { key: this.instanceId || undefined }
             }
         });
+        this.channel = channel;
 
         channel.on('broadcast', { event: 'vtt-sync-request' }, ({ payload }) => {
+            if (channel !== this.channel) return;
             this.handleSyncRequest(payload);
         });
         channel.on('broadcast', { event: 'vtt-snapshot' }, ({ payload }) => {
+            if (channel !== this.channel) return;
             this.handleSnapshotMessage(payload);
         });
         channel.on('broadcast', { event: 'vtt-token-positions' }, ({ payload }) => {
+            if (channel !== this.channel) return;
             this.handlePositionMessage(payload);
         });
 
         const onPresence = () => {
+            if (channel !== this.channel) return;
             const state = typeof channel.presenceState === 'function' ? channel.presenceState() : {};
             this.handlePresenceState(state);
         };
@@ -377,6 +440,7 @@ class VTTCollabSession {
         await new Promise((resolve, reject) => {
             let settled = false;
             const timeout = setTimeout(() => {
+                if (channel !== this.channel) return;
                 this.connected = false;
                 this.updateStatus({
                     state: 'degraded',
@@ -389,9 +453,11 @@ class VTTCollabSession {
                 }
             }, 10000);
             channel.subscribe((status) => {
+                if (channel !== this.channel) return;
                 if (status === 'SUBSCRIBED') {
                     clearTimeout(timeout);
                     this.connected = true;
+                    this.reconnectAttempts = 0;
                     this.updateStatus({
                         state: 'live',
                         detail: 'Live VTT connected.',
@@ -416,12 +482,13 @@ class VTTCollabSession {
                     if (!settled) {
                         settled = true;
                         reject(new Error(`VTT collaboration channel status: ${status}`));
+                        return;
                     }
+                    this.scheduleReconnect(status === 'CLOSED' ? 'Rejoining live VTT...' : 'Retrying live VTT connection...');
                 }
             });
         });
 
-        this.channel = channel;
         await this.refreshPresenceTracking();
         await this.sendBroadcast('vtt-sync-request', {
             roomId: this.roomId,
@@ -681,6 +748,8 @@ class VTTCollabSession {
     handleVisibilityChange() {
         if (document.hidden) {
             this.flushSnapshotNow().catch(() => { });
+        } else if (!this.connected) {
+            this.scheduleReconnect('Rejoining live VTT...');
         } else {
             this.refreshPresenceTracking().catch(() => { });
         }
@@ -697,6 +766,7 @@ class VTTCollabSession {
         window.removeEventListener('beforeunload', this.handleBeforeUnload);
         if (this.pendingMirrorTimer) clearTimeout(this.pendingMirrorTimer);
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
+        if (this.pendingReconnectTimer) clearTimeout(this.pendingReconnectTimer);
 
         try {
             await this.flushSnapshotNow();
@@ -712,16 +782,7 @@ class VTTCollabSession {
             peerCount: 0
         });
 
-        if (this.channel && this.client) {
-            try {
-                if (typeof this.channel.untrack === 'function') {
-                    try { await this.channel.untrack(); } catch (err) { }
-                }
-                await this.client.removeChannel(this.channel);
-            } catch (err) {
-                console.warn('RTF_VTT_COLLAB: Failed removing channel', err);
-            }
-        }
+        await this.disposeChannel(this.channel);
     }
 }
 
