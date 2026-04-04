@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ravnica-tools-v7';
+const CACHE_NAME = 'ravnica-tools-v8';
 const SHELL_ASSETS = [
     './',
     './manifest.json',
@@ -23,7 +23,6 @@ const SHELL_ASSETS = [
     './roster.html',
     './timeline.html',
     './tools.html',
-    './tourney.html',
     './css/board.css',
     './css/clocks.css',
     './css/clue.css',
@@ -45,7 +44,6 @@ const SHELL_ASSETS = [
     './css/timeline.css',
     './css/tools-page.css',
     './css/tools.css',
-    './css/tourney.css',
     './js/board.js',
     './js/board-collab.js',
     './js/clocks.js',
@@ -86,7 +84,6 @@ const SHELL_ASSETS = [
     './js/sw-register.js',
     './js/timeline.js',
     './js/tools.js',
-    './js/tourney.js',
     './js/ui.js',
     './js/vector-field.js',
     './js/srd-5.2-spells.json'

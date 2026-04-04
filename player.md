@@ -96,13 +96,12 @@ A high-level view of the entire party's vital statistics.
 | **Clue Generator** (`clue.html`) | Pair signal vs noise evidence to keep investigations fresh, then copy results into Case Board nodes as needed. |
 | **Session Tracker** (`gm.html`) | DM deck for initiative, loot, and inline rolling. It saves to its own `gmDashboardData` key, so export/import inside the page when you need to share presets. |
 | **Narrative Engine** (`dm-screen.html`) | Prompt factory for hazards, NPC motivations, scene texture, and wrap-up headlines. |
-| **Tournament Bracket** (`tourney.html`) | Manage double-elimination brackets with auto-advancing brackets saved locally per browser. |
 
 ## 💾 Saving Data
 Campaign tools share the `RTF_STORE` Local Storage object.
 *   **Import once:** Open `tools.html`, click Import, and every Hub/Board/Dashboard/Roster/Locations/Requisition/Timeline/Encounter/HQ tab will pick up that snapshot.
 *   **Export often:** Use the Tools Hub export to grab the unified JSON before/after sessions.
-*   **Standalone saves:** The Character Sheet, Session Tracker (`gmDashboardData`), Narrative Engine, Clue Generator, and Tournament Bracket keep their own lightweight storage. Use their built-in export/import (if available) when you need to move those between browsers.
+*   **Standalone saves:** The Character Sheet, Session Tracker (`gmDashboardData`), Narrative Engine, and Clue Generator keep their own lightweight storage. Use their built-in export/import (if available) when you need to move those between browsers.
 
 ## Related Project
 For a less setting-specific version of this toolset, see [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).

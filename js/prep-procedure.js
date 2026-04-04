@@ -302,6 +302,9 @@
             }
         },
         resetAll: document.getElementById('reset-all-btn'),
+        accentBtn: document.getElementById('prep-procedure-accent-btn'),
+        bgStyleBtn: document.getElementById('btn-bg-style'),
+        accentPicker: document.getElementById('accent-picker-input'),
         title: document.getElementById('prep-procedure-title'),
         logCustomPrep: document.getElementById('log-custom-prep-btn'),
         logCustomProcedure: document.getElementById('log-custom-procedure-btn'),
@@ -423,6 +426,29 @@
         refs.status.textContent = String(message || '');
         refs.status.classList.toggle('is-success', tone === 'success');
         refs.status.classList.toggle('is-error', tone === 'error');
+    }
+
+    function isDefaultState() {
+        return statesEqual(state, defaultState);
+    }
+
+    function bindAccentControls() {
+        if (refs.accentBtn) {
+            refs.accentBtn.addEventListener('click', () => {
+                if (typeof global.triggerAccentPicker === 'function') global.triggerAccentPicker();
+            });
+        }
+        if (refs.bgStyleBtn) {
+            refs.bgStyleBtn.addEventListener('click', () => {
+                if (typeof global.cycleBgStyle === 'function') global.cycleBgStyle();
+            });
+        }
+        if (refs.accentPicker) {
+            refs.accentPicker.addEventListener('change', (event) => {
+                const value = event.target && 'value' in event.target ? event.target.value : '';
+                if (typeof global.setAccentColor === 'function') global.setAccentColor(value);
+            });
+        }
     }
 
     function onChange(listener) {
@@ -904,6 +930,11 @@
         openLogPopover({ source: 'example', example });
     });
     refs.resetAll.addEventListener('click', () => {
+        if (isDefaultState()) {
+            setStatus('Prep/procedure clocks are already at defaults.', 'success');
+            return;
+        }
+        if (!global.confirm('Reset prep/procedure clocks, prep tokens, and examples back to defaults?')) return;
         const nextDefaults = createDefaultState(maxPrepTokens);
         state = nextDefaults;
         persistState(state);
@@ -942,6 +973,7 @@
 
     bindClockControls('prep');
     bindClockControls('procedure');
+    bindAccentControls();
     buildCategoryOptions();
 
     persistState(state);

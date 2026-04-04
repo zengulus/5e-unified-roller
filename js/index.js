@@ -78,6 +78,7 @@ let quickActionsPanelOpen = false;
 let quickActionsPanelEventsBound = false;
 let quickActionSearchOpen = false;
 let quickActionSearchQuery = '';
+let quickActionSearchActiveIndex = 0;
 let quickActionLongPressTimer = null;
 let quickActionLongPressTarget = null;
 let quickActionLongPressPointerId = null;
@@ -952,6 +953,32 @@ function bindQuickActionsPanelEvents() {
         input.addEventListener('click', () => {
             setQuickActionSearchOpen(true, { focus: false });
         });
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'ArrowDown') {
+                if (moveQuickActionSearchActiveIndex(1)) event.preventDefault();
+                return;
+            }
+            if (event.key === 'ArrowUp') {
+                if (moveQuickActionSearchActiveIndex(-1)) event.preventDefault();
+                return;
+            }
+            if (event.key === 'Home') {
+                if (moveQuickActionSearchActiveIndex('start')) event.preventDefault();
+                return;
+            }
+            if (event.key === 'End') {
+                if (moveQuickActionSearchActiveIndex('end')) event.preventDefault();
+                return;
+            }
+            if (!quickActionSearchOpen || event.key !== 'Enter') return;
+            const { results } = collectQuickActionSearchResults();
+            if (!results.length) return;
+            const activeIndex = clampQuickActionSearchActiveIndex(results.length);
+            const activeResult = results[activeIndex];
+            if (!activeResult) return;
+            event.preventDefault();
+            runQuickActionSearchResult(activeResult.key);
+        });
     }
 
     document.addEventListener('click', (event) => {
@@ -977,13 +1004,20 @@ function bindQuickActionsPanelEvents() {
     });
 
     document.addEventListener('keydown', (event) => {
-        if (!quickActionSearchOpen || event.key !== 'Enter') return;
-        const input = document.getElementById('quickActionSearchInput');
-        if (!input || event.target !== input) return;
-        const { results } = collectQuickActionSearchResults(1);
-        if (!results.length) return;
+        if (event.defaultPrevented) return;
+        const target = event.target;
+        const isEditableTarget = target instanceof HTMLInputElement
+            || target instanceof HTMLTextAreaElement
+            || target instanceof HTMLSelectElement
+            || (target instanceof HTMLElement && target.isContentEditable);
+        if (isEditableTarget) return;
+
+        const plainSlash = event.key === '/' && !event.altKey && !event.ctrlKey && !event.metaKey;
+        const commandPaletteShortcut = (event.key === 'k' || event.key === 'K') && (event.ctrlKey || event.metaKey) && !event.altKey;
+        if (!plainSlash && !commandPaletteShortcut) return;
+
         event.preventDefault();
-        runQuickActionSearchResult(results[0].key);
+        focusQuickActionSearch();
     });
 }
 
@@ -1877,8 +1911,8 @@ function refreshCharSelect() {
 function switchCharacter(id) {
     syncMyStoryBoardToData();
     allData.characters[allData.activeId] = data;
-    saveGlobal();
     allData.activeId = id;
+    saveGlobal();
     loadActiveChar();
 }
 
@@ -1890,6 +1924,12 @@ function createNewCharacter() {
     allData.activeId = newId;
     saveGlobal();
     loadActiveChar();
+    requestAnimationFrame(() => {
+        const nameInput = document.getElementById('charName');
+        if (!nameInput) return;
+        nameInput.focus({ preventScroll: true });
+        if (typeof nameInput.select === 'function') nameInput.select();
+    });
 }
 
 function deleteCharacter() {
@@ -5117,6 +5157,8 @@ function setQuickActionSearchOpen(open, options = {}) {
     const nextOpen = !!open && quickActionsPanelOpen;
     quickActionSearchOpen = nextOpen;
     if (options && options.clearQuery) quickActionSearchQuery = '';
+    if (!nextOpen) quickActionSearchActiveIndex = 0;
+    else if (options && options.resetActive) quickActionSearchActiveIndex = 0;
     renderQuickActionSearchPopover();
     if (!quickActionSearchOpen || options.focus === false) return;
     requestAnimationFrame(() => {
@@ -5129,11 +5171,13 @@ function setQuickActionSearchOpen(open, options = {}) {
 
 function toggleQuickActionSearchPopover(forceOpen) {
     const nextState = typeof forceOpen === 'boolean' ? forceOpen : !quickActionSearchOpen;
-    setQuickActionSearchOpen(nextState, { focus: nextState });
+    setQuickActionSearchOpen(nextState, { focus: nextState, resetActive: nextState });
 }
 
 function updateQuickActionSearchQuery(value) {
-    quickActionSearchQuery = String(value || '');
+    const nextQuery = String(value || '');
+    if (nextQuery !== quickActionSearchQuery) quickActionSearchActiveIndex = 0;
+    quickActionSearchQuery = nextQuery;
     const input = document.getElementById('quickActionSearchInput');
     const shouldOpen = !!quickActionSearchQuery.trim() || (input && document.activeElement === input);
     if (shouldOpen !== quickActionSearchOpen) {
@@ -5141,6 +5185,54 @@ function updateQuickActionSearchQuery(value) {
         return;
     }
     renderQuickActionSearchPopover();
+}
+
+function clampQuickActionSearchActiveIndex(resultCount) {
+    if (!Number.isFinite(resultCount) || resultCount <= 0) {
+        quickActionSearchActiveIndex = 0;
+        return 0;
+    }
+    quickActionSearchActiveIndex = Math.max(0, Math.min(quickActionSearchActiveIndex, resultCount - 1));
+    return quickActionSearchActiveIndex;
+}
+
+function moveQuickActionSearchActiveIndex(direction) {
+    const { results } = collectQuickActionSearchResults();
+    if (!results.length) return false;
+
+    if (direction === 'start') quickActionSearchActiveIndex = 0;
+    else if (direction === 'end') quickActionSearchActiveIndex = results.length - 1;
+    else {
+        const delta = Number(direction);
+        if (!Number.isFinite(delta) || delta === 0) return false;
+        quickActionSearchActiveIndex = clampQuickActionSearchActiveIndex(results.length) + delta;
+    }
+
+    clampQuickActionSearchActiveIndex(results.length);
+    renderQuickActionSearchPopover();
+    return true;
+}
+
+function scrollActiveQuickActionSearchResultIntoView() {
+    const activeButton = document.querySelector(`.quick-actions-search-run[data-qa-search-index="${quickActionSearchActiveIndex}"]`);
+    if (!activeButton || typeof activeButton.scrollIntoView !== 'function') return;
+    activeButton.scrollIntoView({ block: 'nearest' });
+}
+
+function focusQuickActionSearch() {
+    const currentFace = normalizeSheetFace(
+        data && data.uiState ? data.uiState.sheetFace : '',
+        data && data.uiState ? !!data.uiState.isFlipped : false
+    );
+    if (currentFace !== 'front') setSheetFace('front');
+    setQuickActionsPanelOpen(true);
+    setQuickActionSearchOpen(true, { focus: true, resetActive: true });
+    requestAnimationFrame(() => {
+        const input = document.getElementById('quickActionSearchInput');
+        if (!input) return;
+        input.focus({ preventScroll: true });
+        if (typeof input.select === 'function') input.select();
+    });
 }
 
 function renderQuickActionSearchPopover() {
@@ -5155,9 +5247,11 @@ function renderQuickActionSearchPopover() {
     }
     if (popover) popover.hidden = !quickActionSearchOpen;
     if (input && input.value !== quickActionSearchQuery) input.value = quickActionSearchQuery;
+    if (input) input.setAttribute('aria-expanded', quickActionSearchOpen ? 'true' : 'false');
     if (!resultsEl) return;
 
     const { totalCount, results } = collectQuickActionSearchResults();
+    const activeIndex = clampQuickActionSearchActiveIndex(results.length);
     if (countEl) {
         if (quickActionSearchQuery.trim()) {
             countEl.textContent = totalCount > results.length
@@ -5178,7 +5272,7 @@ function renderQuickActionSearchPopover() {
         return;
     }
 
-    resultsEl.innerHTML = results.map((item) => {
+    resultsEl.innerHTML = results.map((item, idx) => {
         const safeKey = escapeJsString(item.key);
         const pinned = isQuickActionSaved(item.action);
         const pinClass = pinned ? 'quick-actions-search-pin is-pinned' : 'quick-actions-search-pin';
@@ -5187,8 +5281,9 @@ function renderQuickActionSearchPopover() {
         const detailMarkup = item.detail
             ? `<span class="quick-actions-search-detail">${escapeHtml(item.detail)}</span>`
             : '';
+        const activeClass = idx === activeIndex ? ' is-active' : '';
         return `<div class="quick-actions-search-item">
-            <button type="button" class="quick-actions-search-run" data-onclick="runQuickActionSearchResult('${safeKey}')">
+            <button type="button" class="quick-actions-search-run${activeClass}" data-qa-search-index="${idx}" data-onclick="runQuickActionSearchResult('${safeKey}')">
                 <span class="quick-actions-search-meta">
                     <span class="quick-actions-search-kind">${escapeHtml(item.category)}</span>
                     ${detailMarkup}
@@ -5199,6 +5294,12 @@ function renderQuickActionSearchPopover() {
             <button type="button" class="${pinClass}" data-onclick="pinQuickActionSearchResult('${safeKey}')"${pinDisabled}>${pinLabel}</button>
         </div>`;
     }).join('');
+
+    if (quickActionSearchOpen && results.length) {
+        requestAnimationFrame(() => {
+            scrollActiveQuickActionSearchResultIntoView();
+        });
+    }
 }
 
 function renderQuickActions() {

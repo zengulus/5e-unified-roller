@@ -32,7 +32,6 @@ Each tool runs offline. The campaign stack (Hub, Campaign Board, Case Board, Das
 | **[Case Board](docs/CaseBoard.md)** | `board.html` | Physics-based investigation board with pop-up data sources. |
 | **[Clue Generator](docs/ClueGenerator.md)** | `clue.html` | Signal vs Noise intersection generator for mysteries. |
 | **[HQ Layout Foundry](docs/HQLayoutFoundry.md)** | `hq.html` | Multi-floor HQ designer with downtime slots and screenshot/export tools. |
-| **[Tournament Bracket](docs/TournamentBracket.md)** | `tourney.html` | Double-elimination bracket with SVG connections and score modal. |
 
 ## Usage
 Open any `.html` file in a modern browser (Edge, Chrome, Firefox). Data writes to Local Storage automatically. Import/export JSON via Tools Hub for the shared campaign stack, and use page-specific import/export controls where available (for example Character Sheet, Session Tracker, HQ Foundry, Campaign Hub).

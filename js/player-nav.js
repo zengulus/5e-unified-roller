@@ -28,8 +28,7 @@
         { id: 'dm-screen', label: 'Narrative Engine (DM Screen)', href: 'dm-screen.html', description: 'Narrative engine for incident prompts, sensory texture, hazards, and fallout.', keywords: 'dm narrative screen' },
         { id: 'encounters', label: 'Encounter Recipes', href: 'encounters.html', description: 'Modular encounter recipe cards with tier/location/objective planning.', keywords: 'encounters combat planning' },
         { id: 'clocks', label: 'Generic Clocks', href: 'clocks.html', description: 'Standalone progress/danger clocks with segment control and PNG export.', keywords: 'clocks progress' },
-        { id: 'clue', label: 'Clue Generator', href: 'clue.html', description: 'Signal-vs-noise clue intersection generator by guild and modality.', keywords: 'clue generator' },
-        { id: 'tourney', label: 'Tournament Bracket', href: 'tourney.html', description: 'Double-elimination bracket manager with auto-advance and score updates.', keywords: 'tournament bracket' }
+        { id: 'clue', label: 'Clue Generator', href: 'clue.html', description: 'Signal-vs-noise clue intersection generator by guild and modality.', keywords: 'clue generator' }
     ];
     const ALL_NAV_ITEMS = PRIMARY_NAV_ITEMS.concat(GM_NAV_ITEMS);
 

@@ -105,13 +105,6 @@ Legacy snapshot (not modified in this pass):
 - Converted `js/dm-screen.js` output template inline styles to class-based rendering.
 - Reduced `js/dm-screen.js` template inline `style=` usage from `7` to `0`.
 
-### Phase 12 (`tourney.html` + `js/tourney.js`)
-- Converted all `tourney.html` inline handler attributes (`on*`) to `data-on*`.
-- Added delegated data-handler runtime in `js/tourney.js` to execute `data-on*` handlers.
-- Converted all `tourney.html` inline `style="..."` attributes to class-based rules in `css/tourney.css`.
-- Converted `js/tourney.js` bracket title template inline styles to class-based rendering.
-- Reduced `js/tourney.js` template inline `style=` usage from `3` to `0`.
-
 ### Phase 13 (`clue.html` + `js/clue.js`)
 - Converted all `clue.html` inline handler attributes (`on*`) to `data-on*`.
 - Added delegated data-handler runtime in `js/clue.js` to execute `data-on*` handlers.

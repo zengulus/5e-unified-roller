@@ -11,6 +11,9 @@
     const refs = {
         addBtn: document.getElementById('add-clock-btn'),
         resetBtn: document.getElementById('reset-clocks-btn'),
+        accentBtn: document.getElementById('clocks-accent-btn'),
+        bgStyleBtn: document.getElementById('btn-bg-style'),
+        accentPicker: document.getElementById('accent-picker-input'),
         newName: document.getElementById('new-clock-name'),
         newType: document.getElementById('new-clock-type'),
         newTotal: document.getElementById('new-clock-total'),
@@ -69,6 +72,12 @@
             { id: 'default_progress', name: 'Operation Progress', type: 'progress', total: 6, filled: 0 },
             { id: 'default_danger', name: 'Complication Risk', type: 'danger', total: 6, filled: 0 }
         ];
+    }
+
+    const defaultClockSnapshot = JSON.stringify(getDefaultClocks().map(normalizeClock));
+
+    function isDefaultClocksState() {
+        return JSON.stringify(clocks.map((entry, idx) => normalizeClock(entry, idx))) === defaultClockSnapshot;
     }
 
     function loadState() {
@@ -214,12 +223,17 @@
             const link = document.createElement('a');
             link.href = href;
             link.download = filename;
+            document.body.appendChild(link);
             link.click();
+            link.remove();
         };
 
         if (typeof canvas.toBlob === 'function') {
             canvas.toBlob((blob) => {
-                if (!blob) return;
+                if (!blob) {
+                    triggerDownload(canvas.toDataURL('image/png'));
+                    return;
+                }
                 const url = URL.createObjectURL(blob);
                 triggerDownload(url);
                 setTimeout(() => URL.revokeObjectURL(url), 0);
@@ -413,6 +427,7 @@
         refs.newTotal.value = String(DEFAULT_TOTAL);
         saveState();
         render();
+        refs.newName.focus();
     }
 
     function updateClockFilled(id, delta) {
@@ -435,6 +450,8 @@
     function removeClock(id) {
         const idx = findClockIndex(id);
         if (idx < 0) return;
+        const clock = clocks[idx];
+        if (!global.confirm(`Remove "${clock.name}"?`)) return;
         clocks.splice(idx, 1);
         saveState();
         render();
@@ -511,7 +528,45 @@
         if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
         const field = target.getAttribute('data-field');
         if (!field) return;
+        if (field !== 'name') return;
         updateClockField(id, field, target.value);
+    }
+
+    function handleGridChange(event) {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target) return;
+        const row = target.closest('[data-id]');
+        if (!row) return;
+        const id = row.getAttribute('data-id');
+        if (!id) return;
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+        const field = target.getAttribute('data-field');
+        if (!field) return;
+        if (field === 'total' && String(target.value || '').trim() === '') {
+            const idx = findClockIndex(id);
+            if (idx >= 0) target.value = String(clocks[idx].total);
+            return;
+        }
+        updateClockField(id, field, target.value);
+    }
+
+    function bindAccentControls() {
+        if (refs.accentBtn) {
+            refs.accentBtn.addEventListener('click', () => {
+                if (typeof global.triggerAccentPicker === 'function') global.triggerAccentPicker();
+            });
+        }
+        if (refs.bgStyleBtn) {
+            refs.bgStyleBtn.addEventListener('click', () => {
+                if (typeof global.cycleBgStyle === 'function') global.cycleBgStyle();
+            });
+        }
+        if (refs.accentPicker) {
+            refs.accentPicker.addEventListener('change', (event) => {
+                const value = event.target && 'value' in event.target ? event.target.value : '';
+                if (typeof global.setAccentColor === 'function') global.setAccentColor(value);
+            });
+        }
     }
 
     refs.addBtn.addEventListener('click', addClock);
@@ -526,13 +581,16 @@
         addClock();
     });
     refs.resetBtn.addEventListener('click', () => {
+        if (!isDefaultClocksState() && !global.confirm('Reset all clocks back to the default set?')) return;
         clocks = getDefaultClocks().map(normalizeClock);
         saveState();
         render();
+        refs.newName.focus();
     });
     refs.grid.addEventListener('click', handleGridClick);
     refs.grid.addEventListener('input', handleGridInput);
-    refs.grid.addEventListener('change', handleGridInput);
+    refs.grid.addEventListener('change', handleGridChange);
 
+    bindAccentControls();
     render();
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : this));

@@ -112,10 +112,6 @@
                                     <span class="vtt-nav-link-label">Clue Generator</span>
                                     <span class="vtt-nav-link-desc">Signal-vs-noise clue intersection generator by guild and modality.</span>
                                 </a>
-                                <a class="vtt-nav-link" href="tourney.html">
-                                    <span class="vtt-nav-link-label">Tournament Bracket</span>
-                                    <span class="vtt-nav-link-desc">Double-elimination bracket manager with auto-advance and score updates.</span>
-                                </a>
                             </nav>
                         </div>
                     </div>
@@ -171,9 +167,8 @@
                         </div>
                     </div>
                 </div>
-                <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨 Accent</button>
-                <input type="color" id="accent-picker-input" class="vtt-accent-picker-input"
-                    data-onchange="setAccentColor(this.value)">
+                <button class="hero-btn ghost" id="vtt-accent-btn" type="button">🎨 Accent</button>
+                <input type="color" id="accent-picker-input" class="vtt-accent-picker-input">
                 <div class="vtt-popover-anchor vtt-topbar-menu">
                     <button class="hero-btn ghost" data-action="toggle-view-menu" id="vtt-view-menu-toggle"
                         aria-controls="vtt-view-menu" aria-expanded="false">Settings</button>

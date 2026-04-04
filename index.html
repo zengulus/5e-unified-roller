@@ -40,7 +40,8 @@
                     <div class="util-group">
                         <button type="button" id="btnSecret" class="mini-btn" data-chip="secret" data-onclick="toggleSecret()"
                             title="Secret Roll">👁️</button>
-                        <input type="text" id="globalMisc" placeholder="+Mod" class="mini-input">
+                        <input type="text" id="globalMisc" placeholder="+Mod" class="mini-input"
+                            aria-label="Global roll modifier" title="Global roll modifier">
                     </div>
                 </div>
             </div>
@@ -58,12 +59,14 @@
                 <button class="hero-btn ghost sheet-nav-btn" id="btnSheetStory" data-onclick="setSheetFace('my-story')"
                     data-face="my-story" role="tab" aria-selected="false" aria-pressed="false">My Story</button>
             </div>
-            <button class="hero-btn ghost" data-onclick="triggerAccentPicker()">🎨</button>
-            <button class="hero-btn ghost" id="btn-bg-style" data-onclick="cycleBgStyle()">🌌</button>
+            <button class="hero-btn ghost" type="button" data-onclick="triggerAccentPicker()" aria-label="Open accent palette"
+                title="Open accent palette">🎨</button>
+            <button class="hero-btn ghost" type="button" id="btn-bg-style" data-onclick="cycleBgStyle()" aria-label="Cycle background style"
+                title="Cycle background style">🌌</button>
         </div>
 
         <input type="color" id="accent-picker-input"
-            data-onchange="setAccentColor(this.value)" class="ix-inl-001">
+            data-onchange="setAccentColor(this.value)" class="ix-inl-001" aria-label="Accent color">
     </header>
     <div class="scene" id="sheetScene">
         <div class="sheet-flipper view-front" id="sheetFlipper">
@@ -72,12 +75,7 @@
                     <section class="play-surface-card" id="playSurface">
                         <div class="play-surface-head">
                             <div>
-                                <p class="play-surface-eyebrow">Play Console</p>
-                                <h2>Search any roll. Pin what you use.</h2>
-                            </div>
-                            <div class="play-surface-meta">
-                                <span class="play-surface-chip">Enter = roll top match</span>
-                                <span class="play-surface-chip">Right-click / long-press = pin</span>
+                                <h2>Quick Rolls</h2>
                             </div>
                         </div>
                         <div class="quick-actions-header" id="quickActionsHeader" data-quick-actions-mode="persistent">
@@ -85,28 +83,21 @@
                                 <div class="play-surface-console">
                                     <div class="quick-actions-panel-toolbar play-surface-search-block">
                                         <label class="play-surface-search-label" for="quickActionSearchInput">Find Rolls</label>
-                                        <div class="play-surface-search-copy">Type a skill, save, spell, attack, recharge, or die roll.</div>
                                         <div class="quick-actions-search-input-shell play-surface-search-shell">
                                             <input id="quickActionSearchInput" class="quick-actions-search-input" type="search"
                                                 placeholder="Search checks, skills, attacks, damage, spells..."
-                                                autocomplete="off" spellcheck="false"
+                                                autocomplete="off" spellcheck="false" aria-controls="quickActionSearchPopover"
+                                                aria-expanded="false" title="Search rolls. Shortcuts: / or Ctrl/Cmd+K"
                                                 data-oninput="updateQuickActionSearchQuery(this.value)">
-                                            <span class="quick-actions-search-count" id="quickActionSearchCount">0 ready</span>
+                                            <span class="quick-actions-search-count" id="quickActionSearchCount" aria-live="polite">0 ready</span>
                                         </div>
                                         <div class="quick-actions-search-popover" id="quickActionSearchPopover" hidden>
-                                            <div class="quick-actions-search-head play-surface-search-head">
-                                                <div>
-                                                    <div class="quick-actions-search-title">Top Matches</div>
-                                                    <div class="quick-actions-search-subtitle">Roll now from search, or pin a result into your combat strip.</div>
-                                                </div>
-                                            </div>
                                             <div class="quick-actions-search-results" id="quickActionSearchResults"></div>
                                         </div>
                                     </div>
                                     <div class="play-surface-pinned-block">
                                         <div class="play-surface-pinned-head">
                                             <div class="play-surface-pinned-title">Pinned Quick Actions</div>
-                                            <div class="play-surface-pinned-copy">Your repeat-use combat strip.</div>
                                         </div>
                                         <div class="quick-actions-panel-hint" id="quickActionsPanelHint" hidden></div>
                                         <div class="quick-actions-list" id="quickActionsList"></div>
@@ -115,26 +106,6 @@
                             </div>
                         </div>
                     </section>
-                    <div class="sheet-setup-actions">
-                        <div class="sheet-setup-grid">
-                            <button data-onclick="openCharCreator()" class="sheet-setup-btn primary">
-                                <span class="sheet-setup-icon">✨</span>
-                                <span class="sheet-setup-copy">
-                                    <strong>Start a new character</strong>
-                                    <small>Guided setup for stats, class, skills, and starter features.</small>
-                                </span>
-                            </button>
-                            <button data-onclick="openLevelUpWizard()" class="sheet-setup-btn secondary">
-                                <span class="sheet-setup-icon">⬆</span>
-                                <span class="sheet-setup-copy">
-                                    <strong>Level up selected character</strong>
-                                    <small>Guided workflow for HP, hit dice, skills, features, and caster progression.</small>
-                                </span>
-                            </button>
-                        </div>
-                        <button data-onclick="Importer.triggerImport()" class="sheet-setup-import">📂
-                            Import from PDF</button>
-                    </div>
                     <div class="card" id="card-vitals">
                         <div class="drag-grip"></div>
                         <div class="header-grid vitals-header-grid">
@@ -312,13 +283,28 @@
                         <div class="section-title"><span>Sheet Settings</span><span
                                 class="accordion-trigger-abs collapsed" data-onclick="toggleAccordion(this)"></span></div>
                         <div class="accordion-content collapsed">
-                            <div class="settings-character-switcher">
-                                <label>Character Roster</label>
-                                <div class="char-switcher-row"><select id="charSelect"
-                                        data-onchange="switchCharacter(this.value)"></select><button
-                                        class="btn-char-control btn-char-add" data-onclick="createNewCharacter()">+</button><button
-                                        class="btn-char-control btn-char-del" data-onclick="deleteCharacter()">🗑️</button></div>
-                            </div>
+                            <details class="settings-quiet-group">
+                                <summary>Character &amp; Setup</summary>
+                                <div class="settings-quiet-body">
+                                    <div class="settings-character-switcher">
+                                        <label for="charSelect">Active Character</label>
+                                        <div class="char-switcher-row"><select id="charSelect"
+                                                data-onchange="switchCharacter(this.value)" aria-label="Select active character"></select><button
+                                                type="button" class="btn-char-control btn-char-del" data-onclick="deleteCharacter()"
+                                                aria-label="Delete active character" title="Delete active character">🗑️</button></div>
+                                    </div>
+                                    <div class="settings-utility-actions">
+                                        <button type="button" class="settings-utility-btn" data-onclick="createNewCharacter()">Blank
+                                            Sheet</button>
+                                        <button type="button" class="settings-utility-btn" data-onclick="openCharCreator()">Guided
+                                            Builder</button>
+                                        <button type="button" class="settings-utility-btn" data-onclick="openLevelUpWizard()">Level
+                                            Up</button>
+                                        <button type="button" class="settings-utility-btn" data-onclick="Importer.triggerImport()">Import
+                                            PDF</button>
+                                    </div>
+                                </div>
+                            </details>
                             <label class="ix-inl-034">
                                 <div class="toggle-switch"><input type="checkbox" id="showHiddenCards"
                                         data-onchange="toggleShowHidden(this.checked)"><span class="slider"></span></div>

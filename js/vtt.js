@@ -181,6 +181,8 @@
     const toolSizeInputEl = document.getElementById('vtt-tool-size-input');
     const stealthModeToggleEl = document.getElementById('vtt-stealth-mode-toggle');
     const clearFogButtonEl = document.getElementById('vtt-clear-fog');
+    const accentButtonEl = document.getElementById('vtt-accent-btn');
+    const accentPickerEl = document.getElementById('accent-picker-input');
     const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
     const viewMenuEl = document.getElementById('vtt-view-menu');
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
@@ -3289,6 +3291,22 @@
         });
     };
 
+    const bindAccentControls = () => {
+        if (accentButtonEl && accentButtonEl.dataset.bound !== '1') {
+            accentButtonEl.dataset.bound = '1';
+            accentButtonEl.addEventListener('click', () => {
+                if (typeof window.triggerAccentPicker === 'function') window.triggerAccentPicker();
+            });
+        }
+        if (accentPickerEl && accentPickerEl.dataset.bound !== '1') {
+            accentPickerEl.dataset.bound = '1';
+            accentPickerEl.addEventListener('change', (event) => {
+                const value = event.target && 'value' in event.target ? event.target.value : '';
+                if (typeof window.setAccentColor === 'function') window.setAccentColor(value);
+            });
+        }
+    };
+
     const loadMapForScene = (scene) => {
         if (!scene || !mapImageEl) return;
         if (!scene.mapImageUrl) {
@@ -6320,6 +6338,7 @@
 
     const bindEvents = () => {
         bindSyncChipActions();
+        bindAccentControls();
         document.addEventListener('click', (event) => {
             const actionEl = event.target instanceof Element ? event.target.closest('[data-action]') : null;
             if (!actionEl) return;
