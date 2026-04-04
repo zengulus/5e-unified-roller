@@ -731,7 +731,7 @@ function normalizeQuickActionCode(value) {
 
 function isSupportedQuickActionCode(code) {
     const normalized = normalizeQuickActionCode(code);
-    return /^(rollInitiative|rollDie|rollCheck|rollSave|rollSkill|rollAttack|rollDamage|rollHitDie|rollDeathSave|rollResRecharge|rollCustom|castSpell|castSpellRitual)\s*\(/.test(normalized);
+    return /^(rollInitiative|rollDie|rollCheck|rollSave|rollSkill|rollAttack|rollDamage|rollHitDie|rollDeathSave|rollResRecharge|rollCustom|castSpell|castSpellRitual|createNewCharacter|openCharCreator|openLevelUpWizard|Importer\.triggerImport)\s*\(/.test(normalized);
 }
 
 function getQuickActionMetaForCode(code, fallbackLabel = '') {
@@ -743,6 +743,34 @@ function getQuickActionMetaForCode(code, fallbackLabel = '') {
         return {
             label: 'Initiative',
             summary: 'd20 + Dex + Initiative + Misc'
+        };
+    }
+
+    if (normalized === 'createNewCharacter()') {
+        return {
+            label: 'Blank Sheet',
+            summary: 'Create a new blank character sheet'
+        };
+    }
+
+    if (normalized === 'openCharCreator()') {
+        return {
+            label: 'Guided Builder',
+            summary: 'Open the guided character builder'
+        };
+    }
+
+    if (normalized === 'openLevelUpWizard()') {
+        return {
+            label: 'Level Up',
+            summary: 'Open the level-up workflow'
+        };
+    }
+
+    if (normalized === 'Importer.triggerImport()') {
+        return {
+            label: 'Import PDF',
+            summary: 'Import a character sheet from PDF'
         };
     }
 
@@ -4834,7 +4862,7 @@ function getQuickActionPresentation(action) {
 }
 
 function updateQuickActionsInstructionState() {
-    const hintText = 'Use Find Rolls to search and roll instantly, or right-click / long-press a die roll to pin it here.';
+    const hintText = 'Use Search to find rolls or tools instantly, or right-click / long-press a die roll to pin it here.';
     const panelHint = document.getElementById('quickActionsPanelHint');
 
     if (panelHint) {
@@ -4874,7 +4902,8 @@ function buildQuickActionSearchItem(options = {}) {
         detail,
         priority,
         searchText: normalizeQuickActionSearchText(searchTerms),
-        action: sanitizeQuickActionEntry({ ...action, label, summary, id: actionId })
+        action: sanitizeQuickActionEntry({ ...action, label, summary, id: actionId }),
+        pinnable: options.pinnable !== false
     };
 }
 
@@ -4987,6 +5016,42 @@ function getQuickActionSearchCatalog() {
         detail: 'Formula',
         priority: 1140,
         searchTerms: 'custom roll formula arbitrary dice'
+    }));
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'setup:new',
+        category: 'Setup',
+        code: 'createNewCharacter()',
+        detail: 'Character',
+        priority: 1090,
+        searchTerms: 'new character blank sheet fresh character create character',
+        pinnable: false
+    }));
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'setup:builder',
+        category: 'Setup',
+        code: 'openCharCreator()',
+        detail: 'Character',
+        priority: 1085,
+        searchTerms: 'guided builder character builder character creator setup new character',
+        pinnable: false
+    }));
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'setup:levelup',
+        category: 'Setup',
+        code: 'openLevelUpWizard()',
+        detail: 'Character',
+        priority: 1080,
+        searchTerms: 'level up levelup advance character progression hp skills features wizard',
+        pinnable: false
+    }));
+    items.push(buildQuickActionSearchCodeItem({
+        key: 'setup:import',
+        category: 'Import',
+        code: 'Importer.triggerImport()',
+        detail: 'Character',
+        priority: 1075,
+        searchTerms: 'import pdf upload character sheet import builder pdf',
+        pinnable: false
     }));
 
     stats.forEach((stat) => {
@@ -5267,14 +5332,14 @@ function renderQuickActionSearchPopover() {
     if (!results.length) {
         const queryText = quickActionSearchQuery.trim();
         resultsEl.innerHTML = `<div class="quick-actions-search-empty">${queryText
-            ? `No rolls match "${escapeHtml(queryText)}" yet.`
-            : 'No searchable rolls are available on this sheet yet.'}</div>`;
+            ? `No actions match "${escapeHtml(queryText)}" yet.`
+            : 'No searchable actions are available on this sheet yet.'}</div>`;
         return;
     }
 
     resultsEl.innerHTML = results.map((item, idx) => {
         const safeKey = escapeJsString(item.key);
-        const pinned = isQuickActionSaved(item.action);
+        const pinned = item.pinnable === false ? false : isQuickActionSaved(item.action);
         const pinClass = pinned ? 'quick-actions-search-pin is-pinned' : 'quick-actions-search-pin';
         const pinLabel = pinned ? 'Pinned' : 'Pin';
         const pinDisabled = pinned ? ' disabled' : '';
@@ -5282,6 +5347,9 @@ function renderQuickActionSearchPopover() {
             ? `<span class="quick-actions-search-detail">${escapeHtml(item.detail)}</span>`
             : '';
         const activeClass = idx === activeIndex ? ' is-active' : '';
+        const pinMarkup = item.pinnable === false
+            ? ''
+            : `<button type="button" class="${pinClass}" data-onclick="pinQuickActionSearchResult('${safeKey}')"${pinDisabled}>${pinLabel}</button>`;
         return `<div class="quick-actions-search-item">
             <button type="button" class="quick-actions-search-run${activeClass}" data-qa-search-index="${idx}" data-onclick="runQuickActionSearchResult('${safeKey}')">
                 <span class="quick-actions-search-meta">
@@ -5291,7 +5359,7 @@ function renderQuickActionSearchPopover() {
                 <span class="quick-actions-search-label">${escapeHtml(item.label)}</span>
                 <span class="quick-actions-search-summary">${escapeHtml(item.summary)}</span>
             </button>
-            <button type="button" class="${pinClass}" data-onclick="pinQuickActionSearchResult('${safeKey}')"${pinDisabled}>${pinLabel}</button>
+            ${pinMarkup}
         </div>`;
     }).join('');
 
@@ -5482,6 +5550,7 @@ async function runQuickActionSearchResult(key) {
 function pinQuickActionSearchResult(key) {
     const item = findQuickActionSearchItem(key);
     if (!item || !item.action) return;
+    if (item.pinnable === false) return;
     const pinned = addQuickActionEntry(item.action);
     if (!pinned) renderQuickActionSearchPopover();
 }
@@ -5490,6 +5559,7 @@ function getQuickActionControlTarget(target) {
     if (!(target instanceof Element)) return null;
     const control = target.closest('button[data-onclick]');
     if (!control || control.disabled) return null;
+    if (control.getAttribute('data-quick-pin') === 'false') return null;
     const code = normalizeQuickActionCode(control.getAttribute('data-onclick'));
     if (!isSupportedQuickActionCode(code)) return null;
     return control;

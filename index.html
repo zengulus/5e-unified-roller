@@ -82,12 +82,12 @@
                             <div class="quick-actions-panel" id="quickActionsPanel">
                                 <div class="play-surface-console">
                                     <div class="quick-actions-panel-toolbar play-surface-search-block">
-                                        <label class="play-surface-search-label" for="quickActionSearchInput">Find Rolls</label>
+                                        <label class="play-surface-search-label" for="quickActionSearchInput">Search</label>
                                         <div class="quick-actions-search-input-shell play-surface-search-shell">
                                             <input id="quickActionSearchInput" class="quick-actions-search-input" type="search"
-                                                placeholder="Search checks, skills, attacks, damage, spells..."
+                                                placeholder="Search rolls, spells, or tools..."
                                                 autocomplete="off" spellcheck="false" aria-controls="quickActionSearchPopover"
-                                                aria-expanded="false" title="Search rolls. Shortcuts: / or Ctrl/Cmd+K"
+                                                aria-expanded="false" title="Search rolls or tools. Shortcuts: / or Ctrl/Cmd+K"
                                                 data-oninput="updateQuickActionSearchQuery(this.value)">
                                             <span class="quick-actions-search-count" id="quickActionSearchCount" aria-live="polite">0 ready</span>
                                         </div>
@@ -294,13 +294,17 @@
                                                 aria-label="Delete active character" title="Delete active character">🗑️</button></div>
                                     </div>
                                     <div class="settings-utility-actions">
-                                        <button type="button" class="settings-utility-btn" data-onclick="createNewCharacter()">Blank
+                                        <button type="button" class="settings-utility-btn" data-onclick="createNewCharacter()"
+                                            data-quick-pin="false">Blank
                                             Sheet</button>
-                                        <button type="button" class="settings-utility-btn" data-onclick="openCharCreator()">Guided
+                                        <button type="button" class="settings-utility-btn" data-onclick="openCharCreator()"
+                                            data-quick-pin="false">Guided
                                             Builder</button>
-                                        <button type="button" class="settings-utility-btn" data-onclick="openLevelUpWizard()">Level
+                                        <button type="button" class="settings-utility-btn" data-onclick="openLevelUpWizard()"
+                                            data-quick-pin="false">Level
                                             Up</button>
-                                        <button type="button" class="settings-utility-btn" data-onclick="Importer.triggerImport()">Import
+                                        <button type="button" class="settings-utility-btn" data-onclick="Importer.triggerImport()"
+                                            data-quick-pin="false">Import
                                             PDF</button>
                                     </div>
                                 </div>
