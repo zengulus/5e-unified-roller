@@ -12,6 +12,7 @@ import * as decoding from './vendor/lib0/decoding.js';
 const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 1000;
 const SYNC_RECONCILE_INTERVAL_MS = 2000;
+const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
 const DEFAULT_CASE_ID = 'case_primary';
@@ -1587,6 +1588,10 @@ class VTTCollabSession {
             if (channel !== this.channel || !payload || !payload.update) return;
             this.handleAwarenessMessage(payload.update);
         });
+        channel.on('broadcast', { event: SYNC_RECONCILE_REQUEST_EVENT }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleSyncRequestMessage(payload);
+        });
 
         const onPresence = () => {
             if (channel !== this.channel) return;
@@ -1688,14 +1693,6 @@ class VTTCollabSession {
         this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
     }
 
-    broadcastFullSyncUpdate() {
-        if (this.destroyed || !this.connected) return;
-        const fullState = Y.encodeStateAsUpdate(this.doc);
-        const encoder = encoding.createEncoder();
-        syncProtocol.writeUpdate(encoder, fullState);
-        this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
-    }
-
     handleSyncMessage(encoded) {
         let update;
         try {
@@ -1719,6 +1716,22 @@ class VTTCollabSession {
         if (encoding.hasContent(encoder)) {
             this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
         }
+    }
+
+    requestPeerReconcile(reason = 'manual') {
+        if (this.destroyed || !this.connected || !this.remotePresence.size) return;
+        this.sendBroadcast(SYNC_RECONCILE_REQUEST_EVENT, {
+            requestedBy: this.instanceId,
+            requestedAt: Date.now(),
+            reason: toTrimmedString(reason, 'manual', 40).trim() || 'manual'
+        });
+    }
+
+    handleSyncRequestMessage(payload) {
+        if (this.destroyed || !this.connected || !payload || typeof payload !== 'object') return;
+        const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
+        if (requestedBy && requestedBy === this.instanceId) return;
+        this.sendSyncStep1();
     }
 
     broadcastLocalAwareness(clientIds = [this.awareness.clientID]) {
@@ -2039,7 +2052,7 @@ class VTTCollabSession {
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
         if (options && options.flushNow) {
-            this.broadcastFullSyncUpdate();
+            this.requestPeerReconcile('token-drop');
             return this.flushSnapshotNow();
         }
         return Promise.resolve({ ok: true, changes: applied });
