@@ -6224,6 +6224,12 @@
         setZoomAtPoint(nextZoom, event.clientX, event.clientY);
     };
 
+    const handleStageDragStart = (event) => {
+        const targetEl = getEventTargetElement(event);
+        if (!targetEl || !stageEl || !targetEl.closest('#vtt-stage')) return;
+        event.preventDefault();
+    };
+
     const handleStageContextMenu = (event) => {
         const targetEl = getEventTargetElement(event);
         if (!targetEl) return;
@@ -6376,8 +6382,10 @@
             });
         }
         if (npcSearchInputEl) npcSearchInputEl.addEventListener('input', handleNPCSearchInput);
+        if (mapImageEl) mapImageEl.draggable = false;
         if (stageEl) stageEl.addEventListener('pointerdown', handleStagePointerDown);
         if (stageEl) stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
+        if (stageEl) stageEl.addEventListener('dragstart', handleStageDragStart);
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
         if (initiativeListEl) initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
         document.addEventListener('pointermove', handlePointerMove);

@@ -860,6 +860,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     max-height: none;
     display: none;
     user-select: none;
+    -webkit-user-drag: none;
     pointer-events: none;
     image-rendering: auto;
 }
