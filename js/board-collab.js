@@ -687,58 +687,20 @@ class BoardCollabSession {
             const roomPayloadSig = buildSnapshotSignature(roomPayload);
             const localDocSig = buildSnapshotSignature(localDocPayload);
             const cloudUpdatedAt = Date.parse(cloudRow.snapshot.updatedAt || '') || cloudRow.snapshot.revision || 0;
-            const localUpdatedAt = Math.max(0, localDocPayload.updatedAt || 0);
             this.lastSavedRevision = Math.max(0, cloudRow.snapshot.revision || 0);
             roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
-            const canonical = chooseCanonicalSnapshot([
-                {
-                    kind: 'room',
-                    snapshot: roomPayload,
-                    stamp: getSnapshotStamp(roomPayload, cloudUpdatedAt),
-                    priority: 30
-                },
-                {
-                    kind: 'local-doc',
-                    snapshot: localDocPayload,
-                    stamp: getSnapshotStamp(localDocPayload, localUpdatedAt),
-                    priority: 20
-                },
-                {
-                    kind: 'live-store',
-                    snapshot: livePayload,
-                    stamp: getSnapshotStamp(livePayload),
-                    priority: 10
-                }
-            ], {
-                kind: 'room',
-                snapshot: roomPayload,
-                stamp: getSnapshotStamp(roomPayload, cloudUpdatedAt),
-                priority: 30
-            });
-
-            const canonicalPayload = canonical && canonical.snapshot ? canonical.snapshot : roomPayload;
-            const canonicalSig = buildSnapshotSignature(canonicalPayload);
-            const canonicalStamp = canonical && Number.isFinite(canonical.stamp) ? canonical.stamp : (cloudUpdatedAt || Date.now());
-            const canonicalOrigin = canonical && canonical.kind === 'room'
-                ? this.originRemoteRestore
-                : this.originBootstrap;
-
-            if (!hasBoardContent(localDocPayload) || localDocSig !== canonicalSig) {
+            if (!hasBoardContent(localDocPayload) || localDocSig !== roomPayloadSig) {
                 applySnapshotToDoc(
                     this.doc,
-                    canonicalPayload,
+                    roomPayload,
                     this.scope,
                     this.caseId,
-                    canonicalOrigin,
-                    canonicalStamp || Date.now()
+                    this.originRemoteRestore,
+                    cloudUpdatedAt || Date.now()
                 );
             }
-
-            if (canonical && canonical.kind !== 'room' && roomPayloadSig !== canonicalSig) {
-                this.initialCloudFlushRequired = true;
-            } else {
-                this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
-            }
+            this.initialCloudFlushRequired = false;
+            this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
         } else if (cloudRow.ok) {
             const canonicalSeed = sanitizeBoardSnapshot(
                 hasBoardContent(livePayload)

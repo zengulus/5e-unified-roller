@@ -5068,22 +5068,54 @@
             };
         }
 
-        async saveVTTRoomSnapshot(options = {}) {
-            const opts = options && typeof options === 'object' ? options : {};
-            const target = this.resolveVTTRoomTarget(opts);
-            const ensured = await this.ensureRealtimeCollabClient();
-            if (!ensured.ok) return ensured;
+	        async saveVTTRoomSnapshot(options = {}) {
+	            const opts = options && typeof options === 'object' ? options : {};
+	            const target = this.resolveVTTRoomTarget(opts);
+	            const ensured = await this.ensureRealtimeCollabClient();
+	            if (!ensured.ok) return ensured;
 
             const payload = sanitizeVTTState(opts.payload);
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
-            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
-            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
-            const createOnly = !!opts.createOnly;
+	            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+	            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
+	            const createOnly = !!opts.createOnly;
+	            const readCurrentRow = () => ensured.client
+	                .from(tableName)
+	                .select(selectCols)
+	                .eq('campaign_id', ensured.config.campaignId)
+	                .eq('room_id', target.roomId)
+	                .maybeSingle();
+	            const buildSnapshotFromRow = (data) => ({
+	                roomId: String(data && data.room_id || target.roomId),
+	                scope: 'case',
+	                caseId: data && data.case_id ? sanitizeCaseId(data.case_id, target.caseId || 'case_primary') : target.caseId,
+	                payload: sanitizeVTTState(data && data.payload),
+	                revision: toNonNegativeInt(data && data.revision, 0),
+	                updatedAt: toIsoString(data && data.updated_at, ''),
+	                updatedBy: toTrimmedString(data && data.updated_by, '', 120),
+	                updatedByName: toTrimmedString(data && data.updated_by_name, '', 120)
+	            });
+	            const buildStaleResult = (data, fallbackError = 'A newer live VTT snapshot already exists.') => {
+	                const snapshot = buildSnapshotFromRow(data);
+	                return {
+	                    ok: false,
+	                    reason: 'stale',
+	                    error: fallbackError,
+	                    roomId: target.roomId,
+	                    scope: target.scope,
+	                    caseId: target.caseId,
+	                    revision: snapshot.revision,
+	                    updatedAt: snapshot.updatedAt,
+	                    updatedBy: snapshot.updatedBy,
+	                    updatedByName: snapshot.updatedByName,
+	                    snapshot
+	                };
+	            };
 
-            const row = {
-                campaign_id: ensured.config.campaignId,
-                room_id: target.roomId,
+	            const row = {
+	                campaign_id: ensured.config.campaignId,
+	                room_id: target.roomId,
                 board_scope: target.scope,
                 case_id: target.caseId,
                 payload,
@@ -5096,88 +5128,114 @@
                 updated_by_name: Object.prototype.hasOwnProperty.call(opts, 'updatedByName')
                     ? (opts.updatedByName || null)
                     : (ensured.profileName || null)
-            };
+	            };
 
-            if (!createOnly) {
-                const existing = await ensured.client
-                    .from(tableName)
-                    .select(selectCols)
-                    .eq('campaign_id', ensured.config.campaignId)
-                    .eq('room_id', target.roomId)
-                    .maybeSingle();
+	            if (!createOnly) {
+	                const existing = await readCurrentRow();
 
-                if (existing.error) {
-                    return {
-                        ok: false,
+	                if (existing.error) {
+	                    return {
+	                        ok: false,
                         reason: 'read-failed',
                         error: existing.error.message || `Failed reading ${tableName}.`
-                    };
-                }
+	                    };
+	                }
 
-                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
-                    return {
-                        ok: false,
-                        reason: 'stale',
-                        error: 'A newer live VTT snapshot already exists.',
-                        roomId: target.roomId,
-                        scope: target.scope,
-                        caseId: target.caseId,
-                        revision: toNonNegativeInt(existing.data.revision, 0),
-                        updatedAt: toIsoString(existing.data.updated_at, ''),
-                        updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
-                        updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120),
-                        snapshot: {
-                            roomId: String(existing.data.room_id || target.roomId),
-                            scope: 'case',
-                            caseId: existing.data.case_id ? sanitizeCaseId(existing.data.case_id, target.caseId || 'case_primary') : target.caseId,
-                            payload: sanitizeVTTState(existing.data.payload),
-                            revision: toNonNegativeInt(existing.data.revision, 0),
-                            updatedAt: toIsoString(existing.data.updated_at, ''),
-                            updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
-                            updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120)
-                        }
-                    };
-                }
-            }
+	                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
+	                    return buildStaleResult(existing.data);
+	                }
+	                const writeQuery = existing.data
+	                    ? ensured.client
+	                        .from(tableName)
+	                        .update(row)
+	                        .eq('campaign_id', ensured.config.campaignId)
+	                        .eq('room_id', target.roomId)
+	                        .eq('revision', toNonNegativeInt(existing.data.revision, 0))
+	                        .select('revision,updated_at')
+	                        .maybeSingle()
+	                    : ensured.client
+	                        .from(tableName)
+	                        .insert(row)
+	                        .select('revision,updated_at')
+	                        .single();
+	                const result = await writeQuery;
 
-            const query = createOnly
-                ? ensured.client
-                    .from(tableName)
-                    .insert(row)
-                    .select('revision,updated_at')
-                    .single()
-                : ensured.client
-                    .from(tableName)
-                    .upsert(row, { onConflict: 'campaign_id,room_id' })
-                    .select('revision,updated_at')
-                    .single();
+	                if (result.error) {
+	                    if (!existing.data && result.error.code === '23505') {
+	                        const latest = await readCurrentRow();
+	                        if (latest.error) {
+	                            return {
+	                                ok: false,
+	                                reason: 'read-failed',
+	                                error: latest.error.message || `Failed reading ${tableName}.`
+	                            };
+	                        }
+	                        if (latest.data) return buildStaleResult(latest.data);
+	                    }
+	                    return {
+	                        ok: false,
+	                        reason: 'write-failed',
+	                        error: result.error.message || `Failed writing ${tableName}.`
+	                    };
+	                }
 
-            const result = await query;
+	                if (existing.data && !result.data) {
+	                    const latest = await readCurrentRow();
+	                    if (latest.error) {
+	                        return {
+	                            ok: false,
+	                            reason: 'read-failed',
+	                            error: latest.error.message || `Failed reading ${tableName}.`
+	                        };
+	                    }
+	                    if (latest.data) return buildStaleResult(latest.data);
+	                    return {
+	                        ok: false,
+	                        reason: 'write-conflict',
+	                        error: 'Live VTT snapshot write conflicted with another update.'
+	                    };
+	                }
 
-            if (result.error) {
-                if (createOnly && result.error.code === '23505') {
-                    return {
-                        ok: false,
-                        reason: 'exists',
-                        error: result.error.message || `${tableName} row already exists.`
-                    };
-                }
-                return {
-                    ok: false,
-                    reason: 'write-failed',
-                    error: result.error.message || `Failed writing ${tableName}.`
-                };
-            }
+	                return {
+	                    ok: true,
+	                    roomId: target.roomId,
+	                    scope: target.scope,
+	                    caseId: target.caseId,
+	                    revision: toNonNegativeInt(result.data && result.data.revision, revision),
+	                    updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+	                };
+	            }
 
-            return {
-                ok: true,
-                roomId: target.roomId,
-                scope: target.scope,
-                caseId: target.caseId,
-                revision: toNonNegativeInt(result.data && result.data.revision, revision),
-                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
-            };
-        }
+	            const result = await ensured.client
+	                .from(tableName)
+	                .insert(row)
+	                .select('revision,updated_at')
+	                .single();
+
+	            if (result.error) {
+	                if (createOnly && result.error.code === '23505') {
+	                    return {
+	                        ok: false,
+	                        reason: 'exists',
+	                        error: result.error.message || `${tableName} row already exists.`
+	                    };
+	                }
+	                return {
+	                    ok: false,
+	                    reason: 'write-failed',
+	                    error: result.error.message || `Failed writing ${tableName}.`
+	                };
+	            }
+
+	            return {
+	                ok: true,
+	                roomId: target.roomId,
+	                scope: target.scope,
+	                caseId: target.caseId,
+	                revision: toNonNegativeInt(result.data && result.data.revision, revision),
+	                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+	            };
+	        }
 
         async sendBoardRoomAdminEvent(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
@@ -5419,10 +5477,10 @@
             };
         }
 
-        async saveBoardRoomSnapshot(options = {}) {
-            const opts = options && typeof options === 'object' ? options : {};
-            const roomId = toTrimmedString(opts.roomId, '', 160).trim();
-            if (!roomId) return { ok: false, reason: 'missing-room-id' };
+	        async saveBoardRoomSnapshot(options = {}) {
+	            const opts = options && typeof options === 'object' ? options : {};
+	            const roomId = toTrimmedString(opts.roomId, '', 160).trim();
+	            if (!roomId) return { ok: false, reason: 'missing-room-id' };
 
             const ensured = await this.ensureBoardCollabClient();
             if (!ensured.ok) return ensured;
@@ -5432,13 +5490,45 @@
             const payload = sanitizeBoard(opts.payload);
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
-            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
-            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
-            const createOnly = !!opts.createOnly;
+	            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+	            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
+	            const createOnly = !!opts.createOnly;
+	            const readCurrentRow = () => ensured.client
+	                .from(tableName)
+	                .select(selectCols)
+	                .eq('campaign_id', ensured.config.campaignId)
+	                .eq('room_id', roomId)
+	                .maybeSingle();
+	            const buildSnapshotFromRow = (data) => ({
+	                roomId: String(data && data.room_id || roomId),
+	                scope: String(data && data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+	                caseId: data && data.case_id ? sanitizeCaseId(data.case_id, caseId || 'case_primary') : (caseId || ''),
+	                payload: sanitizeBoard(data && data.payload),
+	                revision: toNonNegativeInt(data && data.revision, 0),
+	                updatedAt: toIsoString(data && data.updated_at, ''),
+	                updatedBy: toTrimmedString(data && data.updated_by, '', 120),
+	                updatedByName: toTrimmedString(data && data.updated_by_name, '', 120)
+	            });
+	            const buildStaleResult = (data, fallbackError = 'A newer live room snapshot already exists.') => {
+	                const snapshot = buildSnapshotFromRow(data);
+	                return {
+	                    ok: false,
+	                    reason: 'stale',
+	                    error: fallbackError,
+	                    roomId,
+	                    scope,
+	                    caseId: caseId || '',
+	                    revision: snapshot.revision,
+	                    updatedAt: snapshot.updatedAt,
+	                    updatedBy: snapshot.updatedBy,
+	                    updatedByName: snapshot.updatedByName,
+	                    snapshot
+	                };
+	            };
 
-            const row = {
-                campaign_id: ensured.config.campaignId,
-                room_id: roomId,
+	            const row = {
+	                campaign_id: ensured.config.campaignId,
+	                room_id: roomId,
                 board_scope: scope,
                 case_id: caseId,
                 payload,
@@ -5451,88 +5541,114 @@
                 updated_by_name: Object.prototype.hasOwnProperty.call(opts, 'updatedByName')
                     ? (opts.updatedByName || null)
                     : (ensured.profileName || null)
-            };
+	            };
 
-            if (!createOnly) {
-                const existing = await ensured.client
-                    .from(tableName)
-                    .select(selectCols)
-                    .eq('campaign_id', ensured.config.campaignId)
-                    .eq('room_id', roomId)
-                    .maybeSingle();
+	            if (!createOnly) {
+	                const existing = await readCurrentRow();
 
-                if (existing.error) {
-                    return {
-                        ok: false,
+	                if (existing.error) {
+	                    return {
+	                        ok: false,
                         reason: 'read-failed',
                         error: existing.error.message || `Failed reading ${tableName}.`
-                    };
-                }
+	                    };
+	                }
 
-                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
-                    return {
-                        ok: false,
-                        reason: 'stale',
-                        error: 'A newer live room snapshot already exists.',
-                        roomId,
-                        scope,
-                        caseId: caseId || '',
-                        revision: toNonNegativeInt(existing.data.revision, 0),
-                        updatedAt: toIsoString(existing.data.updated_at, ''),
-                        updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
-                        updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120),
-                        snapshot: {
-                            roomId: String(existing.data.room_id || roomId),
-                            scope: String(existing.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
-                            caseId: existing.data.case_id ? sanitizeCaseId(existing.data.case_id, caseId || 'case_primary') : '',
-                            payload: sanitizeBoard(existing.data.payload),
-                            revision: toNonNegativeInt(existing.data.revision, 0),
-                            updatedAt: toIsoString(existing.data.updated_at, ''),
-                            updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
-                            updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120)
-                        }
-                    };
-                }
-            }
+	                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
+	                    return buildStaleResult(existing.data);
+	                }
+	                const writeQuery = existing.data
+	                    ? ensured.client
+	                        .from(tableName)
+	                        .update(row)
+	                        .eq('campaign_id', ensured.config.campaignId)
+	                        .eq('room_id', roomId)
+	                        .eq('revision', toNonNegativeInt(existing.data.revision, 0))
+	                        .select('revision,updated_at')
+	                        .maybeSingle()
+	                    : ensured.client
+	                        .from(tableName)
+	                        .insert(row)
+	                        .select('revision,updated_at')
+	                        .single();
+	                const result = await writeQuery;
 
-            const query = createOnly
-                ? ensured.client
-                    .from(tableName)
-                    .insert(row)
-                    .select('revision,updated_at')
-                    .single()
-                : ensured.client
-                    .from(tableName)
-                    .upsert(row, { onConflict: 'campaign_id,room_id' })
-                    .select('revision,updated_at')
-                    .single();
+	                if (result.error) {
+	                    if (!existing.data && result.error.code === '23505') {
+	                        const latest = await readCurrentRow();
+	                        if (latest.error) {
+	                            return {
+	                                ok: false,
+	                                reason: 'read-failed',
+	                                error: latest.error.message || `Failed reading ${tableName}.`
+	                            };
+	                        }
+	                        if (latest.data) return buildStaleResult(latest.data);
+	                    }
+	                    return {
+	                        ok: false,
+	                        reason: 'write-failed',
+	                        error: result.error.message || `Failed writing ${tableName}.`
+	                    };
+	                }
 
-            const result = await query;
+	                if (existing.data && !result.data) {
+	                    const latest = await readCurrentRow();
+	                    if (latest.error) {
+	                        return {
+	                            ok: false,
+	                            reason: 'read-failed',
+	                            error: latest.error.message || `Failed reading ${tableName}.`
+	                        };
+	                    }
+	                    if (latest.data) return buildStaleResult(latest.data);
+	                    return {
+	                        ok: false,
+	                        reason: 'write-conflict',
+	                        error: 'Live room snapshot write conflicted with another update.'
+	                    };
+	                }
 
-            if (result.error) {
-                if (createOnly && result.error.code === '23505') {
-                    return {
-                        ok: false,
-                        reason: 'exists',
-                        error: result.error.message || `${tableName} row already exists.`
-                    };
-                }
-                return {
-                    ok: false,
-                    reason: 'write-failed',
-                    error: result.error.message || `Failed writing ${tableName}.`
-                };
-            }
+	                return {
+	                    ok: true,
+	                    roomId,
+	                    scope,
+	                    caseId: caseId || '',
+	                    revision: toNonNegativeInt(result.data && result.data.revision, revision),
+	                    updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+	                };
+	            }
 
-            return {
-                ok: true,
-                roomId,
-                scope,
-                caseId: caseId || '',
-                revision: toNonNegativeInt(result.data && result.data.revision, revision),
-                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
-            };
-        }
+	            const result = await ensured.client
+	                .from(tableName)
+	                .insert(row)
+	                .select('revision,updated_at')
+	                .single();
+
+	            if (result.error) {
+	                if (createOnly && result.error.code === '23505') {
+	                    return {
+	                        ok: false,
+	                        reason: 'exists',
+	                        error: result.error.message || `${tableName} row already exists.`
+	                    };
+	                }
+	                return {
+	                    ok: false,
+	                    reason: 'write-failed',
+	                    error: result.error.message || `Failed writing ${tableName}.`
+	                };
+	            }
+
+	            return {
+	                ok: true,
+	                roomId,
+	                scope,
+	                caseId: caseId || '',
+	                revision: toNonNegativeInt(result.data && result.data.revision, revision),
+	                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+	            };
+	        }
 
         async restoreBoardRoomHistoryEntry(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};

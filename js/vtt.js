@@ -2477,10 +2477,11 @@
         const source = String(meta.source || '').trim().toLowerCase();
         if (source === 'vtt-collab' || source === 'board-collab') return false;
         const scopes = Array.isArray(meta.scopes) ? meta.scopes : [];
+        const isLocalSource = source === 'local' || !source;
         if (scopes.length) {
-            return scopes.some((scope) => isRelevantVTTStoreScope(scope, caseId));
+            return isLocalSource && scopes.some((scope) => isRelevantVTTStoreScope(scope, caseId));
         }
-        return source === 'local' || source === 'remote' || source === 'storage' || !source;
+        return isLocalSource;
     };
 
     const ensureRosterLinkedPlayerPresentationPersisted = (snapshot, options = {}) => {
@@ -5651,6 +5652,10 @@
                     useStoreOnly: true
                 }) || deepClone(store.getVTTState(activeCaseId));
                 const bridged = vttCollabSession.applySharedStoreSnapshot(storeSnapshot, {
+                    source: detail.source || '',
+                    scopeUpdatedAt: typeof store.getVTTStateUpdatedAt === 'function'
+                        ? store.getVTTStateUpdatedAt(activeCaseId)
+                        : 0,
                     reason: detail.source === 'storage' || detail.source === 'remote'
                         ? 'external-store'
                         : 'shared-store'

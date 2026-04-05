@@ -1178,6 +1178,7 @@ class VTTCollabSession {
         this.lastSnapshotSource = '';
         this.lastSharedStoreSignature = '';
         this.lastCloudSnapshotSignature = '';
+        this.lastTrackedPresenceKey = '';
         this.pendingMirrorTimer = null;
         this.pendingFlushTimer = null;
         this.pendingFlushPromise = null;
@@ -1376,38 +1377,21 @@ class VTTCollabSession {
             const roomPayloadSig = buildSnapshotSignature(roomPayload, this.coerceSnapshot.bind(this));
             const localDocSig = buildSnapshotSignature(localDocPayload, this.coerceSnapshot.bind(this));
             const cloudStamp = Date.parse(cloudRow.snapshot.updatedAt || '') || toNonNegativeInt(cloudRow.snapshot.revision, 0);
-            const liveStoreStamp = this.getSharedStoreUpdatedAt();
             this.lastSavedRevision = Math.max(0, toNonNegativeInt(cloudRow.snapshot.revision, 0));
             roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
             this.lastCloudSnapshotSignature = roomPayloadSig;
 
-            const canonical = chooseCanonicalSnapshot([
-                { kind: 'room', snapshot: roomPayload, stamp: cloudStamp, priority: 30 },
-                { kind: 'local-doc', snapshot: localDocPayload, stamp: localDocStamp, priority: 20 },
-                { kind: 'live-store', snapshot: currentPayload, stamp: liveStoreStamp, priority: 10 }
-            ], {
-                kind: 'room',
-                snapshot: roomPayload,
-                stamp: cloudStamp,
-                priority: 30
-            }, this.coerceSnapshot.bind(this));
-
-            const canonicalPayload = canonical && canonical.snapshot ? canonical.snapshot : roomPayload;
-            const canonicalSig = buildSnapshotSignature(canonicalPayload, this.coerceSnapshot.bind(this));
-            const canonicalStamp = canonical && Number.isFinite(canonical.stamp) ? canonical.stamp : (cloudStamp || Date.now());
-            const canonicalOrigin = canonical && canonical.kind === 'room'
-                ? this.originRemoteRestore
-                : this.originBootstrap;
-
-            if (!hasVTTContent(localDocPayload, this.coerceSnapshot.bind(this)) || localDocSig !== canonicalSig) {
-                applySnapshotToDoc(this.doc, canonicalPayload, this.coerceSnapshot.bind(this), canonicalOrigin, canonicalStamp || Date.now());
+            if (!hasVTTContent(localDocPayload, this.coerceSnapshot.bind(this)) || localDocSig !== roomPayloadSig) {
+                applySnapshotToDoc(
+                    this.doc,
+                    roomPayload,
+                    this.coerceSnapshot.bind(this),
+                    this.originRemoteRestore,
+                    cloudStamp || Date.now()
+                );
             }
-
-            if (canonical && canonical.kind !== 'room' && roomPayloadSig !== canonicalSig) {
-                this.pendingReadyFlush = true;
-            } else {
-                this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
-            }
+            this.pendingReadyFlush = false;
+            this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
         } else {
             const liveStoreStamp = this.getSharedStoreUpdatedAt();
             const canonicalSeed = chooseCanonicalSnapshot([
@@ -1663,7 +1647,7 @@ class VTTCollabSession {
             });
         });
 
-        await this.refreshPresenceTracking();
+        await this.refreshPresenceTracking({ force: true });
         this.broadcastLocalAwareness();
         this.sendSyncStep1();
         this.handlePresenceState(typeof channel.presenceState === 'function' ? channel.presenceState() : {});
@@ -1793,13 +1777,18 @@ class VTTCollabSession {
         });
     }
 
-    async refreshPresenceTracking() {
+    async refreshPresenceTracking(options = {}) {
         if (!this.channel || !this.connected || typeof this.channel.track !== 'function') return;
+        const opts = options && typeof options === 'object' ? options : {};
+        const presence = this.buildLocalPresence();
+        const presenceKey = `${presence.activeSceneId || ''}`;
+        if (!opts.force && presenceKey === this.lastTrackedPresenceKey) return;
         try {
-            const result = await this.channel.track(this.buildLocalPresence());
+            const result = await this.channel.track(presence);
             if (result && result !== 'ok') {
                 throw new Error(`Presence track returned ${result}`);
             }
+            this.lastTrackedPresenceKey = presenceKey;
         } catch (err) {
             console.warn('RTF_VTT_COLLAB: Presence track failed', err);
         }
@@ -2028,13 +2017,29 @@ class VTTCollabSession {
 
     applySharedStoreSnapshot(payload, options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
-        const next = this.coerceSnapshot(payload);
-        const nextSig = buildSnapshotSignature(next, this.coerceSnapshot.bind(this));
-        if (nextSig) this.lastSharedStoreSignature = nextSig;
-        if (nextSig === buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this))) {
+        const source = toTrimmedString(opts.source, '', 40).trim().toLowerCase();
+        if ((source === 'remote' || source === 'storage' || source === 'realtime') && !opts.force) {
             return false;
         }
-        applySnapshotToDoc(this.doc, next, this.coerceSnapshot.bind(this), this.originSharedStore, Math.max(Date.now(), this.getSharedStoreUpdatedAt()));
+        const next = this.coerceSnapshot(payload);
+        const nextSig = buildSnapshotSignature(next, this.coerceSnapshot.bind(this));
+        const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this));
+        if (nextSig === currentSig) {
+            return false;
+        }
+        const scopeUpdatedAt = Math.max(0, toNonNegativeInt(opts.scopeUpdatedAt, 0));
+        const currentStamp = getDocUpdatedAt(this.doc);
+        if (!opts.force && scopeUpdatedAt && currentStamp && scopeUpdatedAt < currentStamp) {
+            return false;
+        }
+        if (nextSig) this.lastSharedStoreSignature = nextSig;
+        applySnapshotToDoc(
+            this.doc,
+            next,
+            this.coerceSnapshot.bind(this),
+            this.originSharedStore,
+            Math.max(Date.now(), scopeUpdatedAt || this.getSharedStoreUpdatedAt())
+        );
         if (opts.flushNow) {
             this.flushSnapshotNow().catch((err) => {
                 console.warn('RTF_VTT_COLLAB: Shared-store flush failed', err);
@@ -2065,7 +2070,7 @@ class VTTCollabSession {
             this.scheduleReconnect('Rejoining live VTT...');
         } else {
             this.sendSyncStep1();
-            this.refreshPresenceTracking().catch(() => { });
+            this.refreshPresenceTracking({ force: true }).catch(() => { });
         }
     }
 
