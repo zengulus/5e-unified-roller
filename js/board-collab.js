@@ -215,6 +215,18 @@ const stableStringify = (value) => {
     }
 };
 
+const compareRevisionMeta = (leftRevision, leftSource, rightRevision, rightSource) => {
+    const cleanLeftRevision = Math.max(0, Math.round(toFiniteNumber(leftRevision, 0)));
+    const cleanRightRevision = Math.max(0, Math.round(toFiniteNumber(rightRevision, 0)));
+    if (cleanLeftRevision !== cleanRightRevision) return cleanLeftRevision - cleanRightRevision;
+    const cleanLeftSource = toTrimmedString(leftSource, '', 120).trim();
+    const cleanRightSource = toTrimmedString(rightSource, '', 120).trim();
+    if (cleanLeftSource && cleanRightSource) return cleanLeftSource.localeCompare(cleanRightSource);
+    if (cleanLeftSource) return 1;
+    if (cleanRightSource) return -1;
+    return 0;
+};
+
 const buildSnapshotSignature = (snapshot) => {
     const clean = sanitizeBoardSnapshot(snapshot);
     return stableStringify({
@@ -527,6 +539,7 @@ class BoardCollabSession {
         this.peerColor = '';
         this.indexedDbName = '';
         this.lastSavedRevision = 0;
+        this.lastSnapshotSource = '';
         this.pendingMirrorTimer = null;
         this.pendingFlushTimer = null;
         this.pendingFlushPromise = null;
@@ -569,6 +582,19 @@ class BoardCollabSession {
         const session = new BoardCollabSession(options);
         await session.init();
         return session;
+    }
+
+    applyRevisionState(revision, sourceId = '') {
+        const cleanRevision = Math.max(0, Math.round(toFiniteNumber(revision, 0)));
+        const cleanSource = toTrimmedString(sourceId, '', 120).trim();
+        if (compareRevisionMeta(cleanRevision, cleanSource, this.lastSavedRevision, this.lastSnapshotSource) < 0) {
+            return false;
+        }
+        this.lastSavedRevision = cleanRevision;
+        if (cleanSource || !this.lastSnapshotSource) {
+            this.lastSnapshotSource = cleanSource;
+        }
+        return true;
     }
 
     async init() {
@@ -651,6 +677,7 @@ class BoardCollabSession {
             scope: this.scope,
             caseId: this.caseId
         });
+        let roomSnapshotSource = '';
 
         if (cloudRow.ok && cloudRow.snapshot) {
             const roomPayload = sanitizeBoardSnapshot(cloudRow.snapshot.payload, {
@@ -662,6 +689,7 @@ class BoardCollabSession {
             const cloudUpdatedAt = Date.parse(cloudRow.snapshot.updatedAt || '') || cloudRow.snapshot.revision || 0;
             const localUpdatedAt = Math.max(0, localDocPayload.updatedAt || 0);
             this.lastSavedRevision = Math.max(0, cloudRow.snapshot.revision || 0);
+            roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
             const canonical = chooseCanonicalSnapshot([
                 {
                     kind: 'room',
@@ -756,6 +784,7 @@ class BoardCollabSession {
                 }
             }
             this.persistSnapshotToSharedState(canonicalSeed, canonicalSeedSig);
+            if (seeded.ok) roomSnapshotSource = this.instanceId;
 
             if (!seeded.ok && seeded.reason !== 'exists') {
                 console.warn('RTF_BOARD_COLLAB: Failed seeding board room', seeded.error || seeded.reason);
@@ -774,6 +803,7 @@ class BoardCollabSession {
                     caseId: this.caseId
                 }, canonicalSeed);
                 this.lastSavedRevision = Math.max(0, canonicalRoom.snapshot.revision || 0);
+                roomSnapshotSource = toTrimmedString(canonicalRoom.snapshot.updatedBy, '', 120).trim();
                 if (buildSnapshotSignature(roomPayload) !== buildSnapshotSignature(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
                     applySnapshotToDoc(
                         this.doc,
@@ -794,6 +824,7 @@ class BoardCollabSession {
             caseId: this.caseId
         });
         this.pendingSnapshot = this.lastSnapshot;
+        this.applyRevisionState(this.lastSavedRevision, roomSnapshotSource || this.instanceId);
         if (!this.lastHistorySignature) this.lastHistorySignature = buildSnapshotSignature(this.lastSnapshot);
 
         if (buildSnapshotSignature(this.lastSnapshot) !== livePayloadSig
@@ -969,11 +1000,14 @@ class BoardCollabSession {
     async sendBroadcast(event, payload) {
         if (!this.channel || !this.connected || typeof this.channel.send !== 'function') return;
         try {
-            await this.channel.send({
+            const result = await this.channel.send({
                 type: 'broadcast',
                 event,
                 payload
             });
+            if (result && result !== 'ok') {
+                throw new Error(`Broadcast returned ${result}`);
+            }
         } catch (err) {
             console.warn(`RTF_BOARD_COLLAB: Broadcast failed for ${event}`, err);
         }
@@ -1057,7 +1091,7 @@ class BoardCollabSession {
             this.originRemoteRestore,
             stamp
         );
-        this.lastSavedRevision = Math.max(this.lastSavedRevision, toFiniteNumber(payload.revision, 0) || 0);
+        this.applyRevisionState(payload.revision, payload.sentBy || payload.updatedBy || '');
         this.lastHistorySignature = buildSnapshotSignature(nextPayload);
         this.lastHistoryCapturedAt = Date.now();
         this.updateStatus({
@@ -1104,14 +1138,16 @@ class BoardCollabSession {
         const snapshot = this.getSnapshot();
         const signature = buildSnapshotSignature(snapshot);
         if (!signature) return;
-        const stamp = Math.max(Date.now(), snapshot.updatedAt || 0, this.lastSavedRevision || 0);
+        const revision = Math.max(1, this.lastSavedRevision || 0);
+        this.applyRevisionState(revision, this.instanceId);
+        const stamp = Math.max(Date.now(), snapshot.updatedAt || 0);
         this.sendBroadcast(BOARD_SYNC_EVENT_SNAPSHOT, {
             roomId: this.roomId,
             scope: this.scope,
             caseId: this.caseId,
             requestedBy,
             sentBy: this.instanceId,
-            revision: Math.max(this.lastSavedRevision, stamp),
+            revision,
             updatedAt: new Date(stamp).toISOString(),
             signature,
             payload: snapshot
@@ -1124,6 +1160,7 @@ class BoardCollabSession {
         if (!sentBy || sentBy === this.instanceId) return;
         const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
         if (requestedBy && requestedBy !== this.instanceId) return;
+        if (compareRevisionMeta(payload.revision, sentBy, this.lastSavedRevision, this.lastSnapshotSource) < 0) return;
         const nextPayload = sanitizeBoardSnapshot(payload.payload, {
             scope: this.scope,
             caseId: this.caseId
@@ -1132,7 +1169,10 @@ class BoardCollabSession {
         if (!nextSig) return;
         const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot);
         this.receivedPeerSnapshot = true;
-        if (nextSig === currentSig) return;
+        if (nextSig === currentSig) {
+            this.applyRevisionState(payload.revision, sentBy);
+            return;
+        }
         const stamp = Date.parse(payload.updatedAt || '') || toFiniteNumber(payload.revision, Date.now()) || Date.now();
         applySnapshotToDoc(
             this.doc,
@@ -1142,13 +1182,14 @@ class BoardCollabSession {
             this.originRemoteRestore,
             stamp
         );
-        this.lastSavedRevision = Math.max(this.lastSavedRevision, toFiniteNumber(payload.revision, 0) || 0);
+        this.applyRevisionState(payload.revision, sentBy);
     }
 
     handlePositionMessage(payload) {
         if (this.destroyed || !payload || typeof payload !== 'object') return;
         const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
         if (sentBy && sentBy === this.instanceId) return;
+        if (compareRevisionMeta(payload.revision, sentBy, this.lastSavedRevision, this.lastSnapshotSource) < 0) return;
         const changes = Array.isArray(payload.changes)
             ? payload.changes
                 .map((entry) => {
@@ -1165,7 +1206,7 @@ class BoardCollabSession {
         if (!changes.length) return;
         const stamp = Date.parse(payload.updatedAt || '') || toFiniteNumber(payload.revision, Date.now()) || Date.now();
         const changed = applyPositionChangesToDoc(this.doc, changes, this.originRemoteSync, stamp);
-        this.lastSavedRevision = Math.max(this.lastSavedRevision, toFiniteNumber(payload.revision, 0) || 0);
+        this.applyRevisionState(payload.revision, sentBy);
         if (!changed) return;
     }
 
@@ -1212,7 +1253,7 @@ class BoardCollabSession {
     async refreshPresenceTracking() {
         if (!this.channel || !this.connected || typeof this.channel.track !== 'function') return;
         try {
-            await this.channel.track({
+            const result = await this.channel.track({
                 instanceId: this.instanceId,
                 userId: this.userId || '',
                 profileName: this.profileName || '',
@@ -1223,6 +1264,9 @@ class BoardCollabSession {
                 locks: this.buildPresenceLocks(),
                 ts: Date.now()
             });
+            if (result && result !== 'ok') {
+                throw new Error(`Presence track returned ${result}`);
+            }
         } catch (err) {
             console.warn('RTF_BOARD_COLLAB: Presence track failed', err);
         }
@@ -1343,21 +1387,44 @@ class BoardCollabSession {
             && snapshotSig !== this.lastHistorySignature
             && (opts.forceHistory || !this.lastHistoryCapturedAt || (Date.now() - this.lastHistoryCapturedAt) >= HISTORY_CAPTURE_MIN_INTERVAL_MS)
         );
+        const nextRevision = Math.max(1, this.lastSavedRevision + 1);
+        this.applyRevisionState(nextRevision, this.instanceId);
 
         this.pendingFlushPromise = this.store.saveBoardRoomSnapshot({
             roomId: this.roomId,
             scope: this.scope,
             caseId: this.caseId,
             payload: snapshotToSave,
-            revision: Math.max(Date.now(), this.lastSavedRevision + 1),
+            revision: nextRevision,
             updatedAt: new Date(Math.max(Date.now(), snapshotToSave.updatedAt || 0)).toISOString(),
             updatedBy: this.instanceId,
             updatedByUser: this.userId || null,
             updatedByName: this.profileName || null
         }).then((result) => {
             if (result && result.ok) {
-                this.lastSavedRevision = Math.max(this.lastSavedRevision, result.revision || 0);
+                this.applyRevisionState(result.revision || nextRevision, this.instanceId);
                 this.persistSnapshotToSharedState(snapshotToSave, snapshotSig);
+            }
+            if (result && result.reason === 'stale' && result.snapshot) {
+                const remoteSnapshot = sanitizeBoardSnapshot(result.snapshot.payload, {
+                    scope: this.scope,
+                    caseId: this.caseId
+                }, this.pendingSnapshot || this.lastSnapshot);
+                const remoteSig = buildSnapshotSignature(remoteSnapshot);
+                const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot);
+                this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
+                this.persistSnapshotToSharedState(remoteSnapshot, remoteSig);
+                if (remoteSig && remoteSig !== currentSig) {
+                    const stamp = Date.parse(result.snapshot.updatedAt || '') || toFiniteNumber(result.snapshot.revision, Date.now()) || Date.now();
+                    applySnapshotToDoc(
+                        this.doc,
+                        remoteSnapshot,
+                        this.scope,
+                        this.caseId,
+                        this.originRemoteRestore,
+                        stamp
+                    );
+                }
             }
             if (!result || !result.ok || !shouldCaptureHistory) return result;
             return this.store.appendBoardRoomHistorySnapshot({
@@ -1481,13 +1548,14 @@ class BoardCollabSession {
             })
             .filter(Boolean);
         if (normalizedChanges.length) {
-            const revision = Math.max(stamp, this.lastSavedRevision + 1);
+            const revision = Math.max(1, this.lastSavedRevision + 1);
+            this.applyRevisionState(revision, this.instanceId);
             this.sendBroadcast(BOARD_SYNC_EVENT_POSITION_CHANGES, {
                 roomId: this.roomId,
                 scope: this.scope,
                 caseId: this.caseId,
                 revision,
-                updatedAt: new Date(revision).toISOString(),
+                updatedAt: new Date(stamp).toISOString(),
                 sentBy: this.instanceId,
                 sentByUser: this.userId || null,
                 sentByName: this.profileName || '',

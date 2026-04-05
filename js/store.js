@@ -802,6 +802,19 @@
     const buildBoardRoomChannelName = (campaignId, roomId) => `rtf-board-${campaignId}-${roomId}`;
     const buildVTTRoomId = (caseId = 'case_primary') => `vtt:case:${sanitizeCaseId(caseId, 'case_primary')}`;
     const buildVTTRoomChannelName = (campaignId, roomId) => `rtf-vtt-${campaignId}-${roomId}`;
+    const compareRoomSnapshotVersion = (leftRevision, leftUpdatedBy, rightRevision, rightUpdatedBy) => {
+        const cleanLeftRevision = Math.max(0, toNonNegativeInt(leftRevision, 0));
+        const cleanRightRevision = Math.max(0, toNonNegativeInt(rightRevision, 0));
+        if (cleanLeftRevision !== cleanRightRevision) return cleanLeftRevision - cleanRightRevision;
+        const cleanLeftUpdatedBy = toTrimmedString(leftUpdatedBy, '', 120).trim();
+        const cleanRightUpdatedBy = toTrimmedString(rightUpdatedBy, '', 120).trim();
+        if (cleanLeftUpdatedBy && cleanRightUpdatedBy) {
+            return cleanLeftUpdatedBy.localeCompare(cleanRightUpdatedBy);
+        }
+        if (cleanLeftUpdatedBy) return 1;
+        if (cleanRightUpdatedBy) return -1;
+        return 0;
+    };
     const deleteIndexedDbDatabase = (name) => new Promise((resolve) => {
         if (!name || typeof indexedDB === 'undefined' || !indexedDB || typeof indexedDB.deleteDatabase !== 'function') {
             resolve({ ok: false, reason: 'unavailable' });
@@ -5065,6 +5078,7 @@
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
             const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
             const createOnly = !!opts.createOnly;
 
             const row = {
@@ -5083,6 +5097,48 @@
                     ? (opts.updatedByName || null)
                     : (ensured.profileName || null)
             };
+
+            if (!createOnly) {
+                const existing = await ensured.client
+                    .from(tableName)
+                    .select(selectCols)
+                    .eq('campaign_id', ensured.config.campaignId)
+                    .eq('room_id', target.roomId)
+                    .maybeSingle();
+
+                if (existing.error) {
+                    return {
+                        ok: false,
+                        reason: 'read-failed',
+                        error: existing.error.message || `Failed reading ${tableName}.`
+                    };
+                }
+
+                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
+                    return {
+                        ok: false,
+                        reason: 'stale',
+                        error: 'A newer live VTT snapshot already exists.',
+                        roomId: target.roomId,
+                        scope: target.scope,
+                        caseId: target.caseId,
+                        revision: toNonNegativeInt(existing.data.revision, 0),
+                        updatedAt: toIsoString(existing.data.updated_at, ''),
+                        updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
+                        updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120),
+                        snapshot: {
+                            roomId: String(existing.data.room_id || target.roomId),
+                            scope: 'case',
+                            caseId: existing.data.case_id ? sanitizeCaseId(existing.data.case_id, target.caseId || 'case_primary') : target.caseId,
+                            payload: sanitizeVTTState(existing.data.payload),
+                            revision: toNonNegativeInt(existing.data.revision, 0),
+                            updatedAt: toIsoString(existing.data.updated_at, ''),
+                            updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
+                            updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120)
+                        }
+                    };
+                }
+            }
 
             const query = createOnly
                 ? ensured.client
@@ -5377,6 +5433,7 @@
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
             const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
             const createOnly = !!opts.createOnly;
 
             const row = {
@@ -5395,6 +5452,48 @@
                     ? (opts.updatedByName || null)
                     : (ensured.profileName || null)
             };
+
+            if (!createOnly) {
+                const existing = await ensured.client
+                    .from(tableName)
+                    .select(selectCols)
+                    .eq('campaign_id', ensured.config.campaignId)
+                    .eq('room_id', roomId)
+                    .maybeSingle();
+
+                if (existing.error) {
+                    return {
+                        ok: false,
+                        reason: 'read-failed',
+                        error: existing.error.message || `Failed reading ${tableName}.`
+                    };
+                }
+
+                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
+                    return {
+                        ok: false,
+                        reason: 'stale',
+                        error: 'A newer live room snapshot already exists.',
+                        roomId,
+                        scope,
+                        caseId: caseId || '',
+                        revision: toNonNegativeInt(existing.data.revision, 0),
+                        updatedAt: toIsoString(existing.data.updated_at, ''),
+                        updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
+                        updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120),
+                        snapshot: {
+                            roomId: String(existing.data.room_id || roomId),
+                            scope: String(existing.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                            caseId: existing.data.case_id ? sanitizeCaseId(existing.data.case_id, caseId || 'case_primary') : '',
+                            payload: sanitizeBoard(existing.data.payload),
+                            revision: toNonNegativeInt(existing.data.revision, 0),
+                            updatedAt: toIsoString(existing.data.updated_at, ''),
+                            updatedBy: toTrimmedString(existing.data.updated_by, '', 120),
+                            updatedByName: toTrimmedString(existing.data.updated_by_name, '', 120)
+                        }
+                    };
+                }
+            }
 
             const query = createOnly
                 ? ensured.client

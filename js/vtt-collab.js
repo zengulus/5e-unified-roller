@@ -57,6 +57,18 @@ const stableStringify = (value) => {
     }
 };
 
+const compareRevisionMeta = (leftRevision, leftSource, rightRevision, rightSource) => {
+    const cleanLeftRevision = Math.max(0, toNonNegativeInt(leftRevision, 0));
+    const cleanRightRevision = Math.max(0, toNonNegativeInt(rightRevision, 0));
+    if (cleanLeftRevision !== cleanRightRevision) return cleanLeftRevision - cleanRightRevision;
+    const cleanLeftSource = toTrimmedString(leftSource, '', 120).trim();
+    const cleanRightSource = toTrimmedString(rightSource, '', 120).trim();
+    if (cleanLeftSource && cleanRightSource) return cleanLeftSource.localeCompare(cleanRightSource);
+    if (cleanLeftSource) return 1;
+    if (cleanRightSource) return -1;
+    return 0;
+};
+
 const pickPeerColor = (seed = '') => {
     let hash = 0;
     const text = String(seed || '');
@@ -152,6 +164,7 @@ class VTTCollabSession {
         this.profileName = '';
         this.peerColor = '';
         this.lastSavedRevision = 0;
+        this.lastSnapshotSource = '';
         this.pendingMirrorTimer = null;
         this.pendingFlushTimer = null;
         this.pendingFlushPromise = null;
@@ -210,6 +223,19 @@ class VTTCollabSession {
                 console.warn('RTF_VTT_COLLAB: Status callback failed', err);
             }
         }
+    }
+
+    applyRevisionState(revision, sourceId = '') {
+        const cleanRevision = Math.max(0, toNonNegativeInt(revision, 0));
+        const cleanSource = toTrimmedString(sourceId, '', 120).trim();
+        if (compareRevisionMeta(cleanRevision, cleanSource, this.lastSavedRevision, this.lastSnapshotSource) < 0) {
+            return false;
+        }
+        this.lastSavedRevision = cleanRevision;
+        if (cleanSource || !this.lastSnapshotSource) {
+            this.lastSnapshotSource = cleanSource;
+        }
+        return true;
     }
 
     async disposeChannel(channel = this.channel) {
@@ -312,6 +338,7 @@ class VTTCollabSession {
         );
 
         let roomSnapshot = null;
+        let roomSnapshotSource = '';
         const cloudRow = typeof this.store.loadVTTRoomSnapshot === 'function'
             ? await this.store.loadVTTRoomSnapshot({
                 roomId: this.roomId,
@@ -322,6 +349,7 @@ class VTTCollabSession {
         if (cloudRow && cloudRow.ok && cloudRow.snapshot) {
             roomSnapshot = this.coerceSnapshot(cloudRow.snapshot.payload);
             this.lastSavedRevision = Math.max(0, toNonNegativeInt(cloudRow.snapshot.revision, 0));
+            roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
         } else {
             roomSnapshot = currentPayload;
             if (typeof this.store.saveVTTRoomSnapshot === 'function') {
@@ -339,6 +367,7 @@ class VTTCollabSession {
                 });
                 if (seeded && seeded.ok) {
                     this.lastSavedRevision = Math.max(this.lastSavedRevision, seedStamp, seeded.revision || 0);
+                    roomSnapshotSource = this.instanceId;
                 } else if (seeded && seeded.reason === 'exists' && typeof this.store.loadVTTRoomSnapshot === 'function') {
                     const canonical = await this.store.loadVTTRoomSnapshot({
                         roomId: this.roomId,
@@ -347,6 +376,7 @@ class VTTCollabSession {
                     if (canonical && canonical.ok && canonical.snapshot) {
                         roomSnapshot = this.coerceSnapshot(canonical.snapshot.payload);
                         this.lastSavedRevision = Math.max(this.lastSavedRevision, canonical.snapshot.revision || 0);
+                        roomSnapshotSource = toTrimmedString(canonical.snapshot.updatedBy, '', 120).trim();
                     }
                 } else if (seeded && !seeded.ok) {
                     console.warn('RTF_VTT_COLLAB: Failed seeding live VTT room', seeded.error || seeded.reason);
@@ -356,6 +386,7 @@ class VTTCollabSession {
 
         this.lastSnapshot = this.coerceSnapshot(roomSnapshot || currentPayload || seedPayload);
         this.pendingSnapshot = this.lastSnapshot;
+        this.applyRevisionState(this.lastSavedRevision, roomSnapshotSource || this.instanceId);
 
         if (stableStringify(this.lastSnapshot) !== stableStringify(currentPayload)
             && typeof this.options.applySnapshot === 'function') {
@@ -501,11 +532,14 @@ class VTTCollabSession {
     async sendBroadcast(event, payload) {
         if (!this.channel || !this.connected || typeof this.channel.send !== 'function') return;
         try {
-            await this.channel.send({
+            const result = await this.channel.send({
                 type: 'broadcast',
                 event,
                 payload
             });
+            if (result && result !== 'ok') {
+                throw new Error(`Broadcast returned ${result}`);
+            }
         } catch (err) {
             console.warn(`RTF_VTT_COLLAB: Broadcast failed for ${event}`, err);
         }
@@ -514,7 +548,10 @@ class VTTCollabSession {
     async refreshPresenceTracking() {
         if (!this.channel || !this.connected || typeof this.channel.track !== 'function') return;
         try {
-            await this.channel.track(this.buildLocalPresence());
+            const result = await this.channel.track(this.buildLocalPresence());
+            if (result && result !== 'ok') {
+                throw new Error(`Presence track returned ${result}`);
+            }
         } catch (err) {
             console.warn('RTF_VTT_COLLAB: Presence track failed', err);
         }
@@ -555,21 +592,29 @@ class VTTCollabSession {
         if (this.destroyed || !payload || typeof payload !== 'object') return;
         const requester = toTrimmedString(payload.requester, '', 120).trim();
         if (!requester || requester === this.instanceId) return;
-        this.broadcastSnapshot('sync-request').catch(() => { });
+        this.broadcastSnapshot('sync-request', { reuseRevision: true }).catch(() => { });
     }
 
     handleSnapshotMessage(payload) {
         if (this.destroyed || !payload || typeof payload !== 'object') return;
+        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
+        if (sentBy && sentBy === this.instanceId) {
+            this.applyRevisionState(payload.revision, sentBy);
+            return;
+        }
+        if (compareRevisionMeta(payload.revision, sentBy, this.lastSavedRevision, this.lastSnapshotSource) < 0) {
+            return;
+        }
         const next = this.coerceSnapshot(payload.payload);
         const nextSig = stableStringify(next);
         if (!nextSig || nextSig === stableStringify(this.lastSnapshot)) {
-            this.lastSavedRevision = Math.max(this.lastSavedRevision, toNonNegativeInt(payload.revision, 0));
+            this.applyRevisionState(payload.revision, sentBy);
             return;
         }
 
         this.lastSnapshot = next;
         this.pendingSnapshot = next;
-        this.lastSavedRevision = Math.max(this.lastSavedRevision, toNonNegativeInt(payload.revision, 0));
+        this.applyRevisionState(payload.revision, sentBy);
         this.scheduleMirror();
 
         if (typeof this.options.applySnapshot === 'function') {
@@ -579,18 +624,26 @@ class VTTCollabSession {
 
     handlePositionMessage(payload) {
         if (this.destroyed || !payload || typeof payload !== 'object') return;
+        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
+        if (sentBy && sentBy === this.instanceId) {
+            this.applyRevisionState(payload.revision, sentBy);
+            return;
+        }
+        if (compareRevisionMeta(payload.revision, sentBy, this.lastSavedRevision, this.lastSnapshotSource) < 0) {
+            return;
+        }
         const changes = Array.isArray(payload.changes) ? payload.changes.map(sanitizePositionChange).filter(Boolean) : [];
         if (!changes.length) return;
 
         const result = applyTokenPositionChanges(this.lastSnapshot, changes, this.coerceSnapshot.bind(this));
         if (!result.applied.length) {
-            this.lastSavedRevision = Math.max(this.lastSavedRevision, toNonNegativeInt(payload.revision, 0));
+            this.applyRevisionState(payload.revision, sentBy);
             return;
         }
 
         this.lastSnapshot = result.snapshot;
         this.pendingSnapshot = result.snapshot;
-        this.lastSavedRevision = Math.max(this.lastSavedRevision, toNonNegativeInt(payload.revision, 0));
+        this.applyRevisionState(payload.revision, sentBy);
         this.scheduleMirror();
 
         if (typeof this.options.applyPositionChanges === 'function') {
@@ -650,18 +703,33 @@ class VTTCollabSession {
         }
 
         const snapshotToSave = this.coerceSnapshot(this.pendingSnapshot);
+        const nextRevision = Math.max(1, this.lastSavedRevision + 1);
+        this.applyRevisionState(nextRevision, this.instanceId);
         this.pendingFlushPromise = this.store.saveVTTRoomSnapshot({
             roomId: this.roomId,
             caseId: this.caseId,
             payload: snapshotToSave,
-            revision: Math.max(Date.now(), this.lastSavedRevision + 1),
+            revision: nextRevision,
             updatedAt: toIsoString(Date.now(), '') || new Date().toISOString(),
             updatedBy: this.instanceId,
             updatedByUser: this.userId || null,
             updatedByName: this.profileName || null
         }).then((result) => {
             if (result && result.ok) {
-                this.lastSavedRevision = Math.max(this.lastSavedRevision, result.revision || 0);
+                this.applyRevisionState(result.revision || nextRevision, this.instanceId);
+                return result;
+            }
+            if (result && result.reason === 'stale' && result.snapshot) {
+                const remoteSnapshot = this.coerceSnapshot(result.snapshot.payload);
+                const remoteSig = stableStringify(remoteSnapshot);
+                const currentSig = stableStringify(this.lastSnapshot);
+                this.lastSnapshot = remoteSnapshot;
+                this.pendingSnapshot = remoteSnapshot;
+                this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
+                this.scheduleMirror();
+                if (remoteSig && remoteSig !== currentSig && typeof this.options.applySnapshot === 'function') {
+                    this.options.applySnapshot(remoteSnapshot, { origin: 'cloud-stale-restore' });
+                }
             }
             return result;
         }).finally(() => {
@@ -671,15 +739,19 @@ class VTTCollabSession {
         return this.pendingFlushPromise;
     }
 
-    async broadcastSnapshot(reason = 'snapshot') {
+    async broadcastSnapshot(reason = 'snapshot', options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
         const snapshot = this.coerceSnapshot(this.pendingSnapshot || this.lastSnapshot);
-        const stamp = Math.max(Date.now(), this.lastSavedRevision + 1);
+        const stamp = opts.reuseRevision
+            ? Math.max(1, this.lastSavedRevision || 0)
+            : Math.max(1, this.lastSavedRevision + 1);
+        this.applyRevisionState(stamp, this.instanceId);
         await this.sendBroadcast('vtt-snapshot', {
             roomId: this.roomId,
             caseId: this.caseId,
             reason,
             revision: stamp,
-            updatedAt: new Date(stamp).toISOString(),
+            updatedAt: new Date().toISOString(),
             sentBy: this.instanceId,
             sentByUser: this.userId || null,
             sentByName: this.profileName || '',
@@ -727,12 +799,13 @@ class VTTCollabSession {
             this.refreshPresenceTracking().catch(() => { });
         }
 
-        const stamp = Math.max(Date.now(), this.lastSavedRevision + 1);
+        const stamp = Math.max(1, this.lastSavedRevision + 1);
+        this.applyRevisionState(stamp, this.instanceId);
         this.sendBroadcast('vtt-token-positions', {
             roomId: this.roomId,
             caseId: this.caseId,
             revision: stamp,
-            updatedAt: new Date(stamp).toISOString(),
+            updatedAt: new Date().toISOString(),
             sentBy: this.instanceId,
             sentByUser: this.userId || null,
             sentByName: this.profileName || '',

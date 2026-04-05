@@ -1211,6 +1211,12 @@
     };
     const getRenderableTokenCells = (token, scene, now = Date.now()) => {
         if (!token || !scene) return { x: 0, y: 0 };
+        if (dragState && String(dragState.tokenId || '').trim() === String(token.id || '').trim()) {
+            return {
+                x: normalizeTokenCoordinate(token.x, 0),
+                y: normalizeTokenCoordinate(token.y, 0)
+            };
+        }
         const tweenKey = buildRemoteTokenTweenKey(scene.id, token.id);
         const tween = remoteTokenTweens.get(tweenKey);
         if (!tween || now >= tween.startedAt + tween.durationMs) {
@@ -5829,6 +5835,7 @@
             }
             const anchorX = (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x;
             const anchorY = (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y;
+            remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, token.id));
             dragState = {
                 tokenId: token.id,
                 anchorX,
@@ -5889,6 +5896,8 @@
                     anchorX: pending.anchorX,
                     anchorY: pending.anchorY
                 };
+                const scene = getActiveScene();
+                if (scene) remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, pending.tokenId));
                 lastDragSyncAt = 0;
                 renderStage();
                 return;
