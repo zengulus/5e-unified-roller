@@ -1543,8 +1543,8 @@
                 inspectorPanelCollapsed: !!(parsed && parsed.inspectorPanelCollapsed),
                 showGrid: parsed && parsed.showGrid !== undefined ? !!parsed.showGrid : true,
                 showTokenNames: parsed && parsed.showTokenNames !== undefined ? !!parsed.showTokenNames : true,
-                sceneViewMode: parsed && parsed.sceneViewMode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED,
-                localSceneId: String(parsed && parsed.localSceneId || '').trim()
+                sceneViewMode: SCENE_VIEW_SHARED,
+                localSceneId: ''
             };
         } catch (err) {
             uiState = {
@@ -1602,23 +1602,13 @@
             : String(state.scenes[0] && state.scenes[0].id || '').trim();
     };
 
-    const isUsingLocalSceneView = (state = vttState, role = localRole) => {
-        if (role !== 'dm' || !state || !Array.isArray(state.scenes) || !state.scenes.length) return false;
-        if (uiState.sceneViewMode !== SCENE_VIEW_LOCAL) return false;
-        const localSceneId = String(uiState.localSceneId || '').trim();
-        return !!localSceneId && state.scenes.some((scene) => scene.id === localSceneId);
-    };
+    const isUsingLocalSceneView = (_state = vttState, _role = localRole) => false;
 
-    const getViewedSceneId = (state = vttState, role = localRole) => {
-        const sharedSceneId = getSharedSceneId(state);
-        if (!sharedSceneId) return '';
-        if (!isUsingLocalSceneView(state, role)) return sharedSceneId;
-        return String(uiState.localSceneId || '').trim() || sharedSceneId;
-    };
+    const getViewedSceneId = (state = vttState, _role = localRole) => getSharedSceneId(state);
 
-    const setSceneViewPreference = (mode, sceneId = '') => {
-        uiState.sceneViewMode = mode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED;
-        uiState.localSceneId = uiState.sceneViewMode === SCENE_VIEW_LOCAL ? String(sceneId || '').trim() : '';
+    const setSceneViewPreference = (_mode, _sceneId = '') => {
+        uiState.sceneViewMode = SCENE_VIEW_SHARED;
+        uiState.localSceneId = '';
         persistUIPreferences();
     };
 
@@ -2482,15 +2472,6 @@
         const tokens = getVisibleTokensForRole(scene);
         const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
         const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
-        if (isDM() && uiState.sceneViewMode === SCENE_VIEW_LOCAL) {
-            const viewedSceneId = getViewedSceneId(vttState, localRole);
-            const sharedSceneId = getSharedSceneId(vttState);
-            if (!viewedSceneId || viewedSceneId === sharedSceneId) {
-                uiState.sceneViewMode = SCENE_VIEW_SHARED;
-                uiState.localSceneId = '';
-                persistUIPreferences();
-            }
-        }
         if (!visibleEntries.some((entry) => entry.id === selectedEntryId)) {
             const activeEntryId = vttState && vttState.initiative ? String(vttState.initiative.activeEntryId || '').trim() : '';
             selectedEntryId = visibleEntries.some((entry) => entry.id === activeEntryId)
@@ -3522,26 +3503,15 @@
         const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
         const sharedSceneId = getSharedSceneId(vttState);
         const viewedSceneId = getViewedSceneId(vttState, localRole);
-        const usingLocalView = isUsingLocalSceneView(vttState, localRole);
         const sharedScene = getSceneById(sharedSceneId, vttState);
         const viewedScene = getSceneById(viewedSceneId, vttState) || scenes[0] || null;
-        const routeNote = viewedScene && sharedScene && viewedScene.id !== sharedScene.id
-            ? `DM is previewing ${viewedScene.name || 'this scene'}. Players stay on ${sharedScene.name || 'the shared scene'} until Player Location changes.`
-            : `DM and players are both on ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}. Change Player Location to move everyone.`;
+        const routeNote = `DM scene selection is authoritative. Players follow ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'} immediately.`;
         sceneListEl.innerHTML = scenes.length
             ? `
                 <div class="vtt-scene-manager">
                     <div class="vtt-scene-select-grid">
                         <label class="vtt-field vtt-field-tight vtt-scene-select-field">
-                            <span>DM Location</span>
-                            <select data-scene-picker="dm">
-                                ${scenes.map((scene) => `
-                                    <option value="${escapeHtml(scene.id)}"${scene.id === viewedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
-                                `).join('')}
-                            </select>
-                        </label>
-                        <label class="vtt-field vtt-field-tight vtt-scene-select-field">
-                            <span>Player Location</span>
+                            <span>Scene</span>
                             <select data-scene-picker="shared">
                                 ${scenes.map((scene) => `
                                     <option value="${escapeHtml(scene.id)}"${scene.id === sharedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
@@ -3549,15 +3519,15 @@
                             </select>
                         </label>
                     </div>
-                    <div class="vtt-scene-summary-card${usingLocalView && viewedScene && sharedScene && viewedScene.id !== sharedScene.id ? ' is-dm-local' : ''}">
+                    <div class="vtt-scene-summary-card">
                         <div class="vtt-scene-summary-top">
                             <div class="vtt-scene-summary-copy">
-                                <span class="vtt-scene-summary-eyebrow">Current DM Scene</span>
-                                <strong class="vtt-scene-summary-title">${escapeHtml(viewedScene && viewedScene.name ? viewedScene.name : 'Scene')}</strong>
+                                <span class="vtt-scene-summary-eyebrow">Current Scene</span>
+                                <strong class="vtt-scene-summary-title">${escapeHtml(sharedScene && sharedScene.name ? sharedScene.name : (viewedScene && viewedScene.name ? viewedScene.name : 'Scene'))}</strong>
                                 <span class="vtt-scene-summary-meta">${escapeHtml(describeScene(viewedScene))}</span>
                             </div>
                             <div class="vtt-scene-tag-row">
-                                <span class="vtt-scene-tag">${usingLocalView && viewedScene && sharedScene && viewedScene.id !== sharedScene.id ? 'DM Private' : 'Shared'}</span>
+                                <span class="vtt-scene-tag">Shared</span>
                                 <span class="vtt-scene-tag">${scenes.length} Scene${scenes.length === 1 ? '' : 's'}</span>
                             </div>
                         </div>
@@ -4310,7 +4280,6 @@
         const scene = getActiveScene();
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
-        const usingLocalView = isUsingLocalSceneView(vttState, localRole);
         const toolMeta = localToolState.mode === TOOL_MODE_RULER
             ? 'Ruler active: click and hold on the stage to measure squares and feet.'
             : (localToolState.mode === TOOL_MODE_CIRCLE
@@ -4332,12 +4301,10 @@
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
         if (roleToggleEl) roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
-        if (activeSceneLabelEl) activeSceneLabelEl.textContent = `Players: ${sharedScene.name || 'Scene'}`;
+        if (activeSceneLabelEl) activeSceneLabelEl.textContent = `Scene: ${sharedScene.name || 'Scene'}`;
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
         if (stageMetaEl) {
-            stageMetaEl.textContent = isDM() && usingLocalView && sharedScene.id !== scene.id
-                ? `DM is previewing ${scene.name || 'this scene'} while players stay on ${sharedScene.name || 'the shared scene'}. ${toolMeta} ${stealthMeta}`
-                : `${toolMeta} ${stealthMeta}`;
+            stageMetaEl.textContent = `${toolMeta} ${stealthMeta}`;
         }
         const sceneNameEl = document.getElementById('scene-name');
         const mapUrlEl = document.getElementById('scene-map-url');
@@ -4958,10 +4925,11 @@
             const sourceScene = getActiveScene(vttState);
             if (!sourceScene) return;
             const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
-            setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+            setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 if (!Array.isArray(draft.scenes)) draft.scenes = [];
                 draft.scenes.push(nextScene);
+                draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
             }, { fitView: true });
             return;
@@ -4987,10 +4955,7 @@
                     const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
                     draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
                 }
-                if (wasViewed && !wasActive) {
-                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
-                    setSceneViewPreference(SCENE_VIEW_LOCAL, fallbackScene ? fallbackScene.id : getSharedSceneId(draft));
-                } else if (wasActive || targetSceneId === sharedSceneId) {
+                if (wasViewed || wasActive || targetSceneId === sharedSceneId) {
                     setSceneViewPreference(SCENE_VIEW_SHARED);
                 }
                 previewTokenId = '';
@@ -5000,20 +4965,26 @@
 
         if (action === 'create-scene') {
             const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : []);
-            setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+            setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 if (!Array.isArray(draft.scenes)) draft.scenes = [];
                 draft.scenes.push(nextScene);
+                draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
             }, { fitView: true });
             return;
         }
 
         if (action === 'view-scene-local') {
-            setSceneViewPreference(SCENE_VIEW_LOCAL, id);
-            previewTokenId = '';
-            fitViewOnNextMapLoad = true;
-            render();
+            setSceneViewPreference(SCENE_VIEW_SHARED);
+            withDraft((draft) => {
+                const scene = Array.isArray(draft.scenes)
+                    ? draft.scenes.find((entry) => entry.id === id)
+                    : null;
+                if (!scene) return;
+                draft.activeSceneId = scene.id;
+                previewTokenId = '';
+            }, { fitView: true });
             return;
         }
 
@@ -5035,10 +5006,11 @@
                 ? vttState.scenes.find((entry) => entry.id === id) || getActiveScene(vttState)
                 : null;
             const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
-            setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+            setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 if (!Array.isArray(draft.scenes)) draft.scenes = [];
                 draft.scenes.push(nextScene);
+                draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
             }, { fitView: true });
             return;
@@ -5062,10 +5034,7 @@
                     const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
                     draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
                 }
-                if (wasViewed && !wasActive) {
-                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
-                    setSceneViewPreference(SCENE_VIEW_LOCAL, fallbackScene ? fallbackScene.id : getSharedSceneId(draft));
-                } else if (wasActive || id === sharedSceneId) {
+                if (wasViewed || wasActive || id === sharedSceneId) {
                     setSceneViewPreference(SCENE_VIEW_SHARED);
                 }
                 previewTokenId = '';
@@ -5249,21 +5218,7 @@
             const sceneId = String(target.value || '').trim();
             const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
             if (!sceneId || !scenes.some((scene) => scene.id === sceneId)) return;
-
-            if (target.dataset.scenePicker === 'dm') {
-                const sharedSceneId = getSharedSceneId(vttState);
-                if (sceneId === sharedSceneId) {
-                    setSceneViewPreference(SCENE_VIEW_SHARED);
-                } else {
-                    setSceneViewPreference(SCENE_VIEW_LOCAL, sceneId);
-                }
-                previewTokenId = '';
-                fitViewOnNextMapLoad = true;
-                render();
-                return;
-            }
-
-            const shouldFit = !isUsingLocalSceneView(vttState, localRole) || getViewedSceneId(vttState, localRole) === sceneId;
+            setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 const scene = Array.isArray(draft.scenes)
                     ? draft.scenes.find((entry) => entry.id === sceneId)
@@ -5271,7 +5226,7 @@
                 if (!scene) return;
                 draft.activeSceneId = scene.id;
                 previewTokenId = '';
-            }, { fitView: shouldFit });
+            }, { fitView: true });
             return;
         }
 
@@ -5605,28 +5560,26 @@
             });
             return;
         }
+        const nextSnapshot = ensureRosterLinkedPlayerPresentationPersisted(
+            deepClone(store.getVTTState(activeCaseId)),
+            { reason: 'roster-player-presentation-sync' }
+        ).snapshot;
         if (dragState) {
-            if (syncRosterLinkedPlayerPresentation(vttState)) {
-                normalizeSelections();
-                render();
-            }
+            pendingRemoteVTTSnapshot = nextSnapshot;
             return;
         }
         if (isVTTCollabReady()) {
-            const synced = ensureRosterLinkedPlayerPresentationPersisted(vttState || readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)), {
-                reason: 'roster-player-presentation-sync'
-            });
-            if (synced.mutated) {
-                vttState = synced.snapshot;
-                normalizeSelections();
-                render();
+            queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
+            vttState = deepClone(nextSnapshot);
+            normalizeSelections();
+            render();
+            if (vttCollabSession && typeof vttCollabSession.syncSnapshot === 'function') {
+                Promise.resolve(vttCollabSession.syncSnapshot(nextSnapshot, { reason: 'store-authoritative' })).catch((err) => {
+                    console.warn('VTT collaboration store-sync failed', err);
+                });
             }
             return;
         }
-        const nextSnapshot = ensureRosterLinkedPlayerPresentationPersisted(
-            readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)),
-            { reason: 'roster-player-presentation-sync' }
-        ).snapshot;
         queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
         vttState = nextSnapshot;
         normalizeSelections();
