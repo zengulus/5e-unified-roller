@@ -1611,6 +1611,7 @@
         uiState.localSceneId = '';
         persistUIPreferences();
     };
+    const canEditInitiative = () => isDM();
 
     const getTokenById = (tokenId, state = vttState) => {
         const scene = getActiveScene(state);
@@ -4374,6 +4375,7 @@
     };
 
     const updateSelectedEntry = (mutator) => {
+        if (!canEditInitiative()) return;
         if (!selectedEntryId) return;
         withDraft((draft) => {
             const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
@@ -4421,6 +4423,7 @@
     };
 
     const assignSelectedEntryToToken = (tokenId) => {
+        if (!canEditInitiative()) return false;
         const targetTokenId = String(tokenId || '').trim();
         if (!selectedEntryId || !targetTokenId) return false;
         let assigned = false;
@@ -4484,6 +4487,7 @@
     };
 
     const addTokenToInitiative = (tokenId) => {
+        if (!canEditInitiative()) return;
         withDraft((draft) => {
             const scene = getActiveScene(draft);
             if (!scene || !Array.isArray(scene.tokens)) return;
@@ -4601,6 +4605,7 @@
     };
 
     const advanceTurn = (direction) => {
+        if (!canEditInitiative()) return;
         withDraft((draft) => {
             const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
             if (!entries.length) {
@@ -4623,6 +4628,7 @@
     };
 
     const reorderEntry = (entryId, delta) => {
+        if (!canEditInitiative()) return;
         withDraft((draft) => {
             const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
             const idx = entries.findIndex((entry) => entry.id === entryId);
@@ -4635,6 +4641,7 @@
     };
 
     const removeEntry = (entryId) => {
+        if (!canEditInitiative()) return;
         withDraft((draft) => {
             const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
             const idx = entries.findIndex((entry) => entry.id === entryId);
@@ -5268,6 +5275,7 @@
         }
 
         if (selectedEntryId && target instanceof HTMLSelectElement && target.dataset.entryTokenLink) {
+            if (!canEditInitiative()) return;
             if (event.type !== 'change') return;
             const tokenId = String(target.value || '').trim();
             if (!tokenId) return;
@@ -5392,6 +5400,7 @@
         }
 
         if (selectedEntryId && target.dataset.entryField) {
+            if (!canEditInitiative()) return;
             const field = target.dataset.entryField;
             const entry = getEntryById(selectedEntryId);
             const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
@@ -5408,6 +5417,7 @@
         }
 
         if (selectedEntryId && target.dataset.entryDefence) {
+            if (!canEditInitiative()) return;
             const key = target.dataset.entryDefence;
             if (!DEFENCE_KEYS.includes(key)) return;
             updateSelectedEntry((entry) => {
@@ -5443,6 +5453,7 @@
     };
 
     const processInitiativeQueue = () => {
+        if (!canEditInitiative()) return;
         let parsed = [];
         try {
             const raw = localStorage.getItem(TRACKER_INITIATIVE_QUEUE_KEY);
@@ -5560,26 +5571,29 @@
             });
             return;
         }
-        const nextSnapshot = ensureRosterLinkedPlayerPresentationPersisted(
-            deepClone(store.getVTTState(activeCaseId)),
-            { reason: 'roster-player-presentation-sync' }
-        ).snapshot;
         if (dragState) {
-            pendingRemoteVTTSnapshot = nextSnapshot;
-            return;
-        }
-        if (isVTTCollabReady()) {
-            queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
-            vttState = deepClone(nextSnapshot);
-            normalizeSelections();
-            render();
-            if (vttCollabSession && typeof vttCollabSession.syncSnapshot === 'function') {
-                Promise.resolve(vttCollabSession.syncSnapshot(nextSnapshot, { reason: 'store-authoritative' })).catch((err) => {
-                    console.warn('VTT collaboration store-sync failed', err);
-                });
+            if (syncRosterLinkedPlayerPresentation(vttState)) {
+                normalizeSelections();
+                render();
             }
             return;
         }
+        if (isVTTCollabReady()) {
+            const synced = ensureRosterLinkedPlayerPresentationPersisted(
+                vttState || readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)),
+                { reason: 'roster-player-presentation-sync' }
+            );
+            if (synced.mutated) {
+                vttState = synced.snapshot;
+                normalizeSelections();
+                render();
+            }
+            return;
+        }
+        const nextSnapshot = ensureRosterLinkedPlayerPresentationPersisted(
+            readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)),
+            { reason: 'roster-player-presentation-sync' }
+        ).snapshot;
         queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
         vttState = nextSnapshot;
         normalizeSelections();
