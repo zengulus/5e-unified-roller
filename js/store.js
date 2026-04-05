@@ -8021,6 +8021,13 @@
             return entry.vtt;
         }
 
+        getVTTStateUpdatedAt(caseId = null) {
+            const entry = this.getCaseEntry(caseId, { createIfMissing: true });
+            if (!entry || !this.state || !this.state.meta || !this.state.meta.scopeUpdated) return 0;
+            const scope = `cases.${entry.id}.vtt`;
+            return Math.max(0, toNonNegativeInt(this.state.meta.scopeUpdated[scope], 0));
+        }
+
         getVTTLocalPrefsStorageKey() {
             return VTT_LOCAL_PREFS_KEY;
         }
@@ -8170,6 +8177,9 @@
             const clean = sanitizeVTTState(opts.payload);
             const entry = this.getCaseEntry(target.caseId, { createIfMissing: true });
             if (!entry) return false;
+
+            const current = sanitizeVTTState(entry.vtt);
+            if (stableStringify(current) === stableStringify(clean)) return false;
 
             entry.vtt = clean;
             const scopes = [`cases.${entry.id}.vtt`];

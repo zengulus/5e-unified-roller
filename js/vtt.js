@@ -1883,9 +1883,26 @@
         }
     });
 
-    const buildGuildlessToken = () => ({
+    const GUILDLESS_LABEL_PATTERN = /^guildless(?:\s+(\d+))?$/i;
+
+    const getNextGuildlessTokenNumber = (scene) => {
+        if (!scene || !Array.isArray(scene.tokens)) return 1;
+        let maxGuildlessNumber = 0;
+        scene.tokens.forEach((token) => {
+            const label = String(token && token.label || '').trim();
+            const match = label.match(GUILDLESS_LABEL_PATTERN);
+            if (!match) return;
+            const nextNumber = match[1] ? Math.max(1, Math.round(toNumber(match[1], 1))) : 1;
+            if (nextNumber > maxGuildlessNumber) maxGuildlessNumber = nextNumber;
+        });
+        return maxGuildlessNumber + 1;
+    };
+
+    const buildGuildlessTokenLabel = (scene = null) => `Guildless ${getNextGuildlessTokenNumber(scene)}`;
+
+    const buildGuildlessToken = (label = 'Guildless') => ({
         ...buildCustomToken(),
-        label: 'Guildless',
+        label,
         imageUrl: buildGuildlessImageUrl()
     });
 
@@ -1907,11 +1924,11 @@
     };
 
     const getSpawnDescriptorLabel = (kind, id = '') => {
+        if (kind === 'guildless') return buildGuildlessTokenLabel(getActiveScene(vttState));
         const source = findSpawnSource(kind, id);
         if (source && source.name) return String(source.name).trim() || 'Token';
         if (kind === 'player') return 'Player';
         if (kind === 'npc') return 'NPC';
-        if (kind === 'guildless') return 'Guildless';
         return 'Custom Token';
     };
 
@@ -1969,6 +1986,9 @@
             if (!sourceToken) return;
             const clonedToken = cloneTokenRecord(sourceToken);
             if (!clonedToken) return;
+            if (GUILDLESS_LABEL_PATTERN.test(String(sourceToken.label || '').trim())) {
+                clonedToken.label = buildGuildlessTokenLabel(scene);
+            }
             scene.tokens.push(clonedToken);
             clonedTokenId = clonedToken.id;
             selectedTokenId = clonedToken.id;
@@ -1994,6 +2014,9 @@
             const scene = getActiveScene(draft);
             if (!scene) return;
             const token = deepClone(nextToken);
+            if (kind === 'guildless') {
+                token.label = buildGuildlessTokenLabel(scene);
+            }
             if (worldPoint) {
                 positionTokenAtWorldPoint(token, scene, worldPoint);
             } else {
@@ -2419,9 +2442,10 @@
     const readSharedVTTSnapshot = (options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
         const shouldSyncRosterPresentation = opts.syncRosterPresentation !== false;
+        const useStoreOnly = !!opts.useStoreOnly;
         const store = getStore();
         if (!store) return null;
-        if (isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function') {
+        if (!useStoreOnly && isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function') {
             try {
                 const snapshot = deepClone(vttCollabSession.getSnapshot());
                 if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
@@ -2430,18 +2454,47 @@
                 console.warn('VTT collaboration snapshot read failed', err);
             }
         }
+        if (!useStoreOnly && vttCollabInitPromise && vttState) {
+            const snapshot = deepClone(vttState);
+            if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
+            return snapshot;
+        }
         const snapshot = deepClone(store.getVTTState(getActiveCaseId()));
         if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
         return snapshot;
     };
 
+    const isRelevantVTTStoreScope = (scope, caseId) => {
+        const cleanScope = String(scope || '').trim();
+        const cleanCaseId = String(caseId || '').trim();
+        if (!cleanScope || !cleanCaseId) return false;
+        return cleanScope === `cases.${cleanCaseId}.vtt`
+            || cleanScope.startsWith(`cases.${cleanCaseId}.vtt.`);
+    };
+
+    const shouldBridgeStoreUpdateToVTTCollab = (detail, caseId) => {
+        const meta = detail && typeof detail === 'object' ? detail : {};
+        const source = String(meta.source || '').trim().toLowerCase();
+        if (source === 'vtt-collab' || source === 'board-collab') return false;
+        const scopes = Array.isArray(meta.scopes) ? meta.scopes : [];
+        if (scopes.length) {
+            return scopes.some((scope) => isRelevantVTTStoreScope(scope, caseId));
+        }
+        return source === 'local' || source === 'remote' || source === 'storage' || !source;
+    };
+
     const ensureRosterLinkedPlayerPresentationPersisted = (snapshot, options = {}) => {
         if (!snapshot) return { snapshot, mutated: false };
         const opts = options && typeof options === 'object' ? options : {};
+        const baseSnapshot = opts.persist === false ? null : deepClone(snapshot);
         const mutated = syncRosterLinkedPlayerPresentation(snapshot);
         if (!mutated) return { snapshot, mutated: false };
         if (opts.persist === false) return { snapshot, mutated: true };
-        const saved = persistSharedVTTSnapshot(snapshot, { reason: opts.reason || 'roster-player-presentation-sync' });
+        const saved = persistSharedVTTSnapshot(snapshot, {
+            ...opts,
+            baseSnapshot,
+            reason: opts.reason || 'roster-player-presentation-sync'
+        });
         return {
             snapshot: deepClone(saved || snapshot),
             mutated: true
@@ -2465,8 +2518,12 @@
     const withDraft = (mutator, options = {}) => {
         const draft = readSharedVTTSnapshot();
         if (!draft) return;
+        const baseSnapshot = deepClone(draft);
         mutator(draft);
-        const saved = persistSharedVTTSnapshot(draft, options);
+        const saved = persistSharedVTTSnapshot(draft, {
+            ...options,
+            baseSnapshot
+        });
         vttState = deepClone(saved || draft);
         syncRosterLinkedPlayerPresentation(vttState);
         normalizeSelections();
@@ -3070,8 +3127,12 @@
 
     const applyPendingRemoteVTTSnapshot = () => {
         if (dragState || !pendingRemoteVTTSnapshot) return false;
-        queueRemoteTweensFromSnapshots(vttState, pendingRemoteVTTSnapshot);
-        const synced = ensureRosterLinkedPlayerPresentationPersisted(pendingRemoteVTTSnapshot, { reason: 'roster-player-presentation-sync' });
+        const sessionSnapshot = isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function'
+            ? vttCollabSession.getSnapshot()
+            : null;
+        const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : pendingRemoteVTTSnapshot;
+        queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
+        const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
         vttState = deepClone(synced.snapshot);
         pendingRemoteVTTSnapshot = null;
         normalizeSelections();
@@ -5476,6 +5537,7 @@
 
         const draft = readSharedVTTSnapshot();
         if (!draft) return;
+        const baseSnapshot = deepClone(draft);
         let mutated = false;
         const newlyProcessed = [];
 
@@ -5558,7 +5620,10 @@
         if (!draft.initiative.activeEntryId && draft.initiative.entries[0]) {
             draft.initiative.activeEntryId = draft.initiative.entries[0].id;
         }
-        const saved = persistSharedVTTSnapshot(draft, { reason: 'initiative-queue' });
+        const saved = persistSharedVTTSnapshot(draft, {
+            reason: 'initiative-queue',
+            baseSnapshot
+        });
         vttState = deepClone(saved || draft);
         syncRosterLinkedPlayerPresentation(vttState);
         markProcessedRollIds(newlyProcessed);
@@ -5566,9 +5631,10 @@
         render();
     };
 
-    const handleStoreUpdate = () => {
+    const handleStoreUpdate = (event) => {
         const store = getStore();
         if (!store) return;
+        const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
         const activeCaseId = getActiveCaseId();
         loadRolePreference();
         if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
@@ -5577,20 +5643,40 @@
             });
             return;
         }
-        if (dragState) {
-            if (syncRosterLinkedPlayerPresentation(vttState)) {
-                normalizeSelections();
-                render();
-            }
-            return;
-        }
         if (isVTTCollabReady()) {
+            if (shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId)
+                && typeof vttCollabSession.applySharedStoreSnapshot === 'function') {
+                const storeSnapshot = readSharedVTTSnapshot({
+                    syncRosterPresentation: false,
+                    useStoreOnly: true
+                }) || deepClone(store.getVTTState(activeCaseId));
+                const bridged = vttCollabSession.applySharedStoreSnapshot(storeSnapshot, {
+                    reason: detail.source === 'storage' || detail.source === 'remote'
+                        ? 'external-store'
+                        : 'shared-store'
+                });
+                if (bridged) return;
+            }
+            if (dragState) {
+                if (syncRosterLinkedPlayerPresentation(vttState)) {
+                    normalizeSelections();
+                    render();
+                }
+                return;
+            }
             const synced = ensureRosterLinkedPlayerPresentationPersisted(
                 vttState || readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)),
                 { reason: 'roster-player-presentation-sync' }
             );
             if (synced.mutated) {
                 vttState = synced.snapshot;
+                normalizeSelections();
+                render();
+            }
+            return;
+        }
+        if (dragState) {
+            if (syncRosterLinkedPlayerPresentation(vttState)) {
                 normalizeSelections();
                 render();
             }
