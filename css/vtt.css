@@ -920,8 +920,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 }
 
 .vtt-map-note {
-    --vtt-note-color: #ffd778;
-    --vtt-note-rgb: 255, 215, 120;
+    --vtt-note-color: #39b66b;
+    --vtt-note-rgb: 57, 182, 107;
     border: 1px solid rgba(var(--vtt-note-rgb), 0.34);
     border-radius: 0.95rem;
     background:
@@ -1050,7 +1050,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 }
 
 .vtt-map-note.is-icon-only:not(:focus-within):not(.is-selected) .vtt-map-note-title::before {
-    content: "!";
+    content: attr(data-note-category-short);
     font-size: 0.9rem;
     font-weight: 700;
     line-height: 1;

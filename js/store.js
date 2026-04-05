@@ -127,6 +127,22 @@
         connections: []
     };
     const DEFAULT_VTT_CELL_PX = 70;
+    const VTT_ZONE_CATEGORY_META = Object.freeze({
+        evidence: { label: 'Evidence', color: '#39b66b', defaultTitle: 'Evidence Zone' },
+        danger: { label: 'Danger', color: '#d85b5b', defaultTitle: 'Danger Zone' },
+        info: { label: 'Info', color: '#4f8dff', defaultTitle: 'Info Zone' },
+        objective: { label: 'Objective', color: '#f0b357', defaultTitle: 'Objective Zone' },
+        other: { label: 'Other', color: '#8f9aa8', defaultTitle: 'Zone' }
+    });
+    const DEFAULT_VTT_ZONE_CATEGORY = 'evidence';
+    const getVTTZoneCategoryMeta = (category) => {
+        const key = String(category || '').trim().toLowerCase();
+        return VTT_ZONE_CATEGORY_META[key] || VTT_ZONE_CATEGORY_META[DEFAULT_VTT_ZONE_CATEGORY];
+    };
+    const normalizeVTTZoneCategory = (value, fallback = DEFAULT_VTT_ZONE_CATEGORY) => {
+        const key = String(value || '').trim().toLowerCase();
+        return VTT_ZONE_CATEGORY_META[key] ? key : fallback;
+    };
     const VTT_TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
@@ -623,15 +639,14 @@
 
     const sanitizeVTTEvidenceNote = (note, idx = 0) => {
         const source = note && typeof note === 'object' ? note : {};
-        const rawHighlightColor = toTrimmedString(source.highlightColor, '#ffd778', 24).trim();
-        const highlightColor = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(rawHighlightColor)
-            ? (rawHighlightColor.length === 4
-                ? `#${rawHighlightColor.slice(1).split('').map((char) => char + char).join('')}`.toLowerCase()
-                : rawHighlightColor.toLowerCase())
-            : '#ffd778';
+        const category = normalizeVTTZoneCategory(source.category);
+        const categoryMeta = getVTTZoneCategoryMeta(category);
+        const highlightColor = categoryMeta.color;
+        const defaultTitle = categoryMeta.defaultTitle || 'Zone';
         return {
             id: toTrimmedString(source.id, `evidence_${idx + 1}`, 120).trim() || `evidence_${idx + 1}`,
-            title: toTrimmedString(source.title, `Evidence ${idx + 1}`, 160).trim() || `Evidence ${idx + 1}`,
+            category,
+            title: toTrimmedString(source.title, defaultTitle, 160).trim() || defaultTitle,
             body: toTrimmedString(source.body, '', 6000).trim(),
             x: Math.round(toNumber(source.x, 0)),
             y: Math.round(toNumber(source.y, 0)),

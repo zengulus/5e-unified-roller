@@ -32,7 +32,15 @@
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
     const DEFAULT_VTT_CELL_PX = 70;
-    const DEFAULT_EVIDENCE_NOTE_COLOR = '#ffd778';
+    const DEFAULT_EVIDENCE_NOTE_CATEGORY = 'evidence';
+    const DEFAULT_EVIDENCE_NOTE_COLOR = '#39b66b';
+    const EVIDENCE_NOTE_CATEGORY_META = Object.freeze({
+        evidence: { label: 'Evidence', shortLabel: 'E', color: '#39b66b', defaultTitle: 'Evidence Zone' },
+        danger: { label: 'Danger', shortLabel: '!', color: '#d85b5b', defaultTitle: 'Danger Zone' },
+        info: { label: 'Info', shortLabel: 'i', color: '#4f8dff', defaultTitle: 'Info Zone' },
+        objective: { label: 'Objective', shortLabel: 'O', color: '#f0b357', defaultTitle: 'Objective Zone' },
+        other: { label: 'Other', shortLabel: '?', color: '#8f9aa8', defaultTitle: 'Zone' }
+    });
     const TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
@@ -686,7 +694,19 @@
                 data-world-height="${escapeHtml(String(mask.h))}"></div>
         `;
     };
-    const normalizeEvidenceNoteTitle = (value, fallback = 'Evidence Note') => {
+    const getEvidenceNoteCategoryConfig = (category) => {
+        const key = String(category || '').trim().toLowerCase();
+        return EVIDENCE_NOTE_CATEGORY_META[key] || EVIDENCE_NOTE_CATEGORY_META[DEFAULT_EVIDENCE_NOTE_CATEGORY];
+    };
+    const normalizeEvidenceNoteCategory = (value, fallback = DEFAULT_EVIDENCE_NOTE_CATEGORY) => {
+        const key = String(value || '').trim().toLowerCase();
+        return EVIDENCE_NOTE_CATEGORY_META[key] ? key : fallback;
+    };
+    const getEvidenceNoteCategoryLabel = (category) => getEvidenceNoteCategoryConfig(category).label;
+    const getEvidenceNoteCategoryShortLabel = (category) => getEvidenceNoteCategoryConfig(category).shortLabel;
+    const getDefaultEvidenceNoteTitle = (category = DEFAULT_EVIDENCE_NOTE_CATEGORY) => getEvidenceNoteCategoryConfig(category).defaultTitle || 'Zone';
+    const getDefaultEvidenceNoteHighlightColor = (category = DEFAULT_EVIDENCE_NOTE_CATEGORY) => getEvidenceNoteCategoryConfig(category).color || DEFAULT_EVIDENCE_NOTE_COLOR;
+    const normalizeEvidenceNoteTitle = (value, fallback = getDefaultEvidenceNoteTitle()) => {
         const clean = String(value || '').trim().slice(0, 160);
         return clean || fallback;
     };
@@ -695,17 +715,12 @@
     const EVIDENCE_NOTE_CHIP_ESTIMATED_CHAR_WIDTH_PX = 6.8;
     const EVIDENCE_NOTE_CHIP_ESTIMATED_PADDING_PX = 22;
     const normalizeEvidenceNoteBody = (value) => String(value || '').trim().slice(0, 6000);
-    const normalizeEvidenceNoteHighlightColor = (value, fallback = DEFAULT_EVIDENCE_NOTE_COLOR) => {
-        const raw = String(value || fallback || DEFAULT_EVIDENCE_NOTE_COLOR).trim();
-        const match = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-        if (!match) return DEFAULT_EVIDENCE_NOTE_COLOR;
-        if (raw.length === 4) {
-            return `#${raw.slice(1).split('').map((char) => char + char).join('')}`.toLowerCase();
-        }
-        return raw.toLowerCase();
+    const getEvidenceNoteHighlightColor = (note) => {
+        const category = normalizeEvidenceNoteCategory(note && note.category);
+        return getDefaultEvidenceNoteHighlightColor(category);
     };
     const getEvidenceNoteHighlightRgb = (note) => {
-        const hex = normalizeEvidenceNoteHighlightColor(note && note.highlightColor);
+        const hex = getEvidenceNoteHighlightColor(note);
         const clean = hex.slice(1);
         const normalized = clean.length === 3
             ? clean.split('').map((char) => char + char).join('')
@@ -714,22 +729,29 @@
         if (!Number.isFinite(value)) return '255, 215, 120';
         return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
     };
+    const getEvidenceNoteDisplayTitle = (note) => {
+        const category = normalizeEvidenceNoteCategory(note && note.category);
+        return normalizeEvidenceNoteTitle(note && note.title, getDefaultEvidenceNoteTitle(category));
+    };
     const getSceneEvidenceNotes = (scene) => (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes : []);
     const buildEvidenceNoteFromCellBounds = (scene, bounds, source = {}) => {
         if (!scene || !bounds) return null;
         const cellPx = getSceneCellPx(scene);
         const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
         const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const category = normalizeEvidenceNoteCategory(source.category);
+        const defaultTitle = getDefaultEvidenceNoteTitle(category);
         const left = Math.round(toNumber(bounds.left, 0));
         const top = Math.round(toNumber(bounds.top, 0));
         const widthCells = Math.max(1, Math.round(toNumber(bounds.widthCells, 1)));
         const heightCells = Math.max(1, Math.round(toNumber(bounds.heightCells, 1)));
         return {
             id: String(source.id || buildId('evidence')).trim() || buildId('evidence'),
-            title: normalizeEvidenceNoteTitle(source.title, 'Evidence Note'),
+            category,
+            title: normalizeEvidenceNoteTitle(source.title, defaultTitle),
             body: normalizeEvidenceNoteBody(source.body),
             hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
-            highlightColor: normalizeEvidenceNoteHighlightColor(source.highlightColor),
+            highlightColor: getDefaultEvidenceNoteHighlightColor(category),
             x: Math.round(offsetX + left * cellPx),
             y: Math.round(offsetY + top * cellPx),
             w: Math.max(1, Math.round(widthCells * cellPx)),
@@ -822,7 +844,10 @@
         if (!(noteEl instanceof HTMLElement)) return;
         const titleEl = noteEl.querySelector('.vtt-map-note-title');
         if (!(titleEl instanceof HTMLElement)) return;
-        const fullTitle = normalizeEvidenceNoteTitle(noteEl.dataset.noteTitle, 'Evidence Note');
+        const fullTitle = normalizeEvidenceNoteTitle(
+            noteEl.dataset.noteTitle,
+            getDefaultEvidenceNoteTitle(noteEl.dataset.noteCategory)
+        );
         const noteWidthPx = Math.max(1, Math.round(noteEl.offsetWidth || toNumber(noteEl.dataset.worldWidth, 1) * localView.zoom));
         const availableWidthPx = clamp(noteWidthPx - 14, EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX, EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX);
         const estimatedTitleWidthPx = Math.max(
@@ -833,6 +858,7 @@
         noteEl.classList.toggle('is-icon-only', collapsed);
         noteEl.style.setProperty('--vtt-note-chip-max-width', `${collapsed ? EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX : availableWidthPx}px`);
         titleEl.textContent = fullTitle;
+        titleEl.dataset.noteCategoryShort = getEvidenceNoteCategoryShortLabel(noteEl.dataset.noteCategory);
         titleEl.setAttribute('aria-label', fullTitle);
         titleEl.title = fullTitle;
     };
@@ -1345,7 +1371,7 @@
         if (toolSizeInputEl) {
             const dragAreaModeActive = localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE || localToolState.mode === TOOL_MODE_NOTE;
             toolSizeInputEl.disabled = dragAreaModeActive;
-            toolSizeInputEl.title = dragAreaModeActive ? 'Fog and Evidence tools use drag area selection on the scene grid.' : '';
+            toolSizeInputEl.title = dragAreaModeActive ? 'Fog and Zone tools use drag area selection on the scene grid.' : '';
         }
         if (stealthModeToggleEl) {
             const scene = getActiveScene();
@@ -3443,8 +3469,8 @@
                     <span class="vtt-token-spawn-meta">Spawn here</span>
                 </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note">
-                    <span class="vtt-token-spawn-name">Evidence Note</span>
-                    <span class="vtt-token-spawn-meta">Create a 1x1 note here and open it</span>
+                    <span class="vtt-token-spawn-name">Zone Indicator</span>
+                    <span class="vtt-token-spawn-meta">Create a 1x1 zone here and open it</span>
                 </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-open-npc-search">
                     <span class="vtt-token-spawn-name">NPC Search Here</span>
@@ -3488,7 +3514,7 @@
     const describeScene = (scene) => {
         const tokenCount = scene && Array.isArray(scene.tokens) ? scene.tokens.length : 0;
         const evidenceNoteCount = scene && Array.isArray(scene.evidenceNotes) ? scene.evidenceNotes.length : 0;
-        return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'} - ${evidenceNoteCount} note${evidenceNoteCount === 1 ? '' : 's'}`;
+        return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'} - ${evidenceNoteCount} zone${evidenceNoteCount === 1 ? '' : 's'}`;
     };
 
     const renderSceneList = () => {
@@ -3670,17 +3696,22 @@
             widthCells: 1,
             heightCells: 1
         };
+        const category = normalizeEvidenceNoteCategory(note && note.category);
         return `
             <div class="vtt-inspector-stack">
                 <label class="vtt-field">
                     <span>Title</span>
-                    <input class="vtt-inspector-input" type="text" data-note-field="title" value="${escapeHtml(note.title || 'Evidence Note')}">
-                </label>
-                <label class="vtt-field">
-                    <span>Details</span>
-                    <textarea class="vtt-inspector-textarea" data-note-field="body" placeholder="What was found here?">${escapeHtml(note.body || '')}</textarea>
+                    <input class="vtt-inspector-input" type="text" data-note-field="title" value="${escapeHtml(getEvidenceNoteDisplayTitle(note))}">
                 </label>
                 <div class="vtt-inspector-grid">
+                    <label class="vtt-field">
+                        <span>Category</span>
+                        <select class="vtt-inspector-select" data-note-field="category">
+                            ${Object.entries(EVIDENCE_NOTE_CATEGORY_META).map(([value, meta]) => `
+                                <option value="${escapeHtml(value)}"${category === value ? ' selected' : ''}>${escapeHtml(meta.label)}</option>
+                            `).join('')}
+                        </select>
+                    </label>
                     <label class="vtt-field">
                         <span>Grid X</span>
                         <input class="vtt-inspector-input" type="number" data-note-field="gridX" value="${escapeHtml(String(bounds.left))}">
@@ -3697,23 +3728,23 @@
                         <span>Cells High</span>
                         <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsHigh" value="${escapeHtml(String(bounds.heightCells))}">
                     </label>
-                    <label class="vtt-field">
-                        <span>Highlight Color</span>
-                        <input class="vtt-inspector-input" type="color" data-note-field="highlightColor" value="${escapeHtml(normalizeEvidenceNoteHighlightColor(note.highlightColor))}">
-                    </label>
                 </div>
+                <label class="vtt-field">
+                    <span>Details</span>
+                    <textarea class="vtt-inspector-textarea" data-note-field="body" placeholder="What should this zone communicate?">${escapeHtml(note.body || '')}</textarea>
+                </label>
                 <label class="vtt-inspector-check">
                     <input type="checkbox" data-note-field="hidden"${note.hidden ? ' checked' : ''}>
                     <span>Hidden In Player Mode</span>
                 </label>
                 <div class="vtt-detail-note">
                     ${note.hidden
-                        ? 'Hidden notes stay DM-only until you reveal them.'
-                        : 'Revealed notes still stay hidden from players while their tagged area is fully covered by fog.'}
+                        ? 'DM-only zones stay hidden until you reveal them.'
+                        : 'Revealed zones still stay hidden from players while their tagged area is fully covered by fog.'}
                 </div>
                 <div class="vtt-inspector-actions">
                     <button class="vtt-inline-btn" data-action="toggle-evidence-hidden-quick" data-id="${escapeHtml(String(note.id || ''))}">${note.hidden ? 'Reveal To Players' : 'Hide From Players'}</button>
-                    <button class="vtt-inline-btn danger" data-action="delete-evidence-note" data-id="${escapeHtml(String(note.id || ''))}">Delete Note</button>
+                    <button class="vtt-inline-btn danger" data-action="delete-evidence-note" data-id="${escapeHtml(String(note.id || ''))}">Delete Zone</button>
                 </div>
             </div>
         `;
@@ -3721,11 +3752,12 @@
 
     const buildEvidenceNoteViewerContent = (note, scene) => `
         <div class="vtt-inspector-stack">
-            <div class="vtt-subhead">Evidence Note</div>
+            <div class="vtt-subhead">Zone Indicator</div>
             <div class="vtt-chip-row">
+                <span class="vtt-panel-pill">${escapeHtml(getEvidenceNoteCategoryLabel(note && note.category))}</span>
                 <span class="vtt-panel-pill">${escapeHtml(buildEvidenceNoteAreaLabel(note, scene))}</span>
             </div>
-            <div class="vtt-note-view-body">${escapeHtml(note && note.body ? note.body : 'No details shared yet.')}</div>
+            <div class="vtt-note-view-body">${escapeHtml(note && note.body ? note.body : 'No zone details shared yet.')}</div>
         </div>
     `;
 
@@ -3736,15 +3768,15 @@
         if (!selectionPillEl || !tokenInspectorEl) return;
         if (!isDM() && token && token.hidden) {
             selectionPillEl.textContent = 'No Selection';
-            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token or evidence note on the map to inspect it.</div>';
+            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token or zone on the map to inspect it.</div>';
             return;
         }
         if (note && !token) {
-            selectionPillEl.textContent = note.title || 'Evidence Note';
+            selectionPillEl.textContent = getEvidenceNoteDisplayTitle(note);
             tokenInspectorEl.innerHTML = isDM() && tokenInspectorState && tokenInspectorState.kind === 'note' && tokenInspectorState.targetId === note.id
                 ? `
                     <div class="vtt-inspector-stack">
-                        <div class="vtt-detail-note">Editing ${escapeHtml(note.title || 'Evidence Note')} in the floating inspector. Right-click another evidence note to move it, or press Escape to close it.</div>
+                        <div class="vtt-detail-note">Editing ${escapeHtml(getEvidenceNoteDisplayTitle(note))} in the floating inspector. Right-click another zone to move it, or press Escape to close it.</div>
                     </div>
                 `
                 : (isDM()
@@ -3755,8 +3787,8 @@
         selectionPillEl.textContent = token ? token.label : 'No Selection';
         if (!token) {
             tokenInspectorEl.innerHTML = isDM()
-                ? '<div class="vtt-empty">Right-click a token or evidence note to edit it near your cursor, or click an evidence note to edit the tagged map area here.</div>'
-                : '<div class="vtt-empty">Select a token or evidence note on the map to inspect it.</div>';
+                ? '<div class="vtt-empty">Right-click a token or zone to edit it near your cursor, or click a zone to edit the tagged map area here.</div>'
+                : '<div class="vtt-empty">Select a token or zone on the map to inspect it.</div>';
             return;
         }
 
@@ -3813,10 +3845,10 @@
         tokenInspectorPopoverEl.innerHTML = activePopoverKind === 'note'
             ? `
                 <div class="vtt-panel-head vtt-popover-head">
-                    <h2>Evidence Note</h2>
+                    <h2>Zone Indicator</h2>
                     <div class="vtt-panel-head-actions">
-                        <span class="vtt-panel-pill">${escapeHtml(note && note.title ? note.title : 'Evidence Note')}</span>
-                        <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close evidence note inspector">X</button>
+                        <span class="vtt-panel-pill">${escapeHtml(note ? getEvidenceNoteDisplayTitle(note) : getDefaultEvidenceNoteTitle())}</span>
+                        <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close zone inspector">X</button>
                     </div>
                 </div>
                 ${buildDMEvidenceNoteInspectorContent(note, scene)}
@@ -4114,23 +4146,28 @@
         if (preview) classes.push('is-preview');
         if (selected) classes.push('is-selected');
         if (note.hidden) classes.push('is-hidden');
+        const category = normalizeEvidenceNoteCategory(note.category);
+        const categoryLabel = getEvidenceNoteCategoryLabel(category);
+        const displayTitle = getEvidenceNoteDisplayTitle(note);
         const description = String(note && note.body || '').trim();
         const areaLabel = buildEvidenceNoteAreaLabel(note, scene);
-        const highlightColor = normalizeEvidenceNoteHighlightColor(note.highlightColor);
+        const highlightColor = getEvidenceNoteHighlightColor(note);
         const highlightRgb = getEvidenceNoteHighlightRgb(note);
+        const kicker = note.hidden ? `DM Only · ${categoryLabel}` : categoryLabel;
         return `
             <div class="${classes.join(' ')}"
                 data-note-id="${escapeHtml(String(note.id || ''))}"
-                data-note-title="${escapeHtml(note.title || 'Evidence Note')}"
+                data-note-category="${escapeHtml(category)}"
+                data-note-title="${escapeHtml(displayTitle)}"
                 data-world-left="${escapeHtml(String(note.x || 0))}"
                 data-world-top="${escapeHtml(String(note.y || 0))}"
                 data-world-width="${escapeHtml(String(note.w || 1))}"
                 data-world-height="${escapeHtml(String(note.h || 1))}"
                 style="--vtt-note-color:${escapeHtml(highlightColor)};--vtt-note-rgb:${escapeHtml(highlightRgb)};">
                 <div class="vtt-map-note-chip">
-                    <span class="vtt-map-note-kicker">${escapeHtml(note.hidden ? 'Hidden' : 'Evidence')}</span>
-                    <strong class="vtt-map-note-title">${escapeHtml(note.title || 'Evidence Note')}</strong>
-                    <span class="vtt-map-note-body">${escapeHtml(description || 'No details shared yet.')}</span>
+                    <span class="vtt-map-note-kicker">${escapeHtml(kicker)}</span>
+                    <strong class="vtt-map-note-title" data-note-category-short="${escapeHtml(getEvidenceNoteCategoryShortLabel(category))}">${escapeHtml(displayTitle)}</strong>
+                    <span class="vtt-map-note-body">${escapeHtml(description || 'No zone details shared yet.')}</span>
                     <span class="vtt-map-note-meta">${escapeHtml(areaLabel)}</span>
                 </div>
             </div>
@@ -4281,14 +4318,14 @@
                 : (localToolState.mode === TOOL_MODE_CONE
                     ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
                     : (localToolState.mode === TOOL_MODE_NOTE
-                        ? 'Evidence tool active: drag a rectangle on the map to pin an evidence note to that area. Notes can be shared to players or kept DM-only.'
+                        ? 'Zone tool active: drag a rectangle on the map to pin a category-coded zone to that area. Zones can be shared to players or kept DM-only.'
                     : (localToolState.mode === TOOL_MODE_FOG
                         ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tokens under fog are hidden from players.'
                         : (localToolState.mode === TOOL_MODE_FOG_REMOVE
                             ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
                     : (isDM()
                         ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
-                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click evidence notes to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))));
+                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
@@ -5362,16 +5399,24 @@
                     note.hidden = target.checked;
                     return;
                 }
+                if (field === 'category' && target instanceof HTMLSelectElement) {
+                    const previousCategory = normalizeEvidenceNoteCategory(note.category);
+                    const nextCategory = normalizeEvidenceNoteCategory(target.value, previousCategory);
+                    const previousDefaultTitle = getDefaultEvidenceNoteTitle(previousCategory);
+                    const currentTitle = getEvidenceNoteDisplayTitle(note);
+                    note.category = nextCategory;
+                    if (!String(note.title || '').trim() || currentTitle === previousDefaultTitle) {
+                        note.title = getDefaultEvidenceNoteTitle(nextCategory);
+                    }
+                    note.highlightColor = getDefaultEvidenceNoteHighlightColor(nextCategory);
+                    return;
+                }
                 if (field === 'title') {
-                    note.title = normalizeEvidenceNoteTitle(target.value, 'Evidence Note');
+                    note.title = normalizeEvidenceNoteTitle(target.value, getDefaultEvidenceNoteTitle(note && note.category));
                     return;
                 }
                 if (field === 'body' && target instanceof HTMLTextAreaElement) {
                     note.body = normalizeEvidenceNoteBody(target.value);
-                    return;
-                }
-                if (field === 'highlightColor' && target instanceof HTMLInputElement) {
-                    note.highlightColor = normalizeEvidenceNoteHighlightColor(target.value);
                     return;
                 }
                 const bounds = getEvidenceNoteCellBounds(scene, note) || {
