@@ -1688,6 +1688,14 @@ class VTTCollabSession {
         this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
     }
 
+    broadcastFullSyncUpdate() {
+        if (this.destroyed || !this.connected) return;
+        const fullState = Y.encodeStateAsUpdate(this.doc);
+        const encoder = encoding.createEncoder();
+        syncProtocol.writeUpdate(encoder, fullState);
+        this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+    }
+
     handleSyncMessage(encoded) {
         let update;
         try {
@@ -2031,6 +2039,7 @@ class VTTCollabSession {
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
         if (options && options.flushNow) {
+            this.broadcastFullSyncUpdate();
             return this.flushSnapshotNow();
         }
         return Promise.resolve({ ok: true, changes: applied });
