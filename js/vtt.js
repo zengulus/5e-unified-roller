@@ -1071,6 +1071,12 @@
             : '';
     };
     const isVTTCollabReady = () => !!(vttCollabSession && typeof vttCollabSession.isActive === 'function' && vttCollabSession.isActive());
+    const getVTTCollabStatus = () => (
+        vttCollabSession && typeof vttCollabSession.getStatus === 'function'
+            ? vttCollabSession.getStatus()
+            : null
+    );
+    const isVTTCollabConnected = () => !!(getVTTCollabStatus() && getVTTCollabStatus().connected);
     const isDM = () => localRole === 'dm';
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
         npcSearchOpen = false;
@@ -3162,6 +3168,8 @@
             vttState = deepClone(synced.snapshot);
             normalizeSelections();
             renderStage();
+            positionTokenInspectorPopover();
+            positionInitiativeDetail();
             return;
         }
         if (!vttState) return;
@@ -3193,6 +3201,8 @@
         });
         normalizeSelections();
         renderStage();
+        positionTokenInspectorPopover();
+        positionInitiativeDetail();
     };
 
     const initVTTCollab = async () => {
@@ -4112,7 +4122,7 @@
     };
 
     const buildVisionConeHandleMarkup = (token, scene, sceneSize = worldSize, now = Date.now()) => {
-        if (selectedTokenId !== token.id || !canRoleMoveToken(token)) return '';
+        if (!isDM() || selectedTokenId !== token.id) return '';
         const renderedToken = getRenderableVisionToken(token, scene, now);
         const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
         if (!geometry) return '';
@@ -5645,7 +5655,12 @@
             return;
         }
         if (isVTTCollabReady()) {
-            if (shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId)
+            const isExternalSource = ['remote', 'storage', 'realtime'].includes(String(detail.source || '').trim().toLowerCase());
+            const scopedUpdate = Array.isArray(detail.scopes) ? detail.scopes : [];
+            const externalScopeMatchesActiveVTT = !scopedUpdate.length
+                || scopedUpdate.some((scope) => isRelevantVTTStoreScope(scope, activeCaseId));
+            const shouldRecoverExternalStoreSnapshot = isExternalSource && !isVTTCollabConnected() && externalScopeMatchesActiveVTT;
+            if ((shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId) || shouldRecoverExternalStoreSnapshot)
                 && typeof vttCollabSession.applySharedStoreSnapshot === 'function') {
                 const storeSnapshot = readSharedVTTSnapshot({
                     syncRosterPresentation: false,
@@ -5658,7 +5673,9 @@
                         : 0,
                     reason: detail.source === 'storage' || detail.source === 'remote'
                         ? 'external-store'
-                        : 'shared-store'
+                        : 'shared-store',
+                    allowExternal: shouldRecoverExternalStoreSnapshot,
+                    origin: shouldRecoverExternalStoreSnapshot ? 'remote-restore' : ''
                 });
                 if (bridged) return;
             }
@@ -5744,7 +5761,7 @@
         if (visionRotateHandleEl) {
             const tokenId = String(visionRotateHandleEl.getAttribute('data-token-id') || '').trim();
             const token = getTokenById(tokenId);
-            if (!token || !canRoleMoveToken(token, localRole)) return;
+            if (!isDM() || !token) return;
             selectedTokenId = token.id;
             selectedTemplateId = '';
             selectedEvidenceNoteId = '';
@@ -6066,7 +6083,7 @@
         if (visionConeRotateState) {
             const scene = getActiveScene();
             const token = getTokenById(visionConeRotateState.tokenId);
-            if (!scene || !token || !canRoleMoveToken(token, localRole)) {
+            if (!isDM() || !scene || !token) {
                 visionConeRotateState = null;
                 renderStage();
                 return;
@@ -6216,6 +6233,7 @@
             const pendingRotation = { ...visionConeRotateState };
             visionConeRotateState = null;
             withDraft((draft) => {
+                if (!isDM()) return;
                 const scene = getActiveScene(draft);
                 if (!scene || !Array.isArray(scene.tokens)) return;
                 const token = scene.tokens.find((entry) => entry && entry.id === pendingRotation.tokenId);

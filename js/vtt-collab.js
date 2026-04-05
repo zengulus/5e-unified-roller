@@ -1814,6 +1814,7 @@ class VTTCollabSession {
             const shouldQueueCloudFlush = !origin
                 || origin === this.originLocalSnapshot
                 || origin === this.originPosition
+                || origin === this.originRemoteRestore
                 || origin === this.originSharedStore
                 || origin === this.originManualFlush;
             if (shouldQueueCloudFlush) {
@@ -2018,7 +2019,8 @@ class VTTCollabSession {
     applySharedStoreSnapshot(payload, options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
         const source = toTrimmedString(opts.source, '', 40).trim().toLowerCase();
-        if ((source === 'remote' || source === 'storage' || source === 'realtime') && !opts.force) {
+        const allowExternal = !!opts.allowExternal;
+        if ((source === 'remote' || source === 'storage' || source === 'realtime') && !allowExternal && !opts.force) {
             return false;
         }
         const next = this.coerceSnapshot(payload);
@@ -2033,11 +2035,14 @@ class VTTCollabSession {
             return false;
         }
         if (nextSig) this.lastSharedStoreSignature = nextSig;
+        const applyOrigin = opts.origin === 'remote-restore'
+            ? this.originRemoteRestore
+            : this.originSharedStore;
         applySnapshotToDoc(
             this.doc,
             next,
             this.coerceSnapshot.bind(this),
-            this.originSharedStore,
+            applyOrigin,
             Math.max(Date.now(), scopeUpdatedAt || this.getSharedStoreUpdatedAt())
         );
         if (opts.flushNow) {
