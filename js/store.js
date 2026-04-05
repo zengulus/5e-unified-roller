@@ -148,6 +148,7 @@
     const MAX_VTT_MAP_SCALE = 4;
     function createDefaultVTTState() {
         return {
+            updatedAt: 0,
             activeSceneId: 'scene_1',
             scenes: [
                 {
@@ -758,6 +759,7 @@
             : [];
         const activeEntryIdRaw = toTrimmedString(source.initiative && source.initiative.activeEntryId, '', 120).trim();
         return {
+            updatedAt: Math.max(0, toNonNegativeInt(source.updatedAt, base.updatedAt)),
             activeSceneId: scenes.some((scene) => scene.id === activeSceneIdRaw) ? activeSceneIdRaw : scenes[0].id,
             scenes,
             initiative: {
@@ -5059,7 +5061,10 @@
                     roomId: String(result.data.room_id || target.roomId),
                     scope: 'case',
                     caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId,
-                    payload: sanitizeVTTState(result.data.payload),
+                    payload: sanitizeVTTState({
+                        ...(result.data.payload && typeof result.data.payload === 'object' ? result.data.payload : {}),
+                        updatedAt: Date.parse(result.data.updated_at || '') || toNonNegativeInt(result.data.revision, 0)
+                    }),
                     revision: toNonNegativeInt(result.data.revision, 0),
                     updatedAt: toIsoString(result.data.updated_at, ''),
                     updatedBy: toTrimmedString(result.data.updated_by, '', 120),
@@ -5068,54 +5073,60 @@
             };
         }
 
-	        async saveVTTRoomSnapshot(options = {}) {
-	            const opts = options && typeof options === 'object' ? options : {};
-	            const target = this.resolveVTTRoomTarget(opts);
-	            const ensured = await this.ensureRealtimeCollabClient();
-	            if (!ensured.ok) return ensured;
+        async saveVTTRoomSnapshot(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const target = this.resolveVTTRoomTarget(opts);
+            const ensured = await this.ensureRealtimeCollabClient();
+            if (!ensured.ok) return ensured;
 
-            const payload = sanitizeVTTState(opts.payload);
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
-	            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
-	            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
-	            const createOnly = !!opts.createOnly;
-	            const readCurrentRow = () => ensured.client
-	                .from(tableName)
-	                .select(selectCols)
-	                .eq('campaign_id', ensured.config.campaignId)
-	                .eq('room_id', target.roomId)
-	                .maybeSingle();
-	            const buildSnapshotFromRow = (data) => ({
-	                roomId: String(data && data.room_id || target.roomId),
-	                scope: 'case',
-	                caseId: data && data.case_id ? sanitizeCaseId(data.case_id, target.caseId || 'case_primary') : target.caseId,
-	                payload: sanitizeVTTState(data && data.payload),
-	                revision: toNonNegativeInt(data && data.revision, 0),
-	                updatedAt: toIsoString(data && data.updated_at, ''),
-	                updatedBy: toTrimmedString(data && data.updated_by, '', 120),
-	                updatedByName: toTrimmedString(data && data.updated_by_name, '', 120)
-	            });
-	            const buildStaleResult = (data, fallbackError = 'A newer live VTT snapshot already exists.') => {
-	                const snapshot = buildSnapshotFromRow(data);
-	                return {
-	                    ok: false,
-	                    reason: 'stale',
-	                    error: fallbackError,
-	                    roomId: target.roomId,
-	                    scope: target.scope,
-	                    caseId: target.caseId,
-	                    revision: snapshot.revision,
-	                    updatedAt: snapshot.updatedAt,
-	                    updatedBy: snapshot.updatedBy,
-	                    updatedByName: snapshot.updatedByName,
-	                    snapshot
-	                };
-	            };
+            const payload = sanitizeVTTState({
+                ...(opts.payload && typeof opts.payload === 'object' ? opts.payload : {}),
+                updatedAt: Date.parse(updatedAt) || revision
+            });
+            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
+            const createOnly = !!opts.createOnly;
+            const readCurrentRow = () => ensured.client
+                .from(tableName)
+                .select(selectCols)
+                .eq('campaign_id', ensured.config.campaignId)
+                .eq('room_id', target.roomId)
+                .maybeSingle();
+            const buildSnapshotFromRow = (data) => ({
+                roomId: String(data && data.room_id || target.roomId),
+                scope: 'case',
+                caseId: data && data.case_id ? sanitizeCaseId(data.case_id, target.caseId || 'case_primary') : target.caseId,
+                payload: sanitizeVTTState({
+                    ...(data && data.payload && typeof data.payload === 'object' ? data.payload : {}),
+                    updatedAt: Date.parse(data && data.updated_at || '') || toNonNegativeInt(data && data.revision, 0)
+                }),
+                revision: toNonNegativeInt(data && data.revision, 0),
+                updatedAt: toIsoString(data && data.updated_at, ''),
+                updatedBy: toTrimmedString(data && data.updated_by, '', 120),
+                updatedByName: toTrimmedString(data && data.updated_by_name, '', 120)
+            });
+            const buildStaleResult = (data, fallbackError = 'A newer live VTT snapshot already exists.') => {
+                const snapshot = buildSnapshotFromRow(data);
+                return {
+                    ok: false,
+                    reason: 'stale',
+                    error: fallbackError,
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId,
+                    revision: snapshot.revision,
+                    updatedAt: snapshot.updatedAt,
+                    updatedBy: snapshot.updatedBy,
+                    updatedByName: snapshot.updatedByName,
+                    snapshot
+                };
+            };
 
-	            const row = {
-	                campaign_id: ensured.config.campaignId,
-	                room_id: target.roomId,
+            const row = {
+                campaign_id: ensured.config.campaignId,
+                room_id: target.roomId,
                 board_scope: target.scope,
                 case_id: target.caseId,
                 payload,
@@ -5128,114 +5139,114 @@
                 updated_by_name: Object.prototype.hasOwnProperty.call(opts, 'updatedByName')
                     ? (opts.updatedByName || null)
                     : (ensured.profileName || null)
-	            };
+            };
 
-	            if (!createOnly) {
-	                const existing = await readCurrentRow();
+            if (!createOnly) {
+                const existing = await readCurrentRow();
 
-	                if (existing.error) {
-	                    return {
-	                        ok: false,
+                if (existing.error) {
+                    return {
+                        ok: false,
                         reason: 'read-failed',
                         error: existing.error.message || `Failed reading ${tableName}.`
-	                    };
-	                }
+                    };
+                }
 
-	                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
-	                    return buildStaleResult(existing.data);
-	                }
-	                const writeQuery = existing.data
-	                    ? ensured.client
-	                        .from(tableName)
-	                        .update(row)
-	                        .eq('campaign_id', ensured.config.campaignId)
-	                        .eq('room_id', target.roomId)
-	                        .eq('revision', toNonNegativeInt(existing.data.revision, 0))
-	                        .select('revision,updated_at')
-	                        .maybeSingle()
-	                    : ensured.client
-	                        .from(tableName)
-	                        .insert(row)
-	                        .select('revision,updated_at')
-	                        .single();
-	                const result = await writeQuery;
+                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
+                    return buildStaleResult(existing.data);
+                }
+                const writeQuery = existing.data
+                    ? ensured.client
+                        .from(tableName)
+                        .update(row)
+                        .eq('campaign_id', ensured.config.campaignId)
+                        .eq('room_id', target.roomId)
+                        .eq('revision', toNonNegativeInt(existing.data.revision, 0))
+                        .select('revision,updated_at')
+                        .maybeSingle()
+                    : ensured.client
+                        .from(tableName)
+                        .insert(row)
+                        .select('revision,updated_at')
+                        .single();
+                const result = await writeQuery;
 
-	                if (result.error) {
-	                    if (!existing.data && result.error.code === '23505') {
-	                        const latest = await readCurrentRow();
-	                        if (latest.error) {
-	                            return {
-	                                ok: false,
-	                                reason: 'read-failed',
-	                                error: latest.error.message || `Failed reading ${tableName}.`
-	                            };
-	                        }
-	                        if (latest.data) return buildStaleResult(latest.data);
-	                    }
-	                    return {
-	                        ok: false,
-	                        reason: 'write-failed',
-	                        error: result.error.message || `Failed writing ${tableName}.`
-	                    };
-	                }
+                if (result.error) {
+                    if (!existing.data && result.error.code === '23505') {
+                        const latest = await readCurrentRow();
+                        if (latest.error) {
+                            return {
+                                ok: false,
+                                reason: 'read-failed',
+                                error: latest.error.message || `Failed reading ${tableName}.`
+                            };
+                        }
+                        if (latest.data) return buildStaleResult(latest.data);
+                    }
+                    return {
+                        ok: false,
+                        reason: 'write-failed',
+                        error: result.error.message || `Failed writing ${tableName}.`
+                    };
+                }
 
-	                if (existing.data && !result.data) {
-	                    const latest = await readCurrentRow();
-	                    if (latest.error) {
-	                        return {
-	                            ok: false,
-	                            reason: 'read-failed',
-	                            error: latest.error.message || `Failed reading ${tableName}.`
-	                        };
-	                    }
-	                    if (latest.data) return buildStaleResult(latest.data);
-	                    return {
-	                        ok: false,
-	                        reason: 'write-conflict',
-	                        error: 'Live VTT snapshot write conflicted with another update.'
-	                    };
-	                }
+                if (existing.data && !result.data) {
+                    const latest = await readCurrentRow();
+                    if (latest.error) {
+                        return {
+                            ok: false,
+                            reason: 'read-failed',
+                            error: latest.error.message || `Failed reading ${tableName}.`
+                        };
+                    }
+                    if (latest.data) return buildStaleResult(latest.data);
+                    return {
+                        ok: false,
+                        reason: 'write-conflict',
+                        error: 'Live VTT snapshot write conflicted with another update.'
+                    };
+                }
 
-	                return {
-	                    ok: true,
-	                    roomId: target.roomId,
-	                    scope: target.scope,
-	                    caseId: target.caseId,
-	                    revision: toNonNegativeInt(result.data && result.data.revision, revision),
-	                    updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
-	                };
-	            }
+                return {
+                    ok: true,
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId,
+                    revision: toNonNegativeInt(result.data && result.data.revision, revision),
+                    updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+                };
+            }
 
-	            const result = await ensured.client
-	                .from(tableName)
-	                .insert(row)
-	                .select('revision,updated_at')
-	                .single();
+            const result = await ensured.client
+                .from(tableName)
+                .insert(row)
+                .select('revision,updated_at')
+                .single();
 
-	            if (result.error) {
-	                if (createOnly && result.error.code === '23505') {
-	                    return {
-	                        ok: false,
-	                        reason: 'exists',
-	                        error: result.error.message || `${tableName} row already exists.`
-	                    };
-	                }
-	                return {
-	                    ok: false,
-	                    reason: 'write-failed',
-	                    error: result.error.message || `Failed writing ${tableName}.`
-	                };
-	            }
+            if (result.error) {
+                if (createOnly && result.error.code === '23505') {
+                    return {
+                        ok: false,
+                        reason: 'exists',
+                        error: result.error.message || `${tableName} row already exists.`
+                    };
+                }
+                return {
+                    ok: false,
+                    reason: 'write-failed',
+                    error: result.error.message || `Failed writing ${tableName}.`
+                };
+            }
 
-	            return {
-	                ok: true,
-	                roomId: target.roomId,
-	                scope: target.scope,
-	                caseId: target.caseId,
-	                revision: toNonNegativeInt(result.data && result.data.revision, revision),
-	                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
-	            };
-	        }
+            return {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                revision: toNonNegativeInt(result.data && result.data.revision, revision),
+                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
+            };
+        }
 
         async sendBoardRoomAdminEvent(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
@@ -8179,6 +8190,7 @@
 
             const opts = options && typeof options === 'object' ? options : {};
             const nextVTT = sanitizeVTTState(entry.vtt);
+            nextVTT.updatedAt = Math.max(0, toNonNegativeInt(opts.updatedAt, Date.now()) || Date.now());
             const nextEntry = sanitizeVTTInitiativeEntry(entryInput, nextVTT.initiative.entries.length);
             const entryScope = buildCaseVTTInitiativeEntryScope(entry.id, nextEntry);
             const targetScopeId = buildVTTInitiativeEntryScopeId(nextEntry);
@@ -8212,10 +8224,23 @@
             return entry.vtt;
         }
 
-        updateVTTState(vttState, caseId = null) {
+        updateVTTState(vttState, caseId = null, options = {}) {
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return sanitizeVTTState(null);
-            entry.vtt = sanitizeVTTState(vttState);
+            const opts = options && typeof options === 'object' ? options : {};
+            const nextUpdatedAt = Math.max(
+                0,
+                toNonNegativeInt(
+                    Object.prototype.hasOwnProperty.call(opts, 'updatedAt')
+                        ? opts.updatedAt
+                        : Date.now(),
+                    Date.now()
+                ) || Date.now()
+            );
+            entry.vtt = sanitizeVTTState({
+                ...(vttState && typeof vttState === 'object' ? vttState : {}),
+                updatedAt: nextUpdatedAt
+            });
             this.save({ scope: `cases.${entry.id}.vtt` });
             return entry.vtt;
         }

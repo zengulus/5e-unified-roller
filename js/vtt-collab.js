@@ -111,6 +111,7 @@ const decodeBase64 = (value) => {
 };
 
 const fallbackSnapshot = () => ({
+    updatedAt: 0,
     activeSceneId: 'scene_1',
     scenes: [
         {
@@ -143,7 +144,18 @@ const normalizeTokenCoordinate = (value, fallback = 0) => {
     return Math.max(0, Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION);
 };
 
-const buildSnapshotSignature = (snapshot, coerceSnapshot) => stableStringify(coerceSnapshot(snapshot));
+const getSnapshotUpdatedAt = (snapshot, coerceSnapshot = (value) => value) => {
+    const clean = coerceSnapshot(snapshot);
+    return Math.max(0, toNonNegativeInt(clean && clean.updatedAt, 0));
+};
+
+const buildSnapshotSignature = (snapshot, coerceSnapshot) => {
+    const clean = coerceSnapshot(snapshot);
+    if (!clean || typeof clean !== 'object') return stableStringify(clean);
+    const comparable = { ...clean };
+    delete comparable.updatedAt;
+    return stableStringify(comparable);
+};
 
 const hasVTTContent = (snapshot, coerceSnapshot) => (
     buildSnapshotSignature(snapshot, coerceSnapshot) !== buildSnapshotSignature(fallbackSnapshot(), coerceSnapshot)
@@ -985,6 +997,7 @@ const serializeDocSnapshot = (doc, coerceSnapshot) => {
         120
     ).trim() || (scenes[0] && scenes[0].id ? scenes[0].id : 'scene_1');
     return coerceSnapshot({
+        updatedAt: Math.max(0, toNonNegativeInt(metaMap.get('updatedAt'), 0)),
         activeSceneId,
         scenes,
         initiative: {
@@ -1872,7 +1885,9 @@ class VTTCollabSession {
         const snapshotSig = signature || buildSnapshotSignature(snapshot, this.coerceSnapshot.bind(this));
         if (!snapshotSig || snapshotSig === this.lastSharedStoreSignature) return false;
         try {
-            this.store.updateVTTState(snapshot, this.caseId);
+            this.store.updateVTTState(snapshot, this.caseId, {
+                updatedAt: getSnapshotUpdatedAt(snapshot, this.coerceSnapshot.bind(this)) || getDocUpdatedAt(this.doc) || Date.now()
+            });
             this.lastSharedStoreSignature = snapshotSig;
             return true;
         } catch (err) {
@@ -2019,10 +2034,6 @@ class VTTCollabSession {
     applySharedStoreSnapshot(payload, options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
         const source = toTrimmedString(opts.source, '', 40).trim().toLowerCase();
-        const allowExternal = !!opts.allowExternal;
-        if ((source === 'remote' || source === 'storage' || source === 'realtime') && !allowExternal && !opts.force) {
-            return false;
-        }
         const next = this.coerceSnapshot(payload);
         const nextSig = buildSnapshotSignature(next, this.coerceSnapshot.bind(this));
         const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this));
@@ -2031,7 +2042,17 @@ class VTTCollabSession {
         }
         const scopeUpdatedAt = Math.max(0, toNonNegativeInt(opts.scopeUpdatedAt, 0));
         const currentStamp = getDocUpdatedAt(this.doc);
-        if (!opts.force && scopeUpdatedAt && currentStamp && scopeUpdatedAt < currentStamp) {
+        const currentSnapshotUpdatedAt = Math.max(
+            getSnapshotUpdatedAt(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this)),
+            currentStamp
+        );
+        const nextSnapshotUpdatedAt = getSnapshotUpdatedAt(next, this.coerceSnapshot.bind(this));
+        const isExternalSource = source === 'remote' || source === 'storage' || source === 'realtime';
+        if (!opts.force && currentSnapshotUpdatedAt && !nextSnapshotUpdatedAt && isExternalSource) {
+            return false;
+        }
+        const incomingStamp = nextSnapshotUpdatedAt || (!currentSnapshotUpdatedAt ? scopeUpdatedAt : 0);
+        if (!opts.force && incomingStamp && currentSnapshotUpdatedAt && incomingStamp < currentSnapshotUpdatedAt) {
             return false;
         }
         if (nextSig) this.lastSharedStoreSignature = nextSig;
@@ -2043,7 +2064,7 @@ class VTTCollabSession {
             next,
             this.coerceSnapshot.bind(this),
             applyOrigin,
-            Math.max(Date.now(), scopeUpdatedAt || this.getSharedStoreUpdatedAt())
+            Math.max(Date.now(), nextSnapshotUpdatedAt || scopeUpdatedAt || this.getSharedStoreUpdatedAt())
         );
         if (opts.flushNow) {
             this.flushSnapshotNow().catch((err) => {

@@ -49,6 +49,7 @@
     const GUILDLESS_TOKEN_MIN = 1;
     const GUILDLESS_TOKEN_MAX = 300;
     const DEFAULT_VTT_STATE = {
+        updatedAt: 0,
         activeSceneId: 'scene_1',
         scenes: [
             {
@@ -1076,7 +1077,6 @@
             ? vttCollabSession.getStatus()
             : null
     );
-    const isVTTCollabConnected = () => !!(getVTTCollabStatus() && getVTTCollabStatus().connected);
     const isDM = () => localRole === 'dm';
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
         npcSearchOpen = false;
@@ -5659,8 +5659,8 @@
             const scopedUpdate = Array.isArray(detail.scopes) ? detail.scopes : [];
             const externalScopeMatchesActiveVTT = !scopedUpdate.length
                 || scopedUpdate.some((scope) => isRelevantVTTStoreScope(scope, activeCaseId));
-            const shouldRecoverExternalStoreSnapshot = isExternalSource && !isVTTCollabConnected() && externalScopeMatchesActiveVTT;
-            if ((shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId) || shouldRecoverExternalStoreSnapshot)
+            const shouldBridgeExternalStoreSnapshot = isExternalSource && externalScopeMatchesActiveVTT;
+            if ((shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId) || shouldBridgeExternalStoreSnapshot)
                 && typeof vttCollabSession.applySharedStoreSnapshot === 'function') {
                 const storeSnapshot = readSharedVTTSnapshot({
                     syncRosterPresentation: false,
@@ -5674,8 +5674,7 @@
                     reason: detail.source === 'storage' || detail.source === 'remote'
                         ? 'external-store'
                         : 'shared-store',
-                    allowExternal: shouldRecoverExternalStoreSnapshot,
-                    origin: shouldRecoverExternalStoreSnapshot ? 'remote-restore' : ''
+                    origin: shouldBridgeExternalStoreSnapshot ? 'remote-restore' : ''
                 });
                 if (bridged) return;
             }
