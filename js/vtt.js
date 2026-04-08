@@ -3353,15 +3353,6 @@
         vttCollabInitPromise = null;
         pendingRemoteVTTSnapshot = null;
 
-        const store = getStore();
-        if (store && typeof store.connectSync === 'function') {
-            try {
-                await store.connectSync();
-            } catch (err) {
-                console.warn('VTT collaboration retry sync connect failed', err);
-            }
-        }
-
         return initVTTCollab();
     };
 

@@ -425,14 +425,6 @@ async function retryBoardCollabConnection() {
     boardCollabInitPromise = null;
     pendingRemoteBoardSnapshot = null;
 
-    if (store && typeof store.connectSync === 'function') {
-        try {
-            await store.connectSync();
-        } catch (err) {
-            console.warn('Board collaboration retry sync connect failed', err);
-        }
-    }
-
     const session = await initBoardCollab();
     if (!session || (typeof session.isActive === 'function' && !session.isActive())) {
         const latestStatus = session && typeof session.getStatus === 'function'

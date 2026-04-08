@@ -2425,6 +2425,19 @@
         return sanitizeSyncConfig({ ...DEFAULT_SYNC_CONFIG, ...(boot || {}), ...(stored || {}) });
     };
 
+    const shouldAutoConnectOnThisPage = () => {
+        const body = global.document && global.document.body ? global.document.body : null;
+        return !!(body && body.dataset && body.dataset.syncAutoconnect === '1');
+    };
+
+    const isVTTPage = () => {
+        try {
+            return /\/vtt\.html$/i.test(String(global.location && global.location.pathname || ''));
+        } catch (err) {
+            return false;
+        }
+    };
+
     const coerceAutoConnectBackendMode = (config) => {
         const clean = sanitizeSyncConfig(config);
         if (!clean.enabled || !clean.autoConnect) {
@@ -2527,7 +2540,7 @@
             this.load();
             this.updateSyncStatus({});
 
-            if (this.sync.config.enabled && this.sync.config.autoConnect) {
+            if (this.sync.config.enabled && this.sync.config.autoConnect && shouldAutoConnectOnThisPage()) {
                 this.connectSync().catch((err) => {
                     this.updateSyncStatus({
                         mode: 'error',
@@ -8761,6 +8774,7 @@
         maybeHydrateVTTRoom(caseId = null) {
             const cfg = this.sync && this.sync.config ? this.sync.config : null;
             if (!cfg || !cfg.enabled || !cfg.supabaseUrl || !cfg.anonKey || !cfg.campaignId) return null;
+            if (isVTTPage()) return null;
             const target = this.resolveVTTRoomTarget({ caseId });
             const key = `vtt:${target.caseId}`;
             return this.queueRoomHydration(key, async () => {
