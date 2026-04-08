@@ -43,6 +43,14 @@
         if (!STORE_DEBUG) return;
         console.log(...args);
     };
+    const stableStringify = (value) => {
+        if (value === null || value === undefined) return '';
+        try {
+            return JSON.stringify(value);
+        } catch (err) {
+            return '';
+        }
+    };
     const isExternalStoreUpdateSource = (value) => value === 'remote' || value === 'storage';
     const getSharedSupabaseClientCache = () => {
         if (global[SHARED_SUPABASE_CLIENT_CACHE_KEY] instanceof Map) return global[SHARED_SUPABASE_CLIENT_CACHE_KEY];

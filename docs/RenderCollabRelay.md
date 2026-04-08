@@ -55,7 +55,23 @@ You will need:
 
 ### 3. Deploy the relay on Render
 
-Use [render-collab/render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) or create a Web Service manually:
+Create a **Render Web Service** for the relay.
+
+You have two valid ways to do that:
+
+#### Option A. Blueprint deploy
+
+Point Render at this repo and let [render-collab/render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) create the service.
+
+#### Option B. Manual service creation
+
+In Render, choose:
+
+- `New +`
+- `Web Service`
+- connect your GitHub repo
+
+Then set:
 
 - Root directory: `render-collab`
 - Build command: `npm install`
@@ -71,6 +87,8 @@ After deploy, Render will give you a URL like:
 Your app should use the websocket form of that URL:
 
 - `wss://your-render-service.onrender.com`
+
+Do **not** create a Static Site for the relay itself. The static site is your GitHub Pages app. In Render, the relay should be a Node **Web Service**.
 
 The relay listens on Render's provided `PORT`.
 

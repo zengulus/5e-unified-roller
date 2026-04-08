@@ -8,7 +8,12 @@ Tiny websocket relay for the hosted stack:
 
 ## Hosted Deployment
 
-Use [render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) to create a Render Web Service from this repo.
+Create a Node **Web Service** in Render for this folder.
+
+You can either:
+
+- use [render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) with Blueprint deploy
+- or click `New +` -> `Web Service` in Render and enter the settings below manually
 
 Recommended settings:
 
@@ -17,6 +22,8 @@ Recommended settings:
 - Start command: `npm start`
 - Health check path: `/healthz`
 - Environment variable: `ALLOWED_ORIGINS=https://<your-github-pages-origin>`
+
+Do not create a Static Site in Render for the relay. GitHub Pages already serves the app; Render only needs to run the websocket server.
 
 After deploy, verify:
 
