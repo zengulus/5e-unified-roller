@@ -3868,7 +3868,7 @@
 
             if (reconnect) {
                 if (next.enabled) {
-                    this.connectSync().catch((err) => {
+                    this.connectSync({ explicit: shouldAutoConnectOnThisPage() }).catch((err) => {
                         this.updateSyncStatus({
                             mode: 'error',
                             connected: false,
@@ -5408,7 +5408,9 @@
             return this.sync.supabaseLoadPromise;
         }
 
-        async connectSync() {
+        async connectSync(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const explicit = opts.explicit === true;
             const coerced = coerceAutoConnectBackendMode(this.sync.config);
             if (coerced.changed) {
                 this.sync.config = coerced.config;
@@ -5440,6 +5442,20 @@
                     lastError: 'Missing required sync config.'
                 });
                 return { ok: false, reason: 'missing-config' };
+            }
+
+            if (!explicit && !shouldAutoConnectOnThisPage()) {
+                this.updateSyncStatus({
+                    mode: 'idle',
+                    connected: false,
+                    enabled: true,
+                    campaignId: config.campaignId,
+                    profileName: config.profileName,
+                    message: 'Full cloud sync is idle on this page.',
+                    pendingPush: false,
+                    lastError: ''
+                });
+                return { ok: false, reason: 'page-blocked' };
             }
 
             this.updateSyncStatus({
@@ -6624,7 +6640,7 @@
             const cleanName = sanitizeProfileName(profileName);
             if (cleanName) patch.profileName = cleanName;
             if (Object.keys(patch).length) this.setSyncConfig(patch, { reconnect: false });
-            return this.connectSync();
+            return this.connectSync({ explicit: true });
         }
 
         async signOutSyncUser() {

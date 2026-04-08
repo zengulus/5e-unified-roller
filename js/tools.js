@@ -1700,7 +1700,7 @@ async function applyConnectProfile(raw, opts = {}) {
 
     if (options.connect === false) return { ok: true, connected: false };
 
-    const result = await window.RTF_STORE.connectSync();
+    const result = await window.RTF_STORE.connectSync({ explicit: true });
     if (!result.ok) {
         const status = window.RTF_STORE.getSyncStatus();
         return { ok: false, error: status.lastError || 'Connect failed.' };
@@ -2156,7 +2156,7 @@ async function connectSync() {
         enabled: true
     }, { reconnect: false });
     applySyncConfigToForm(window.RTF_STORE.getSyncConfig());
-    const result = await window.RTF_STORE.connectSync();
+    const result = await window.RTF_STORE.connectSync({ explicit: true });
     if (!result.ok) {
         const status = window.RTF_STORE.getSyncStatus();
         alert(status.lastError || 'Failed to connect cloud sync.');

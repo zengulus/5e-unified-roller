@@ -120,7 +120,7 @@
         if (profileField) profileField.value = payload.profileName;
 
         store.setSyncConfig(payload, { reconnect: false });
-        const result = await store.connectSync();
+        const result = await store.connectSync({ explicit: true });
         if (!result || result.ok === false) {
             const status = (typeof store.getSyncStatus === 'function') ? store.getSyncStatus() : null;
             return { ok: false, error: (status && status.lastError) || 'Connect failed.' };
@@ -923,7 +923,7 @@
                     if (typeof store.connectSync !== 'function') {
                         throw new Error('Reconnect is unavailable on this page.');
                     }
-                    const result = await store.connectSync();
+                    const result = await store.connectSync({ explicit: true });
                     if (!result || result.ok === false) {
                         throw new Error((store.getSyncStatus && store.getSyncStatus().lastError) || 'Reconnect failed.');
                     }
@@ -954,7 +954,7 @@
                         if (typeof store.connectSync !== 'function') {
                             throw new Error('Reconnect is unavailable on this page.');
                         }
-                        const result = await store.connectSync();
+                        const result = await store.connectSync({ explicit: true });
                         if (!result || result.ok === false) {
                             throw new Error((store.getSyncStatus && store.getSyncStatus().lastError) || 'Reconnect failed.');
                         }
