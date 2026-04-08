@@ -4,6 +4,7 @@
     const LEGACY_BOARD_KEY = 'invBoardData';
     const DIRTY_SCOPES_KEY = 'ravnica_sync_dirty_scopes_v1';
     const SCOPE_BASELINES_KEY = 'ravnica_sync_scope_baselines_v1';
+    const VTT_NPC_REFRESH_META_KEY = 'rtf_vtt_npc_refresh_meta_v1';
 
     const SYNC_CONFIG_KEY = 'ravnica_sync_config_v1';
     const SYNC_STATUS_EVENT = 'rtf-sync-status';
@@ -8484,6 +8485,114 @@
         getPlayers() {
             if (!this.state.campaign.players) this.state.campaign.players = [];
             return this.state.campaign.players;
+        }
+
+        async refreshNPCDirectoryForVTT(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const force = !!opts.force;
+            const ttlMs = Math.max(0, toNonNegativeInt(opts.ttlMs, 5 * 60 * 1000));
+            const config = sanitizeSyncConfig(this.sync && this.sync.config ? this.sync.config : getMergedSyncConfig());
+            if (!config.enabled || !config.supabaseUrl || !config.anonKey || !config.campaignId) {
+                return { ok: false, reason: 'missing-config', count: this.getNPCs().length };
+            }
+
+            const cacheKey = `${VTT_NPC_REFRESH_META_KEY}:${config.campaignId}`;
+            const now = Date.now();
+            if (!force && ttlMs > 0) {
+                try {
+                    const raw = localStorage.getItem(cacheKey);
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        const fetchedAt = toTimestamp(parsed && parsed.fetchedAt, 0);
+                        if (fetchedAt && (now - fetchedAt) < ttlMs) {
+                            return { ok: true, reason: 'cached', count: this.getNPCs().length, fetchedAt };
+                        }
+                    }
+                } catch (err) { }
+            }
+
+            const tableName = config.normalizedNPCsTable || DEFAULT_SYNC_CONFIG.normalizedNPCsTable;
+            const url = new URL(`/rest/v1/${tableName}`, config.supabaseUrl);
+            url.searchParams.set('select', 'npc_id,payload,revision,updated_at,updated_by,updated_by_name');
+            url.searchParams.set('campaign_id', `eq.${config.campaignId}`);
+            url.searchParams.set('order', 'npc_id.asc');
+
+            let response;
+            try {
+                response = await fetch(url.toString(), {
+                    method: 'GET',
+                    headers: {
+                        apikey: config.anonKey,
+                        Authorization: `Bearer ${config.anonKey}`,
+                        Accept: 'application/json'
+                    },
+                    cache: 'no-store'
+                });
+            } catch (err) {
+                return {
+                    ok: false,
+                    reason: 'network-error',
+                    error: err && err.message ? err.message : 'NPC refresh failed.',
+                    count: this.getNPCs().length
+                };
+            }
+
+            if (!response.ok) {
+                let message = `NPC refresh failed (${response.status}).`;
+                try {
+                    const errorPayload = await response.json();
+                    if (errorPayload && errorPayload.message) message = String(errorPayload.message);
+                } catch (err) { }
+                return { ok: false, reason: 'http-error', error: message, count: this.getNPCs().length };
+            }
+
+            let rows = [];
+            try {
+                const payload = await response.json();
+                rows = Array.isArray(payload) ? payload : [];
+            } catch (err) {
+                return { ok: false, reason: 'parse-error', error: 'NPC refresh returned invalid JSON.', count: this.getNPCs().length };
+            }
+
+            const existing = Array.isArray(this.state.campaign && this.state.campaign.npcs)
+                ? this.state.campaign.npcs.slice()
+                : [];
+            const remoteIds = new Set();
+            const remoteNPCs = rows.map((row) => {
+                const npcId = toTrimmedString(row && row.npc_id, buildEntityId('npc'), 80);
+                const payload = this.ensureEntityId(row && row.payload, npcId, 'id');
+                payload.__rtfSource = 'cloud';
+                remoteIds.add(normalizeEntityScopeId(payload && payload.id));
+                return payload;
+            });
+            const merged = existing.filter((npc) => {
+                const scopeId = normalizeEntityScopeId(npc && npc.id);
+                if (!scopeId) return true;
+                if (npc && npc.__rtfSource === 'cloud' && !remoteIds.has(scopeId)) return false;
+                return !remoteIds.has(scopeId);
+            });
+            merged.push(...remoteNPCs);
+            this.state.campaign.npcs = merged;
+
+            try {
+                localStorage.setItem(cacheKey, JSON.stringify({ fetchedAt: now, count: remoteNPCs.length }));
+            } catch (err) { }
+
+            this.save({ scope: 'campaign.npcs', skipCloud: true });
+            this.clearLocalDirtyScopes(['campaign.npcs', buildEntityOrderScope(CAMPAIGN_ENTITY_SCOPE_PREFIXES.npcs)]);
+            this.sync.lastSyncedState = sanitizeState(this.state);
+            this.broadcastStoreUpdate('local', {
+                scopes: ['campaign.npcs'],
+                reason: 'vtt-npc-refresh'
+            });
+
+            return {
+                ok: true,
+                reason: 'refreshed',
+                count: this.getNPCs().length,
+                remoteCount: remoteNPCs.length,
+                fetchedAt: now
+            };
         }
 
         getNPCs() {

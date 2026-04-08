@@ -97,6 +97,8 @@
     let npcSearchOpen = false;
     let npcSearchState = null;
     let npcSearchQuery = '';
+    let npcSearchLoading = false;
+    let npcSearchRefreshPromise = null;
     let previewTokenId = '';
     let localView = { x: 40, y: 40, zoom: 1 };
     let worldSize = { ...DEFAULT_WORLD_SIZE };
@@ -1660,6 +1662,34 @@
         return store && typeof store.getNPCs === 'function' ? store.getNPCs() : [];
     };
 
+    const ensureNPCSearchData = async () => {
+        if (npcSearchRefreshPromise) return npcSearchRefreshPromise;
+        const store = getStore();
+        npcSearchLoading = true;
+        renderNPCSearchPopover();
+        npcSearchRefreshPromise = (async () => {
+            if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
+                try {
+                    await window.RTF_DATA_LOADER.ensureDatasets(['npcs']);
+                } catch (err) {
+                    console.warn('Failed loading VTT NPC dataset', err);
+                }
+            }
+            if (store && typeof store.refreshNPCDirectoryForVTT === 'function') {
+                try {
+                    await store.refreshNPCDirectoryForVTT();
+                } catch (err) {
+                    console.warn('Failed refreshing VTT NPC directory', err);
+                }
+            }
+        })().finally(() => {
+            npcSearchLoading = false;
+            npcSearchRefreshPromise = null;
+            renderNPCSearchPopover();
+        });
+        return npcSearchRefreshPromise;
+    };
+
     const normalizeMoveAccess = (value, fallback = 'dm') => {
         const clean = String(value || fallback || 'dm').trim().toLowerCase();
         return clean === 'player' ? 'player' : 'dm';
@@ -2824,6 +2854,9 @@
                 npcSearchInputEl.select();
             });
         }
+        ensureNPCSearchData().catch((err) => {
+            console.warn('Failed preparing NPC search', err);
+        });
         return true;
     };
 
@@ -3512,15 +3545,18 @@
             const guild = String(npc && npc.guild || '').toLowerCase();
             return name.includes(query) || guild.includes(query);
         });
+        const loadingMessage = npcSearchLoading
+            ? '<div class="vtt-empty">Refreshing shared NPC roster...</div>'
+            : '';
 
-        npcSearchListEl.innerHTML = npcs.length
+        npcSearchListEl.innerHTML = (loadingMessage + (npcs.length
                 ? npcs.map((npc) => `
                     <button class="vtt-token-spawn" type="button" data-action="spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
                         <span class="vtt-token-spawn-meta">${escapeHtml(npcSearchState && npcSearchState.worldPoint ? 'Spawn here' : 'Spawn token')}${npc.guild ? ` · ${escapeHtml(npc.guild)}` : ''}</span>
                     </button>
                 `).join('')
-                : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`;
+                : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`));
         positionNPCSearchPopover();
     };
 
@@ -6546,14 +6582,6 @@
         if (!store) {
             if (syncChipEl) syncChipEl.textContent = 'Unavailable';
             return;
-        }
-
-        if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
-            try {
-                await window.RTF_DATA_LOADER.ensureDatasets(['npcs']);
-            } catch (err) {
-                console.warn('Failed loading VTT preload datasets', err);
-            }
         }
 
         bindEvents();
