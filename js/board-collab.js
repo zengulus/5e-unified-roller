@@ -1497,6 +1497,7 @@ class BoardCollabSession {
             caseId: this.caseId,
             payload: snapshotToSave,
             checkpointPayload: exportBoardCheckpointFromDoc(this.doc, this.scope, this.caseId),
+            previousRevision: this.lastSavedRevision,
             revision: nextRevision,
             updatedAt: new Date(Math.max(Date.now(), snapshotToSave.updatedAt || 0)).toISOString(),
             updatedBy: this.instanceId,

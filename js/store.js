@@ -53,6 +53,7 @@
         }
     };
     const isExternalStoreUpdateSource = (value) => value === 'remote' || value === 'storage';
+    const AUTH_SESSION_CACHE_MS = 30000;
     const getSharedSupabaseClientCache = () => {
         if (global[SHARED_SUPABASE_CLIENT_CACHE_KEY] instanceof Map) return global[SHARED_SUPABASE_CLIENT_CACHE_KEY];
         const cache = new Map();
@@ -2472,10 +2473,13 @@
                 pushQueued: false,
                 normalizedPullTimer: null,
                 normalizedPendingScopes: new Set(),
+                normalizedPendingScopeMeta: new Map(),
                 lastRemoteSeenAt: 0,
                 lastPushAt: 0,
                 lastPullAt: 0,
                 userId: '',
+                authCheckedAt: 0,
+                authPromise: null,
                 supabaseLoadPromise: null,
                 lastCloudStateSig: '',
                 localDirtyScopes: new Set(parseStoredDirtyScopes()),
@@ -2489,7 +2493,8 @@
                 hadStoredStateAtBoot: false,
                 lastForegroundPullAt: 0,
                 roomHydrationInflight: new Map(),
-                roomHydrationSeenAt: new Map()
+                roomHydrationSeenAt: new Map(),
+                queryCache: new Map()
             };
 
             if (coercedSyncConfig.changed) {
@@ -4217,6 +4222,23 @@
             if (opts.clearScopes !== false && this.sync.normalizedPendingScopes instanceof Set) {
                 this.sync.normalizedPendingScopes.clear();
             }
+            if (opts.clearMeta !== false && this.sync.normalizedPendingScopeMeta instanceof Map) {
+                this.sync.normalizedPendingScopeMeta.clear();
+            }
+        }
+
+        normalizeRealtimeScopeMeta(entry) {
+            if (!entry || typeof entry !== 'object') return null;
+            const scope = normalizeScopeToken(entry.scope);
+            if (!scope || scope === SYNC_SCOPE_GLOBAL || isRoomBackedScope(scope)) return null;
+            return {
+                scope,
+                exists: entry.exists !== false,
+                revision: toNonNegativeInt(entry.revision, 0),
+                updated_at: toIsoString(entry.updated_at, '') || '',
+                updated_by: toTrimmedString(entry.updated_by, '', 120),
+                updated_by_name: toTrimmedString(entry.updated_by_name, '', 120)
+            };
         }
 
         scheduleNormalizedRealtimePull(scopes = null) {
@@ -4224,11 +4246,22 @@
             if (!(this.sync.normalizedPendingScopes instanceof Set)) {
                 this.sync.normalizedPendingScopes = new Set();
             }
-            normalizeScopeList(scopes || []).forEach((scope) => {
+            if (!(this.sync.normalizedPendingScopeMeta instanceof Map)) {
+                this.sync.normalizedPendingScopeMeta = new Map();
+            }
+            const entries = Array.isArray(scopes)
+                ? scopes
+                : (scopes ? [scopes] : []);
+            entries.forEach((entry) => {
+                const meta = this.normalizeRealtimeScopeMeta(entry);
+                const scope = meta
+                    ? meta.scope
+                    : normalizeScopeToken(entry);
                 if (!scope || scope === SYNC_SCOPE_GLOBAL || isRoomBackedScope(scope)) return;
                 this.sync.normalizedPendingScopes.add(scope);
+                if (meta) this.sync.normalizedPendingScopeMeta.set(scope, meta);
             });
-            this.clearNormalizedRealtimePull({ clearScopes: false });
+            this.clearNormalizedRealtimePull({ clearScopes: false, clearMeta: false });
             this.sync.normalizedPullTimer = setTimeout(() => {
                 this.sync.normalizedPullTimer = null;
                 if (!this.syncStatus.connected) return;
@@ -4236,11 +4269,19 @@
                     ? Array.from(this.sync.normalizedPendingScopes.values())
                     : [];
                 if (this.sync.normalizedPendingScopes instanceof Set) this.sync.normalizedPendingScopes.clear();
+                const pendingScopeMeta = this.sync.normalizedPendingScopeMeta instanceof Map
+                    ? Array.from(this.sync.normalizedPendingScopeMeta.values())
+                    : [];
+                if (this.sync.normalizedPendingScopeMeta instanceof Map) this.sync.normalizedPendingScopeMeta.clear();
                 if (!pendingScopes.length) {
                     this.pullFromCloud({ force: false, silent: true }).catch(() => { });
                     return;
                 }
-                this.pullFromCloudNormalizedScopes(pendingScopes, { force: false, silent: true }).catch(() => {
+                this.pullFromCloudNormalizedScopes(pendingScopes, {
+                    force: false,
+                    silent: true,
+                    scopeVersionRows: pendingScopeMeta
+                }).catch(() => {
                     this.pullFromCloud({ force: false, silent: true }).catch(() => { });
                 });
             }, 350);
@@ -4669,6 +4710,160 @@
                 snapshot[entry.key] = entry.result.data || null;
             });
             return { ok: true, snapshot };
+        }
+
+        buildNormalizedScopeVersionMap(rows) {
+            const versionMap = new Map();
+            (Array.isArray(rows) ? rows : []).forEach((entry) => {
+                const row = this.normalizeRealtimeScopeMeta(entry);
+                if (!row) return;
+                versionMap.set(row.scope, row);
+            });
+            return versionMap;
+        }
+
+        buildNormalizedRemoteRowFromScopedSnapshot(remoteBase, scopes, snapshot, versionMap = new Map()) {
+            const composed = this.applyNormalizedScopedSnapshot(remoteBase, scopes, snapshot, versionMap);
+            const scopeSnapshot = buildScopeSnapshot(composed.state);
+            const scopeMeta = new Map();
+            normalizeScopeList(scopes).forEach((scope) => {
+                if (!isGranularNormalizedLwwScope(scope)) return;
+                const row = versionMap.get(scope);
+                scopeMeta.set(scope, {
+                    revision: toNonNegativeInt(row && row.revision, composed.revision),
+                    updatedAt: toTimestamp(row && row.updated_at, composed.updatedAt),
+                    exists: row ? row.exists !== false : scopeSnapshot.has(scope),
+                    signature: scopeSnapshot.has(scope) ? JSON.stringify(scopeSnapshot.get(scope)) : ''
+                });
+            });
+            return {
+                state: composed.state,
+                revision: toNonNegativeInt(composed.revision, 0),
+                updatedAt: toTimestamp(composed.updatedAt, Date.now()),
+                updatedBy: composed.updatedBy || '',
+                updatedByName: composed.updatedByName || '',
+                scopeMeta
+            };
+        }
+
+        async fetchNormalizedScopeVersionRowsSince(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const silent = !!opts.silent;
+            const tables = this.getNormalizedTables();
+            if (!tables.scopeVersions) {
+                return { ok: false, reason: 'missing-table', error: 'Scope versions table unavailable.' };
+            }
+
+            const sinceRevision = Math.max(0, toNonNegativeInt(
+                opts.sinceRevision,
+                toNonNegativeInt(this.sync.lastKnownRemoteRevision, 0)
+            ));
+            const sinceUpdatedAt = toTimestamp(opts.sinceUpdatedAt, toTimestamp(this.sync.lastRemoteSeenAt, 0));
+            const allowFullScan = opts.allowFullScan === true;
+            let query = this.sync.client
+                .from(tables.scopeVersions)
+                .select('scope,exists,revision,updated_at,updated_by,updated_by_name')
+                .eq('campaign_id', this.sync.config.campaignId);
+
+            if (sinceRevision > 0) {
+                query = query.gt('revision', sinceRevision);
+            } else if (sinceUpdatedAt > 0) {
+                query = query.gt('updated_at', new Date(sinceUpdatedAt).toISOString());
+            } else if (!allowFullScan) {
+                return { ok: true, reason: 'unknown-baseline', data: null };
+            }
+
+            query = query
+                .order('revision', { ascending: true })
+                .order('updated_at', { ascending: true });
+
+            const result = await query;
+            if (result.error) {
+                const message = result.error.message || 'Scope version read failed.';
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        message: 'Cloud read failed.',
+                        lastError: message
+                    });
+                }
+                return { ok: false, reason: 'error', error: message };
+            }
+
+            return {
+                ok: true,
+                reason: 'rows',
+                data: Array.isArray(result.data) ? result.data : []
+            };
+        }
+
+        async fetchCloudRowNormalizedDelta(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const silent = !!opts.silent;
+            const remoteBase = sanitizeState(opts.remoteBase || this.sync.lastSyncedState || this.state);
+            const versionRowsResult = Array.isArray(opts.scopeVersionRows)
+                ? { ok: true, reason: 'provided', data: opts.scopeVersionRows }
+                : await this.fetchNormalizedScopeVersionRowsSince({
+                    silent,
+                    sinceRevision: opts.sinceRevision,
+                    sinceUpdatedAt: opts.sinceUpdatedAt,
+                    allowFullScan: opts.allowFullScan === true
+                });
+
+            if (!versionRowsResult.ok) return versionRowsResult;
+            if (!versionRowsResult.data) {
+                return this.fetchCloudRowNormalized({ silent });
+            }
+
+            const versionMap = this.buildNormalizedScopeVersionMap(versionRowsResult.data);
+            const changedScopes = Array.from(versionMap.keys());
+            if (!changedScopes.length) {
+                const baselineRevision = Math.max(
+                    toNonNegativeInt(remoteBase && remoteBase.meta && remoteBase.meta.syncRevision, 0),
+                    Math.max(0, toNonNegativeInt(opts.sinceRevision, 0))
+                );
+                const baselineUpdatedAt = toTimestamp(remoteBase && remoteBase.meta && remoteBase.meta.updated, 0);
+                if (!baselineRevision && !baselineUpdatedAt && !this.sync.lastPullAt && !this.sync.lastKnownRemoteRevision) {
+                    return { ok: true, reason: 'empty', row: null, changedScopes: [], scopeVersionRows: [] };
+                }
+                return {
+                    ok: true,
+                    reason: 'up-to-date',
+                    row: {
+                        state: remoteBase,
+                        revision: baselineRevision,
+                        updatedAt: baselineUpdatedAt,
+                        updatedAtRaw: baselineUpdatedAt ? new Date(baselineUpdatedAt).toISOString() : '',
+                        updatedBy: '',
+                        updatedByName: '',
+                        scopeMeta: new Map()
+                    },
+                    changedScopes: [],
+                    scopeVersionRows: []
+                };
+            }
+
+            const scopedFetch = await this.fetchNormalizedScopedRows(changedScopes);
+            if (!scopedFetch.ok) {
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        message: 'Cloud read failed.',
+                        lastError: scopedFetch.error || 'Targeted normalized read failed.'
+                    });
+                }
+                return { ok: false, reason: 'error', error: scopedFetch.error || 'Targeted normalized read failed.' };
+            }
+
+            const row = this.buildNormalizedRemoteRowFromScopedSnapshot(remoteBase, changedScopes, scopedFetch.snapshot, versionMap);
+            row.updatedAtRaw = row.updatedAt ? new Date(row.updatedAt).toISOString() : '';
+            return {
+                ok: true,
+                reason: 'delta',
+                row,
+                changedScopes,
+                scopeVersionRows: Array.from(versionMap.values())
+            };
         }
 
         applyNormalizedScopedSnapshot(baseState, scopes, snapshot, versionMap = new Map()) {
@@ -5601,6 +5796,93 @@
             return this.ensureBoardCollabClient();
         }
 
+        buildSyncQueryCacheKey(prefix, suffix = '') {
+            const campaignId = this.sync && this.sync.config && this.sync.config.campaignId
+                ? this.sync.config.campaignId
+                : '';
+            return `${prefix}:${campaignId}:${suffix || ''}`;
+        }
+
+        readSyncQueryCache(key, ttlMs, loader, options = {}) {
+            if (!key || typeof loader !== 'function') return Promise.resolve(null);
+            if (!(this.sync.queryCache instanceof Map)) this.sync.queryCache = new Map();
+            const opts = options && typeof options === 'object' ? options : {};
+            const force = !!opts.force;
+            const ttl = Math.max(0, toNonNegativeInt(ttlMs, 0));
+            const cached = this.sync.queryCache.get(key);
+            const now = Date.now();
+            if (!force && cached) {
+                if (cached.promise) return cached.promise;
+                if (Object.prototype.hasOwnProperty.call(cached, 'value')
+                    && (!ttl || (now - toTimestamp(cached.fetchedAt, 0)) < ttl)) {
+                    return Promise.resolve(deepClone(cached.value));
+                }
+            }
+
+            const promise = Promise.resolve()
+                .then(() => loader())
+                .then((value) => {
+                    if (value && typeof value === 'object' && value.ok === false) {
+                        this.sync.queryCache.delete(key);
+                        return value;
+                    }
+                    this.sync.queryCache.set(key, {
+                        value: deepClone(value),
+                        fetchedAt: Date.now()
+                    });
+                    return deepClone(value);
+                })
+                .catch((err) => {
+                    const active = this.sync.queryCache.get(key);
+                    if (active && active.promise === promise) this.sync.queryCache.delete(key);
+                    throw err;
+                });
+
+            this.sync.queryCache.set(key, { promise });
+            return promise;
+        }
+
+        setSyncQueryCacheValue(key, value) {
+            if (!key) return;
+            if (!(this.sync.queryCache instanceof Map)) this.sync.queryCache = new Map();
+            this.sync.queryCache.set(key, {
+                value: deepClone(value),
+                fetchedAt: Date.now()
+            });
+        }
+
+        invalidateSyncQueryCache(keyOrPrefix, options = {}) {
+            if (!(this.sync.queryCache instanceof Map) || !keyOrPrefix) return;
+            const opts = options && typeof options === 'object' ? options : {};
+            const usePrefix = !!opts.prefix;
+            Array.from(this.sync.queryCache.keys()).forEach((key) => {
+                if ((usePrefix && key.startsWith(keyOrPrefix)) || (!usePrefix && key === keyOrPrefix)) {
+                    this.sync.queryCache.delete(key);
+                }
+            });
+        }
+
+        getBoardRoomSnapshotCacheKey(options = {}) {
+            const target = this.resolveBoardRoomTarget(options);
+            return this.buildSyncQueryCacheKey('board-room', target.roomId);
+        }
+
+        getBoardRoomHistoryCachePrefix(options = {}) {
+            const target = this.resolveBoardRoomTarget(options);
+            return this.buildSyncQueryCacheKey('board-history', `${target.roomId}:`);
+        }
+
+        getBoardRoomHistoryCacheKey(options = {}) {
+            const target = this.resolveBoardRoomTarget(options);
+            const limit = Math.max(1, Math.min(100, toNonNegativeInt(options && options.limit, 25) || 25));
+            return this.buildSyncQueryCacheKey('board-history', `${target.roomId}:${limit}`);
+        }
+
+        getVTTRoomSnapshotCacheKey(options = {}) {
+            const target = this.resolveVTTRoomTarget(options);
+            return this.buildSyncQueryCacheKey('vtt-room', target.roomId);
+        }
+
         resolveBoardRoomTarget(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
@@ -5644,61 +5926,64 @@
         async loadVTTRoomSnapshot(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const target = this.resolveVTTRoomTarget(opts);
-            const ensured = await this.ensureRealtimeCollabClient();
-            if (!ensured.ok) return ensured;
+            const cacheKey = this.getVTTRoomSnapshotCacheKey(target);
+            return this.readSyncQueryCache(cacheKey, 5000, async () => {
+                const ensured = await this.ensureRealtimeCollabClient();
+                if (!ensured.ok) return ensured;
 
-            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
-            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
+                const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+                const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
 
-            const result = await ensured.client
-                .from(tableName)
-                .select(selectCols)
-                .eq('campaign_id', ensured.config.campaignId)
-                .eq('room_id', target.roomId)
-                .maybeSingle();
+                const result = await ensured.client
+                    .from(tableName)
+                    .select(selectCols)
+                    .eq('campaign_id', ensured.config.campaignId)
+                    .eq('room_id', target.roomId)
+                    .maybeSingle();
 
-            if (result.error) {
-                return {
-                    ok: false,
-                    reason: 'read-failed',
-                    error: result.error.message || `Failed reading ${tableName}.`
-                };
-            }
+                if (result.error) {
+                    return {
+                        ok: false,
+                        reason: 'read-failed',
+                        error: result.error.message || `Failed reading ${tableName}.`
+                    };
+                }
 
-            if (!result.data) {
+                if (!result.data) {
+                    return {
+                        ok: true,
+                        snapshot: null,
+                        roomId: target.roomId,
+                        scope: target.scope,
+                        caseId: target.caseId
+                    };
+                }
+
+                const decodedPayload = await decodeVTTRoomCheckpointPayload(
+                    result.data.payload,
+                    result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId
+                );
+
                 return {
                     ok: true,
-                    snapshot: null,
                     roomId: target.roomId,
                     scope: target.scope,
-                    caseId: target.caseId
+                    caseId: target.caseId,
+                    snapshot: {
+                        roomId: String(result.data.room_id || target.roomId),
+                        scope: 'case',
+                        caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId,
+                        payload: sanitizeVTTState({
+                            ...decodedPayload,
+                            updatedAt: Date.parse(result.data.updated_at || '') || toNonNegativeInt(result.data.revision, 0)
+                        }),
+                        revision: toNonNegativeInt(result.data.revision, 0),
+                        updatedAt: toIsoString(result.data.updated_at, ''),
+                        updatedBy: toTrimmedString(result.data.updated_by, '', 120),
+                        updatedByName: toTrimmedString(result.data.updated_by_name, '', 120)
+                    }
                 };
-            }
-
-            const decodedPayload = await decodeVTTRoomCheckpointPayload(
-                result.data.payload,
-                result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId
-            );
-
-            return {
-                ok: true,
-                roomId: target.roomId,
-                scope: target.scope,
-                caseId: target.caseId,
-                snapshot: {
-                    roomId: String(result.data.room_id || target.roomId),
-                    scope: 'case',
-                    caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId,
-                    payload: sanitizeVTTState({
-                        ...decodedPayload,
-                        updatedAt: Date.parse(result.data.updated_at || '') || toNonNegativeInt(result.data.revision, 0)
-                    }),
-                    revision: toNonNegativeInt(result.data.revision, 0),
-                    updatedAt: toIsoString(result.data.updated_at, ''),
-                    updatedBy: toTrimmedString(result.data.updated_by, '', 120),
-                    updatedByName: toTrimmedString(result.data.updated_by_name, '', 120)
-                }
-            };
+            }, { force: !!opts.force });
         }
 
         async saveVTTRoomSnapshot(options = {}) {
@@ -5720,6 +6005,8 @@
             const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
             const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
             const createOnly = !!opts.createOnly;
+            const hasPreviousRevision = Object.prototype.hasOwnProperty.call(opts, 'previousRevision');
+            const previousRevision = Math.max(0, toNonNegativeInt(opts.previousRevision, 0));
             const readCurrentRow = () => ensured.client
                 .from(tableName)
                 .select(selectCols)
@@ -5774,6 +6061,109 @@
             };
 
             if (!createOnly) {
+                if (hasPreviousRevision) {
+                    let optimisticResult = null;
+                    if (previousRevision > 0) {
+                        optimisticResult = await ensured.client
+                            .from(tableName)
+                            .update(row)
+                            .eq('campaign_id', ensured.config.campaignId)
+                            .eq('room_id', target.roomId)
+                            .eq('revision', previousRevision)
+                            .select('revision,updated_at')
+                            .maybeSingle();
+                        if (!optimisticResult.error && optimisticResult.data) {
+                            const response = {
+                                ok: true,
+                                roomId: target.roomId,
+                                scope: target.scope,
+                                caseId: target.caseId,
+                                revision: toNonNegativeInt(optimisticResult.data && optimisticResult.data.revision, revision),
+                                updatedAt: toIsoString(optimisticResult.data && optimisticResult.data.updated_at, updatedAt) || updatedAt
+                            };
+                            this.setSyncQueryCacheValue(this.getVTTRoomSnapshotCacheKey(target), {
+                                ok: true,
+                                roomId: target.roomId,
+                                scope: target.scope,
+                                caseId: target.caseId,
+                                snapshot: {
+                                    roomId: target.roomId,
+                                    scope: 'case',
+                                    caseId: target.caseId,
+                                    payload: snapshotPayload,
+                                    revision: response.revision,
+                                    updatedAt: response.updatedAt,
+                                    updatedBy: row.updated_by || '',
+                                    updatedByName: row.updated_by_name || ''
+                                }
+                            });
+                            return response;
+                        }
+                        if (optimisticResult.error && optimisticResult.error.code !== 'PGRST116') {
+                            return {
+                                ok: false,
+                                reason: 'write-failed',
+                                error: optimisticResult.error.message || `Failed writing ${tableName}.`
+                            };
+                        }
+                    } else {
+                        optimisticResult = await ensured.client
+                            .from(tableName)
+                            .insert(row)
+                            .select('revision,updated_at')
+                            .single();
+                        if (!optimisticResult.error) {
+                            const response = {
+                                ok: true,
+                                roomId: target.roomId,
+                                scope: target.scope,
+                                caseId: target.caseId,
+                                revision: toNonNegativeInt(optimisticResult.data && optimisticResult.data.revision, revision),
+                                updatedAt: toIsoString(optimisticResult.data && optimisticResult.data.updated_at, updatedAt) || updatedAt
+                            };
+                            this.setSyncQueryCacheValue(this.getVTTRoomSnapshotCacheKey(target), {
+                                ok: true,
+                                roomId: target.roomId,
+                                scope: target.scope,
+                                caseId: target.caseId,
+                                snapshot: {
+                                    roomId: target.roomId,
+                                    scope: 'case',
+                                    caseId: target.caseId,
+                                    payload: snapshotPayload,
+                                    revision: response.revision,
+                                    updatedAt: response.updatedAt,
+                                    updatedBy: row.updated_by || '',
+                                    updatedByName: row.updated_by_name || ''
+                                }
+                            });
+                            return response;
+                        }
+                        if (optimisticResult.error.code !== '23505') {
+                            return {
+                                ok: false,
+                                reason: 'write-failed',
+                                error: optimisticResult.error.message || `Failed writing ${tableName}.`
+                            };
+                        }
+                    }
+
+                    const latest = await readCurrentRow();
+                    if (latest.error) {
+                        return {
+                            ok: false,
+                            reason: 'read-failed',
+                            error: latest.error.message || `Failed reading ${tableName}.`
+                        };
+                    }
+                    if (latest.data) return buildStaleResult(latest.data);
+                    return {
+                        ok: false,
+                        reason: 'write-conflict',
+                        error: 'Live VTT snapshot write conflicted with another update.'
+                    };
+                }
+
                 const existing = await readCurrentRow();
 
                 if (existing.error) {
@@ -5839,7 +6229,7 @@
                     };
                 }
 
-                return {
+                const response = {
                     ok: true,
                     roomId: target.roomId,
                     scope: target.scope,
@@ -5847,6 +6237,23 @@
                     revision: toNonNegativeInt(result.data && result.data.revision, revision),
                     updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
                 };
+                this.setSyncQueryCacheValue(this.getVTTRoomSnapshotCacheKey(target), {
+                    ok: true,
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId,
+                    snapshot: {
+                        roomId: target.roomId,
+                        scope: 'case',
+                        caseId: target.caseId,
+                        payload: snapshotPayload,
+                        revision: response.revision,
+                        updatedAt: response.updatedAt,
+                        updatedBy: row.updated_by || '',
+                        updatedByName: row.updated_by_name || ''
+                    }
+                });
+                return response;
             }
 
             const result = await ensured.client
@@ -5870,7 +6277,7 @@
                 };
             }
 
-            return {
+            const response = {
                 ok: true,
                 roomId: target.roomId,
                 scope: target.scope,
@@ -5878,6 +6285,23 @@
                 revision: toNonNegativeInt(result.data && result.data.revision, revision),
                 updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
             };
+            this.setSyncQueryCacheValue(this.getVTTRoomSnapshotCacheKey(target), {
+                ok: true,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId,
+                snapshot: {
+                    roomId: target.roomId,
+                    scope: 'case',
+                    caseId: target.caseId,
+                    payload: snapshotPayload,
+                    revision: response.revision,
+                    updatedAt: response.updatedAt,
+                    updatedBy: row.updated_by || '',
+                    updatedByName: row.updated_by_name || ''
+                }
+            });
+            return response;
         }
 
         async sendBoardRoomAdminEvent(options = {}) {
@@ -6006,7 +6430,7 @@
                 };
             }
 
-            return {
+            const response = {
                 ok: true,
                 id: toNonNegativeInt(result.data && result.data.id, 0),
                 capturedAt: toIsoString(result.data && result.data.captured_at, capturedAt) || capturedAt,
@@ -6014,127 +6438,135 @@
                 scope: target.scope,
                 caseId: target.caseId
             };
+            this.invalidateSyncQueryCache(this.getBoardRoomHistoryCachePrefix(target), { prefix: true });
+            return response;
         }
 
         async listBoardRoomHistory(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const target = this.resolveBoardRoomTarget(opts);
-            const ensured = await this.ensureBoardCollabClient();
-            if (!ensured.ok) return ensured;
+            const cacheKey = this.getBoardRoomHistoryCacheKey({ ...target, limit: opts.limit });
+            return this.readSyncQueryCache(cacheKey, 5000, async () => {
+                const ensured = await this.ensureBoardCollabClient();
+                if (!ensured.ok) return ensured;
 
-            const limit = Math.max(1, Math.min(100, toNonNegativeInt(opts.limit, 25) || 25));
-            const tableName = ensured.config.boardHistoryTable || DEFAULT_SYNC_CONFIG.boardHistoryTable;
-            const selectCols = 'id,room_id,board_scope,case_id,payload,revision,reason,captured_at,captured_by,captured_by_name';
-            const result = await ensured.client
-                .from(tableName)
-                .select(selectCols)
-                .eq('campaign_id', ensured.config.campaignId)
-                .eq('room_id', target.roomId)
-                .order('captured_at', { ascending: false })
-                .limit(limit);
+                const limit = Math.max(1, Math.min(100, toNonNegativeInt(opts.limit, 25) || 25));
+                const tableName = ensured.config.boardHistoryTable || DEFAULT_SYNC_CONFIG.boardHistoryTable;
+                const selectCols = 'id,room_id,board_scope,case_id,payload,revision,reason,captured_at,captured_by,captured_by_name';
+                const result = await ensured.client
+                    .from(tableName)
+                    .select(selectCols)
+                    .eq('campaign_id', ensured.config.campaignId)
+                    .eq('room_id', target.roomId)
+                    .order('captured_at', { ascending: false })
+                    .limit(limit);
 
-            if (result.error) {
+                if (result.error) {
+                    return {
+                        ok: false,
+                        reason: 'history-read-failed',
+                        error: result.error.message || `Failed reading ${tableName}.`
+                    };
+                }
+
+                const history = Array.isArray(result.data) ? await Promise.all(result.data.map(async (row) => {
+                    const payload = await decodeBoardRoomCheckpointPayload(
+                        row && row.payload ? row.payload : null,
+                        String(row && row.board_scope || target.scope).trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                        row && row.case_id ? sanitizeCaseId(row.case_id, target.caseId || 'case_primary') : ''
+                    );
+                    return {
+                        id: toNonNegativeInt(row && row.id, 0),
+                        roomId: toTrimmedString(row && row.room_id, target.roomId, 160).trim() || target.roomId,
+                        scope: String(row && row.board_scope || target.scope).trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                        caseId: row && row.case_id ? sanitizeCaseId(row.case_id, target.caseId || 'case_primary') : '',
+                        payload,
+                        revision: toNonNegativeInt(row && row.revision, 0),
+                        reason: sanitizeBoardHistoryReason(row && row.reason, 'snapshot'),
+                        capturedAt: toIsoString(row && row.captured_at, ''),
+                        capturedBy: toTrimmedString(row && row.captured_by, '', 120),
+                        capturedByName: toTrimmedString(row && row.captured_by_name, '', 120),
+                        nodeCount: Array.isArray(payload.nodes) ? payload.nodes.length : 0,
+                        connectionCount: Array.isArray(payload.connections) ? payload.connections.length : 0
+                    };
+                })) : [];
+
                 return {
-                    ok: false,
-                    reason: 'history-read-failed',
-                    error: result.error.message || `Failed reading ${tableName}.`
+                    ok: true,
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId,
+                    history
                 };
-            }
-
-            const history = Array.isArray(result.data) ? await Promise.all(result.data.map(async (row) => {
-                const payload = await decodeBoardRoomCheckpointPayload(
-                    row && row.payload ? row.payload : null,
-                    String(row && row.board_scope || target.scope).trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
-                    row && row.case_id ? sanitizeCaseId(row.case_id, target.caseId || 'case_primary') : ''
-                );
-                return {
-                    id: toNonNegativeInt(row && row.id, 0),
-                    roomId: toTrimmedString(row && row.room_id, target.roomId, 160).trim() || target.roomId,
-                    scope: String(row && row.board_scope || target.scope).trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
-                    caseId: row && row.case_id ? sanitizeCaseId(row.case_id, target.caseId || 'case_primary') : '',
-                    payload,
-                    revision: toNonNegativeInt(row && row.revision, 0),
-                    reason: sanitizeBoardHistoryReason(row && row.reason, 'snapshot'),
-                    capturedAt: toIsoString(row && row.captured_at, ''),
-                    capturedBy: toTrimmedString(row && row.captured_by, '', 120),
-                    capturedByName: toTrimmedString(row && row.captured_by_name, '', 120),
-                    nodeCount: Array.isArray(payload.nodes) ? payload.nodes.length : 0,
-                    connectionCount: Array.isArray(payload.connections) ? payload.connections.length : 0
-                };
-            })) : [];
-
-            return {
-                ok: true,
-                roomId: target.roomId,
-                scope: target.scope,
-                caseId: target.caseId,
-                history
-            };
+            }, { force: !!opts.force });
         }
 
         async loadBoardRoomSnapshot(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const roomId = toTrimmedString(opts.roomId, '', 160).trim();
             if (!roomId) return { ok: false, reason: 'missing-room-id' };
-
-            const ensured = await this.ensureBoardCollabClient();
-            if (!ensured.ok) return ensured;
-
             const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
             const caseId = scope === 'campaign' ? '' : sanitizeCaseId(opts.caseId, this.getActiveCaseId());
-            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
-            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
+            const target = { roomId, scope, caseId };
+            const cacheKey = this.getBoardRoomSnapshotCacheKey(target);
+            return this.readSyncQueryCache(cacheKey, 5000, async () => {
+                const ensured = await this.ensureBoardCollabClient();
+                if (!ensured.ok) return ensured;
 
-            const result = await ensured.client
-                .from(tableName)
-                .select(selectCols)
-                .eq('campaign_id', ensured.config.campaignId)
-                .eq('room_id', roomId)
-                .maybeSingle();
+                const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
+                const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
 
-            if (result.error) {
-                return {
-                    ok: false,
-                    reason: 'read-failed',
-                    error: result.error.message || `Failed reading ${tableName}.`
-                };
-            }
+                const result = await ensured.client
+                    .from(tableName)
+                    .select(selectCols)
+                    .eq('campaign_id', ensured.config.campaignId)
+                    .eq('room_id', roomId)
+                    .maybeSingle();
 
-            if (!result.data) {
+                if (result.error) {
+                    return {
+                        ok: false,
+                        reason: 'read-failed',
+                        error: result.error.message || `Failed reading ${tableName}.`
+                    };
+                }
+
+                if (!result.data) {
+                    return {
+                        ok: true,
+                        snapshot: null,
+                        roomId,
+                        scope,
+                        caseId
+                    };
+                }
+
+                const decodedPayload = await decodeBoardRoomCheckpointPayload(
+                    result.data.payload,
+                    String(result.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                    result.data.case_id ? sanitizeCaseId(result.data.case_id, caseId || 'case_primary') : ''
+                );
+
                 return {
                     ok: true,
-                    snapshot: null,
                     roomId,
                     scope,
-                    caseId
+                    caseId,
+                    snapshot: {
+                        roomId: String(result.data.room_id || roomId),
+                        scope: String(result.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                        caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, caseId || 'case_primary') : '',
+                        payload: sanitizeBoard({
+                            ...decodedPayload,
+                            updatedAt: Date.parse(result.data.updated_at || '') || toNonNegativeInt(result.data.revision, 0)
+                        }),
+                        revision: toNonNegativeInt(result.data.revision, 0),
+                        updatedAt: toIsoString(result.data.updated_at, ''),
+                        updatedBy: toTrimmedString(result.data.updated_by, '', 120),
+                        updatedByName: toTrimmedString(result.data.updated_by_name, '', 120)
+                    }
                 };
-            }
-
-            const decodedPayload = await decodeBoardRoomCheckpointPayload(
-                result.data.payload,
-                String(result.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
-                result.data.case_id ? sanitizeCaseId(result.data.case_id, caseId || 'case_primary') : ''
-            );
-
-            return {
-                ok: true,
-                roomId,
-                scope,
-                caseId,
-                snapshot: {
-                    roomId: String(result.data.room_id || roomId),
-                    scope: String(result.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
-                    caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, caseId || 'case_primary') : '',
-                    payload: sanitizeBoard({
-                        ...decodedPayload,
-                        updatedAt: Date.parse(result.data.updated_at || '') || toNonNegativeInt(result.data.revision, 0)
-                    }),
-                    revision: toNonNegativeInt(result.data.revision, 0),
-                    updatedAt: toIsoString(result.data.updated_at, ''),
-                    updatedBy: toTrimmedString(result.data.updated_by, '', 120),
-                    updatedByName: toTrimmedString(result.data.updated_by_name, '', 120)
-                }
-            };
+            }, { force: !!opts.force });
         }
 
 	        async saveBoardRoomSnapshot(options = {}) {
@@ -6157,6 +6589,8 @@
 	            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
 	            const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
 	            const createOnly = !!opts.createOnly;
+                const hasPreviousRevision = Object.prototype.hasOwnProperty.call(opts, 'previousRevision');
+                const previousRevision = Math.max(0, toNonNegativeInt(opts.previousRevision, 0));
 	            const readCurrentRow = () => ensured.client
 	                .from(tableName)
 	                .select(selectCols)
@@ -6215,6 +6649,109 @@
 	            };
 
 	            if (!createOnly) {
+                    if (hasPreviousRevision) {
+                        let optimisticResult = null;
+                        if (previousRevision > 0) {
+                            optimisticResult = await ensured.client
+                                .from(tableName)
+                                .update(row)
+                                .eq('campaign_id', ensured.config.campaignId)
+                                .eq('room_id', roomId)
+                                .eq('revision', previousRevision)
+                                .select('revision,updated_at')
+                                .maybeSingle();
+                            if (!optimisticResult.error && optimisticResult.data) {
+                                const response = {
+                                    ok: true,
+                                    roomId,
+                                    scope,
+                                    caseId: caseId || '',
+                                    revision: toNonNegativeInt(optimisticResult.data && optimisticResult.data.revision, revision),
+                                    updatedAt: toIsoString(optimisticResult.data && optimisticResult.data.updated_at, updatedAt) || updatedAt
+                                };
+                                this.setSyncQueryCacheValue(this.getBoardRoomSnapshotCacheKey({ roomId, scope, caseId }), {
+                                    ok: true,
+                                    roomId,
+                                    scope,
+                                    caseId: caseId || '',
+                                    snapshot: {
+                                        roomId,
+                                        scope,
+                                        caseId: caseId || '',
+                                        payload: snapshotPayload,
+                                        revision: response.revision,
+                                        updatedAt: response.updatedAt,
+                                        updatedBy: row.updated_by || '',
+                                        updatedByName: row.updated_by_name || ''
+                                    }
+                                });
+                                return response;
+                            }
+                            if (optimisticResult.error && optimisticResult.error.code !== 'PGRST116') {
+                                return {
+                                    ok: false,
+                                    reason: 'write-failed',
+                                    error: optimisticResult.error.message || `Failed writing ${tableName}.`
+                                };
+                            }
+                        } else {
+                            optimisticResult = await ensured.client
+                                .from(tableName)
+                                .insert(row)
+                                .select('revision,updated_at')
+                                .single();
+                            if (!optimisticResult.error) {
+                                const response = {
+                                    ok: true,
+                                    roomId,
+                                    scope,
+                                    caseId: caseId || '',
+                                    revision: toNonNegativeInt(optimisticResult.data && optimisticResult.data.revision, revision),
+                                    updatedAt: toIsoString(optimisticResult.data && optimisticResult.data.updated_at, updatedAt) || updatedAt
+                                };
+                                this.setSyncQueryCacheValue(this.getBoardRoomSnapshotCacheKey({ roomId, scope, caseId }), {
+                                    ok: true,
+                                    roomId,
+                                    scope,
+                                    caseId: caseId || '',
+                                    snapshot: {
+                                        roomId,
+                                        scope,
+                                        caseId: caseId || '',
+                                        payload: snapshotPayload,
+                                        revision: response.revision,
+                                        updatedAt: response.updatedAt,
+                                        updatedBy: row.updated_by || '',
+                                        updatedByName: row.updated_by_name || ''
+                                    }
+                                });
+                                return response;
+                            }
+                            if (optimisticResult.error.code !== '23505') {
+                                return {
+                                    ok: false,
+                                    reason: 'write-failed',
+                                    error: optimisticResult.error.message || `Failed writing ${tableName}.`
+                                };
+                            }
+                        }
+
+                        const latest = await readCurrentRow();
+                        if (latest.error) {
+                            return {
+                                ok: false,
+                                reason: 'read-failed',
+                                error: latest.error.message || `Failed reading ${tableName}.`
+                            };
+                        }
+                        if (latest.data) return buildStaleResult(latest.data);
+                        return {
+                            ok: false,
+                            reason: 'write-conflict',
+                            error: 'Live room snapshot write conflicted with another update.'
+                        };
+                    }
+
 	                const existing = await readCurrentRow();
 
 	                if (existing.error) {
@@ -6280,7 +6817,7 @@
 	                    };
 	                }
 
-	                return {
+	                const response = {
 	                    ok: true,
 	                    roomId,
 	                    scope,
@@ -6288,6 +6825,23 @@
 	                    revision: toNonNegativeInt(result.data && result.data.revision, revision),
 	                    updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
 	                };
+                    this.setSyncQueryCacheValue(this.getBoardRoomSnapshotCacheKey({ roomId, scope, caseId }), {
+                        ok: true,
+                        roomId,
+                        scope,
+                        caseId: caseId || '',
+                        snapshot: {
+                            roomId,
+                            scope,
+                            caseId: caseId || '',
+                            payload: snapshotPayload,
+                            revision: response.revision,
+                            updatedAt: response.updatedAt,
+                            updatedBy: row.updated_by || '',
+                            updatedByName: row.updated_by_name || ''
+                        }
+                    });
+	                return response;
 	            }
 
 	            const result = await ensured.client
@@ -6311,7 +6865,7 @@
 	                };
 	            }
 
-	            return {
+	            const response = {
 	                ok: true,
 	                roomId,
 	                scope,
@@ -6319,6 +6873,23 @@
 	                revision: toNonNegativeInt(result.data && result.data.revision, revision),
 	                updatedAt: toIsoString(result.data && result.data.updated_at, updatedAt) || updatedAt
 	            };
+                this.setSyncQueryCacheValue(this.getBoardRoomSnapshotCacheKey({ roomId, scope, caseId }), {
+                    ok: true,
+                    roomId,
+                    scope,
+                    caseId: caseId || '',
+                    snapshot: {
+                        roomId,
+                        scope,
+                        caseId: caseId || '',
+                        payload: snapshotPayload,
+                        revision: response.revision,
+                        updatedAt: response.updatedAt,
+                        updatedBy: row.updated_by || '',
+                        updatedByName: row.updated_by_name || ''
+                    }
+                });
+	            return response;
 	        }
 
         async restoreBoardRoomHistoryEntry(options = {}) {
@@ -6477,7 +7048,7 @@
                 };
             }
 
-            return {
+            const response = {
                 ok: true,
                 roomId: target.roomId,
                 scope: target.scope,
@@ -6488,6 +7059,14 @@
                 broadcastOk: !!(broadcast && broadcast.ok),
                 broadcastError: broadcast && !broadcast.ok ? (broadcast.error || broadcast.reason || '') : ''
             };
+            this.setSyncQueryCacheValue(this.getBoardRoomSnapshotCacheKey(target), {
+                ok: true,
+                snapshot: null,
+                roomId: target.roomId,
+                scope: target.scope,
+                caseId: target.caseId
+            });
+            return response;
         }
 
         async clearBoardRoomLocalState(options = {}) {
@@ -6555,8 +7134,11 @@
             this.sync.localSoftLocks = new Map();
             this.sync.pendingConflict = null;
             this.sync.normalizedPendingScopes = new Set();
+            this.sync.normalizedPendingScopeMeta = new Map();
+            this.sync.authPromise = null;
             this.sync.roomHydrationInflight = new Map();
             this.sync.roomHydrationSeenAt = new Map();
+            this.sync.queryCache = new Map();
 
             if (reason === 'disabled') {
                 this.updateSyncStatus({
@@ -6583,11 +7165,18 @@
 
         async ensureSyncUser() {
             if (!this.sync.client) return { ok: false, message: 'Supabase client unavailable.' };
+            const now = Date.now();
+            if (this.sync.userId && (now - toTimestamp(this.sync.authCheckedAt, 0)) < AUTH_SESSION_CACHE_MS) {
+                return { ok: true, userId: this.sync.userId };
+            }
+            if (this.sync.authPromise) return this.sync.authPromise;
 
-            try {
+            this.sync.authPromise = (async () => {
                 const sessionResult = await this.sync.client.auth.getSession();
                 const existingSession = sessionResult && sessionResult.data ? sessionResult.data.session : null;
                 if (existingSession && existingSession.user && existingSession.user.id) {
+                    this.sync.userId = existingSession.user.id;
+                    this.sync.authCheckedAt = Date.now();
                     return { ok: true, userId: existingSession.user.id };
                 }
 
@@ -6606,16 +7195,22 @@
 
                 const session = anonResult.data ? anonResult.data.session : null;
                 if (session && session.user && session.user.id) {
+                    this.sync.userId = session.user.id;
+                    this.sync.authCheckedAt = Date.now();
                     return { ok: true, userId: session.user.id };
                 }
 
                 return { ok: false, message: 'No authenticated user session.' };
-            } catch (err) {
+            })().catch((err) => {
                 return {
                     ok: false,
                     message: err && err.message ? err.message : 'Auth failed.'
                 };
-            }
+            }).finally(() => {
+                this.sync.authPromise = null;
+            });
+
+            return this.sync.authPromise;
         }
 
         async requestMagicLink(email) {
@@ -6652,6 +7247,8 @@
                 return { ok: false, error: result.error.message || 'Sign out failed.' };
             }
             this.sync.userId = '';
+            this.sync.authCheckedAt = 0;
+            this.sync.authPromise = null;
             this.updateSyncStatus({
                 mode: this.sync.config.enabled ? 'idle' : 'disabled',
                 connected: false,
@@ -6743,7 +7340,7 @@
                 }
                 const scope = normalizeScopeToken(row.scope);
                 if (!scope || scope === SYNC_SCOPE_GLOBAL || isRoomBackedScope(scope)) return;
-                this.scheduleNormalizedRealtimePull([scope]);
+                this.scheduleNormalizedRealtimePull([row]);
                 return;
             }
             const row = payload && payload.new ? payload.new : null;
@@ -6814,29 +7411,31 @@
             }
 
             const tables = this.getNormalizedTables();
-            const versionRowsResult = await this.fetchNormalizedList(
-                tables.scopeVersions,
-                'scope,exists,revision,updated_at,updated_by,updated_by_name',
-                { column: 'updated_at', ascending: false },
-                [{ column: 'scope', in: changedScopes }]
-            );
-            if (!versionRowsResult.ok) {
-                if (!silent) {
-                    this.updateSyncStatus({
-                        mode: 'error',
-                        message: 'Cloud read failed.',
-                        lastError: versionRowsResult.error || 'Scope version read failed.'
-                    });
+            const versionMap = this.buildNormalizedScopeVersionMap(opts.scopeVersionRows);
+            const missingScopeRows = changedScopes.filter((scope) => !versionMap.has(scope));
+            if (missingScopeRows.length) {
+                const versionRowsResult = await this.fetchNormalizedList(
+                    tables.scopeVersions,
+                    'scope,exists,revision,updated_at,updated_by,updated_by_name',
+                    { column: 'updated_at', ascending: false },
+                    [{ column: 'scope', in: missingScopeRows }]
+                );
+                if (!versionRowsResult.ok) {
+                    if (!silent) {
+                        this.updateSyncStatus({
+                            mode: 'error',
+                            message: 'Cloud read failed.',
+                            lastError: versionRowsResult.error || 'Scope version read failed.'
+                        });
+                    }
+                    return { ok: false, reason: 'error', error: versionRowsResult.error || 'Scope version read failed.' };
                 }
-                return { ok: false, reason: 'error', error: versionRowsResult.error || 'Scope version read failed.' };
+                (Array.isArray(versionRowsResult.data) ? versionRowsResult.data : []).forEach((row) => {
+                    const scope = normalizeScopeToken(row && row.scope);
+                    if (!scope) return;
+                    versionMap.set(scope, row);
+                });
             }
-
-            const versionMap = new Map();
-            (Array.isArray(versionRowsResult.data) ? versionRowsResult.data : []).forEach((row) => {
-                const scope = normalizeScopeToken(row && row.scope);
-                if (!scope) return;
-                versionMap.set(scope, row);
-            });
 
             const scopedFetch = await this.fetchNormalizedScopedRows(changedScopes);
             if (!scopedFetch.ok) {
@@ -6851,28 +7450,7 @@
             }
 
             const remoteBase = sanitizeState(this.sync.lastSyncedState || this.state);
-            const composed = this.applyNormalizedScopedSnapshot(remoteBase, changedScopes, scopedFetch.snapshot, versionMap);
-            const scopeSnapshot = buildScopeSnapshot(composed.state);
-            const scopeMeta = new Map();
-            changedScopes.forEach((scope) => {
-                if (!isGranularNormalizedLwwScope(scope)) return;
-                const row = versionMap.get(scope);
-                scopeMeta.set(scope, {
-                    revision: toNonNegativeInt(row && row.revision, composed.revision),
-                    updatedAt: toTimestamp(row && row.updated_at, composed.updatedAt),
-                    exists: row ? row.exists !== false : scopeSnapshot.has(scope),
-                    signature: scopeSnapshot.has(scope) ? JSON.stringify(scopeSnapshot.get(scope)) : ''
-                });
-            });
-
-            const remoteRow = {
-                state: composed.state,
-                revision: toNonNegativeInt(composed.revision, 0),
-                updatedAt: toTimestamp(composed.updatedAt, Date.now()),
-                updatedBy: composed.updatedBy || '',
-                updatedByName: composed.updatedByName || '',
-                scopeMeta
-            };
+            const remoteRow = this.buildNormalizedRemoteRowFromScopedSnapshot(remoteBase, changedScopes, scopedFetch.snapshot, versionMap);
             const applied = this.applyMergedRemoteState(remoteRow, dirtyScopes, 'realtime-scoped', {
                 clearPendingConflict: false,
                 schedulePush: !!dirtyScopes.length
@@ -7085,6 +7663,34 @@
             };
         }
 
+        getLastSyncedCampaignEntityIds(key) {
+            const synced = sanitizeState(this.sync && this.sync.lastSyncedState ? this.sync.lastSyncedState : null);
+            const list = synced && synced.campaign && Array.isArray(synced.campaign[key]) ? synced.campaign[key] : [];
+            return list
+                .map((entry) => toTrimmedString(entry && entry.id, '', 80))
+                .filter(Boolean);
+        }
+
+        getLastSyncedCaseIds() {
+            const synced = sanitizeState(this.sync && this.sync.lastSyncedState ? this.sync.lastSyncedState : null);
+            const items = synced && synced.cases && Array.isArray(synced.cases.items) ? synced.cases.items : [];
+            return items
+                .map((entry) => sanitizeCaseId(entry && entry.id, ''))
+                .filter(Boolean);
+        }
+
+        getLastSyncedCaseEventIds(caseId) {
+            const targetCaseId = sanitizeCaseId(caseId, '');
+            if (!targetCaseId) return [];
+            const synced = sanitizeState(this.sync && this.sync.lastSyncedState ? this.sync.lastSyncedState : null);
+            const items = synced && synced.cases && Array.isArray(synced.cases.items) ? synced.cases.items : [];
+            const entry = items.find((item) => sanitizeCaseId(item && item.id, '') === targetCaseId);
+            const events = entry && Array.isArray(entry.events) ? entry.events : [];
+            return events
+                .map((event) => toTrimmedString(event && event.id, '', 80))
+                .filter(Boolean);
+        }
+
         async replaceEntityCollection(tableName, idColumn, sourceItems, writeMeta) {
             const campaignId = this.sync.config.campaignId;
             const list = Array.isArray(sourceItems) ? sourceItems : [];
@@ -7104,17 +7710,16 @@
                 });
             });
 
-            const existing = await this.sync.client
-                .from(tableName)
-                .select(idColumn)
-                .eq('campaign_id', campaignId);
-            if (existing.error) {
-                return { ok: false, error: existing.error.message || `Failed reading ${tableName}.` };
-            }
-
-            const existingIds = (Array.isArray(existing.data) ? existing.data : [])
-                .map((row) => toTrimmedString(row && row[idColumn], '', 80))
-                .filter(Boolean);
+            const keyByIdColumn = {
+                player_id: 'players',
+                npc_id: 'npcs',
+                location_id: 'locations',
+                requisition_id: 'requisitions',
+                encounter_id: 'encounters'
+            };
+            const existingIds = keyByIdColumn[idColumn]
+                ? this.getLastSyncedCampaignEntityIds(keyByIdColumn[idColumn])
+                : [];
             const toDelete = existingIds.filter((id) => !localIds.has(id));
 
             if (rows.length) {
@@ -7278,18 +7883,8 @@
                 });
             }
 
-            const existing = await this.sync.client
-                .from(tables.caseState)
-                .select('case_id')
-                .eq('campaign_id', campaignId);
-            if (existing.error) {
-                return { ok: false, error: existing.error.message || 'Failed reading case state.' };
-            }
-
             const localCaseIds = new Set(rows.map((row) => row.case_id));
-            const existingCaseIds = (Array.isArray(existing.data) ? existing.data : [])
-                .map((row) => sanitizeCaseId(row && row.case_id, ''))
-                .filter(Boolean);
+            const existingCaseIds = this.getLastSyncedCaseIds();
             const toDelete = existingCaseIds.filter((id) => !localCaseIds.has(id));
 
             const upsert = await this.sync.client
@@ -7370,17 +7965,7 @@
                     });
                 });
 
-                const existing = await this.sync.client
-                    .from(tables.caseEvents)
-                    .select('event_id')
-                    .eq('campaign_id', campaignId)
-                    .eq('case_id', caseId);
-                if (existing.error) {
-                    return { ok: false, error: existing.error.message || `Failed reading events for ${caseId}.` };
-                }
-                const existingIds = (Array.isArray(existing.data) ? existing.data : [])
-                    .map((row) => toTrimmedString(row && row.event_id, '', 80))
-                    .filter(Boolean);
+                const existingIds = this.getLastSyncedCaseEventIds(caseId);
                 const toDelete = existingIds.filter((id) => !localIds.has(id));
 
                 if (normalizedRows.length) {
@@ -7662,7 +8247,10 @@
                         return { ok: false, reason: 'locked', locks: lockConflicts };
                     }
 
-                    const fetched = await this.fetchCloudRowNormalized({ silent: true });
+                    const fetched = await this.fetchCloudRowNormalizedDelta({
+                        silent: true,
+                        sinceRevision: baseRevision
+                    });
                     if (!fetched.ok) return fetched;
                     const remoteRow = fetched.row;
                     const remoteRevision = remoteRow ? toNonNegativeInt(remoteRow.revision, 0) : 0;
@@ -7847,7 +8435,9 @@
                 return { ok: false, reason: 'not-connected' };
             }
 
-            const fetched = await this.fetchCloudRow({ silent });
+            const fetched = (this.isNormalizedReadMode() && !force)
+                ? await this.fetchCloudRowNormalizedDelta({ silent })
+                : await this.fetchCloudRow({ silent });
             if (!fetched.ok) {
                 return fetched;
             }
@@ -7944,7 +8534,7 @@
             const shouldApply = force || localIsOlder;
 
             if (!shouldApply) {
-                if (localRevision > remoteRevision || localUpdatedAt > remoteUpdatedAt) {
+                if (hasLocalDirty && (localRevision > remoteRevision || localUpdatedAt > remoteUpdatedAt)) {
                     this.scheduleCloudPush('catch-up');
                 }
                 this.sync.lastPullAt = Date.now();

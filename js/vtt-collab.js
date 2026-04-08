@@ -2022,6 +2022,7 @@ class VTTCollabSession {
             caseId: this.caseId,
             payload: snapshotToSave,
             checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
+            previousRevision: this.lastSavedRevision,
             revision: nextRevision,
             updatedAt: toIsoString(getDocUpdatedAt(this.doc), '') || new Date().toISOString(),
             updatedBy: this.instanceId,
