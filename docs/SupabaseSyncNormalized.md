@@ -5,8 +5,9 @@ This is an optional high-concurrency schema for teams that want better simultane
 Current normalized client behavior is hybrid:
 
 - Exact row scopes for players, NPCs, locations, requisitions, encounters, and timeline events prefer newer remote data and auto-resolve quietly.
-- Protected shared scopes such as boards, HQ, ledger/core payloads, and bulk collection writes still surface conflicts when edits overlap.
-- Foreground reconnects pull quickly, reconcile pulls run every few seconds, and presence heartbeats are faster than the legacy defaults to reduce dual-edit windows.
+- Protected shared scopes such as HQ, ledger/core payloads, and bulk collection writes still surface conflicts when edits overlap.
+- Board and VTT state are room-backed and should live in `rtf_board_rooms`, not in the normalized campaign tables.
+- Foreground reconnects are the main catch-up path, while normalized realtime invalidation now comes from a tiny scope-version table instead of broad full-state pulls.
 
 ## Why this model
 
@@ -18,10 +19,10 @@ Current normalized client behavior is hybrid:
 
 Use one row per independently edited object:
 
-- `rtf_campaign_core`: one row per campaign (rep, heat, cognitive risk, case template/meta, ledger payload, campaign context, campaign meta board/timeline payloads).
+- `rtf_campaign_core`: one row per campaign (rep, heat, cognitive risk, case template/meta, ledger payload, campaign context, campaign meta timeline/event payloads).
+- `rtf_sync_scope_versions`: one row per changed scope for lightweight realtime invalidation.
 - `rtf_campaign_hq`: one row per campaign (HQ payload).
 - `rtf_case_state`: one row per case (name/order/active flag).
-- `rtf_case_boards`: one row per case board.
 - `rtf_case_events`: one row per timeline event.
 - `rtf_campaign_players`: one row per player.
 - `rtf_campaign_npcs`: one row per NPC.
@@ -35,24 +36,34 @@ Each row keeps:
 - `revision bigint` for optimistic concurrency checks.
 - `updated_at`, `updated_by`, `updated_by_user`, `updated_by_name`.
 
+`rtf_sync_scope_versions` keeps:
+
+- `scope text`
+- `exists boolean`
+- `revision bigint`
+- `updated_at`, `updated_by`, `updated_by_user`, `updated_by_name`
+
 ## Scope-to-table mapping
 
-- `campaign.heat`, `campaign.cognitiveRisk`, `campaign.rep`, `campaign.case`, `campaign.ledger`, `campaign.context`, `campaign.meta`, `campaign.meta.board`, `campaign.meta.events` -> `rtf_campaign_core`
+- `campaign.heat`, `campaign.cognitiveRisk`, `campaign.rep`, `campaign.case`, `campaign.ledger`, `campaign.context`, `campaign.meta`, `campaign.meta.events` -> `rtf_campaign_core`
 - `campaign.players` -> `rtf_campaign_players`
 - `campaign.npcs` -> `rtf_campaign_npcs`
 - `campaign.locations` -> `rtf_campaign_locations`
 - `campaign.requisitions` -> `rtf_campaign_requisitions`
 - `campaign.encounters` -> `rtf_campaign_encounters`
 - `cases.meta` -> `rtf_case_state`
-- `cases.<id>.board` -> `rtf_case_boards`
 - `cases.<id>.events` -> `rtf_case_events`
 - `hq` -> `rtf_campaign_hq`
+- any normalized write scope above also writes a corresponding `rtf_sync_scope_versions` row
 
 `campaign.meta.events.<eventId>` scope writes still map to `rtf_campaign_core` because campaign meta data is stored in the core payload JSON. The client still tracks these at exact-scope granularity for merge decisions, but they are not stored in a dedicated events table.
 
-## Schema impact for campaign meta
+## Board / VTT authority
 
-No additional Supabase tables are required for `campaign.meta.board` / `campaign.meta.events`. The existing normalized schema already supports this through `rtf_campaign_core.payload`.
+- `campaign.meta.board`, `cases.<id>.board`, and `cases.<id>.vtt` are no longer part of normalized campaign sync.
+- Those scopes should be loaded from `rtf_board_rooms` room snapshots and mirrored locally on demand.
+- `rtf_case_boards` can remain in place during migration, but the current client no longer depends on it.
+- `rtf_board_rooms.payload` remains `jsonb`, but newer room writes now store compact Yjs checkpoint envelopes instead of full board/VTT snapshot JSON. Legacy plain-JSON rows are still read transparently.
 
 ## Optimistic write contract
 
@@ -97,6 +108,7 @@ You can set this via `RTF_SYNC_BOOTSTRAP`, `setSyncConfig(...)`, or `connect.jso
   "normalizedCaseStateTable": "rtf_case_state",
   "normalizedCaseBoardsTable": "rtf_case_boards",
   "normalizedCaseEventsTable": "rtf_case_events",
+  "normalizedScopeVersionsTable": "rtf_sync_scope_versions",
   "normalizedPlayersTable": "rtf_campaign_players",
   "normalizedNPCsTable": "rtf_campaign_npcs",
   "normalizedLocationsTable": "rtf_campaign_locations",

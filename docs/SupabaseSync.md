@@ -8,6 +8,11 @@ Campaign-level meta board/timeline state (`campaign.meta.board`, `campaign.meta.
 
 Realtime board collaboration now uses a dedicated room table plus Supabase Realtime broadcast/presence for `board.html` and `campaign-board.html`. The regular campaign state row still mirrors board snapshots for compatibility, but live board transport no longer depends on the legacy board payload path.
 
+Room checkpoint storage is now hybrid-compatible:
+- older rows may still contain plain snapshot JSON in `rtf_board_rooms.payload`
+- newer rows can store a compact Yjs checkpoint envelope in the same `jsonb` column
+- the client reads both formats and rewrites rooms forward to the compact format on the next save
+
 For higher-concurrency deployments, see the hybrid normalized model:
 - `docs/SupabaseSyncNormalized.md`
 - `docs/SupabaseSyncNormalized.sql`

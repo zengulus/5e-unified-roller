@@ -1625,6 +1625,7 @@ function getSyncFormValues() {
         anonKey: (document.getElementById('sync-key').value || '').trim(),
         campaignId: (document.getElementById('sync-campaign').value || '').trim(),
         profileName: (document.getElementById('sync-profile').value || '').trim(),
+        collabRelayUrl: (document.getElementById('sync-collab-relay').value || '').trim(),
         autoConnect: autoConnectEl ? !!autoConnectEl.checked : true
     };
 }
@@ -1643,6 +1644,7 @@ function normalizeConnectPayload(raw) {
         anonKey,
         campaignId,
         profileName,
+        collabRelayUrl: String(raw.collabRelayUrl || raw.collabServerUrl || raw.relayUrl || '').trim(),
         enabled: true,
         autoConnect,
         backendMode
@@ -1657,6 +1659,7 @@ function normalizeConnectPayload(raw) {
         ['normalizedCaseStateTable', raw.normalizedCaseStateTable || raw.caseStateTable || ''],
         ['normalizedCaseBoardsTable', raw.normalizedCaseBoardsTable || raw.caseBoardsTable || ''],
         ['normalizedCaseEventsTable', raw.normalizedCaseEventsTable || raw.caseEventsTable || ''],
+        ['normalizedScopeVersionsTable', raw.normalizedScopeVersionsTable || raw.scopeVersionsTable || ''],
         ['normalizedPlayersTable', raw.normalizedPlayersTable || raw.playersTable || ''],
         ['normalizedNPCsTable', raw.normalizedNPCsTable || raw.npcsTable || ''],
         ['normalizedLocationsTable', raw.normalizedLocationsTable || raw.locationsTable || ''],
@@ -1784,6 +1787,7 @@ function applySyncConfigToForm(config) {
     document.getElementById('sync-key').value = config.anonKey || '';
     document.getElementById('sync-campaign').value = config.campaignId || '';
     document.getElementById('sync-profile').value = config.profileName || '';
+    document.getElementById('sync-collab-relay').value = config.collabRelayUrl || '';
     const autoConnectEl = document.getElementById('sync-autoconnect');
     if (autoConnectEl) autoConnectEl.checked = config.autoConnect !== false;
 }
@@ -2259,6 +2263,7 @@ function exportConnectFile() {
         anonKey: config.anonKey || '',
         campaignId: config.campaignId || '',
         profileName: '',
+        collabRelayUrl: config.collabRelayUrl || '',
         backendMode: config.backendMode || 'legacy',
         autoConnect: config.autoConnect !== false
     };
@@ -2272,6 +2277,7 @@ function exportConnectFile() {
         'normalizedCaseStateTable',
         'normalizedCaseBoardsTable',
         'normalizedCaseEventsTable',
+        'normalizedScopeVersionsTable',
         'normalizedPlayersTable',
         'normalizedNPCsTable',
         'normalizedLocationsTable',

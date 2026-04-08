@@ -66,6 +66,10 @@ This project is unofficial Fan Content permitted under the Fan Content Policy. N
 **Third-Party and Attributed Materials:**
 * [pdf.js](https://github.com/mozilla/pdf.js) (`js/pdf.min.js`, `js/pdf.worker.min.js`) - [Apache-2.0 License](https://www.apache.org/licenses/LICENSE-2.0)
 * `lib0`, `yjs`, `y-protocols`, and `y-indexeddb` under `js/vendor/` - MIT License
+
+## Render Collab Relay
+
+Live board/VTT transport can now be moved off Supabase and onto a tiny Render websocket relay while still keeping Supabase for room snapshots and recovery. See `docs/RenderCollabRelay.md`.
 * See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license paths and attribution details.
 
 

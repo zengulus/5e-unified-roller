@@ -8,10 +8,12 @@ import {
 import { IndexeddbPersistence } from './vendor/y-indexeddb/y-indexeddb.js';
 import * as encoding from './vendor/lib0/encoding.js';
 import * as decoding from './vendor/lib0/decoding.js';
+import { createCollabRelayChannel } from './collab-relay-client.js';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 1000;
-const SYNC_RECONCILE_INTERVAL_MS = 2000;
+const CLOUD_FLUSH_DELAY_MS = 2500;
+const SYNC_RECONCILE_INTERVAL_MS = 15000;
+const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 30000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
@@ -1008,6 +1010,98 @@ const serializeDocSnapshot = (doc, coerceSnapshot) => {
     });
 };
 
+const VTT_CHECKPOINT_FORMAT = 'yjs-vtt-update-v1';
+
+const encodeCheckpointBase64 = (bytes) => {
+    if (!(bytes instanceof Uint8Array)) return '';
+    if (typeof btoa === 'function') {
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary);
+    }
+    if (typeof Buffer !== 'undefined') {
+        return Buffer.from(bytes).toString('base64');
+    }
+    return '';
+};
+
+const decodeCheckpointBase64 = (value) => {
+    const clean = toTrimmedString(value, '', 8 * 1024 * 1024).trim();
+    if (!clean) return null;
+    try {
+        if (typeof atob === 'function') {
+            const binary = atob(clean);
+            const out = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+            return out;
+        }
+        if (typeof Buffer !== 'undefined') {
+            return new Uint8Array(Buffer.from(clean, 'base64'));
+        }
+    } catch (err) {
+        console.warn('RTF_VTT_COLLAB: Failed decoding checkpoint payload', err);
+    }
+    return null;
+};
+
+const buildCheckpointSummary = (snapshot, coerceSnapshot) => {
+    const clean = coerceSnapshot(snapshot);
+    const scenes = Array.isArray(clean.scenes) ? clean.scenes : [];
+    let tokenCount = 0;
+    scenes.forEach((scene) => {
+        tokenCount += Array.isArray(scene && scene.tokens) ? scene.tokens.length : 0;
+    });
+    return {
+        updatedAt: Math.max(0, toNonNegativeInt(clean.updatedAt, 0)),
+        activeSceneId: toTrimmedString(clean.activeSceneId, '', 120).trim(),
+        sceneCount: scenes.length,
+        tokenCount
+    };
+};
+
+const isEncodedVTTCheckpoint = (value) => !!(
+    value
+    && typeof value === 'object'
+    && String(value.format || '').trim() === VTT_CHECKPOINT_FORMAT
+    && typeof value.update === 'string'
+);
+
+const exportVTTCheckpointFromDoc = (doc, coerceSnapshot) => {
+    if (!(doc instanceof Y.Doc) || typeof coerceSnapshot !== 'function') return null;
+    const snapshot = serializeDocSnapshot(doc, coerceSnapshot);
+    const update = encodeCheckpointBase64(Y.encodeStateAsUpdate(doc));
+    if (!update) return null;
+    return {
+        format: VTT_CHECKPOINT_FORMAT,
+        encoding: 'base64',
+        update,
+        summary: buildCheckpointSummary(snapshot, coerceSnapshot)
+    };
+};
+
+const exportVTTCheckpointFromSnapshot = (snapshot, coerceSnapshot) => {
+    if (typeof coerceSnapshot !== 'function') return null;
+    const clean = coerceSnapshot(snapshot);
+    const doc = new Y.Doc();
+    applySnapshotToDoc(doc, clean, coerceSnapshot, { kind: 'vtt-checkpoint-export' }, Math.max(0, toNonNegativeInt(clean.updatedAt, Date.now()) || Date.now()));
+    return exportVTTCheckpointFromDoc(doc, coerceSnapshot);
+};
+
+const decodeVTTCheckpointToSnapshot = (payload, coerceSnapshot) => {
+    if (typeof coerceSnapshot !== 'function') return fallbackSnapshot();
+    if (!isEncodedVTTCheckpoint(payload)) return coerceSnapshot(payload);
+    const bytes = decodeCheckpointBase64(payload.update);
+    if (!(bytes instanceof Uint8Array) || !bytes.length) return fallbackSnapshot();
+    try {
+        const doc = new Y.Doc();
+        Y.applyUpdate(doc, bytes, { kind: 'vtt-checkpoint-import' });
+        return serializeDocSnapshot(doc, coerceSnapshot);
+    } catch (err) {
+        console.warn('RTF_VTT_COLLAB: Failed decoding VTT checkpoint', err);
+        return fallbackSnapshot();
+    }
+};
+
 const getDocUpdatedAt = (doc) => {
     const metaMap = doc.getMap('meta');
     return Math.max(0, toNonNegativeInt(metaMap.get('updatedAt'), 0));
@@ -1191,6 +1285,7 @@ class VTTCollabSession {
         this.lastSnapshotSource = '';
         this.lastSharedStoreSignature = '';
         this.lastCloudSnapshotSignature = '';
+        this.lastCompatibilityCloudSyncAt = 0;
         this.lastTrackedPresenceKey = '';
         this.pendingMirrorTimer = null;
         this.pendingFlushTimer = null;
@@ -1431,6 +1526,7 @@ class VTTCollabSession {
                     roomId: this.roomId,
                     caseId: this.caseId,
                     payload: canonicalPayload,
+                    checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
                     revision: seedStamp,
                     updatedAt: new Date(seedStamp).toISOString(),
                     updatedBy: this.instanceId,
@@ -1501,12 +1597,16 @@ class VTTCollabSession {
 
     async disposeChannel(channel = this.channel) {
         this.stopPeriodicSync();
-        if (!channel || !this.client) return;
+        if (!channel) return;
         try {
             if (typeof channel.untrack === 'function') {
                 try { await channel.untrack(); } catch (err) { }
             }
-            await this.client.removeChannel(channel);
+            if (channel.__relay && typeof channel.close === 'function') {
+                await channel.close();
+            } else if (this.client) {
+                await this.client.removeChannel(channel);
+            }
         } catch (err) {
             console.warn('RTF_VTT_COLLAB: Failed removing channel', err);
         } finally {
@@ -1545,6 +1645,7 @@ class VTTCollabSession {
         this.periodicSyncTimer = setInterval(() => {
             if (this.destroyed || !this.connected || !this.ready) return;
             if (!this.remotePresence.size) return;
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
             this.sendSyncStep1();
         }, SYNC_RECONCILE_INTERVAL_MS);
     }
@@ -1569,12 +1670,25 @@ class VTTCollabSession {
         this.stopPeriodicSync();
         this.remotePresence = new Map();
         const channelName = `rtf-vtt-${config.campaignId}-${this.roomId}`;
-        const channel = this.client.channel(channelName, {
-            config: {
-                broadcast: { self: false },
-                presence: { key: this.instanceId || undefined }
-            }
-        });
+        const relayUrl = toTrimmedString(config.collabRelayUrl, '', 4000).trim();
+        const channel = relayUrl
+            ? createCollabRelayChannel({
+                baseUrl: relayUrl,
+                roomId: channelName,
+                campaignId: config.campaignId,
+                instanceId: this.instanceId,
+                presenceKey: this.instanceId || undefined,
+                profileName: this.profileName,
+                userId: this.userId,
+                scope: 'case',
+                caseId: this.caseId
+            })
+            : this.client.channel(channelName, {
+                config: {
+                    broadcast: { self: false },
+                    presence: { key: this.instanceId || undefined }
+                }
+            });
         this.channel = channel;
 
         channel.on('broadcast', { event: 'y-sync' }, ({ payload }) => {
@@ -1880,14 +1994,24 @@ class VTTCollabSession {
         }, CLOUD_FLUSH_DELAY_MS);
     }
 
-    persistSnapshotToSharedState(snapshot, signature = '') {
+    shouldMirrorCompatibilityCloud(force = false) {
+        if (force) return true;
+        const now = Date.now();
+        return !this.lastCompatibilityCloudSyncAt
+            || (now - this.lastCompatibilityCloudSyncAt) >= COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS;
+    }
+
+    persistSnapshotToSharedState(snapshot, signature = '', options = {}) {
         if (!snapshot || !this.store || typeof this.store.updateVTTState !== 'function') return false;
+        const opts = options && typeof options === 'object' ? options : {};
         const snapshotSig = signature || buildSnapshotSignature(snapshot, this.coerceSnapshot.bind(this));
         if (!snapshotSig || snapshotSig === this.lastSharedStoreSignature) return false;
         try {
             this.store.updateVTTState(snapshot, this.caseId, {
-                updatedAt: getSnapshotUpdatedAt(snapshot, this.coerceSnapshot.bind(this)) || getDocUpdatedAt(this.doc) || Date.now()
+                updatedAt: getSnapshotUpdatedAt(snapshot, this.coerceSnapshot.bind(this)) || getDocUpdatedAt(this.doc) || Date.now(),
+                skipCloud: !opts.syncCloud
             });
+            if (opts.syncCloud) this.lastCompatibilityCloudSyncAt = Date.now();
             this.lastSharedStoreSignature = snapshotSig;
             return true;
         } catch (err) {
@@ -1896,7 +2020,8 @@ class VTTCollabSession {
         }
     }
 
-    async flushSnapshotNow() {
+    async flushSnapshotNow(options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
         if (this.pendingFlushPromise) {
             this.flushQueuedWhilePending = true;
             return this.pendingFlushPromise;
@@ -1919,6 +2044,7 @@ class VTTCollabSession {
             roomId: this.roomId,
             caseId: this.caseId,
             payload: snapshotToSave,
+            checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
             revision: nextRevision,
             updatedAt: toIsoString(getDocUpdatedAt(this.doc), '') || new Date().toISOString(),
             updatedBy: this.instanceId,
@@ -1929,7 +2055,9 @@ class VTTCollabSession {
                 this.applyRevisionState(result.revision || nextRevision, this.instanceId);
                 if (snapshotSig) this.lastCloudSnapshotSignature = snapshotSig;
                 this.pendingReadyFlush = false;
-                this.persistSnapshotToSharedState(snapshotToSave, snapshotSig);
+                this.persistSnapshotToSharedState(snapshotToSave, snapshotSig, {
+                    syncCloud: this.shouldMirrorCompatibilityCloud(!!opts.forceCompatibilityMirror)
+                });
                 return result;
             }
             if (result && result.reason === 'stale' && result.snapshot) {
@@ -1938,7 +2066,9 @@ class VTTCollabSession {
                 const currentSig = buildSnapshotSignature(this.getSnapshot(), this.coerceSnapshot.bind(this));
                 this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
                 if (remoteSig) this.lastCloudSnapshotSignature = remoteSig;
-                this.persistSnapshotToSharedState(remoteSnapshot, remoteSig);
+                this.persistSnapshotToSharedState(remoteSnapshot, remoteSig, {
+                    syncCloud: false
+                });
                 if (remoteSig !== currentSig) {
                     this.flushQueuedWhilePending = true;
                     this.pendingReadyFlush = true;
@@ -1996,7 +2126,7 @@ class VTTCollabSession {
         }
         if (base && nextSig === buildSnapshotSignature(base, this.coerceSnapshot.bind(this))) {
             if (opts.flushNow) {
-                return this.flushSnapshotNow();
+                return this.flushSnapshotNow({ forceCompatibilityMirror: true });
             }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
@@ -2026,7 +2156,7 @@ class VTTCollabSession {
             applySnapshotToDoc(this.doc, next, this.coerceSnapshot.bind(this), this.originLocalSnapshot, Date.now());
         }
         if (opts.flushNow) {
-            return this.flushSnapshotNow();
+            return this.flushSnapshotNow({ forceCompatibilityMirror: true });
         }
         return Promise.resolve({ ok: true });
     }
@@ -2067,7 +2197,7 @@ class VTTCollabSession {
             Math.max(Date.now(), nextSnapshotUpdatedAt || scopeUpdatedAt || this.getSharedStoreUpdatedAt())
         );
         if (opts.flushNow) {
-            this.flushSnapshotNow().catch((err) => {
+            this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch((err) => {
                 console.warn('RTF_VTT_COLLAB: Shared-store flush failed', err);
             });
         }
@@ -2078,20 +2208,20 @@ class VTTCollabSession {
         const applied = applyTokenPositionChangesToDoc(this.doc, changes, this.originPosition, Date.now());
         if (!applied.length) {
             if (options && options.flushNow) {
-                return this.flushSnapshotNow();
+                return this.flushSnapshotNow({ forceCompatibilityMirror: true });
             }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
         if (options && options.flushNow) {
             this.requestPeerReconcile('token-drop');
-            return this.flushSnapshotNow();
+            return this.flushSnapshotNow({ forceCompatibilityMirror: true });
         }
         return Promise.resolve({ ok: true, changes: applied });
     }
 
     handleVisibilityChange() {
         if (document.hidden) {
-            this.flushSnapshotNow().catch(() => { });
+            this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
         } else if (!this.connected) {
             this.scheduleReconnect('Rejoining live VTT...');
         } else {
@@ -2101,7 +2231,7 @@ class VTTCollabSession {
     }
 
     handleBeforeUnload() {
-        this.flushSnapshotNow().catch(() => { });
+        this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
     }
 
     async destroy() {
@@ -2115,7 +2245,7 @@ class VTTCollabSession {
         this.stopPeriodicSync();
 
         try {
-            await this.flushSnapshotNow();
+            await this.flushSnapshotNow({ forceCompatibilityMirror: true });
         } catch (err) {
             console.warn('RTF_VTT_COLLAB: Final flush failed', err);
         }
@@ -2144,6 +2274,12 @@ class VTTCollabSession {
 const api = {
     createSession(options = {}) {
         return VTTCollabSession.create(options);
+    },
+    exportCheckpointFromSnapshot(snapshot, coerceSnapshot = sanitizeVTTState) {
+        return exportVTTCheckpointFromSnapshot(snapshot, coerceSnapshot);
+    },
+    decodeCheckpointToSnapshot(payload, coerceSnapshot = sanitizeVTTState) {
+        return decodeVTTCheckpointToSnapshot(payload, coerceSnapshot);
     }
 };
 
@@ -2151,5 +2287,12 @@ if (typeof globalThis !== 'undefined') {
     globalThis.RTF_VTT_COLLAB = api;
 }
 
-export { VTTCollabSession };
+export {
+    VTTCollabSession,
+    VTT_CHECKPOINT_FORMAT,
+    isEncodedVTTCheckpoint,
+    exportVTTCheckpointFromDoc,
+    exportVTTCheckpointFromSnapshot,
+    decodeVTTCheckpointToSnapshot
+};
 export default api;

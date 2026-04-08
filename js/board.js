@@ -1866,16 +1866,21 @@ function readStoreBoardPayload() {
     return null;
 }
 
-function writeStoreBoardPayload(payload) {
+function writeStoreBoardPayload(payload, options = {}) {
     if (writeHostBoardPayload(payload)) return true;
     if (!window.RTF_STORE) return false;
     const clean = sanitizeBoardPayload(payload);
+    const opts = options && typeof options === 'object' ? options : {};
     if (isCampaignBoardView() && typeof window.RTF_STORE.updateCampaignMetaBoard === 'function') {
-        window.RTF_STORE.updateCampaignMetaBoard(clean);
+        window.RTF_STORE.updateCampaignMetaBoard(clean, {
+            skipCloud: !!opts.skipCloud
+        });
         return true;
     }
     if (typeof window.RTF_STORE.updateBoard === 'function') {
-        window.RTF_STORE.updateBoard(clean);
+        window.RTF_STORE.updateBoard(clean, null, {
+            skipCloud: !!opts.skipCloud
+        });
         return true;
     }
     if (window.RTF_STORE.state) {
@@ -1890,10 +1895,16 @@ function writeStoreBoardPayload(payload) {
         }
         if (typeof window.RTF_STORE.save === 'function') {
             if (isCampaignBoardView()) {
-                window.RTF_STORE.save({ scope: 'campaign.meta.board' });
+                window.RTF_STORE.save({
+                    scope: 'campaign.meta.board',
+                    skipCloud: !!opts.skipCloud
+                });
             } else {
                 const activeCaseId = getBoardActiveCaseId(window.RTF_STORE);
-                window.RTF_STORE.save({ scope: `cases.${activeCaseId}.board` });
+                window.RTF_STORE.save({
+                    scope: `cases.${activeCaseId}.board`,
+                    skipCloud: !!opts.skipCloud
+                });
             }
         }
         return true;
@@ -5115,7 +5126,9 @@ function persistBoardPayload(payload, options = {}) {
         updatedAt: Math.max(Date.now(), parseInt(source.updatedAt, 10) || 0)
     });
     const opts = options && typeof options === 'object' ? options : {};
-    const wroteSharedStore = writeStoreBoardPayload(clean);
+    const wroteSharedStore = writeStoreBoardPayload(clean, {
+        skipCloud: isBoardCollabReady()
+    });
     if (isBoardCollabReady() && typeof boardCollabSession.syncSnapshot === 'function') {
         boardCollabSession.syncSnapshot(clean, {
             flushNow: !!opts.flushNow,

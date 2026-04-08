@@ -378,6 +378,9 @@ function renderVTTSyncStatus() {
 function bindTrackerVTTStoreStatus() {
     if (trackerVTTStoreStatusBound) return;
     trackerVTTStoreStatusBound = true;
+    window.addEventListener('rtf-store-updated', () => {
+        renderVTTSyncStatus();
+    });
     window.addEventListener('storage', (event) => {
         if (!event || event.key !== UNIFIED_STORE_KEY) return;
         renderVTTSyncStatus();

@@ -24,6 +24,21 @@ create table if not exists public.rtf_campaign_hq (
   updated_by_name text
 );
 
+create table if not exists public.rtf_sync_scope_versions (
+  campaign_id text not null,
+  scope text not null,
+  exists boolean not null default true,
+  revision bigint not null default 0,
+  updated_at timestamptz not null default timezone('utc', now()),
+  updated_by text,
+  updated_by_user uuid references auth.users(id) on delete set null,
+  updated_by_name text,
+  primary key (campaign_id, scope)
+);
+
+create index if not exists rtf_sync_scope_versions_campaign_updated_idx
+  on public.rtf_sync_scope_versions (campaign_id, updated_at desc);
+
 -- 2) Case rows
 create table if not exists public.rtf_case_state (
   campaign_id text not null,
@@ -158,6 +173,7 @@ begin
   foreach t in array array[
     'rtf_campaign_core',
     'rtf_campaign_hq',
+    'rtf_sync_scope_versions',
     'rtf_case_state',
     'rtf_case_boards',
     'rtf_case_events',
@@ -186,6 +202,7 @@ begin
   foreach t in array array[
     'rtf_campaign_core',
     'rtf_campaign_hq',
+    'rtf_sync_scope_versions',
     'rtf_case_state',
     'rtf_case_boards',
     'rtf_case_events',

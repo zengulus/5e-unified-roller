@@ -19,6 +19,10 @@
     const SUPABASE_CDN_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
     const SHARED_SUPABASE_CLIENT_CACHE_KEY = '__RTF_SHARED_SUPABASE_CLIENT_CACHE__';
     const STORE_DEBUG = false;
+    const BOARD_CODEC_MODULE_CACHE_KEY = '__RTF_BOARD_CODEC_MODULE_CACHE__';
+    const VTT_CODEC_MODULE_CACHE_KEY = '__RTF_VTT_CODEC_MODULE_CACHE__';
+    const BOARD_CHECKPOINT_FORMAT = 'yjs-board-update-v1';
+    const VTT_CHECKPOINT_FORMAT = 'yjs-vtt-update-v1';
 
     const FALLBACK_GUILDS = [
         "Azorius",
@@ -61,6 +65,22 @@
         cache.set(clientKey, client);
         return client;
     };
+    const importCachedModule = (globalKey, path) => {
+        if (global[globalKey] && typeof global[globalKey].then === 'function') return global[globalKey];
+        global[globalKey] = import(path).catch((err) => {
+            try {
+                delete global[globalKey];
+            } catch (deleteErr) { }
+            throw err;
+        });
+        return global[globalKey];
+    };
+    const isEncodedRoomCheckpointPayload = (value, format) => !!(
+        value
+        && typeof value === 'object'
+        && String(value.format || '').trim() === format
+        && typeof value.update === 'string'
+    );
 
     const dedupeGuildNames = (source) => {
         const seen = new Set();
@@ -254,6 +274,7 @@
         anonKey: '',
         campaignId: '',
         profileName: '',
+        collabRelayUrl: '',
         backendMode: SYNC_BACKEND_LEGACY,
         schema: 'public',
         tableName: 'rtf_campaign_state',
@@ -264,13 +285,14 @@
         normalizedCaseStateTable: 'rtf_case_state',
         normalizedCaseBoardsTable: 'rtf_case_boards',
         normalizedCaseEventsTable: 'rtf_case_events',
+        normalizedScopeVersionsTable: 'rtf_sync_scope_versions',
         normalizedPlayersTable: 'rtf_campaign_players',
         normalizedNPCsTable: 'rtf_campaign_npcs',
         normalizedLocationsTable: 'rtf_campaign_locations',
         normalizedRequisitionsTable: 'rtf_campaign_requisitions',
         normalizedEncountersTable: 'rtf_campaign_encounters',
-        syncDelayMs: 350,
-        reconcileIntervalMs: 5000,
+        syncDelayMs: 1000,
+        reconcileIntervalMs: 60000,
         presenceHeartbeatMs: 3000,
         lockTtlMs: 20000
     };
@@ -816,6 +838,54 @@
         if (cleanLeftUpdatedBy) return 1;
         if (cleanRightUpdatedBy) return -1;
         return 0;
+    };
+    const decodeBoardRoomCheckpointPayload = async (payload, scope = 'case', caseId = '') => {
+        if (!isEncodedRoomCheckpointPayload(payload, BOARD_CHECKPOINT_FORMAT)) return sanitizeBoard(payload);
+        try {
+            const module = await importCachedModule(BOARD_CODEC_MODULE_CACHE_KEY, './board-collab.js');
+            if (module && typeof module.decodeBoardCheckpointToSnapshot === 'function') {
+                return sanitizeBoard(module.decodeBoardCheckpointToSnapshot(payload, { scope, caseId }));
+            }
+        } catch (err) {
+            console.warn('RTF_STORE: Failed importing board checkpoint codec', err);
+        }
+        return sanitizeBoard(null);
+    };
+    const encodeBoardRoomCheckpointPayload = async (payload, scope = 'case', caseId = '') => {
+        if (isEncodedRoomCheckpointPayload(payload, BOARD_CHECKPOINT_FORMAT)) return payload;
+        try {
+            const module = await importCachedModule(BOARD_CODEC_MODULE_CACHE_KEY, './board-collab.js');
+            if (module && typeof module.exportBoardCheckpointFromSnapshot === 'function') {
+                return module.exportBoardCheckpointFromSnapshot(payload, scope, caseId);
+            }
+        } catch (err) {
+            console.warn('RTF_STORE: Failed importing board checkpoint encoder', err);
+        }
+        return null;
+    };
+    const decodeVTTRoomCheckpointPayload = async (payload, caseId = '') => {
+        if (!isEncodedRoomCheckpointPayload(payload, VTT_CHECKPOINT_FORMAT)) return sanitizeVTTState(payload);
+        try {
+            const module = await importCachedModule(VTT_CODEC_MODULE_CACHE_KEY, './vtt-collab.js');
+            if (module && typeof module.decodeVTTCheckpointToSnapshot === 'function') {
+                return sanitizeVTTState(module.decodeVTTCheckpointToSnapshot(payload, sanitizeVTTState));
+            }
+        } catch (err) {
+            console.warn('RTF_STORE: Failed importing VTT checkpoint codec', err);
+        }
+        return sanitizeVTTState(null);
+    };
+    const encodeVTTRoomCheckpointPayload = async (payload) => {
+        if (isEncodedRoomCheckpointPayload(payload, VTT_CHECKPOINT_FORMAT)) return payload;
+        try {
+            const module = await importCachedModule(VTT_CODEC_MODULE_CACHE_KEY, './vtt-collab.js');
+            if (module && typeof module.exportVTTCheckpointFromSnapshot === 'function') {
+                return module.exportVTTCheckpointFromSnapshot(payload, sanitizeVTTState);
+            }
+        } catch (err) {
+            console.warn('RTF_STORE: Failed importing VTT checkpoint encoder', err);
+        }
+        return null;
     };
     const deleteIndexedDbDatabase = (name) => new Promise((resolve) => {
         if (!name || typeof indexedDB === 'undefined' || !indexedDB || typeof indexedDB.deleteDatabase !== 'function') {
@@ -1380,6 +1450,43 @@
         if (!out.length) out.push(SYNC_SCOPE_GLOBAL);
         return out;
     };
+    const isRoomBackedScope = (scopeToken) => {
+        const scope = normalizeScopeToken(scopeToken);
+        if (scope === 'campaign.meta.board') return true;
+        if (/^cases\.[a-z0-9_-]+\.board$/.test(scope)) return true;
+        if (/^cases\.[a-z0-9_-]+\.vtt(?:$|\.)/.test(scope)) return true;
+        return false;
+    };
+    const filterCloudSyncScopes = (scopeOrList) => normalizeScopeList(scopeOrList)
+        .filter((scope) => !isRoomBackedScope(scope));
+    const hasBoardContent = (boardState) => {
+        const board = sanitizeBoard(boardState);
+        return !!(
+            (Array.isArray(board.nodes) && board.nodes.length)
+            || (Array.isArray(board.connections) && board.connections.length)
+            || toNonNegativeInt(board.updatedAt, 0) > 0
+        );
+    };
+    const hasVTTContent = (vttState) => {
+        const vtt = sanitizeVTTState(vttState);
+        const scenes = Array.isArray(vtt.scenes) ? vtt.scenes : [];
+        const hasSceneContent = scenes.some((scene) => (
+            (Array.isArray(scene && scene.tokens) && scene.tokens.length)
+            || (Array.isArray(scene && scene.templates) && scene.templates.length)
+            || (Array.isArray(scene && scene.evidenceNotes) && scene.evidenceNotes.length)
+            || (Array.isArray(scene && scene.fog) && scene.fog.length)
+            || !!toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim()
+            || !!toTrimmedString(scene && scene.name, '', 160).trim()
+        ));
+        const initiative = vtt && vtt.initiative && typeof vtt.initiative === 'object' ? vtt.initiative : {};
+        return !!(
+            hasSceneContent
+            || (Array.isArray(initiative.entries) && initiative.entries.length)
+            || toNonNegativeInt(vtt.updatedAt, 0) > 0
+            || toTrimmedString(initiative.activeEntryId, '', 120).trim()
+            || Math.max(1, Math.round(toNumber(initiative.round, 1))) > 1
+        );
+    };
 
     const ENTITY_SCOPE_ORDER_TOKEN = '__order';
     const CAMPAIGN_ENTITY_SCOPE_PREFIXES = Object.freeze({
@@ -1698,7 +1805,8 @@
             if (!Array.isArray(parsed)) return [];
             const cleaned = parsed.filter((entry) => typeof entry === 'string' && /^[a-z0-9_.-]+$/i.test(entry.trim()));
             if (!cleaned.length) return [];
-            return normalizeScopeList(cleaned);
+            const filtered = filterCloudSyncScopes(cleaned);
+            return filtered.length ? filtered : [];
         } catch (err) {
             console.warn('RTF_STORE: Failed to parse dirty scopes cache', err);
             return [];
@@ -1780,27 +1888,13 @@
         map.set('campaign.ledger', sanitizeLedgerState(clean.campaign.ledger));
         map.set('campaign.case', clean.campaign.case);
         map.set('campaign.context', clean.campaignContext);
-        map.set('campaign.meta.board', stripBoardNodeLocalFields(clean.campaignMeta && clean.campaignMeta.board));
         addEntityScopesToSnapshot(map, CAMPAIGN_META_EVENTS_SCOPE_PREFIX, sanitizeEventList(clean.campaignMeta && clean.campaignMeta.events));
         map.set(SYNC_SCOPE_CASES_META, buildCasesMetaSnapshot(clean));
         map.set('hq', clean.hq);
         (clean.cases.items || []).forEach((entry) => {
             if (!entry || !entry.id) return;
-            map.set(`cases.${entry.id}.board`, stripBoardNodeLocalFields(entry.board));
             addEntityScopesToSnapshot(map, buildCaseEventsScopePrefix(entry.id), sanitizeEventList(entry.events));
             map.set(`cases.${entry.id}.leads`, sanitizeLeadList(entry.leads));
-            const vtt = sanitizeVTTState(entry.vtt);
-            map.set(`cases.${entry.id}.vtt`, vtt);
-            if (Array.isArray(vtt.initiative && vtt.initiative.entries)) {
-                vtt.initiative.entries.forEach((initiativeEntry, entryIdx) => {
-                    const scope = buildCaseVTTInitiativeEntryScope(entry.id, initiativeEntry);
-                    if (!scope) return;
-                    map.set(scope, sanitizeVTTInitiativeEntry(initiativeEntry, entryIdx));
-                });
-            }
-            if (vtt.initiative && vtt.initiative.activeEntryId) {
-                map.set(buildCaseVTTInitiativeActiveScope(entry.id), vtt.initiative.activeEntryId);
-            }
         });
         return map;
     };
@@ -2204,13 +2298,29 @@
     const mergeRemoteBoardWithLocalLayout = (remoteState, localState) => {
         const merged = sanitizeState(remoteState);
         const localLayouts = buildLocalOnlyBoardLayoutMap(localState);
+        const localCampaignMeta = sanitizeCampaignMeta(localState && localState.campaignMeta);
+        const remoteCampaignMeta = sanitizeCampaignMeta(merged.campaignMeta);
+
+        merged.campaignMeta = sanitizeCampaignMeta({
+            ...remoteCampaignMeta,
+            board: hasBoardContent(localCampaignMeta.board)
+                ? sanitizeBoard(localCampaignMeta.board)
+                : sanitizeBoard(remoteCampaignMeta.board)
+        });
 
         if (merged.cases && Array.isArray(merged.cases.items)) {
             merged.cases.items = merged.cases.items.map((caseEntry) => {
+                const localCase = getCaseById(localState, caseEntry.id);
                 const localLayout = localLayouts.get(caseEntry.id) || new Map();
+                const localBoard = localCase && localCase.board ? localCase.board : null;
+                const remoteBoard = caseEntry && caseEntry.board ? caseEntry.board : null;
+                const selectedBoard = hasBoardContent(localBoard) ? localBoard : remoteBoard;
+                const localVTT = localCase && localCase.vtt ? localCase.vtt : null;
+                const remoteVTT = caseEntry && caseEntry.vtt ? caseEntry.vtt : null;
                 return {
                     ...caseEntry,
-                    board: applyBoardLayout(caseEntry.board, localLayout)
+                    board: applyBoardLayout(selectedBoard, localLayout),
+                    vtt: hasVTTContent(localVTT) ? sanitizeVTTState(localVTT) : sanitizeVTTState(remoteVTT)
                 };
             });
 
@@ -2226,17 +2336,24 @@
 
     const stripLocalOnlyFieldsForCloud = (state) => {
         const cloud = sanitizeState(state);
+        if (cloud.campaign && typeof cloud.campaign === 'object') {
+            cloud.campaign.events = [];
+        }
+        if (cloud.campaignMeta && typeof cloud.campaignMeta === 'object') {
+            delete cloud.campaignMeta.board;
+        }
         if (cloud.cases && Array.isArray(cloud.cases.items)) {
-            cloud.cases.items = cloud.cases.items.map((caseEntry) => ({
-                ...caseEntry,
-                board: stripBoardNodeLocalFields(caseEntry.board)
-            }));
-            const activeCase = cloud.cases.items.find((item) => item.id === cloud.cases.activeCaseId) || cloud.cases.items[0];
-            if (activeCase) cloud.board = activeCase.board;
+            cloud.cases.items = cloud.cases.items.map((caseEntry) => {
+                const nextEntry = { ...caseEntry };
+                delete nextEntry.board;
+                delete nextEntry.vtt;
+                return nextEntry;
+            });
+            delete cloud.board;
             return cloud;
         }
 
-        cloud.board = stripBoardNodeLocalFields(cloud.board);
+        delete cloud.board;
         return cloud;
     };
 
@@ -2270,6 +2387,7 @@
             anonKey: typeof source.anonKey === 'string' ? source.anonKey.trim() : '',
             campaignId: sanitizeCampaignId(source.campaignId),
             profileName: sanitizeProfileName(source.profileName),
+            collabRelayUrl: typeof source.collabRelayUrl === 'string' ? source.collabRelayUrl.trim() : '',
             backendMode: sanitizeSyncBackendMode(source.backendMode),
             schema: sanitizeIdentifier(source.schema, DEFAULT_SYNC_CONFIG.schema),
             tableName: sanitizeIdentifier(source.tableName, DEFAULT_SYNC_CONFIG.tableName),
@@ -2280,13 +2398,14 @@
             normalizedCaseStateTable: sanitizeIdentifier(source.normalizedCaseStateTable, DEFAULT_SYNC_CONFIG.normalizedCaseStateTable),
             normalizedCaseBoardsTable: sanitizeIdentifier(source.normalizedCaseBoardsTable, DEFAULT_SYNC_CONFIG.normalizedCaseBoardsTable),
             normalizedCaseEventsTable: sanitizeIdentifier(source.normalizedCaseEventsTable, DEFAULT_SYNC_CONFIG.normalizedCaseEventsTable),
+            normalizedScopeVersionsTable: sanitizeIdentifier(source.normalizedScopeVersionsTable, DEFAULT_SYNC_CONFIG.normalizedScopeVersionsTable),
             normalizedPlayersTable: sanitizeIdentifier(source.normalizedPlayersTable, DEFAULT_SYNC_CONFIG.normalizedPlayersTable),
             normalizedNPCsTable: sanitizeIdentifier(source.normalizedNPCsTable, DEFAULT_SYNC_CONFIG.normalizedNPCsTable),
             normalizedLocationsTable: sanitizeIdentifier(source.normalizedLocationsTable, DEFAULT_SYNC_CONFIG.normalizedLocationsTable),
             normalizedRequisitionsTable: sanitizeIdentifier(source.normalizedRequisitionsTable, DEFAULT_SYNC_CONFIG.normalizedRequisitionsTable),
             normalizedEncountersTable: sanitizeIdentifier(source.normalizedEncountersTable, DEFAULT_SYNC_CONFIG.normalizedEncountersTable),
-            syncDelayMs: Math.max(250, toNonNegativeInt(source.syncDelayMs, DEFAULT_SYNC_CONFIG.syncDelayMs) || DEFAULT_SYNC_CONFIG.syncDelayMs),
-            reconcileIntervalMs: Math.max(5000, toNonNegativeInt(source.reconcileIntervalMs, DEFAULT_SYNC_CONFIG.reconcileIntervalMs) || DEFAULT_SYNC_CONFIG.reconcileIntervalMs),
+            syncDelayMs: Math.max(1000, toNonNegativeInt(source.syncDelayMs, DEFAULT_SYNC_CONFIG.syncDelayMs) || DEFAULT_SYNC_CONFIG.syncDelayMs),
+            reconcileIntervalMs: Math.max(60000, toNonNegativeInt(source.reconcileIntervalMs, DEFAULT_SYNC_CONFIG.reconcileIntervalMs) || DEFAULT_SYNC_CONFIG.reconcileIntervalMs),
             presenceHeartbeatMs: Math.max(3000, toNonNegativeInt(source.presenceHeartbeatMs, DEFAULT_SYNC_CONFIG.presenceHeartbeatMs) || DEFAULT_SYNC_CONFIG.presenceHeartbeatMs),
             lockTtlMs: Math.max(5000, toNonNegativeInt(source.lockTtlMs, DEFAULT_SYNC_CONFIG.lockTtlMs) || DEFAULT_SYNC_CONFIG.lockTtlMs)
         };
@@ -2330,6 +2449,7 @@
                 pushInFlight: false,
                 pushQueued: false,
                 normalizedPullTimer: null,
+                normalizedPendingScopes: new Set(),
                 lastRemoteSeenAt: 0,
                 lastPushAt: 0,
                 lastPullAt: 0,
@@ -2345,7 +2465,9 @@
                 remoteSoftLocks: new Map(),
                 remotePeers: new Map(),
                 hadStoredStateAtBoot: false,
-                lastForegroundPullAt: 0
+                lastForegroundPullAt: 0,
+                roomHydrationInflight: new Map(),
+                roomHydrationSeenAt: new Map()
             };
 
             if (coercedSyncConfig.changed) {
@@ -2447,7 +2569,7 @@
         }
 
         scheduleForegroundPull(reason = 'foreground') {
-            if (!this.syncStatus.connected || !this.isNormalizedReadMode()) return;
+            if (!this.syncStatus.connected) return;
             const now = Date.now();
             if (now - toTimestamp(this.sync.lastForegroundPullAt, 0) < 2000) return;
             this.sync.lastForegroundPullAt = now;
@@ -2510,10 +2632,22 @@
         }
 
         replaceLocalDirtyScopes(scopes, timestamp = Date.now()) {
-            const list = Array.isArray(scopes) ? normalizeScopeList(scopes) : [];
+            const list = Array.isArray(scopes) ? filterCloudSyncScopes(scopes) : [];
             this.clearLocalDirtyScopes();
             if (list.length) this.markLocalDirtyScopes(list, timestamp);
             return list;
+        }
+
+        recordScopeUpdated(scopes, timestamp = Date.now()) {
+            if (!this.state.meta || typeof this.state.meta !== 'object') {
+                this.state.meta = deepClone(DEFAULT_STATE.meta);
+            }
+            if (!this.state.meta.scopeUpdated || typeof this.state.meta.scopeUpdated !== 'object') {
+                this.state.meta.scopeUpdated = {};
+            }
+            normalizeScopeList(scopes).forEach((scope) => {
+                this.state.meta.scopeUpdated[scope] = timestamp;
+            });
         }
 
         getNormalizedRemoteScopeMeta(remoteRow, scopeToken) {
@@ -3476,11 +3610,12 @@
                 this.applyScopeAttribution(scopes);
                 const now = Date.now();
                 this.state.meta.updated = now;
-                this.markLocalDirtyScopes(scopes, now);
-                this.touchSoftLockScopes(scopes);
+                this.recordScopeUpdated(scopes, now);
+                const cloudScopes = this.markLocalDirtyScopes(scopes, now);
+                if (cloudScopes.length) this.touchSoftLockScopes(cloudScopes);
                 localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
 
-                if (!skipCloud && !this.isApplyingRemote) this.scheduleCloudPush('local-save');
+                if (!skipCloud && !this.isApplyingRemote && cloudScopes.length) this.scheduleCloudPush('local-save');
                 if (!skipEvent) this.broadcastStoreUpdate('local', { scopes });
             } catch (e) {
                 console.error("RTF_STORE: Save failed", e);
@@ -3798,7 +3933,8 @@
                 const current = Array.from(this.sync.localDirtyScopes.values());
                 return current.length ? current : [SYNC_SCOPE_GLOBAL];
             }
-            return normalizeScopeList(scopes);
+            const filtered = filterCloudSyncScopes(scopes);
+            return filtered.length ? filtered : [];
         }
 
         persistDirtyScopes() {
@@ -3818,16 +3954,10 @@
 
         markLocalDirtyScopes(scopes, timestamp = Date.now()) {
             if (!this.sync.localDirtyScopes) this.sync.localDirtyScopes = new Set();
-            if (!this.state.meta || typeof this.state.meta !== 'object') {
-                this.state.meta = deepClone(DEFAULT_STATE.meta);
-            }
-            if (!this.state.meta.scopeUpdated || typeof this.state.meta.scopeUpdated !== 'object') {
-                this.state.meta.scopeUpdated = {};
-            }
-            const list = normalizeScopeList(scopes);
+            const list = filterCloudSyncScopes(scopes);
+            this.recordScopeUpdated(scopes, timestamp);
             list.forEach((scope) => {
                 this.sync.localDirtyScopes.add(scope);
-                this.state.meta.scopeUpdated[scope] = timestamp;
             });
             this.persistDirtyScopes();
             return list;
@@ -3986,6 +4116,7 @@
 
             this.sync.reconcileTimer = setInterval(() => {
                 if (!this.syncStatus.connected) return;
+                if (global.document && global.document.visibilityState === 'hidden') return;
                 this.pullFromCloud({ silent: true, force: false }).catch(() => { });
             }, reconcileEvery);
 
@@ -4022,6 +4153,7 @@
                 caseState: cfg.normalizedCaseStateTable,
                 caseBoards: cfg.normalizedCaseBoardsTable,
                 caseEvents: cfg.normalizedCaseEventsTable,
+                scopeVersions: cfg.normalizedScopeVersionsTable,
                 players: cfg.normalizedPlayersTable,
                 npcs: cfg.normalizedNPCsTable,
                 locations: cfg.normalizedLocationsTable,
@@ -4032,26 +4164,47 @@
 
         getRealtimeTableTargets() {
             if (this.isNormalizedReadMode()) {
-                const tables = Object.values(this.getNormalizedTables());
-                return Array.from(new Set(tables.filter(Boolean)));
+                const tableName = this.sync.config.normalizedScopeVersionsTable;
+                return tableName ? [tableName] : [];
             }
             return [this.sync.config.tableName];
         }
 
-        clearNormalizedRealtimePull() {
+        clearNormalizedRealtimePull(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
             if (this.sync.normalizedPullTimer) {
                 clearTimeout(this.sync.normalizedPullTimer);
                 this.sync.normalizedPullTimer = null;
             }
+            if (opts.clearScopes !== false && this.sync.normalizedPendingScopes instanceof Set) {
+                this.sync.normalizedPendingScopes.clear();
+            }
         }
 
-        scheduleNormalizedRealtimePull() {
+        scheduleNormalizedRealtimePull(scopes = null) {
             if (!this.isNormalizedReadMode()) return;
-            this.clearNormalizedRealtimePull();
+            if (!(this.sync.normalizedPendingScopes instanceof Set)) {
+                this.sync.normalizedPendingScopes = new Set();
+            }
+            normalizeScopeList(scopes || []).forEach((scope) => {
+                if (!scope || scope === SYNC_SCOPE_GLOBAL || isRoomBackedScope(scope)) return;
+                this.sync.normalizedPendingScopes.add(scope);
+            });
+            this.clearNormalizedRealtimePull({ clearScopes: false });
             this.sync.normalizedPullTimer = setTimeout(() => {
                 this.sync.normalizedPullTimer = null;
                 if (!this.syncStatus.connected) return;
-                this.pullFromCloud({ force: false, silent: true }).catch(() => { });
+                const pendingScopes = this.sync.normalizedPendingScopes instanceof Set
+                    ? Array.from(this.sync.normalizedPendingScopes.values())
+                    : [];
+                if (this.sync.normalizedPendingScopes instanceof Set) this.sync.normalizedPendingScopes.clear();
+                if (!pendingScopes.length) {
+                    this.pullFromCloud({ force: false, silent: true }).catch(() => { });
+                    return;
+                }
+                this.pullFromCloudNormalizedScopes(pendingScopes, { force: false, silent: true }).catch(() => {
+                    this.pullFromCloud({ force: false, silent: true }).catch(() => { });
+                });
             }, 350);
         }
 
@@ -4072,11 +4225,22 @@
             return { ok: true, data: result.data || null };
         }
 
-        async fetchNormalizedList(tableName, selectCols, order = null) {
+        async fetchNormalizedList(tableName, selectCols, order = null, filters = null) {
             let query = this.sync.client
                 .from(tableName)
                 .select(selectCols)
                 .eq('campaign_id', this.sync.config.campaignId);
+            const filterList = Array.isArray(filters) ? filters : [];
+            filterList.forEach((filter) => {
+                if (!filter || !filter.column) return;
+                if (Array.isArray(filter.in) && filter.in.length) {
+                    query = query.in(filter.column, filter.in);
+                    return;
+                }
+                if (Object.prototype.hasOwnProperty.call(filter, 'value')) {
+                    query = query.eq(filter.column, filter.value);
+                }
+            });
             if (order && order.column) {
                 query = query.order(order.column, { ascending: order.ascending !== false });
             }
@@ -4256,6 +4420,415 @@
             return sanitizeState(base);
         }
 
+        applyNormalizedCoreRowToState(targetState, row) {
+            if (!row || !row.payload || typeof row.payload !== 'object') return;
+            const payload = row.payload;
+            if (Object.prototype.hasOwnProperty.call(payload, 'rep')) targetState.campaign.rep = sanitizeRep(payload.rep);
+            if (Object.prototype.hasOwnProperty.call(payload, 'heat')) targetState.campaign.heat = toNumber(payload.heat, 0);
+            if (Object.prototype.hasOwnProperty.call(payload, 'cognitiveRisk')) targetState.campaign.cognitiveRisk = toNumber(payload.cognitiveRisk, 0);
+            if (Object.prototype.hasOwnProperty.call(payload, 'ledger')) targetState.campaign.ledger = sanitizeLedgerState(payload.ledger);
+            if (Object.prototype.hasOwnProperty.call(payload, 'case')) targetState.campaign.case = sanitizeCase(payload.case);
+            if (Object.prototype.hasOwnProperty.call(payload, 'context')) targetState.campaignContext = sanitizeCampaignContext(payload.context, targetState.cases);
+            if (Object.prototype.hasOwnProperty.call(payload, 'meta')) {
+                const currentMeta = sanitizeCampaignMeta(targetState.campaignMeta);
+                const nextMeta = sanitizeCampaignMeta(payload.meta);
+                targetState.campaignMeta = sanitizeCampaignMeta({
+                    ...currentMeta,
+                    ...nextMeta,
+                    board: currentMeta.board
+                });
+            }
+        }
+
+        buildNormalizedTargetedFetchPlan(scopes) {
+            const campaignEntityPlanMap = {
+                players: { allKey: 'fetchPlayersAll', idSet: 'playerIds' },
+                npcs: { allKey: 'fetchNPCsAll', idSet: 'npcIds' },
+                locations: { allKey: 'fetchLocationsAll', idSet: 'locationIds' },
+                requisitions: { allKey: 'fetchRequisitionsAll', idSet: 'requisitionIds' },
+                encounters: { allKey: 'fetchEncountersAll', idSet: 'encounterIds' }
+            };
+            const plan = {
+                fetchCore: false,
+                fetchHQ: false,
+                fetchAllCaseState: false,
+                fetchAllCaseEvents: false,
+                caseStateIds: new Set(),
+                caseEventIds: new Set(),
+                granularCaseEventIds: new Map(),
+                fetchPlayersAll: false,
+                fetchNPCsAll: false,
+                fetchLocationsAll: false,
+                fetchRequisitionsAll: false,
+                fetchEncountersAll: false,
+                playerIds: new Set(),
+                npcIds: new Set(),
+                locationIds: new Set(),
+                requisitionIds: new Set(),
+                encounterIds: new Set()
+            };
+            const addGranularCaseEvent = (caseId, eventScopeId) => {
+                const cleanCaseId = sanitizeCaseId(caseId, 'case_primary');
+                const cleanEventId = normalizeEntityScopeId(eventScopeId);
+                if (!cleanEventId || cleanEventId === ENTITY_SCOPE_ORDER_TOKEN) return;
+                if (!plan.granularCaseEventIds.has(cleanCaseId)) plan.granularCaseEventIds.set(cleanCaseId, new Set());
+                plan.granularCaseEventIds.get(cleanCaseId).add(cleanEventId);
+            };
+            const addEntityId = (set, scopeId) => {
+                const cleanId = normalizeEntityScopeId(scopeId);
+                if (!cleanId || cleanId === ENTITY_SCOPE_ORDER_TOKEN) return;
+                set.add(cleanId);
+            };
+
+            normalizeScopeList(scopes).forEach((scope) => {
+                if (!scope || scope === SYNC_SCOPE_GLOBAL) {
+                    plan.fetchCore = true;
+                    plan.fetchHQ = true;
+                    plan.fetchAllCaseState = true;
+                    plan.fetchAllCaseEvents = true;
+                    plan.fetchPlayersAll = true;
+                    plan.fetchNPCsAll = true;
+                    plan.fetchLocationsAll = true;
+                    plan.fetchRequisitionsAll = true;
+                    plan.fetchEncountersAll = true;
+                    return;
+                }
+                if (isRoomBackedScope(scope)) return;
+
+                if (scope === 'campaign' || scope === 'campaign.context' || scope === 'campaign.case' || scope === 'campaign.heat'
+                    || scope === 'campaign.rep' || scope === 'campaign.cognitiveRisk' || scope === 'campaign.ledger'
+                    || scope === 'campaign.meta' || scope.startsWith('campaign.meta.')) {
+                    plan.fetchCore = true;
+                    return;
+                }
+                const campaignEntityMatch = scope.match(/^campaign\.(players|npcs|locations|requisitions|encounters)(?:\.([a-z0-9_-]+))?$/);
+                if (campaignEntityMatch) {
+                    const key = campaignEntityMatch[1];
+                    const scopeId = campaignEntityMatch[2] || '';
+                    const cfg = campaignEntityPlanMap[key];
+                    if (!cfg) return;
+                    if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) {
+                        plan[cfg.allKey] = true;
+                    } else if (plan[cfg.idSet] instanceof Set) {
+                        addEntityId(plan[cfg.idSet], scopeId);
+                    }
+                    return;
+                }
+                if (scope === 'hq') {
+                    plan.fetchHQ = true;
+                    return;
+                }
+                if (scope === 'cases' || scope === SYNC_SCOPE_CASES_META) {
+                    plan.fetchAllCaseState = true;
+                    return;
+                }
+                const caseEventMatch = scope.match(/^cases\.([a-z0-9_-]+)\.events(?:\.([a-z0-9_-]+))?$/);
+                if (caseEventMatch) {
+                    const caseId = sanitizeCaseId(caseEventMatch[1], 'case_primary');
+                    const scopeId = caseEventMatch[2] || '';
+                    if (!scopeId || scopeId === ENTITY_SCOPE_ORDER_TOKEN) {
+                        plan.caseEventIds.add(caseId);
+                    } else {
+                        addGranularCaseEvent(caseId, scopeId);
+                    }
+                    return;
+                }
+                const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)(?:\.(name|leads|events))?$/);
+                if (caseFieldMatch) {
+                    const caseId = sanitizeCaseId(caseFieldMatch[1], 'case_primary');
+                    const field = caseFieldMatch[2] || '';
+                    if (!field || field === 'name' || field === 'leads') {
+                        plan.caseStateIds.add(caseId);
+                    }
+                    if (!field || field === 'events') {
+                        plan.caseEventIds.add(caseId);
+                    }
+                }
+            });
+
+            if (plan.fetchAllCaseEvents) {
+                plan.caseEventIds.clear();
+                plan.granularCaseEventIds.clear();
+            } else if (plan.caseEventIds.size) {
+                plan.caseEventIds.forEach((caseId) => plan.granularCaseEventIds.delete(caseId));
+            }
+            if (plan.fetchPlayersAll) plan.playerIds.clear();
+            if (plan.fetchNPCsAll) plan.npcIds.clear();
+            if (plan.fetchLocationsAll) plan.locationIds.clear();
+            if (plan.fetchRequisitionsAll) plan.requisitionIds.clear();
+            if (plan.fetchEncountersAll) plan.encounterIds.clear();
+
+            return plan;
+        }
+
+        async fetchNormalizedScopedRows(scopes) {
+            const tables = this.getNormalizedTables();
+            const plan = this.buildNormalizedTargetedFetchPlan(scopes);
+            const queries = [];
+            const pushQuery = (key, promise) => queries.push({ key, promise });
+
+            if (plan.fetchCore) pushQuery('core', this.fetchNormalizedSingle(tables.core));
+            if (plan.fetchHQ) pushQuery('hq', this.fetchNormalizedSingle(tables.hq));
+            if (plan.fetchAllCaseState) {
+                pushQuery('caseStateRows', this.fetchNormalizedList(
+                    tables.caseState,
+                    'case_id,case_name,is_active,sort_order,payload,revision,updated_at,updated_by,updated_by_name',
+                    { column: 'sort_order', ascending: true }
+                ));
+            } else if (plan.caseStateIds.size) {
+                pushQuery('caseStateRows', this.fetchNormalizedList(
+                    tables.caseState,
+                    'case_id,case_name,is_active,sort_order,payload,revision,updated_at,updated_by,updated_by_name',
+                    { column: 'sort_order', ascending: true },
+                    [{ column: 'case_id', in: Array.from(plan.caseStateIds.values()) }]
+                ));
+            }
+            if (plan.fetchAllCaseEvents) {
+                pushQuery('eventRows', this.fetchNormalizedList(
+                    tables.caseEvents,
+                    'case_id,event_id,payload,revision,updated_at,updated_by,updated_by_name',
+                    { column: 'event_id', ascending: true }
+                ));
+            } else {
+                const targetedCaseIds = new Set(plan.caseEventIds);
+                if (plan.granularCaseEventIds instanceof Map) {
+                    plan.granularCaseEventIds.forEach((_set, caseId) => targetedCaseIds.add(caseId));
+                }
+                if (targetedCaseIds.size) {
+                pushQuery('eventRows', this.fetchNormalizedList(
+                    tables.caseEvents,
+                    'case_id,event_id,payload,revision,updated_at,updated_by,updated_by_name',
+                    { column: 'event_id', ascending: true },
+                    [{ column: 'case_id', in: Array.from(targetedCaseIds.values()) }]
+                ));
+                }
+            }
+            if (plan.fetchPlayersAll) pushQuery('playerRows', this.fetchNormalizedList(tables.players, 'player_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'player_id', ascending: true }));
+            else if (plan.playerIds.size) pushQuery('playerRows', this.fetchNormalizedList(tables.players, 'player_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'player_id', ascending: true }, [{ column: 'player_id', in: Array.from(plan.playerIds.values()) }]));
+            if (plan.fetchNPCsAll) pushQuery('npcRows', this.fetchNormalizedList(tables.npcs, 'npc_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'npc_id', ascending: true }));
+            else if (plan.npcIds.size) pushQuery('npcRows', this.fetchNormalizedList(tables.npcs, 'npc_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'npc_id', ascending: true }, [{ column: 'npc_id', in: Array.from(plan.npcIds.values()) }]));
+            if (plan.fetchLocationsAll) pushQuery('locationRows', this.fetchNormalizedList(tables.locations, 'location_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'location_id', ascending: true }));
+            else if (plan.locationIds.size) pushQuery('locationRows', this.fetchNormalizedList(tables.locations, 'location_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'location_id', ascending: true }, [{ column: 'location_id', in: Array.from(plan.locationIds.values()) }]));
+            if (plan.fetchRequisitionsAll) pushQuery('requisitionRows', this.fetchNormalizedList(tables.requisitions, 'requisition_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'requisition_id', ascending: true }));
+            else if (plan.requisitionIds.size) pushQuery('requisitionRows', this.fetchNormalizedList(tables.requisitions, 'requisition_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'requisition_id', ascending: true }, [{ column: 'requisition_id', in: Array.from(plan.requisitionIds.values()) }]));
+            if (plan.fetchEncountersAll) pushQuery('encounterRows', this.fetchNormalizedList(tables.encounters, 'encounter_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'encounter_id', ascending: true }));
+            else if (plan.encounterIds.size) pushQuery('encounterRows', this.fetchNormalizedList(tables.encounters, 'encounter_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'encounter_id', ascending: true }, [{ column: 'encounter_id', in: Array.from(plan.encounterIds.values()) }]));
+
+            const settled = await Promise.all(queries.map(async (entry) => ({
+                key: entry.key,
+                result: await entry.promise
+            })));
+            const failing = settled.find((entry) => !entry.result.ok);
+            if (failing) {
+                return {
+                    ok: false,
+                    error: failing.result.error || 'Targeted normalized read failed.'
+                };
+            }
+
+            const snapshot = { plan };
+            settled.forEach((entry) => {
+                snapshot[entry.key] = entry.result.data || null;
+            });
+            return { ok: true, snapshot };
+        }
+
+        applyNormalizedScopedSnapshot(baseState, scopes, snapshot, versionMap = new Map()) {
+            const remoteBase = sanitizeState(baseState);
+            const sourceState = sanitizeState(remoteBase);
+            const plan = snapshot && snapshot.plan ? snapshot.plan : this.buildNormalizedTargetedFetchPlan(scopes);
+            const setEntityCollection = (key, rows, idColumn, fallbackPrefix) => {
+                sourceState.campaign[key] = (Array.isArray(rows) ? rows : []).map((row) =>
+                    this.ensureEntityId(row && row.payload, toTrimmedString(row && row[idColumn], buildEntityId(fallbackPrefix), 80), 'id')
+                );
+            };
+
+            if (snapshot && snapshot.core) this.applyNormalizedCoreRowToState(sourceState, snapshot.core);
+            if (snapshot && snapshot.hq && snapshot.hq.payload && typeof snapshot.hq.payload === 'object') {
+                sourceState.hq = sanitizeHQ(snapshot.hq.payload);
+            }
+            if (plan.fetchPlayersAll && snapshot && snapshot.playerRows) setEntityCollection('players', snapshot.playerRows, 'player_id', 'player');
+            if (plan.fetchNPCsAll && snapshot && snapshot.npcRows) setEntityCollection('npcs', snapshot.npcRows, 'npc_id', 'npc');
+            if (plan.fetchLocationsAll && snapshot && snapshot.locationRows) setEntityCollection('locations', snapshot.locationRows, 'location_id', 'loc');
+            if (plan.fetchRequisitionsAll && snapshot && snapshot.requisitionRows) setEntityCollection('requisitions', snapshot.requisitionRows, 'requisition_id', 'req');
+            if (plan.fetchEncountersAll && snapshot && snapshot.encounterRows) setEntityCollection('encounters', snapshot.encounterRows, 'encounter_id', 'enc');
+
+            const applyEntityRows = (key, rows, idColumn, idSet, fallbackPrefix) => {
+                if (!(idSet instanceof Set) || !idSet.size) return;
+                const existing = Array.isArray(sourceState.campaign[key]) ? sourceState.campaign[key].slice() : [];
+                const byScopeId = new Map();
+                (Array.isArray(rows) ? rows : []).forEach((row) => {
+                    const payload = this.ensureEntityId(row && row.payload, toTrimmedString(row && row[idColumn], buildEntityId(fallbackPrefix), 80), 'id');
+                    byScopeId.set(normalizeEntityScopeId(payload && payload.id), payload);
+                });
+                const keep = [];
+                existing.forEach((entry) => {
+                    const scopeId = normalizeEntityScopeId(entry && entry.id);
+                    if (!scopeId || !idSet.has(scopeId)) {
+                        keep.push(entry);
+                        return;
+                    }
+                    const version = versionMap.get(`campaign.${key}.${scopeId}`);
+                    if (version && version.exists === false && !byScopeId.has(scopeId)) return;
+                    keep.push(byScopeId.has(scopeId) ? byScopeId.get(scopeId) : entry);
+                    byScopeId.delete(scopeId);
+                });
+                byScopeId.forEach((entry, scopeId) => {
+                    if (idSet.has(scopeId)) keep.push(entry);
+                });
+                sourceState.campaign[key] = keep;
+            };
+
+            applyEntityRows('players', snapshot && snapshot.playerRows, 'player_id', plan.playerIds, 'player');
+            applyEntityRows('npcs', snapshot && snapshot.npcRows, 'npc_id', plan.npcIds, 'npc');
+            applyEntityRows('locations', snapshot && snapshot.locationRows, 'location_id', plan.locationIds, 'loc');
+            applyEntityRows('requisitions', snapshot && snapshot.requisitionRows, 'requisition_id', plan.requisitionIds, 'req');
+            applyEntityRows('encounters', snapshot && snapshot.encounterRows, 'encounter_id', plan.encounterIds, 'enc');
+
+            if (plan.fetchAllCaseState && Array.isArray(snapshot && snapshot.caseStateRows)) {
+                const caseRows = snapshot.caseStateRows;
+                const activeCaseId = (caseRows.find((row) => row && row.is_active) || {}).case_id || remoteBase.cases.activeCaseId;
+                sourceState.cases.activeCaseId = sanitizeCaseId(activeCaseId, remoteBase.cases.activeCaseId || 'case_primary');
+                sourceState.cases.items = caseRows.map((row) => {
+                    const caseId = sanitizeCaseId(row && row.case_id, 'case_primary');
+                    const payload = row && row.payload && typeof row.payload === 'object' ? row.payload : {};
+                    const existing = getCaseById(sourceState, caseId);
+                    return {
+                        id: caseId,
+                        name: sanitizeCaseName(row && row.case_name ? row.case_name : payload.name, existing && existing.name ? existing.name : DEFAULT_CASE_NAME),
+                        board: sanitizeBoard(existing && existing.board),
+                        events: sanitizeEventList(existing && existing.events),
+                        leads: sanitizeLeadList(payload.leads),
+                        vtt: sanitizeVTTState(existing && existing.vtt)
+                    };
+                });
+            } else if (plan.caseStateIds.size && Array.isArray(snapshot && snapshot.caseStateRows)) {
+                snapshot.caseStateRows.forEach((row) => {
+                    const caseId = sanitizeCaseId(row && row.case_id, 'case_primary');
+                    const payload = row && row.payload && typeof row.payload === 'object' ? row.payload : {};
+                    let entry = getCaseById(sourceState, caseId);
+                    if (!entry) {
+                        entry = {
+                            id: caseId,
+                            name: DEFAULT_CASE_NAME,
+                            board: sanitizeBoard(null),
+                            events: [],
+                            leads: [],
+                            vtt: createDefaultVTTState()
+                        };
+                        sourceState.cases.items.push(entry);
+                    }
+                    entry.name = sanitizeCaseName(row && row.case_name ? row.case_name : payload.name, entry.name || DEFAULT_CASE_NAME);
+                    entry.leads = sanitizeLeadList(payload.leads);
+                    if (row && row.is_active) sourceState.cases.activeCaseId = caseId;
+                });
+                const currentItems = Array.isArray(sourceState.cases && sourceState.cases.items) ? sourceState.cases.items : [];
+                sourceState.cases.items = currentItems.filter((entry) => {
+                    if (!entry || !entry.id || !plan.caseStateIds.has(entry.id)) return true;
+                    const scopeCandidates = [
+                        `cases.${entry.id}`,
+                        `cases.${entry.id}.name`,
+                        `cases.${entry.id}.leads`
+                    ];
+                    return !scopeCandidates.some((scopeToken) => {
+                        const version = versionMap.get(scopeToken);
+                        return version && version.exists === false;
+                    });
+                });
+            }
+
+            if (plan.fetchAllCaseEvents && Array.isArray(snapshot && snapshot.eventRows)) {
+                const byCase = new Map();
+                snapshot.eventRows.forEach((row) => {
+                    const caseId = sanitizeCaseId(row && row.case_id, 'case_primary');
+                    const payload = row && row.payload && typeof row.payload === 'object' ? row.payload : {};
+                    const normalized = {
+                        ...payload,
+                        id: toTrimmedString(payload.id || (row && row.event_id), buildEntityId('event'), 80),
+                        caseId
+                    };
+                    if (!byCase.has(caseId)) byCase.set(caseId, []);
+                    byCase.get(caseId).push(normalized);
+                });
+                sourceState.cases.items.forEach((entry) => {
+                    entry.events = sanitizeEventList((byCase.get(entry.id) || []).slice().sort(compareEventsByStoredOrder));
+                });
+            } else {
+                if (plan.caseEventIds.size && Array.isArray(snapshot && snapshot.eventRows)) {
+                    const targetCaseIds = new Set(plan.caseEventIds);
+                    sourceState.cases.items.forEach((entry) => {
+                        if (!entry || !targetCaseIds.has(entry.id)) return;
+                        const rows = snapshot.eventRows.filter((row) => sanitizeCaseId(row && row.case_id, 'case_primary') === entry.id);
+                        entry.events = sanitizeEventList(rows.map((row) => {
+                            const payload = row && row.payload && typeof row.payload === 'object' ? row.payload : {};
+                            return {
+                                ...payload,
+                                id: toTrimmedString(payload.id || (row && row.event_id), buildEntityId('event'), 80),
+                                caseId: entry.id
+                            };
+                        }).sort(compareEventsByStoredOrder));
+                    });
+                }
+                if (plan.granularCaseEventIds instanceof Map && plan.granularCaseEventIds.size && Array.isArray(snapshot && snapshot.eventRows)) {
+                    plan.granularCaseEventIds.forEach((scopeIds, caseId) => {
+                        const entry = getCaseById(sourceState, caseId);
+                        if (!entry) return;
+                        const eventMap = new Map();
+                        snapshot.eventRows
+                            .filter((row) => sanitizeCaseId(row && row.case_id, 'case_primary') === caseId)
+                            .forEach((row) => {
+                                const payload = row && row.payload && typeof row.payload === 'object' ? row.payload : {};
+                                const eventId = normalizeEntityScopeId(payload.id || (row && row.event_id));
+                                if (!eventId) return;
+                                eventMap.set(eventId, {
+                                    ...payload,
+                                    id: toTrimmedString(payload.id || (row && row.event_id), buildEntityId('event'), 80),
+                                    caseId
+                                });
+                            });
+                        entry.events = sanitizeEventList((Array.isArray(entry.events) ? entry.events : []).filter((eventEntry) => {
+                            const eventId = normalizeEntityScopeId(eventEntry && eventEntry.id);
+                            if (!eventId || !scopeIds.has(eventId)) return true;
+                            const version = versionMap.get(`cases.${caseId}.events.${eventId}`);
+                            return !(version && version.exists === false && !eventMap.has(eventId));
+                        }));
+                        entry.events = sanitizeEventList(entry.events.concat(Array.from(eventMap.values())));
+                    });
+                }
+            }
+
+            let maxRevision = 0;
+            let maxUpdatedAt = 0;
+            let maxUpdatedBy = '';
+            let maxUpdatedByName = '';
+            versionMap.forEach((rowMeta) => {
+                const revision = toNonNegativeInt(rowMeta && rowMeta.revision, 0);
+                const updatedAt = toTimestamp(rowMeta && rowMeta.updated_at, 0);
+                if (revision > maxRevision) maxRevision = revision;
+                if (updatedAt >= maxUpdatedAt) {
+                    maxUpdatedAt = updatedAt;
+                    maxUpdatedBy = toTrimmedString(rowMeta && rowMeta.updated_by, '', 120);
+                    maxUpdatedByName = toTrimmedString(rowMeta && rowMeta.updated_by_name, '', 120);
+                }
+            });
+
+            const nextRemoteState = sanitizeState(remoteBase);
+            normalizeScopeList(scopes).forEach((scope) => {
+                if (isRoomBackedScope(scope)) return;
+                applyScopeFromSource(nextRemoteState, sourceState, scope);
+            });
+            nextRemoteState.meta.updated = maxUpdatedAt || toTimestamp(nextRemoteState.meta && nextRemoteState.meta.updated, Date.now());
+            nextRemoteState.meta.syncRevision = Math.max(maxRevision, toNonNegativeInt(nextRemoteState.meta && nextRemoteState.meta.syncRevision, 0));
+
+            return {
+                state: sanitizeState(nextRemoteState),
+                revision: maxRevision,
+                updatedAt: maxUpdatedAt,
+                updatedBy: maxUpdatedBy,
+                updatedByName: maxUpdatedByName
+            };
+        }
+
         async fetchCloudRowNormalized(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const silent = !!opts.silent;
@@ -4265,7 +4838,6 @@
                 this.fetchNormalizedSingle(tables.core),
                 this.fetchNormalizedSingle(tables.hq),
                 this.fetchNormalizedList(tables.caseState, 'case_id,case_name,is_active,sort_order,payload,revision,updated_at,updated_by,updated_by_name', { column: 'sort_order', ascending: true }),
-                this.fetchNormalizedList(tables.caseBoards, 'case_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'case_id', ascending: true }),
                 this.fetchNormalizedList(tables.caseEvents, 'case_id,event_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'event_id', ascending: true }),
                 this.fetchNormalizedList(tables.players, 'player_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'player_id', ascending: true }),
                 this.fetchNormalizedList(tables.npcs, 'npc_id,payload,revision,updated_at,updated_by,updated_by_name', { column: 'npc_id', ascending: true }),
@@ -4290,12 +4862,11 @@
                 };
             }
 
-            const [coreRes, hqRes, caseStateRes, boardsRes, eventsRes, playersRes, npcsRes, locationsRes, requisitionsRes, encountersRes] = tasks;
+            const [coreRes, hqRes, caseStateRes, eventsRes, playersRes, npcsRes, locationsRes, requisitionsRes, encountersRes] = tasks;
             const rowCount =
                 (coreRes.data ? 1 : 0)
                 + (hqRes.data ? 1 : 0)
                 + caseStateRes.data.length
-                + boardsRes.data.length
                 + eventsRes.data.length
                 + playersRes.data.length
                 + npcsRes.data.length
@@ -4311,7 +4882,6 @@
                 core: coreRes.data,
                 hq: hqRes.data,
                 caseStateRows: caseStateRes.data,
-                boardRows: boardsRes.data,
                 eventRows: eventsRes.data,
                 playerRows: playersRes.data,
                 npcRows: npcsRes.data,
@@ -4354,7 +4924,6 @@
                 ...this.extractRowMeta(coreRes.data),
                 ...this.extractRowMeta(hqRes.data),
                 ...this.extractRowMeta(caseStateRes.data),
-                ...this.extractRowMeta(boardsRes.data),
                 ...this.extractRowMeta(eventsRes.data),
                 ...this.extractRowMeta(playersRes.data),
                 ...this.extractRowMeta(npcsRes.data),
@@ -5052,6 +5621,11 @@
                 };
             }
 
+            const decodedPayload = await decodeVTTRoomCheckpointPayload(
+                result.data.payload,
+                result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId
+            );
+
             return {
                 ok: true,
                 roomId: target.roomId,
@@ -5062,7 +5636,7 @@
                     scope: 'case',
                     caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, target.caseId || 'case_primary') : target.caseId,
                     payload: sanitizeVTTState({
-                        ...(result.data.payload && typeof result.data.payload === 'object' ? result.data.payload : {}),
+                        ...decodedPayload,
                         updatedAt: Date.parse(result.data.updated_at || '') || toNonNegativeInt(result.data.revision, 0)
                     }),
                     revision: toNonNegativeInt(result.data.revision, 0),
@@ -5081,10 +5655,14 @@
 
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
-            const payload = sanitizeVTTState({
+            const snapshotPayload = sanitizeVTTState({
                 ...(opts.payload && typeof opts.payload === 'object' ? opts.payload : {}),
                 updatedAt: Date.parse(updatedAt) || revision
             });
+            const checkpointPayload = isEncodedRoomCheckpointPayload(opts.checkpointPayload, VTT_CHECKPOINT_FORMAT)
+                ? opts.checkpointPayload
+                : (await encodeVTTRoomCheckpointPayload(snapshotPayload));
+            const payload = checkpointPayload || snapshotPayload;
             const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
             const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
             const createOnly = !!opts.createOnly;
@@ -5094,12 +5672,12 @@
                 .eq('campaign_id', ensured.config.campaignId)
                 .eq('room_id', target.roomId)
                 .maybeSingle();
-            const buildSnapshotFromRow = (data) => ({
+            const buildSnapshotFromRow = async (data) => ({
                 roomId: String(data && data.room_id || target.roomId),
                 scope: 'case',
                 caseId: data && data.case_id ? sanitizeCaseId(data.case_id, target.caseId || 'case_primary') : target.caseId,
                 payload: sanitizeVTTState({
-                    ...(data && data.payload && typeof data.payload === 'object' ? data.payload : {}),
+                    ...(await decodeVTTRoomCheckpointPayload(data && data.payload, data && data.case_id ? sanitizeCaseId(data.case_id, target.caseId || 'case_primary') : target.caseId)),
                     updatedAt: Date.parse(data && data.updated_at || '') || toNonNegativeInt(data && data.revision, 0)
                 }),
                 revision: toNonNegativeInt(data && data.revision, 0),
@@ -5107,8 +5685,8 @@
                 updatedBy: toTrimmedString(data && data.updated_by, '', 120),
                 updatedByName: toTrimmedString(data && data.updated_by_name, '', 120)
             });
-            const buildStaleResult = (data, fallbackError = 'A newer live VTT snapshot already exists.') => {
-                const snapshot = buildSnapshotFromRow(data);
+            const buildStaleResult = async (data, fallbackError = 'A newer live VTT snapshot already exists.') => {
+                const snapshot = await buildSnapshotFromRow(data);
                 return {
                     ok: false,
                     reason: 'stale',
@@ -5335,7 +5913,11 @@
             if (!ensured.ok) return ensured;
 
             const tableName = ensured.config.boardHistoryTable || DEFAULT_SYNC_CONFIG.boardHistoryTable;
-            const payload = sanitizeBoard(opts.payload);
+            const checkpointPayload = isEncodedRoomCheckpointPayload(opts.checkpointPayload, BOARD_CHECKPOINT_FORMAT)
+                ? opts.checkpointPayload
+                : (await encodeBoardRoomCheckpointPayload(sanitizeBoard(opts.payload), target.scope, target.caseId || ''));
+            const snapshotPayload = sanitizeBoard(opts.payload);
+            const payload = checkpointPayload || snapshotPayload;
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const capturedAt = toIsoString(opts.capturedAt, '') || new Date().toISOString();
             const row = {
@@ -5405,8 +5987,12 @@
                 };
             }
 
-            const history = Array.isArray(result.data) ? result.data.map((row) => {
-                const payload = sanitizeBoard(row && row.payload ? row.payload : null);
+            const history = Array.isArray(result.data) ? await Promise.all(result.data.map(async (row) => {
+                const payload = await decodeBoardRoomCheckpointPayload(
+                    row && row.payload ? row.payload : null,
+                    String(row && row.board_scope || target.scope).trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                    row && row.case_id ? sanitizeCaseId(row.case_id, target.caseId || 'case_primary') : ''
+                );
                 return {
                     id: toNonNegativeInt(row && row.id, 0),
                     roomId: toTrimmedString(row && row.room_id, target.roomId, 160).trim() || target.roomId,
@@ -5421,7 +6007,7 @@
                     nodeCount: Array.isArray(payload.nodes) ? payload.nodes.length : 0,
                     connectionCount: Array.isArray(payload.connections) ? payload.connections.length : 0
                 };
-            }) : [];
+            })) : [];
 
             return {
                 ok: true,
@@ -5470,6 +6056,12 @@
                 };
             }
 
+            const decodedPayload = await decodeBoardRoomCheckpointPayload(
+                result.data.payload,
+                String(result.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                result.data.case_id ? sanitizeCaseId(result.data.case_id, caseId || 'case_primary') : ''
+            );
+
             return {
                 ok: true,
                 roomId,
@@ -5479,7 +6071,10 @@
                     roomId: String(result.data.room_id || roomId),
                     scope: String(result.data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
                     caseId: result.data.case_id ? sanitizeCaseId(result.data.case_id, caseId || 'case_primary') : '',
-                    payload: sanitizeBoard(result.data.payload),
+                    payload: sanitizeBoard({
+                        ...decodedPayload,
+                        updatedAt: Date.parse(result.data.updated_at || '') || toNonNegativeInt(result.data.revision, 0)
+                    }),
                     revision: toNonNegativeInt(result.data.revision, 0),
                     updatedAt: toIsoString(result.data.updated_at, ''),
                     updatedBy: toTrimmedString(result.data.updated_by, '', 120),
@@ -5498,7 +6093,11 @@
 
             const scope = String(opts.scope || '').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case';
             const caseId = scope === 'campaign' ? null : sanitizeCaseId(opts.caseId, this.getActiveCaseId());
-            const payload = sanitizeBoard(opts.payload);
+            const checkpointPayload = isEncodedRoomCheckpointPayload(opts.checkpointPayload, BOARD_CHECKPOINT_FORMAT)
+                ? opts.checkpointPayload
+                : (await encodeBoardRoomCheckpointPayload(sanitizeBoard(opts.payload), scope, caseId || ''));
+            const snapshotPayload = sanitizeBoard(opts.payload);
+            const payload = checkpointPayload || snapshotPayload;
             const revision = Math.max(1, toNonNegativeInt(opts.revision, Date.now()) || Date.now());
             const updatedAt = toIsoString(opts.updatedAt, '') || new Date().toISOString();
 	            const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
@@ -5510,18 +6109,25 @@
 	                .eq('campaign_id', ensured.config.campaignId)
 	                .eq('room_id', roomId)
 	                .maybeSingle();
-	            const buildSnapshotFromRow = (data) => ({
+	            const buildSnapshotFromRow = async (data) => ({
 	                roomId: String(data && data.room_id || roomId),
 	                scope: String(data && data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
 	                caseId: data && data.case_id ? sanitizeCaseId(data.case_id, caseId || 'case_primary') : (caseId || ''),
-	                payload: sanitizeBoard(data && data.payload),
+	                payload: sanitizeBoard({
+                        ...(await decodeBoardRoomCheckpointPayload(
+                            data && data.payload,
+                            String(data && data.board_scope || scope || 'case').trim().toLowerCase() === 'campaign' ? 'campaign' : 'case',
+                            data && data.case_id ? sanitizeCaseId(data.case_id, caseId || 'case_primary') : ''
+                        )),
+                        updatedAt: Date.parse(data && data.updated_at || '') || toNonNegativeInt(data && data.revision, 0)
+                    }),
 	                revision: toNonNegativeInt(data && data.revision, 0),
 	                updatedAt: toIsoString(data && data.updated_at, ''),
 	                updatedBy: toTrimmedString(data && data.updated_by, '', 120),
 	                updatedByName: toTrimmedString(data && data.updated_by_name, '', 120)
 	            });
-	            const buildStaleResult = (data, fallbackError = 'A newer live room snapshot already exists.') => {
-	                const snapshot = buildSnapshotFromRow(data);
+	            const buildStaleResult = async (data, fallbackError = 'A newer live room snapshot already exists.') => {
+	                const snapshot = await buildSnapshotFromRow(data);
 	                return {
 	                    ok: false,
 	                    reason: 'stale',
@@ -5894,6 +6500,9 @@
             this.sync.remoteSoftLocks = new Map();
             this.sync.localSoftLocks = new Map();
             this.sync.pendingConflict = null;
+            this.sync.normalizedPendingScopes = new Set();
+            this.sync.roomHydrationInflight = new Map();
+            this.sync.roomHydrationSeenAt = new Map();
 
             if (reason === 'disabled') {
                 this.updateSyncStatus({
@@ -6063,10 +6672,9 @@
         }
 
         handleRealtimePayload(payload) {
-            const row = payload && payload.new ? payload.new : null;
-            if (!row) return;
-
             if (this.isNormalizedReadMode()) {
+                const row = payload && (payload.new || payload.old) ? (payload.new || payload.old) : null;
+                if (!row) return;
                 const updatedByNormalized = row.updated_by || '';
                 if (updatedByNormalized && updatedByNormalized === this.sync.instanceId) return;
                 const normalizedRevision = toNonNegativeInt(row.revision, 0);
@@ -6079,9 +6687,13 @@
                             : 'Shared update detected. Catching up.'
                     });
                 }
-                this.scheduleNormalizedRealtimePull();
+                const scope = normalizeScopeToken(row.scope);
+                if (!scope || scope === SYNC_SCOPE_GLOBAL || isRoomBackedScope(scope)) return;
+                this.scheduleNormalizedRealtimePull([scope]);
                 return;
             }
+            const row = payload && payload.new ? payload.new : null;
+            if (!row) return;
             if (!row.state) return;
 
             const updatedAt = toTimestamp(row.updated_at, Date.now());
@@ -6127,6 +6739,105 @@
                     message: 'Remote update received.'
                 });
             }
+        }
+
+        async pullFromCloudNormalizedScopes(scopes, options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const silent = !!opts.silent;
+            const force = !!opts.force;
+            const changedScopes = filterCloudSyncScopes(scopes);
+            if (!changedScopes.length) {
+                return { ok: true, reason: 'no-scopes', applied: false };
+            }
+            if (!this.sync.client || !this.syncStatus.connected) {
+                return { ok: false, reason: 'not-connected' };
+            }
+
+            const hasLocalDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
+            const dirtyScopes = hasLocalDirty ? this.getDirtyScopesSnapshot() : [];
+            if (!force && dirtyScopes.some((localScope) => changedScopes.some((remoteScope) => scopesOverlap(localScope, remoteScope)))) {
+                return this.pullFromCloud({ ...opts, force: false, silent });
+            }
+
+            const tables = this.getNormalizedTables();
+            const versionRowsResult = await this.fetchNormalizedList(
+                tables.scopeVersions,
+                'scope,exists,revision,updated_at,updated_by,updated_by_name',
+                { column: 'updated_at', ascending: false },
+                [{ column: 'scope', in: changedScopes }]
+            );
+            if (!versionRowsResult.ok) {
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        message: 'Cloud read failed.',
+                        lastError: versionRowsResult.error || 'Scope version read failed.'
+                    });
+                }
+                return { ok: false, reason: 'error', error: versionRowsResult.error || 'Scope version read failed.' };
+            }
+
+            const versionMap = new Map();
+            (Array.isArray(versionRowsResult.data) ? versionRowsResult.data : []).forEach((row) => {
+                const scope = normalizeScopeToken(row && row.scope);
+                if (!scope) return;
+                versionMap.set(scope, row);
+            });
+
+            const scopedFetch = await this.fetchNormalizedScopedRows(changedScopes);
+            if (!scopedFetch.ok) {
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        message: 'Cloud read failed.',
+                        lastError: scopedFetch.error || 'Targeted normalized read failed.'
+                    });
+                }
+                return { ok: false, reason: 'error', error: scopedFetch.error || 'Targeted normalized read failed.' };
+            }
+
+            const remoteBase = sanitizeState(this.sync.lastSyncedState || this.state);
+            const composed = this.applyNormalizedScopedSnapshot(remoteBase, changedScopes, scopedFetch.snapshot, versionMap);
+            const scopeSnapshot = buildScopeSnapshot(composed.state);
+            const scopeMeta = new Map();
+            changedScopes.forEach((scope) => {
+                if (!isGranularNormalizedLwwScope(scope)) return;
+                const row = versionMap.get(scope);
+                scopeMeta.set(scope, {
+                    revision: toNonNegativeInt(row && row.revision, composed.revision),
+                    updatedAt: toTimestamp(row && row.updated_at, composed.updatedAt),
+                    exists: row ? row.exists !== false : scopeSnapshot.has(scope),
+                    signature: scopeSnapshot.has(scope) ? JSON.stringify(scopeSnapshot.get(scope)) : ''
+                });
+            });
+
+            const remoteRow = {
+                state: composed.state,
+                revision: toNonNegativeInt(composed.revision, 0),
+                updatedAt: toTimestamp(composed.updatedAt, Date.now()),
+                updatedBy: composed.updatedBy || '',
+                updatedByName: composed.updatedByName || '',
+                scopeMeta
+            };
+            const applied = this.applyMergedRemoteState(remoteRow, dirtyScopes, 'realtime-scoped', {
+                clearPendingConflict: false,
+                schedulePush: !!dirtyScopes.length
+            });
+            this.sync.lastPullAt = Date.now();
+            this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, toNonNegativeInt(remoteRow.revision, 0));
+            if (applied) {
+                this.updateSyncStatus({
+                    lastPullAt: this.sync.lastPullAt,
+                    mode: 'ready',
+                    connected: true,
+                    pendingPush: !!dirtyScopes.length,
+                    message: dirtyScopes.length
+                        ? 'Applied scoped cloud updates with local edits preserved.'
+                        : 'Applied scoped cloud updates.',
+                    lastError: ''
+                });
+            }
+            return { ok: true, reason: applied ? 'applied' : 'skipped', applied };
         }
 
         scheduleCloudPush(reason = 'scheduled') {
@@ -6176,14 +6887,12 @@
                 writeRequisitions: writeAll,
                 writeEncounters: writeAll,
                 writeCaseState: writeAll,
-                writeAllCaseBoards: writeAll,
                 writeAllCaseEvents: writeAll,
                 playerIds: new Set(),
                 npcIds: new Set(),
                 locationIds: new Set(),
                 requisitionIds: new Set(),
                 encounterIds: new Set(),
-                caseBoards: new Set(),
                 caseEvents: new Set(),
                 caseEventIds: new Map()
             };
@@ -6218,6 +6927,7 @@
 
             scopeList.forEach((scope) => {
                 if (scope === SYNC_SCOPE_GLOBAL) return;
+                if (isRoomBackedScope(scope)) return;
                 if (scope === 'campaign' || scope.startsWith('campaign.')) {
                     if (scope === 'campaign') {
                         markCampaignAll();
@@ -6266,20 +6976,18 @@
                     addCaseEventScopeId(caseId, scopeId);
                     return;
                 }
-                const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(board|events|name|leads|vtt)$/);
+                const caseFieldMatch = scope.match(/^cases\.([a-z0-9_-]+)\.(events|name|leads)$/);
                 if (caseFieldMatch) {
                     const caseId = sanitizeCaseId(caseFieldMatch[1], 'case_primary');
                     const field = caseFieldMatch[2];
-                    if (field === 'board') plan.caseBoards.add(caseId);
                     if (field === 'events') plan.caseEvents.add(caseId);
-                    if (field === 'name' || field === 'leads' || field === 'vtt') plan.writeCaseState = true;
+                    if (field === 'name' || field === 'leads') plan.writeCaseState = true;
                     return;
                 }
                 const caseWholeMatch = scope.match(/^cases\.([a-z0-9_-]+)$/);
                 if (caseWholeMatch) {
                     const caseId = sanitizeCaseId(caseWholeMatch[1], 'case_primary');
                     plan.writeCaseState = true;
-                    plan.caseBoards.add(caseId);
                     plan.caseEvents.add(caseId);
                 }
             });
@@ -6290,9 +6998,6 @@
             if (plan.writeRequisitions) plan.requisitionIds.clear();
             if (plan.writeEncounters) plan.encounterIds.clear();
 
-            if (plan.writeAllCaseBoards) {
-                caseIds.forEach((id) => plan.caseBoards.add(id));
-            }
             if (plan.writeAllCaseEvents) {
                 caseIds.forEach((id) => plan.caseEvents.add(id));
                 plan.caseEventIds.clear();
@@ -6304,11 +7009,10 @@
             }
             if (plan.writeCaseState) {
                 caseIds.forEach((id) => {
-                    if (!plan.writeAllCaseBoards && scopeList.some((scope) => scope === 'cases' || scope === SYNC_SCOPE_CASES_META)) {
+                    if (scopeList.some((scope) => scope === 'cases' || scope === SYNC_SCOPE_CASES_META)) {
                         // cases.meta affects active case/order/name only; board/event payload stays scoped separately.
                         return;
                     }
-                    if (plan.writeAllCaseBoards) plan.caseBoards.add(id);
                     if (plan.writeAllCaseEvents) plan.caseEvents.add(id);
                 });
             }
@@ -6503,8 +7207,7 @@
                     sort_order: idx,
                     payload: {
                         name: caseName,
-                        leads: sanitizeLeadList(entry && entry.leads),
-                        vtt: sanitizeVTTState(entry && entry.vtt)
+                        leads: sanitizeLeadList(entry && entry.leads)
                     },
                     ...writeMeta
                 };
@@ -6516,7 +7219,7 @@
                     case_name: DEFAULT_CASE_NAME,
                     is_active: true,
                     sort_order: 0,
-                    payload: { name: DEFAULT_CASE_NAME, leads: [], vtt: createDefaultVTTState() },
+                    payload: { name: DEFAULT_CASE_NAME, leads: [] },
                     ...writeMeta
                 });
             }
@@ -6543,13 +7246,11 @@
             }
 
             if (toDelete.length) {
-                const [delEvents, delBoards, delCases] = await Promise.all([
+                const [delEvents, delCases] = await Promise.all([
                     this.sync.client.from(tables.caseEvents).delete().eq('campaign_id', campaignId).in('case_id', toDelete),
-                    this.sync.client.from(tables.caseBoards).delete().eq('campaign_id', campaignId).in('case_id', toDelete),
                     this.sync.client.from(tables.caseState).delete().eq('campaign_id', campaignId).in('case_id', toDelete)
                 ]);
                 if (delEvents.error) return { ok: false, error: delEvents.error.message || 'Failed pruning case events.' };
-                if (delBoards.error) return { ok: false, error: delBoards.error.message || 'Failed pruning case boards.' };
                 if (delCases.error) return { ok: false, error: delCases.error.message || 'Failed pruning case state.' };
             }
             return { ok: true };
@@ -6729,6 +7430,42 @@
             return { ok: true };
         }
 
+        async writeNormalizedScopeVersions(scopes, state, writeMeta) {
+            const tables = this.getNormalizedTables();
+            const tableName = tables.scopeVersions;
+            if (!tableName) return { ok: true };
+
+            const campaignId = this.sync.config.campaignId;
+            const scopeSnapshot = buildScopeSnapshot(state);
+            const rows = filterCloudSyncScopes(scopes).map((scopeToken) => {
+                const scope = normalizeScopeToken(scopeToken);
+                if (!scope || scope === SYNC_SCOPE_GLOBAL) return null;
+                return {
+                    campaign_id: campaignId,
+                    scope,
+                    exists: scopeSnapshot.has(scope),
+                    revision: toNonNegativeInt(writeMeta && writeMeta.revision, 0),
+                    updated_at: writeMeta && writeMeta.updated_at ? writeMeta.updated_at : new Date().toISOString(),
+                    updated_by: toTrimmedString(writeMeta && writeMeta.updated_by, this.sync.instanceId, 120),
+                    updated_by_user: Object.prototype.hasOwnProperty.call(writeMeta || {}, 'updated_by_user')
+                        ? (writeMeta.updated_by_user || null)
+                        : (this.sync.userId || null),
+                    updated_by_name: Object.prototype.hasOwnProperty.call(writeMeta || {}, 'updated_by_name')
+                        ? (writeMeta.updated_by_name || null)
+                        : (this.sync.config.profileName || null)
+                };
+            }).filter(Boolean);
+            if (!rows.length) return { ok: true };
+
+            const upsert = await this.sync.client
+                .from(tableName)
+                .upsert(rows, { onConflict: 'campaign_id,scope' });
+            if (upsert.error) {
+                return { ok: false, error: upsert.error.message || `Failed writing ${tableName}.` };
+            }
+            return { ok: true };
+        }
+
         async writeNormalizedStateByScopes(state, scopes, meta = {}) {
             if (!this.sync.client || !this.syncStatus.connected) {
                 return { ok: false, error: 'Not connected.' };
@@ -6815,12 +7552,6 @@
                 if (!result.ok) return result;
             }
 
-            const boardIds = plan.writeAllCaseBoards ? caseIds : Array.from(plan.caseBoards.values());
-            if (boardIds.length) {
-                const boardResult = await this.syncCaseBoardsRows(cleanState, boardIds, writeMeta);
-                if (!boardResult.ok) return boardResult;
-            }
-
             const eventIds = plan.writeAllCaseEvents ? caseIds : Array.from(plan.caseEvents.values());
             if (eventIds.length) {
                 const eventResult = await this.syncCaseEventsRows(cleanState, eventIds, writeMeta);
@@ -6830,6 +7561,9 @@
                 const eventResult = await this.syncCaseEventRowsByScopeIds(cleanState, plan.caseEventIds, writeMeta);
                 if (!eventResult.ok) return eventResult;
             }
+
+            const scopeVersionResult = await this.writeNormalizedScopeVersions(scopes, cleanState, writeMeta);
+            if (!scopeVersionResult.ok) return scopeVersionResult;
 
             return { ok: true };
         }
@@ -7956,16 +8690,85 @@
             this.save({ scope: scope || CAMPAIGN_META_EVENTS_SCOPE_PREFIX });
         }
 
+        queueRoomHydration(key, loader) {
+            if (!key || typeof loader !== 'function') return null;
+            if (!(this.sync.roomHydrationInflight instanceof Map)) this.sync.roomHydrationInflight = new Map();
+            if (!(this.sync.roomHydrationSeenAt instanceof Map)) this.sync.roomHydrationSeenAt = new Map();
+            if (this.sync.roomHydrationInflight.has(key)) return this.sync.roomHydrationInflight.get(key);
+            const lastSeenAt = toTimestamp(this.sync.roomHydrationSeenAt.get(key), 0);
+            const now = Date.now();
+            if (now - lastSeenAt < 15000) return null;
+            this.sync.roomHydrationSeenAt.set(key, now);
+            const promise = Promise.resolve()
+                .then(() => loader())
+                .catch((err) => {
+                    console.warn('RTF_STORE: Room hydration failed', err);
+                    return null;
+                })
+                .finally(() => {
+                    if (this.sync.roomHydrationInflight instanceof Map) {
+                        this.sync.roomHydrationInflight.delete(key);
+                    }
+                });
+            this.sync.roomHydrationInflight.set(key, promise);
+            return promise;
+        }
+
+        maybeHydrateBoardRoom(options = {}) {
+            const cfg = this.sync && this.sync.config ? this.sync.config : null;
+            if (!cfg || !cfg.enabled || !cfg.supabaseUrl || !cfg.anonKey || !cfg.campaignId) return null;
+            const target = this.resolveBoardRoomTarget(options);
+            const key = `board:${target.scope}:${target.caseId || 'campaign'}`;
+            return this.queueRoomHydration(key, async () => {
+                const result = await this.loadBoardRoomSnapshot(target);
+                if (!result || !result.ok || !result.snapshot) return result;
+                this.mirrorBoardSnapshotToState({
+                    roomId: result.roomId,
+                    scope: result.snapshot.scope || target.scope,
+                    caseId: result.snapshot.caseId || target.caseId,
+                    payload: result.snapshot.payload,
+                    updatedAt: result.snapshot.updatedAt,
+                    source: 'room-hydrate'
+                });
+                return result;
+            });
+        }
+
+        maybeHydrateVTTRoom(caseId = null) {
+            const cfg = this.sync && this.sync.config ? this.sync.config : null;
+            if (!cfg || !cfg.enabled || !cfg.supabaseUrl || !cfg.anonKey || !cfg.campaignId) return null;
+            const target = this.resolveVTTRoomTarget({ caseId });
+            const key = `vtt:${target.caseId}`;
+            return this.queueRoomHydration(key, async () => {
+                const result = await this.loadVTTRoomSnapshot(target);
+                if (!result || !result.ok || !result.snapshot) return result;
+                this.mirrorVTTSnapshotToState({
+                    roomId: result.roomId,
+                    caseId: result.snapshot.caseId || target.caseId,
+                    payload: result.snapshot.payload,
+                    updatedAt: result.snapshot.updatedAt,
+                    source: 'room-hydrate'
+                });
+                return result;
+            });
+        }
+
         getCampaignMetaBoard() {
             const meta = this.ensureCampaignMetaIntegrity();
             meta.board = sanitizeBoard(meta.board);
+            this.maybeHydrateBoardRoom({ scope: 'campaign' });
             return meta.board;
         }
 
-        updateCampaignMetaBoard(boardState) {
+        updateCampaignMetaBoard(boardState, options = {}) {
             const meta = this.ensureCampaignMetaIntegrity();
+            const opts = options && typeof options === 'object' ? options : {};
             meta.board = sanitizeBoard(boardState);
-            this.save({ scope: 'campaign.meta.board' });
+            this.save({
+                scope: 'campaign.meta.board',
+                skipCloud: !!opts.skipCloud,
+                skipEvent: !!opts.skipEvent
+            });
         }
 
         clearCampaignMetaBoard() {
@@ -8145,6 +8948,7 @@
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return sanitizeVTTState(null);
             entry.vtt = sanitizeVTTState(entry.vtt);
+            this.maybeHydrateVTTRoom(entry.id);
             return entry.vtt;
         }
 
@@ -8241,7 +9045,11 @@
                 ...(vttState && typeof vttState === 'object' ? vttState : {}),
                 updatedAt: nextUpdatedAt
             });
-            this.save({ scope: `cases.${entry.id}.vtt` });
+            this.save({
+                scope: `cases.${entry.id}.vtt`,
+                skipCloud: !!opts.skipCloud,
+                skipEvent: !!opts.skipEvent
+            });
             return entry.vtt;
         }
 
@@ -8249,16 +9057,22 @@
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return sanitizeBoard(null);
             entry.board = sanitizeBoard(entry.board);
+            this.maybeHydrateBoardRoom({ scope: 'case', caseId: entry.id });
             if (!caseId || entry.id === this.getActiveCaseId()) this.syncActiveCaseLegacyState();
             return entry.board;
         }
 
-        updateBoard(boardState, caseId = null) {
+        updateBoard(boardState, caseId = null, options = {}) {
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return;
+            const opts = options && typeof options === 'object' ? options : {};
             entry.board = sanitizeBoard(boardState);
             this.syncActiveCaseLegacyState();
-            this.save({ scope: `cases.${entry.id}.board` });
+            this.save({
+                scope: `cases.${entry.id}.board`,
+                skipCloud: !!opts.skipCloud,
+                skipEvent: !!opts.skipEvent
+            });
         }
 
         clearBoard(caseId = null) {
@@ -8289,7 +9103,7 @@
             this.syncActiveCaseLegacyState();
 
             try {
-                const now = Date.now();
+                const now = toTimestamp(opts.updatedAt, Date.now()) || Date.now();
                 if (!this.state.meta || typeof this.state.meta !== 'object') {
                     this.state.meta = { version: 1, created: now, updated: now, syncRevision: 0, scopeUpdated: {} };
                 }
@@ -8301,7 +9115,7 @@
                     this.state.meta.scopeUpdated[scopeToken] = now;
                 });
                 localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                this.broadcastStoreUpdate('board-collab', {
+                this.broadcastStoreUpdate(opts.source || 'board-collab', {
                     scopes,
                     roomId: toTrimmedString(opts.roomId, '', 160).trim()
                 });
@@ -8326,7 +9140,7 @@
             const scopes = [`cases.${entry.id}.vtt`];
 
             try {
-                const now = Date.now();
+                const now = toTimestamp(opts.updatedAt, Date.now()) || Date.now();
                 if (!this.state.meta || typeof this.state.meta !== 'object') {
                     this.state.meta = { version: 1, created: now, updated: now, syncRevision: 0, scopeUpdated: {} };
                 }
@@ -8338,7 +9152,7 @@
                     this.state.meta.scopeUpdated[scopeToken] = now;
                 });
                 localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                this.broadcastStoreUpdate('vtt-collab', {
+                this.broadcastStoreUpdate(opts.source || 'vtt-collab', {
                     scopes,
                     roomId: target.roomId
                 });

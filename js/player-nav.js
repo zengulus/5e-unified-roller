@@ -49,6 +49,7 @@
         'normalizedCaseStateTable',
         'normalizedCaseBoardsTable',
         'normalizedCaseEventsTable',
+        'normalizedScopeVersionsTable',
         'normalizedPlayersTable',
         'normalizedNPCsTable',
         'normalizedLocationsTable',
@@ -76,6 +77,7 @@
             supabaseUrl,
             anonKey,
             campaignId,
+            collabRelayUrl: String(source.collabRelayUrl || source.collabServerUrl || source.relayUrl || '').trim(),
             backendMode
         };
 
