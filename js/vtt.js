@@ -3111,7 +3111,8 @@
             && config.enabled
             && config.supabaseUrl
             && config.anonKey
-            && config.campaignId);
+            && config.campaignId
+            && String(config.collabRelayUrl || '').trim());
     };
 
     const applyVTTCollabSnapshot = (payload) => {
@@ -4630,8 +4631,8 @@
     const syncDraggedState = (force = false) => {
         const store = getStore();
         if (!store || !vttState) return;
+        if (!force) return;
         const now = Date.now();
-        if (!force && now - lastDragSyncAt < DRAG_SYNC_INTERVAL_MS) return;
         const localToken = dragState ? getTokenById(dragState.tokenId, vttState) : null;
         const scene = getActiveScene(vttState);
 
@@ -4647,7 +4648,7 @@
                 tokenId: localToken.id,
                 x: localToken.x,
                 y: localToken.y
-            }], { flushNow: force })).catch((err) => {
+            }], { flushNow: true })).catch((err) => {
                 console.warn('VTT collaboration drag sync failed', err);
             });
             if (typeof vttCollabSession.getSnapshot === 'function') {

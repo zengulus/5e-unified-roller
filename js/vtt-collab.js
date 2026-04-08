@@ -1671,24 +1671,25 @@ class VTTCollabSession {
         this.remotePresence = new Map();
         const channelName = `rtf-vtt-${config.campaignId}-${this.roomId}`;
         const relayUrl = toTrimmedString(config.collabRelayUrl, '', 4000).trim();
-        const channel = relayUrl
-            ? createCollabRelayChannel({
-                baseUrl: relayUrl,
-                roomId: channelName,
-                campaignId: config.campaignId,
-                instanceId: this.instanceId,
-                presenceKey: this.instanceId || undefined,
-                profileName: this.profileName,
-                userId: this.userId,
-                scope: 'case',
-                caseId: this.caseId
-            })
-            : this.client.channel(channelName, {
-                config: {
-                    broadcast: { self: false },
-                    presence: { key: this.instanceId || undefined }
-                }
+        if (!relayUrl) {
+            this.updateStatus({
+                state: 'local',
+                detail: 'Live VTT relay is not configured. VTT changes stay on this device.',
+                peerCount: this.remotePresence.size
             });
+            return;
+        }
+        const channel = createCollabRelayChannel({
+            baseUrl: relayUrl,
+            roomId: channelName,
+            campaignId: config.campaignId,
+            instanceId: this.instanceId,
+            presenceKey: this.instanceId || undefined,
+            profileName: this.profileName,
+            userId: this.userId,
+            scope: 'case',
+            caseId: this.caseId
+        });
         this.channel = channel;
 
         channel.on('broadcast', { event: 'y-sync' }, ({ payload }) => {
@@ -1940,7 +1941,6 @@ class VTTCollabSession {
             this.scheduleMirror();
             const shouldQueueCloudFlush = !origin
                 || origin === this.originLocalSnapshot
-                || origin === this.originPosition
                 || origin === this.originRemoteRestore
                 || origin === this.originSharedStore
                 || origin === this.originManualFlush;
@@ -2207,14 +2207,10 @@ class VTTCollabSession {
     updateTokenPositions(changes, options = {}) {
         const applied = applyTokenPositionChangesToDoc(this.doc, changes, this.originPosition, Date.now());
         if (!applied.length) {
-            if (options && options.flushNow) {
-                return this.flushSnapshotNow({ forceCompatibilityMirror: true });
-            }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
         if (options && options.flushNow) {
             this.requestPeerReconcile('token-drop');
-            return this.flushSnapshotNow({ forceCompatibilityMirror: true });
         }
         return Promise.resolve({ ok: true, changes: applied });
     }
