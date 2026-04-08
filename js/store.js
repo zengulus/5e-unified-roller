@@ -3517,6 +3517,22 @@
             return changed;
         }
 
+        applyLoadedPreloads() {
+            const dirtyBeforeSeed = this.sync.localDirtyScopes
+                ? new Set(this.sync.localDirtyScopes)
+                : new Set();
+            const changed = this.ingestPreloadedData();
+            if (!changed) return false;
+            this.save({ scope: 'campaign', skipCloud: true });
+            const dirtyAfterSeed = this.sync.localDirtyScopes
+                ? Array.from(this.sync.localDirtyScopes.values())
+                : [];
+            const seededScopes = dirtyAfterSeed.filter((scope) => !dirtyBeforeSeed.has(scope));
+            this.clearLocalDirtyScopes(seededScopes.length ? seededScopes : 'campaign');
+            this.sync.lastSyncedState = sanitizeState(this.state);
+            return true;
+        }
+
         getMutationAuthor() {
             const profileName = sanitizeAttributionBy(this.sync && this.sync.config ? this.sync.config.profileName : '', '');
             if (profileName) return profileName;

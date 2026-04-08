@@ -2448,6 +2448,13 @@ function draftEncounterFromTargetNode() {
 
 window.addEventListener('load', async () => {
     await waitForExternalBoardReady();
+    if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
+        try {
+            await window.RTF_DATA_LOADER.ensureDatasets(['npcs', 'locations']);
+        } catch (err) {
+            console.warn('Failed loading board preload datasets', err);
+        }
+    }
     bindDelegatedDataHandlers();
     applyMobileModeClass();
     bindMobileHandlers();
@@ -4629,7 +4636,10 @@ function syncTheoryNodeDisplay(nodeEl) {
 
 function applyNodeImage(nodeEl, imageUrl = '') {
     if (!nodeEl) return;
-    const clean = sanitizeImageUrl(imageUrl);
+    const sanitized = sanitizeImageUrl(imageUrl);
+    const clean = (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.getUsableUrl === 'function')
+        ? window.RTF_MEDIA_CACHE.getUsableUrl(sanitized)
+        : sanitized;
     const slots = nodeEl.querySelectorAll('[data-image-slot]');
     if (!slots.length) return;
 

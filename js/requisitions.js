@@ -48,6 +48,14 @@
 
         return '';
     };
+    const getUsableMediaUrl = (url = '') => {
+        const clean = sanitizeImageUrl(url);
+        if (!clean) return '';
+        if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.getUsableUrl === 'function') {
+            return window.RTF_MEDIA_CACHE.getUsableUrl(clean);
+        }
+        return clean;
+    };
 
     function getDelegatedHandlerFn(code) {
         if (!delegatedHandlerCache.has(code)) {
@@ -391,7 +399,7 @@
 
     function buildCard(req) {
         const reqId = escapeJsString(req.id || '');
-        const imageUrl = sanitizeImageUrl(req.imageUrl || '');
+        const imageUrl = getUsableMediaUrl(req.imageUrl || '');
         const imageMarkup = imageUrl
             ? `<div class="req-image-block"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(req.item || 'Requisition')} image"></div>`
             : '';

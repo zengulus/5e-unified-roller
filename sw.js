@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ravnica-tools-v8';
+const CACHE_NAME = 'ravnica-tools-v9';
 const SHELL_ASSETS = [
     './',
     './manifest.json',
@@ -50,11 +50,10 @@ const SHELL_ASSETS = [
     './js/clue.js',
     './js/config.js',
     './js/core.js',
+    './js/data-loader.js',
     './js/creator.js',
     './js/data-clue.js',
     './js/data-guilds.js',
-    './js/data-locations.js',
-    './js/data-npcs.js',
     './js/data-setting.js',
     './js/data.js',
     './js/delegated-handler.js',
@@ -69,6 +68,7 @@ const SHELL_ASSETS = [
     './js/leads.js',
     './js/ledger.js',
     './js/locations.js',
+    './js/media-cache.js',
     './js/my-story-board-bridge.js',
     './js/pdf.min.js',
     './js/pdf.worker.min.js',

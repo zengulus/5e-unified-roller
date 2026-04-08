@@ -2026,8 +2026,11 @@ function writeCustomizeForm(guilds, npcs, locations) {
     document.getElementById('customize-locations-json').value = JSON.stringify(locations, null, 2);
 }
 
-function loadCustomizeDefaults() {
+async function loadCustomizeDefaults() {
     try {
+        if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
+            await window.RTF_DATA_LOADER.ensureDatasets(['npcs', 'locations']);
+        }
         const guilds = (typeof window.getRTFGuilds === 'function')
             ? window.getRTFGuilds({ includeGuildless: true }).map(coerceGuildSeedEntry).filter(Boolean)
             : (Array.isArray(window.PRELOADED_GUILDS) ? window.PRELOADED_GUILDS.map(coerceGuildSeedEntry).filter(Boolean) : []);

@@ -250,6 +250,14 @@
         if (!raw) return '';
         return /^https?:\/\//i.test(raw) || /^data:image\//i.test(raw) ? raw : '';
     };
+    const getUsableMediaUrl = (value) => {
+        const raw = toImageUrl(value);
+        if (!raw) return '';
+        if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.getUsableUrl === 'function') {
+            return window.RTF_MEDIA_CACHE.getUsableUrl(raw);
+        }
+        return raw;
+    };
     const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
     const randomIntInclusive = (min, max) => {
         const safeMin = Math.min(min, max);
@@ -3411,18 +3419,33 @@
             return;
         }
 
-        if (mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) return;
+        const requestedUrl = getUsableMediaUrl(scene.mapImageUrl);
+        if (!requestedUrl) {
+            mapSize = { width: 0, height: 0 };
+            mapLoadState = { url: String(scene.mapImageUrl || ''), loaded: false };
+            worldSize = getWorldSizeForScene(scene);
+            mapImageEl.removeAttribute('src');
+            mapImageEl.style.width = '0px';
+            mapImageEl.style.height = '0px';
+            mapImageEl.style.display = 'none';
+            renderStage();
+            return;
+        }
+
+        if (mapLoadState.url === requestedUrl && mapLoadState.loaded) return;
 
         mapSize = { width: 0, height: 0 };
-        mapLoadState = { url: scene.mapImageUrl, loaded: false };
-        mapImageEl.src = scene.mapImageUrl;
+        mapLoadState = { url: requestedUrl, loaded: false };
+        mapImageEl.src = requestedUrl;
         mapImageEl.style.display = 'none';
         const probe = new Image();
-        const requestedUrl = scene.mapImageUrl;
         probe.onload = () => {
+            if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberSuccess === 'function') {
+                window.RTF_MEDIA_CACHE.rememberSuccess(requestedUrl);
+            }
             if (!vttState) return;
             const active = getActiveScene();
-            if (!active || active.mapImageUrl !== requestedUrl) return;
+            if (!active || getUsableMediaUrl(active.mapImageUrl) !== requestedUrl) return;
             mapSize = {
                 width: Math.max(1, Math.round(probe.naturalWidth || 1)),
                 height: Math.max(1, Math.round(probe.naturalHeight || 1))
@@ -3437,8 +3460,11 @@
             renderStage();
         };
         probe.onerror = () => {
+            if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberFailure === 'function') {
+                window.RTF_MEDIA_CACHE.rememberFailure(requestedUrl);
+            }
             const active = getActiveScene();
-            if (!active || active.mapImageUrl !== requestedUrl) return;
+            if (!active || getUsableMediaUrl(active.mapImageUrl) !== requestedUrl) return;
             mapSize = { width: 0, height: 0 };
             worldSize = getWorldSizeForScene(active);
             mapLoadState = { url: requestedUrl, loaded: false };
@@ -4319,11 +4345,12 @@
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => {
             const renderedCells = getRenderableTokenCells(token, scene, renderTime);
+            const usableImageUrl = getUsableMediaUrl(token.imageUrl);
             const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
             const isBloodied = isTokenBloodied(token);
             const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
             return `
-                <div class="vtt-token${token.imageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
+                <div class="vtt-token${usableImageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
                     data-token-id="${escapeHtml(token.id)}"
                     data-id="${escapeHtml(token.id)}"
                     data-action="select-token"
@@ -4336,9 +4363,9 @@
                     data-world-height="${escapeHtml(String(token.h * scene.grid.cellPx))}"
                     style="--vtt-token-damage:${getTokenDamageFraction(token)};">
                     <div class="vtt-token-face">
-                        ${token.imageUrl ? `<img class="vtt-token-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
+                        ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
                     </div>
-                    ${token.imageUrl ? `<div class="vtt-token-hover-card"><img class="vtt-token-hover-image" src="${escapeHtml(token.imageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false"></div>` : ''}
+                    ${usableImageUrl ? `<div class="vtt-token-hover-card"><img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false"></div>` : ''}
                     <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
                 </div>
             `;
@@ -6523,11 +6550,19 @@
         if (sidebarEl) sidebarEl.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
     };
 
-    const init = () => {
+    const init = async () => {
         const store = getStore();
         if (!store) {
             if (syncChipEl) syncChipEl.textContent = 'Unavailable';
             return;
+        }
+
+        if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
+            try {
+                await window.RTF_DATA_LOADER.ensureDatasets(['npcs']);
+            } catch (err) {
+                console.warn('Failed loading VTT preload datasets', err);
+            }
         }
 
         bindEvents();

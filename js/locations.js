@@ -79,6 +79,15 @@ function buildLocationSearchText(location) {
     ].map(normalizeLocationField).join(' ');
 }
 
+function getUsableMediaUrl(url = '') {
+    const clean = sanitizeImageUrl(url);
+    if (!clean) return '';
+    if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.getUsableUrl === 'function') {
+        return window.RTF_MEDIA_CACHE.getUsableUrl(clean);
+    }
+    return clean;
+}
+
 function getDelegatedHandlerFn(code) {
     if (!delegatedHandlerCache.has(code)) {
         delegatedHandlerCache.set(code, window.RTF_DELEGATED_HANDLER.compile(code));
@@ -374,7 +383,7 @@ function render() {
     container.innerHTML = filtered.map(loc => {
         const locationId = String(loc.id || '');
         const locationIdArg = escapeJsString(locationId);
-        const imageUrl = sanitizeImageUrl(loc.imageUrl || '');
+        const imageUrl = getUsableMediaUrl(loc.imageUrl || '');
         const trust = clampTrackLevel(loc.trust, 2);
         const stigma = clampTrackLevel(loc.stigma, 0);
         const imageMarkup = imageUrl
@@ -452,8 +461,15 @@ function render() {
     applyPendingLocationDeepLinkFocus();
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
     pendingLinkLocationId = getLocationIdFromUrl();
+    if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
+        try {
+            await window.RTF_DATA_LOADER.ensureDatasets(['locations']);
+        } catch (err) {
+            console.warn('Failed loading location preload dataset', err);
+        }
+    }
     if (window.RTF_STORE) {
         render();
     } else {

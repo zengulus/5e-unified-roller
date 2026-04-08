@@ -155,9 +155,24 @@ const buildNPCSearchText = (npc) => {
     ].map(normalizeNPCField).join(' ');
 };
 
-const PRELOADED_NPC_SIGNATURES = new Set(
+let PRELOADED_NPC_SIGNATURES = new Set(
     (Array.isArray(window.PRELOADED_NPCS) ? window.PRELOADED_NPCS : []).map(buildNPCSignature)
 );
+
+function refreshPreloadedNPCSignatures() {
+    PRELOADED_NPC_SIGNATURES = new Set(
+        (Array.isArray(window.PRELOADED_NPCS) ? window.PRELOADED_NPCS : []).map(buildNPCSignature)
+    );
+}
+
+function getUsableMediaUrl(url = '') {
+    const clean = sanitizeImageUrl(url);
+    if (!clean) return '';
+    if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.getUsableUrl === 'function') {
+        return window.RTF_MEDIA_CACHE.getUsableUrl(clean);
+    }
+    return clean;
+}
 
 function getCampaign() {
     if (!window.RTF_STORE) return null;
@@ -504,7 +519,7 @@ function render() {
         const npcIdArg = escapeJsString(npcId);
         const trust = clampTrackLevel(npc.trust, 2);
         const stigma = clampTrackLevel(npc.stigma, 0);
-        const imageUrl = sanitizeImageUrl(npc.imageUrl || '');
+        const imageUrl = getUsableMediaUrl(npc.imageUrl || '');
         const imageMarkup = imageUrl
             ? `<div class="roster-npc-image"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(npc.name || 'NPC')} portrait"></div>`
             : '';
@@ -577,8 +592,16 @@ function render() {
     applyPendingNpcDeepLinkFocus();
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
     pendingLinkNPCId = getLinkedNpcIdFromUrl();
+    if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
+        try {
+            await window.RTF_DATA_LOADER.ensureDatasets(['npcs']);
+        } catch (err) {
+            console.warn('Failed loading NPC preload dataset', err);
+        }
+    }
+    refreshPreloadedNPCSignatures();
     if (window.RTF_STORE) {
         ensureGuildOptions();
         setFormMode(false);
