@@ -1521,45 +1521,7 @@ class VTTCollabSession {
                 applySnapshotToDoc(this.doc, canonicalPayload, this.coerceSnapshot.bind(this), this.originBootstrap, seedStamp);
             }
 
-            if (typeof this.store.saveVTTRoomSnapshot === 'function') {
-                const seeded = await this.store.saveVTTRoomSnapshot({
-                    roomId: this.roomId,
-                    caseId: this.caseId,
-                    payload: canonicalPayload,
-                    checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
-                    revision: seedStamp,
-                    updatedAt: new Date(seedStamp).toISOString(),
-                    updatedBy: this.instanceId,
-                    updatedByUser: this.userId || null,
-                    updatedByName: this.profileName || null,
-                    createOnly: true
-                });
-                this.persistSnapshotToSharedState(canonicalPayload, canonicalSig);
-                if (seeded && seeded.ok) {
-                    this.lastSavedRevision = Math.max(this.lastSavedRevision, seedStamp, seeded.revision || 0);
-                    this.lastCloudSnapshotSignature = canonicalSig;
-                    roomSnapshotSource = this.instanceId;
-                } else if (seeded && seeded.reason === 'exists' && typeof this.store.loadVTTRoomSnapshot === 'function') {
-                    const canonicalRoom = await this.store.loadVTTRoomSnapshot({
-                        roomId: this.roomId,
-                        caseId: this.caseId
-                    });
-                    if (canonicalRoom && canonicalRoom.ok && canonicalRoom.snapshot) {
-                        const roomPayload = this.coerceSnapshot(canonicalRoom.snapshot.payload);
-                        const roomPayloadSig = buildSnapshotSignature(roomPayload, this.coerceSnapshot.bind(this));
-                        const roomUpdatedAt = Date.parse(canonicalRoom.snapshot.updatedAt || '') || toNonNegativeInt(canonicalRoom.snapshot.revision, seedStamp);
-                        this.lastSavedRevision = Math.max(this.lastSavedRevision, canonicalRoom.snapshot.revision || 0);
-                        this.lastCloudSnapshotSignature = roomPayloadSig;
-                        roomSnapshotSource = toTrimmedString(canonicalRoom.snapshot.updatedBy, '', 120).trim();
-                        if (roomPayloadSig !== buildSnapshotSignature(serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this)), this.coerceSnapshot.bind(this))) {
-                            applySnapshotToDoc(this.doc, roomPayload, this.coerceSnapshot.bind(this), this.originRemoteRestore, roomUpdatedAt);
-                        }
-                    }
-                } else if (seeded && !seeded.ok) {
-                    this.pendingReadyFlush = true;
-                    console.warn('RTF_VTT_COLLAB: Failed seeding live VTT room', seeded.error || seeded.reason);
-                }
-            }
+            this.persistSnapshotToSharedState(canonicalPayload, canonicalSig);
         }
 
         this.lastSnapshot = serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
@@ -1979,19 +1941,7 @@ class VTTCollabSession {
     }
 
     scheduleCloudFlush() {
-        if (this.destroyed || !this.store || typeof this.store.saveVTTRoomSnapshot !== 'function') return;
-        if (!this.ready) {
-            this.pendingReadyFlush = true;
-            return;
-        }
         this.pendingReadyFlush = false;
-        if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
-        this.pendingFlushTimer = setTimeout(() => {
-            this.pendingFlushTimer = null;
-            this.flushSnapshotNow().catch((err) => {
-                console.warn('RTF_VTT_COLLAB: Scheduled flush failed', err);
-            });
-        }, CLOUD_FLUSH_DELAY_MS);
     }
 
     shouldMirrorCompatibilityCloud(force = false) {
@@ -2026,75 +1976,18 @@ class VTTCollabSession {
             this.flushQueuedWhilePending = true;
             return this.pendingFlushPromise;
         }
-        if (!this.store || !this.pendingSnapshot || typeof this.store.saveVTTRoomSnapshot !== 'function') {
+        if (!this.store || !this.pendingSnapshot) {
             return { ok: false, reason: 'no-snapshot' };
         }
 
         const snapshotToSave = this.getSnapshot();
         const snapshotSig = buildSnapshotSignature(snapshotToSave, this.coerceSnapshot.bind(this));
-        if (snapshotSig && snapshotSig === this.lastCloudSnapshotSignature) {
-            this.pendingReadyFlush = false;
-            return { ok: true, reason: 'unchanged' };
-        }
-
-        const nextRevision = this.nextLocalRevision();
+        this.pendingReadyFlush = false;
         this.flushQueuedWhilePending = false;
-        this.applyRevisionState(nextRevision, this.instanceId);
-        this.pendingFlushPromise = this.store.saveVTTRoomSnapshot({
-            roomId: this.roomId,
-            caseId: this.caseId,
-            payload: snapshotToSave,
-            checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
-            revision: nextRevision,
-            updatedAt: toIsoString(getDocUpdatedAt(this.doc), '') || new Date().toISOString(),
-            updatedBy: this.instanceId,
-            updatedByUser: this.userId || null,
-            updatedByName: this.profileName || null
-        }).then((result) => {
-            if (result && result.ok) {
-                this.applyRevisionState(result.revision || nextRevision, this.instanceId);
-                if (snapshotSig) this.lastCloudSnapshotSignature = snapshotSig;
-                this.pendingReadyFlush = false;
-                this.persistSnapshotToSharedState(snapshotToSave, snapshotSig, {
-                    syncCloud: this.shouldMirrorCompatibilityCloud(!!opts.forceCompatibilityMirror)
-                });
-                return result;
-            }
-            if (result && result.reason === 'stale' && result.snapshot) {
-                const remoteSnapshot = this.coerceSnapshot(result.snapshot.payload);
-                const remoteSig = buildSnapshotSignature(remoteSnapshot, this.coerceSnapshot.bind(this));
-                const currentSig = buildSnapshotSignature(this.getSnapshot(), this.coerceSnapshot.bind(this));
-                this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
-                if (remoteSig) this.lastCloudSnapshotSignature = remoteSig;
-                this.persistSnapshotToSharedState(remoteSnapshot, remoteSig, {
-                    syncCloud: false
-                });
-                if (remoteSig !== currentSig) {
-                    this.flushQueuedWhilePending = true;
-                    this.pendingReadyFlush = true;
-                } else {
-                    this.pendingReadyFlush = false;
-                }
-            }
-            return result;
-        }).finally(() => {
-            this.pendingFlushPromise = null;
-            if (this.destroyed || !this.ready) return;
-            if (this.flushQueuedWhilePending) {
-                this.flushQueuedWhilePending = false;
-                queueMicrotask(() => {
-                    this.flushSnapshotNow().catch((err) => {
-                        console.warn('RTF_VTT_COLLAB: Follow-up flush failed', err);
-                    });
-                });
-                return;
-            }
-            if (this.pendingReadyFlush) {
-                this.scheduleCloudFlush();
-            }
+        this.persistSnapshotToSharedState(snapshotToSave, snapshotSig, {
+            syncCloud: false
         });
-
-        return this.pendingFlushPromise;
+        return { ok: true, reason: 'disabled' };
     }
 
     getSnapshot() {
@@ -2217,7 +2110,7 @@ class VTTCollabSession {
 
     handleVisibilityChange() {
         if (document.hidden) {
-            this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
+            return;
         } else if (!this.connected) {
             this.scheduleReconnect('Rejoining live VTT...');
         } else {
@@ -2227,7 +2120,7 @@ class VTTCollabSession {
     }
 
     handleBeforeUnload() {
-        this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
+        return;
     }
 
     async destroy() {
@@ -2239,12 +2132,6 @@ class VTTCollabSession {
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
         if (this.pendingReconnectTimer) clearTimeout(this.pendingReconnectTimer);
         this.stopPeriodicSync();
-
-        try {
-            await this.flushSnapshotNow({ forceCompatibilityMirror: true });
-        } catch (err) {
-            console.warn('RTF_VTT_COLLAB: Final flush failed', err);
-        }
 
         this.connected = false;
         this.ready = false;
