@@ -3,6 +3,16 @@ import { WebSocketServer } from 'ws';
 
 const PORT = Number.parseInt(process.env.PORT || '10000', 10) || 10000;
 const HOST = process.env.HOST || '0.0.0.0';
+const SERVICE_NAME = String(process.env.SERVICE_NAME || 'RTF collab relay').trim() || 'RTF collab relay';
+const MAX_MESSAGE_BYTES = Math.max(1024, Number.parseInt(process.env.MAX_MESSAGE_BYTES || '262144', 10) || 262144);
+const ROOM_IDLE_TTL_MS = Math.max(0, Number.parseInt(process.env.ROOM_IDLE_TTL_MS || '1800000', 10) || 1800000);
+const LOG_CONNECTIONS = /^(1|true|yes|on)$/i.test(String(process.env.LOG_CONNECTIONS || '').trim());
+const ALLOWED_ORIGINS = new Set(
+  String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+);
 
 const rooms = new Map();
 
@@ -11,13 +21,21 @@ const toTrimmedString = (value, fallback = '', maxLen = 4000) => {
   return String(value).slice(0, maxLen);
 };
 
+const countClients = () => Array.from(rooms.values()).reduce((sum, room) => sum + room.clients.size, 0);
+
+const logEvent = (...parts) => {
+  if (!LOG_CONNECTIONS) return;
+  console.log('[relay]', ...parts);
+};
+
 const getRoom = (roomId) => {
   const key = toTrimmedString(roomId, '', 160).trim();
   if (!key) return null;
   if (!rooms.has(key)) {
     rooms.set(key, {
       id: key,
-      clients: new Set()
+      clients: new Set(),
+      lastSeenAt: Date.now()
     });
   }
   return rooms.get(key);
@@ -26,7 +44,15 @@ const getRoom = (roomId) => {
 const removeRoomIfEmpty = (roomId) => {
   const room = rooms.get(roomId);
   if (!room || room.clients.size) return;
+  if ((Date.now() - (room.lastSeenAt || 0)) < ROOM_IDLE_TTL_MS) return;
   rooms.delete(roomId);
+};
+
+const sweepIdleRooms = () => {
+  rooms.forEach((room, roomId) => {
+    if (!room || room.clients.size) return;
+    removeRoomIfEmpty(roomId);
+  });
 };
 
 const buildPresenceState = (room) => {
@@ -78,8 +104,10 @@ const cleanupClient = (client) => {
   client.roomId = '';
   if (!room) return;
   room.clients.delete(client);
+  room.lastSeenAt = Date.now();
   emitPresence(room, 'leave');
   removeRoomIfEmpty(roomId);
+  logEvent('disconnect', roomId, `clients=${room.clients.size}`);
 };
 
 const server = http.createServer((req, res) => {
@@ -87,18 +115,50 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
       ok: true,
+      service: SERVICE_NAME,
       rooms: rooms.size,
-      clients: Array.from(rooms.values()).reduce((sum, room) => sum + room.clients.size, 0)
+      clients: countClients(),
+      roomIds: Array.from(rooms.keys()).slice(0, 20),
+      uptimeSeconds: Math.floor(process.uptime())
     }));
     return;
   }
-  res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-  res.end('RTF collab relay is running.\n');
+  if (req.url === '/' || req.url === '/info') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      ok: true,
+      service: SERVICE_NAME,
+      transport: 'websocket',
+      healthcheck: '/healthz',
+      websocketQuery: {
+        roomId: 'required',
+        campaignId: 'optional',
+        instanceId: 'optional',
+        presenceKey: 'optional',
+        scope: 'optional',
+        caseId: 'optional'
+      },
+      allowedOrigins: Array.from(ALLOWED_ORIGINS),
+      maxMessageBytes: MAX_MESSAGE_BYTES
+    }, null, 2));
+    return;
+  }
+  res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ ok: false, error: 'not-found' }));
 });
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: MAX_MESSAGE_BYTES });
+
+if (ROOM_IDLE_TTL_MS > 0) {
+  setInterval(sweepIdleRooms, Math.min(ROOM_IDLE_TTL_MS, 60000)).unref();
+}
 
 wss.on('connection', (socket, req) => {
+  const origin = toTrimmedString(req.headers.origin, '', 4000).trim();
+  if (ALLOWED_ORIGINS.size && (!origin || !ALLOWED_ORIGINS.has(origin))) {
+    socket.close(1008, 'origin-not-allowed');
+    return;
+  }
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const roomId = toTrimmedString(url.searchParams.get('roomId'), '', 160).trim();
   const room = getRoom(roomId);
@@ -119,7 +179,9 @@ wss.on('connection', (socket, req) => {
     presence: null
   };
   room.clients.add(client);
+  room.lastSeenAt = Date.now();
   emitPresence(room, 'join');
+  logEvent('connect', room.id, `clients=${room.clients.size}`, origin ? `origin=${origin}` : 'origin=unknown');
 
   socket.on('message', (raw) => {
     let packet = null;
@@ -172,5 +234,8 @@ wss.on('connection', (socket, req) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`RTF collab relay listening on ${HOST}:${PORT}`);
+  console.log(`${SERVICE_NAME} listening on ${HOST}:${PORT}`);
+  if (ALLOWED_ORIGINS.size) {
+    console.log(`Allowed websocket origins: ${Array.from(ALLOWED_ORIGINS).join(', ')}`);
+  }
 });

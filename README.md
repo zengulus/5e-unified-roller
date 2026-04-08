@@ -69,7 +69,12 @@ This project is unofficial Fan Content permitted under the Fan Content Policy. N
 
 ## Render Collab Relay
 
-Live board/VTT transport can now be moved off Supabase and onto a tiny Render websocket relay while still keeping Supabase for room snapshots and recovery. See `docs/RenderCollabRelay.md`.
+Live board/VTT transport can now be moved off Supabase and onto a tiny Render websocket relay while still keeping Supabase for room snapshots and recovery.
+
+- Setup guide: [docs/RenderCollabRelay.md](/home/nathm/5e-unified-roller/docs/RenderCollabRelay.md)
+- Hosted relay package notes: [render-collab/README.md](/home/nathm/5e-unified-roller/render-collab/README.md)
+- Starter connect profile: [render-collab/connect.example.json](/home/nathm/5e-unified-roller/render-collab/connect.example.json)
+
 * See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license paths and attribution details.
 
 

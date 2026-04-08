@@ -1,0 +1,8 @@
+{
+  "supabaseUrl": "https://YOUR_PROJECT.supabase.co",
+  "anonKey": "YOUR_SUPABASE_ANON_KEY",
+  "campaignId": "your-campaign",
+  "profileName": "",
+  "backendMode": "normalized",
+  "collabRelayUrl": "wss://your-render-service.onrender.com"
+}

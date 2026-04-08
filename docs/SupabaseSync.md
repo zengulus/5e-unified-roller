@@ -165,6 +165,8 @@ This project supports a simple `connect.json` profile so players do not need to 
 3. Click `Export connect.json`.
 4. Share that file with players.
 
+If you already filled in `Collab Relay URL (Optional)`, that relay URL is exported too.
+
 ### Player Flow
 
 1. Open `tools.html`.
@@ -183,7 +185,8 @@ If you place a `connect.json` file at the site root (same level as `tools.html`)
   "supabaseUrl": "https://your-project-ref.supabase.co",
   "anonKey": "your-anon-public-key",
   "campaignId": "ravnica-main",
-  "profileName": ""
+  "profileName": "",
+  "collabRelayUrl": "wss://your-render-service.onrender.com"
 }
 ```
 
@@ -191,6 +194,7 @@ Accepted aliases are also supported:
 - `projectUrl` or `url` for `supabaseUrl`
 - `key` or `publicKey` for `anonKey`
 - `slug` or `campaign` for `campaignId`
+- `collabServerUrl` or `relayUrl` for `collabRelayUrl`
 
 ## Notes
 

@@ -7,3 +7,8 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /healthz
+    envVars:
+      - key: SERVICE_NAME
+        value: RTF collab relay
+      - key: ALLOWED_ORIGINS
+        sync: false
