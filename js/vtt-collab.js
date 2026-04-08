@@ -14,6 +14,7 @@ const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 2500;
 const SYNC_RECONCILE_INTERVAL_MS = 15000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 30000;
+const DURABLE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
@@ -1293,7 +1294,9 @@ class VTTCollabSession {
         this.pendingReadyFlush = false;
         this.pendingReconnectTimer = null;
         this.periodicSyncTimer = null;
+        this.periodicSaveTimer = null;
         this.flushQueuedWhilePending = false;
+        this.isDirty = false;
         this.reconnectAttempts = 0;
         this.pendingSnapshot = null;
         this.lastSnapshot = this.coerceSnapshot(
@@ -1618,6 +1621,23 @@ class VTTCollabSession {
         this.periodicSyncTimer = null;
     }
 
+    startPeriodicSave() {
+        if (this.periodicSaveTimer) clearInterval(this.periodicSaveTimer);
+        this.periodicSaveTimer = setInterval(() => {
+            if (this.destroyed || !this.connected || !this.ready || !this.isDirty) return;
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+            this.flushSnapshotNow().catch((err) => {
+                console.warn('RTF_VTT_COLLAB: Periodic save failed', err);
+            });
+        }, DURABLE_SAVE_INTERVAL_MS);
+    }
+
+    stopPeriodicSave() {
+        if (!this.periodicSaveTimer) return;
+        clearInterval(this.periodicSaveTimer);
+        this.periodicSaveTimer = null;
+    }
+
     async connectChannel(config) {
         if (!this.client || !config) return;
         if (this.pendingReconnectTimer) {
@@ -1630,6 +1650,7 @@ class VTTCollabSession {
 
         this.connected = false;
         this.stopPeriodicSync();
+        this.stopPeriodicSave();
         this.remotePresence = new Map();
         const channelName = `rtf-vtt-${config.campaignId}-${this.roomId}`;
         const relayUrl = toTrimmedString(config.collabRelayUrl, '', 4000).trim();
@@ -1705,6 +1726,7 @@ class VTTCollabSession {
                     this.connected = true;
                     this.reconnectAttempts = 0;
                     this.startPeriodicSync();
+                    this.startPeriodicSave();
                     this.updateStatus({
                         state: 'live',
                         detail: 'Live VTT connected.',
@@ -1720,6 +1742,7 @@ class VTTCollabSession {
                     clearTimeout(timeout);
                     this.connected = false;
                     this.stopPeriodicSync();
+                    this.stopPeriodicSave();
                     this.updateStatus({
                         state: 'degraded',
                         detail: status === 'CLOSED'
@@ -1898,6 +1921,9 @@ class VTTCollabSession {
         const origin = transaction ? transaction.origin : null;
         this.lastSnapshot = next;
         this.pendingSnapshot = next;
+        if (origin !== this.originRemoteSync && origin !== this.originBootstrap) {
+            this.isDirty = true;
+        }
 
         if (this.ready) {
             this.scheduleMirror();
@@ -1976,18 +2002,79 @@ class VTTCollabSession {
             this.flushQueuedWhilePending = true;
             return this.pendingFlushPromise;
         }
-        if (!this.store || !this.pendingSnapshot) {
+        if (!this.store || !this.pendingSnapshot || typeof this.store.saveVTTRoomSnapshot !== 'function') {
             return { ok: false, reason: 'no-snapshot' };
         }
 
         const snapshotToSave = this.getSnapshot();
         const snapshotSig = buildSnapshotSignature(snapshotToSave, this.coerceSnapshot.bind(this));
-        this.pendingReadyFlush = false;
+        if (snapshotSig && snapshotSig === this.lastCloudSnapshotSignature) {
+            this.pendingReadyFlush = false;
+            this.isDirty = false;
+            return { ok: true, reason: 'unchanged' };
+        }
+
+        const nextRevision = this.nextLocalRevision();
         this.flushQueuedWhilePending = false;
-        this.persistSnapshotToSharedState(snapshotToSave, snapshotSig, {
-            syncCloud: false
+        this.applyRevisionState(nextRevision, this.instanceId);
+        this.pendingFlushPromise = this.store.saveVTTRoomSnapshot({
+            roomId: this.roomId,
+            caseId: this.caseId,
+            payload: snapshotToSave,
+            checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
+            revision: nextRevision,
+            updatedAt: toIsoString(getDocUpdatedAt(this.doc), '') || new Date().toISOString(),
+            updatedBy: this.instanceId,
+            updatedByUser: this.userId || null,
+            updatedByName: this.profileName || null
+        }).then((result) => {
+            if (result && result.ok) {
+                this.applyRevisionState(result.revision || nextRevision, this.instanceId);
+                if (snapshotSig) this.lastCloudSnapshotSignature = snapshotSig;
+                this.pendingReadyFlush = false;
+                this.isDirty = false;
+                this.persistSnapshotToSharedState(snapshotToSave, snapshotSig, {
+                    syncCloud: this.shouldMirrorCompatibilityCloud(!!opts.forceCompatibilityMirror)
+                });
+                return result;
+            }
+            if (result && result.reason === 'stale' && result.snapshot) {
+                const remoteSnapshot = this.coerceSnapshot(result.snapshot.payload);
+                const remoteSig = buildSnapshotSignature(remoteSnapshot, this.coerceSnapshot.bind(this));
+                const currentSig = buildSnapshotSignature(this.getSnapshot(), this.coerceSnapshot.bind(this));
+                this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
+                if (remoteSig) this.lastCloudSnapshotSignature = remoteSig;
+                this.persistSnapshotToSharedState(remoteSnapshot, remoteSig, {
+                    syncCloud: false
+                });
+                if (remoteSig !== currentSig) {
+                    this.flushQueuedWhilePending = true;
+                    this.pendingReadyFlush = true;
+                    this.isDirty = true;
+                } else {
+                    this.pendingReadyFlush = false;
+                    this.isDirty = false;
+                }
+            }
+            return result;
+        }).finally(() => {
+            this.pendingFlushPromise = null;
+            if (this.destroyed || !this.ready) return;
+            if (this.flushQueuedWhilePending) {
+                this.flushQueuedWhilePending = false;
+                queueMicrotask(() => {
+                    this.flushSnapshotNow().catch((err) => {
+                        console.warn('RTF_VTT_COLLAB: Follow-up flush failed', err);
+                    });
+                });
+                return;
+            }
+            if (this.pendingReadyFlush) {
+                this.scheduleCloudFlush();
+            }
         });
-        return { ok: true, reason: 'disabled' };
+
+        return this.pendingFlushPromise;
     }
 
     getSnapshot() {
@@ -2120,7 +2207,8 @@ class VTTCollabSession {
     }
 
     handleBeforeUnload() {
-        return;
+        if (!this.isDirty) return;
+        this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
     }
 
     async destroy() {
@@ -2132,6 +2220,15 @@ class VTTCollabSession {
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
         if (this.pendingReconnectTimer) clearTimeout(this.pendingReconnectTimer);
         this.stopPeriodicSync();
+        this.stopPeriodicSave();
+
+        if (this.isDirty) {
+            try {
+                await this.flushSnapshotNow({ forceCompatibilityMirror: true });
+            } catch (err) {
+                console.warn('RTF_VTT_COLLAB: Final flush failed', err);
+            }
+        }
 
         this.connected = false;
         this.ready = false;

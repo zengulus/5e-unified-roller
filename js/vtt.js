@@ -5071,7 +5071,7 @@
                 draft.scenes.push(nextScene);
                 draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
@@ -5099,7 +5099,7 @@
                     setSceneViewPreference(SCENE_VIEW_SHARED);
                 }
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
@@ -5111,7 +5111,7 @@
                 draft.scenes.push(nextScene);
                 draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
@@ -5124,7 +5124,7 @@
                 if (!scene) return;
                 draft.activeSceneId = scene.id;
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
@@ -5137,7 +5137,7 @@
                 if (!scene) return;
                 draft.activeSceneId = scene.id;
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
@@ -5152,7 +5152,7 @@
                 draft.scenes.push(nextScene);
                 draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
@@ -5178,7 +5178,7 @@
                     setSceneViewPreference(SCENE_VIEW_SHARED);
                 }
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
@@ -5366,7 +5366,7 @@
                 if (!scene) return;
                 draft.activeSceneId = scene.id;
                 previewTokenId = '';
-            }, { fitView: true });
+            }, { fitView: true, flushNow: true });
             return;
         }
 
