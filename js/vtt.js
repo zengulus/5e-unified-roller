@@ -3,6 +3,8 @@
     const UI_PREFS_STORAGE_PREFIX = 'rtf_vtt_ui_';
     const PROCESSED_INIT_STORAGE_PREFIX = 'rtf_vtt_processed_init_';
     const TRACKER_INITIATIVE_QUEUE_KEY = 'rtf_tracker_initiative_queue';
+    const SHEET_STORAGE_KEY = 'unifiedSheetData.json';
+    const GM_STORAGE_KEY = 'gmDashboardData';
     const STORE_UPDATED_EVENT = 'rtf-store-updated';
     const DEFAULT_WORLD_SIZE = { width: 2400, height: 1600 };
     const DRAG_SYNC_INTERVAL_MS = 120;
@@ -31,6 +33,8 @@
     const STEALTH_STATUS_UNSEEN = 'unseen';
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
+    const QUICK_ACTION_SEARCH_DICE = [20, 12, 10, 8, 6, 4, 100];
+    const QUICK_ACTION_SEARCH_RESULT_LIMIT = 18;
     const DEFAULT_VTT_CELL_PX = 70;
     const DEFAULT_EVIDENCE_NOTE_CATEGORY = 'evidence';
     const DEFAULT_EVIDENCE_NOTE_COLOR = '#39b66b';
@@ -120,6 +124,9 @@
     let quickSpawnMenuState = null;
     let tokenInspectorState = null;
     let initiativeDetailState = null;
+    let sheetActionState = null;
+    let sheetActionQuery = '';
+    let npcRollState = null;
     let navMenuOpen = false;
     let viewMenuOpen = false;
     let toolsMenuOpen = false;
@@ -168,6 +175,8 @@
     const tokenInspectorEl = document.getElementById('vtt-token-inspector');
     const inspectorPanelEl = document.getElementById('vtt-inspector-panel');
     const tokenInspectorPopoverEl = document.getElementById('vtt-token-inspector-popover');
+    const sheetActionPopoverEl = document.getElementById('vtt-sheet-action-popover');
+    const npcRollPopoverEl = document.getElementById('vtt-npc-roll-popover');
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
     const sceneListEl = document.getElementById('vtt-scene-list');
@@ -292,6 +301,230 @@
         const words = String(label || '').trim().split(/\s+/).filter(Boolean);
         if (!words.length) return '?';
         return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join('');
+    };
+    const toTitleCaseWords = (value = '') => String(value || '').replace(/\w\S*/g, (word) =>
+        word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    );
+    const normalizeSearchText = (value = '') => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const sheetStatNames = {
+        str: 'Strength',
+        dex: 'Dexterity',
+        con: 'Constitution',
+        int: 'Intelligence',
+        wis: 'Wisdom',
+        cha: 'Charisma'
+    };
+    const sheetSkillsMap = {
+        'acrobatics': 'dex',
+        'animal handling': 'wis',
+        'arcana': 'int',
+        'athletics': 'str',
+        'deception': 'cha',
+        'history': 'int',
+        'insight': 'wis',
+        'intimidation': 'cha',
+        'investigation': 'int',
+        'medicine': 'wis',
+        'nature': 'int',
+        'perception': 'wis',
+        'performance': 'cha',
+        'persuasion': 'cha',
+        'religion': 'int',
+        'sleight of hand': 'dex',
+        'stealth': 'dex',
+        'survival': 'wis'
+    };
+    const readJSONStorage = (key, fallback = null) => {
+        try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : fallback;
+        } catch (err) {
+            return fallback;
+        }
+    };
+    const getActiveSheetBundle = (preferredSheetKey = '') => {
+        const allData = readJSONStorage(SHEET_STORAGE_KEY, null);
+        if (!allData || typeof allData !== 'object' || !allData.characters || typeof allData.characters !== 'object') return null;
+        const cleanSheetKey = String(preferredSheetKey || '').trim();
+        if (cleanSheetKey) {
+            const matched = Object.entries(allData.characters).find(([, character]) =>
+                String(character && character.meta && character.meta.sheetKey || '').trim() === cleanSheetKey
+            );
+            if (matched && matched[1]) return { allData, activeId: matched[0], character: matched[1] };
+        }
+        const activeId = String(allData.activeId || '').trim();
+        const character = allData.characters[activeId] || Object.values(allData.characters)[0] || null;
+        if (!character || typeof character !== 'object') return null;
+        return { allData, activeId: allData.characters[activeId] ? activeId : Object.keys(allData.characters)[0], character };
+    };
+    const buildSheetActionItem = (options = {}) => {
+        const action = options.action && typeof options.action === 'object' ? options.action : null;
+        const key = String(options.key || '').trim();
+        if (!action || !key) return null;
+        const label = String(options.label || action.label || 'Action').trim() || 'Action';
+        const summary = String(options.summary || action.summary || '').trim();
+        const category = String(options.category || 'Action').trim() || 'Action';
+        const detail = String(options.detail || '').trim();
+        const priority = Number.isFinite(options.priority) ? Number(options.priority) : 0;
+        return {
+            key,
+            label,
+            summary,
+            category,
+            detail,
+            priority,
+            action: { ...action, label, summary },
+            searchText: normalizeSearchText([label, summary, category, detail, options.searchTerms || ''].join(' '))
+        };
+    };
+    const buildSheetCodeActionItem = (options = {}) => buildSheetActionItem({
+        ...options,
+        action: {
+            kind: 'code',
+            code: String(options.code || '').trim(),
+            label: options.label || 'Action',
+            summary: options.summary || ''
+        }
+    });
+    const buildSheetActionCatalog = () => {
+        const bundle = getActiveSheetBundle(sheetActionState && sheetActionState.sheetKey);
+        const character = bundle && bundle.character ? bundle.character : null;
+        if (!character) return [];
+        const items = [];
+        items.push(buildSheetCodeActionItem({
+            key: 'core:initiative',
+            category: 'Core',
+            code: 'rollInitiative()',
+            label: 'Initiative',
+            summary: 'Roll initiative from the sheet',
+            priority: 1300,
+            searchTerms: 'initiative init combat turn order'
+        }));
+        items.push(buildSheetCodeActionItem({
+            key: 'core:custom',
+            category: 'Utility',
+            code: 'rollCustom()',
+            label: 'Custom Roll',
+            summary: 'Sheet-only custom roll',
+            priority: 1140,
+            searchTerms: 'custom formula arbitrary dice'
+        }));
+        DEFENCE_KEYS.forEach((stat) => {
+            const fullName = sheetStatNames[stat] || stat.toUpperCase();
+            items.push(buildSheetCodeActionItem({
+                key: `check:${stat}`,
+                category: 'Check',
+                code: `rollCheck('${stat}')`,
+                label: `${fullName} Check`,
+                summary: `d20 + ${fullName}`,
+                detail: fullName,
+                priority: 900,
+                searchTerms: `${stat} ${fullName} ability check`
+            }));
+            items.push(buildSheetCodeActionItem({
+                key: `save:${stat}`,
+                category: 'Save',
+                code: `rollSave('${stat}')`,
+                label: `${fullName} Save`,
+                summary: `d20 + ${fullName} save`,
+                detail: fullName,
+                priority: 880,
+                searchTerms: `${stat} ${fullName} saving throw save`
+            }));
+        });
+        Object.keys(sheetSkillsMap).forEach((skillName) => {
+            const ability = sheetSkillsMap[skillName];
+            items.push(buildSheetCodeActionItem({
+                key: `skill:${skillName}`,
+                category: 'Skill',
+                code: `rollSkill('${skillName}')`,
+                label: toTitleCaseWords(skillName),
+                summary: `${sheetStatNames[ability] || ability.toUpperCase()} skill check`,
+                detail: sheetStatNames[ability] || ability.toUpperCase(),
+                priority: skillName === 'perception' ? 1120 : (skillName === 'stealth' ? 1110 : 840),
+                searchTerms: `${skillName} ${ability} skill check`
+            }));
+        });
+        (Array.isArray(character.attacks) ? character.attacks : []).forEach((attack, idx) => {
+            const name = String(attack && attack.name || '').trim() || `Attack ${idx + 1}`;
+            const damage = String(attack && attack.dmg || '').trim();
+            items.push(buildSheetCodeActionItem({
+                key: `attack:atk:${idx}`,
+                category: 'Attack',
+                code: `rollAttack(${idx})`,
+                label: `Atk: ${name}`,
+                summary: 'Attack roll',
+                detail: damage || 'Attack',
+                priority: 760,
+                searchTerms: `${name} attack weapon hit ${damage} ${attack && attack.desc ? attack.desc : ''}`
+            }));
+            items.push(buildSheetCodeActionItem({
+                key: `attack:dmg:${idx}`,
+                category: 'Damage',
+                code: `rollDamage(${idx})`,
+                label: `Dmg: ${name}`,
+                summary: damage ? `Roll damage - ${damage}` : 'Roll damage',
+                detail: damage || 'Damage',
+                priority: 750,
+                searchTerms: `${name} damage ${damage} ${attack && attack.desc ? attack.desc : ''}`
+            }));
+        });
+        (Array.isArray(character.resources) ? character.resources : []).forEach((resource, idx) => {
+            if (!resource || !resource.rCheck) return;
+            const name = String(resource.name || '').trim() || `Resource ${idx + 1}`;
+            const formula = String(resource.rFormula || '1d6').trim() || '1d6';
+            items.push(buildSheetCodeActionItem({
+                key: `resource:recharge:${idx}`,
+                category: 'Recharge',
+                code: `rollResRecharge(${idx})`,
+                label: `Recharge: ${name}`,
+                summary: `Roll recharge - ${formula}`,
+                detail: formula,
+                priority: 700,
+                searchTerms: `${name} recharge resource ${formula}`
+            }));
+        });
+        (Array.isArray(character.spellbook) ? character.spellbook : []).forEach((spell, idx) => {
+            const spellName = String(spell && spell.name || '').trim();
+            if (!spellName) return;
+            const level = Math.max(0, Math.min(9, parseInt(spell.lvl, 10) || 0));
+            const levelText = level === 0 ? 'Cantrip' : `Level ${level}`;
+            items.push(buildSheetActionItem({
+                key: `spell:cast:${idx}`,
+                category: 'Spell',
+                label: `Cast: ${spellName}`,
+                summary: `Cast from spellbook - ${levelText}`,
+                detail: levelText,
+                priority: 620,
+                searchTerms: `${spellName} ${levelText} ${spell.school || ''} ${spell.classes || ''} ${spell.damageFormula || ''} ${spell.description || ''}`,
+                action: { kind: 'spell', castMode: 'normal', spellName, spellIndex: idx }
+            }));
+            if (spell.ritual) {
+                items.push(buildSheetActionItem({
+                    key: `spell:ritual:${idx}`,
+                    category: 'Ritual',
+                    label: `Ritual: ${spellName}`,
+                    summary: `Ritual cast - ${levelText}`,
+                    detail: levelText,
+                    priority: 610,
+                    searchTerms: `${spellName} ritual ${levelText}`,
+                    action: { kind: 'spell', castMode: 'ritual', spellName, spellIndex: idx }
+                }));
+            }
+        });
+        QUICK_ACTION_SEARCH_DICE.forEach((sides) => {
+            items.push(buildSheetCodeActionItem({
+                key: `die:${sides}`,
+                category: 'Die',
+                code: `rollDie(${sides}, 0, 'd${sides}', ${sides === 20 ? 'true' : 'false'}, 'check')`,
+                label: `d${sides}`,
+                summary: 'Standard die roll',
+                detail: sides === 20 ? 'Supports ADV/DIS' : 'Single die',
+                priority: 420,
+                searchTerms: `d${sides} die dice`
+            }));
+        });
+        return items.filter(Boolean);
     };
     const buildSceneRecord = (scenes, sourceScene = null) => {
         const source = sourceScene && typeof sourceScene === 'object' ? sourceScene : null;
@@ -1473,6 +1706,47 @@
         tokenInspectorPopoverEl.style.top = `${Math.round(top)}px`;
     };
 
+    const positionAnchoredPopover = (popoverEl, state, fallbackWidth = 360, fallbackHeight = 420) => {
+        if (!popoverEl || popoverEl.hidden || !state) return;
+        const width = popoverEl.offsetWidth || fallbackWidth;
+        const height = popoverEl.offsetHeight || fallbackHeight;
+        const margin = 12;
+        let left = toNumber(state.clientX, window.innerWidth / 2) + 14;
+        let top = toNumber(state.clientY, window.innerHeight / 2) + 14;
+        if (left + width > window.innerWidth - margin) {
+            left = Math.max(margin, toNumber(state.clientX, window.innerWidth / 2) - width - 14);
+        }
+        if (top + height > window.innerHeight - margin) {
+            top = Math.max(margin, window.innerHeight - height - margin);
+        }
+        popoverEl.style.left = `${Math.round(left)}px`;
+        popoverEl.style.top = `${Math.round(top)}px`;
+    };
+
+    const positionSheetActionPopover = () => positionAnchoredPopover(sheetActionPopoverEl, sheetActionState, 380, 460);
+    const positionNPCRollPopover = () => positionAnchoredPopover(npcRollPopoverEl, npcRollState, 360, 340);
+
+    const closeSheetActionPopover = () => {
+        if (!sheetActionState && (!sheetActionPopoverEl || sheetActionPopoverEl.hidden)) return false;
+        sheetActionState = null;
+        sheetActionQuery = '';
+        if (sheetActionPopoverEl) {
+            sheetActionPopoverEl.hidden = true;
+            sheetActionPopoverEl.innerHTML = '';
+        }
+        return true;
+    };
+
+    const closeNPCRollPopover = () => {
+        if (!npcRollState && (!npcRollPopoverEl || npcRollPopoverEl.hidden)) return false;
+        npcRollState = null;
+        if (npcRollPopoverEl) {
+            npcRollPopoverEl.hidden = true;
+            npcRollPopoverEl.innerHTML = '';
+        }
+        return true;
+    };
+
     const closeInitiativeDetail = () => {
         if (!initiativeDetailState && (!initiativeDetailPanelEl || initiativeDetailPanelEl.hidden)) return false;
         initiativeDetailState = null;
@@ -1565,8 +1839,8 @@
                 inspectorPanelCollapsed: !!(parsed && parsed.inspectorPanelCollapsed),
                 showGrid: parsed && parsed.showGrid !== undefined ? !!parsed.showGrid : true,
                 showTokenNames: parsed && parsed.showTokenNames !== undefined ? !!parsed.showTokenNames : true,
-                sceneViewMode: SCENE_VIEW_SHARED,
-                localSceneId: ''
+                sceneViewMode: parsed && parsed.sceneViewMode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED,
+                localSceneId: String(parsed && parsed.localSceneId || '').trim()
             };
         } catch (err) {
             uiState = {
@@ -1624,13 +1898,22 @@
             : String(state.scenes[0] && state.scenes[0].id || '').trim();
     };
 
-    const isUsingLocalSceneView = (_state = vttState, _role = localRole) => false;
+    const isUsingLocalSceneView = (state = vttState, role = localRole) => {
+        if (role !== 'dm') return false;
+        if (uiState.sceneViewMode !== SCENE_VIEW_LOCAL) return false;
+        const localSceneId = String(uiState.localSceneId || '').trim();
+        return !!(localSceneId && state && Array.isArray(state.scenes) && state.scenes.some((scene) => scene.id === localSceneId));
+    };
 
-    const getViewedSceneId = (state = vttState, _role = localRole) => getSharedSceneId(state);
+    const getViewedSceneId = (state = vttState, role = localRole) => (
+        isUsingLocalSceneView(state, role) ? String(uiState.localSceneId || '').trim() : getSharedSceneId(state)
+    );
 
-    const setSceneViewPreference = (_mode, _sceneId = '') => {
-        uiState.sceneViewMode = SCENE_VIEW_SHARED;
-        uiState.localSceneId = '';
+    const setSceneViewPreference = (mode, sceneId = '') => {
+        const cleanMode = mode === SCENE_VIEW_LOCAL && isDM() ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED;
+        const cleanSceneId = String(sceneId || '').trim();
+        uiState.sceneViewMode = cleanMode;
+        uiState.localSceneId = cleanMode === SCENE_VIEW_LOCAL ? cleanSceneId : '';
         persistUIPreferences();
     };
     const canEditInitiative = () => isDM();
@@ -3631,6 +3914,439 @@
         return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'} - ${evidenceNoteCount} zone${evidenceNoteCount === 1 ? '' : 's'}`;
     };
 
+    const getSheetActionSearchResults = () => {
+        const tokens = normalizeSearchText(sheetActionQuery).split(' ').filter(Boolean);
+        return buildSheetActionCatalog()
+            .filter((item) => !tokens.length || tokens.every((token) => item.searchText.includes(token)))
+            .sort((a, b) => {
+                const scoreA = (Number.isFinite(a.priority) ? a.priority : 0) + (tokens.some((token) => normalizeSearchText(a.label).startsWith(token)) ? 100 : 0);
+                const scoreB = (Number.isFinite(b.priority) ? b.priority : 0) + (tokens.some((token) => normalizeSearchText(b.label).startsWith(token)) ? 100 : 0);
+                if (scoreA !== scoreB) return scoreB - scoreA;
+                return a.label.localeCompare(b.label);
+            })
+            .slice(0, QUICK_ACTION_SEARCH_RESULT_LIMIT);
+    };
+
+    const renderSheetActionPopover = () => {
+        if (!sheetActionPopoverEl) return;
+        if (!sheetActionState) {
+            sheetActionPopoverEl.hidden = true;
+            sheetActionPopoverEl.innerHTML = '';
+            return;
+        }
+        const bundle = getActiveSheetBundle(sheetActionState && sheetActionState.sheetKey);
+        const character = bundle && bundle.character ? bundle.character : null;
+        const results = character ? getSheetActionSearchResults() : [];
+        sheetActionPopoverEl.hidden = false;
+        sheetActionPopoverEl.innerHTML = `
+            <div class="vtt-popover-head">
+                <div>
+                    <strong>Sheet Actions</strong>
+                    <span>${escapeHtml(character && character.meta && character.meta.name ? character.meta.name : 'Open a sheet first')}</span>
+                </div>
+                <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-sheet-actions" aria-label="Close sheet actions">X</button>
+            </div>
+            <label class="vtt-field vtt-field-tight">
+                <span>Search</span>
+                <input type="search" data-sheet-action-search value="${escapeHtml(sheetActionQuery)}" placeholder="attack, save, spell, skill">
+            </label>
+            <div class="vtt-popover-results vtt-action-search-results">
+                ${results.length ? results.map((item) => `
+                    <button type="button" class="vtt-action-search-item" data-action="run-sheet-action" data-id="${escapeHtml(item.key)}">
+                        <span class="vtt-action-search-kind">${escapeHtml(item.category)}</span>
+                        <span class="vtt-action-search-label">${escapeHtml(item.label)}</span>
+                        <span class="vtt-action-search-summary">${escapeHtml(item.summary || item.detail || 'Run from sheet')}</span>
+                    </button>
+                `).join('') : `<div class="vtt-empty">${character ? 'No matching sheet actions.' : 'No local character sheet data found.'}</div>`}
+            </div>
+            ${sheetActionState.lastResult ? `
+                <div class="vtt-sheet-action-result${sheetActionState.lastResult.ok ? '' : ' vtt-sheet-action-result-muted'}">
+                    <strong>${escapeHtml(String(sheetActionState.lastResult.total))}</strong>
+                    <span>${escapeHtml(`${sheetActionState.lastResult.label || 'Roll'} - ${sheetActionState.lastResult.formula || ''}`)}</span>
+                </div>
+            ` : ''}
+        `;
+        const input = sheetActionPopoverEl.querySelector('[data-sheet-action-search]');
+        if (input && document.activeElement !== input) {
+            requestAnimationFrame(() => {
+                const activeInput = sheetActionPopoverEl.querySelector('[data-sheet-action-search]');
+                if (activeInput && document.activeElement !== activeInput) activeInput.focus();
+            });
+        }
+        requestAnimationFrame(positionSheetActionPopover);
+    };
+
+    const openSheetActionPopover = (token, clientX, clientY) => {
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        sheetActionState = {
+            tokenId: token && token.id ? token.id : '',
+            sheetKey: String(rosterPlayer && rosterPlayer.sheetKey || '').trim(),
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
+        };
+        sheetActionQuery = '';
+        closeNPCRollPopover();
+        renderSheetActionPopover();
+        return true;
+    };
+
+    const runSheetActionByKey = (key) => {
+        const item = buildSheetActionCatalog().find((entry) => entry && entry.key === key);
+        if (!item || !item.action) return false;
+        const directResult = runSheetActionDirect(item);
+        if (directResult && directResult.ok) {
+            sheetActionState = {
+                ...(sheetActionState || {}),
+                lastResult: directResult
+            };
+            renderSheetActionPopover();
+            postSheetDiscordRoll(directResult.character, directResult.label, directResult.total, directResult.formula, directResult.type, directResult.detail).catch((err) => {
+                console.warn('VTT sheet roll Discord post failed', err);
+            });
+            return true;
+        }
+        const message = directResult && directResult.reason === 'missing-character'
+            ? 'No linked local character sheet data.'
+            : 'That sheet action needs the Character Sheet.';
+        sheetActionState = {
+            ...(sheetActionState || {}),
+            lastResult: {
+                ok: false,
+                label: item.label,
+                total: 'VTT',
+                formula: message
+            }
+        };
+        renderSheetActionPopover();
+        return false;
+    };
+
+    const getSheetMod = (character, stat) => Math.floor(((character && character.stats && character.stats[stat] ? Number(character.stats[stat].val) : 10) - 10) / 2);
+    const getSheetPB = (character) => Math.floor(((character && character.meta ? parseInt(character.meta.level, 10) : 1) - 1) / 4) + 2;
+    const getSheetSkillMiscBonus = (character, skillName) => {
+        const raw = character && character.skillMisc ? String(character.skillMisc[skillName] || '').trim().toLowerCase() : '';
+        if (!raw) return 0;
+        if (DEFENCE_KEYS.includes(raw)) return getSheetMod(character, raw);
+        return parseInt(raw, 10) || 0;
+    };
+    const rollSheetD20 = (character, bonus, label, options = {}) => {
+        const opts = options && typeof options === 'object' ? options : {};
+        const allowAdvantage = opts.allowAdvantage !== false;
+        const mode = allowAdvantage ? String(character && character.rollMode || 'norm').trim().toLowerCase() : 'norm';
+        let result = null;
+        if (allowAdvantage && (mode === 'adv' || mode === 'dis')) {
+            const first = randomIntInclusive(1, 20);
+            const second = randomIntInclusive(1, 20);
+            const total = mode === 'adv' ? Math.max(first, second) : Math.min(first, second);
+            result = {
+                total,
+                formula: `[${first}, ${second}] (${mode.toUpperCase()})`,
+                isCrit: total === 20,
+                isFail: total === 1
+            };
+        } else {
+            const roll = randomIntInclusive(1, 20);
+            result = {
+                total: roll,
+                formula: `[${roll}]`,
+                isCrit: roll === 20,
+                isFail: roll === 1
+            };
+        }
+        let extraTotal = 0;
+        let extraText = '';
+        const buffs = character && character.buffs && typeof character.buffs === 'object' ? character.buffs : {};
+        const type = String(opts.type || 'check').trim();
+        if (buffs.bless && (type === 'atk' || type === 'save')) {
+            const bless = randomIntInclusive(1, 4);
+            extraTotal += bless;
+            extraText += ` +${bless}(Bless)`;
+        }
+        if (buffs.guidance && type === 'check') {
+            const guidance = randomIntInclusive(1, 4);
+            extraTotal += guidance;
+            extraText += ` +${guidance}(Guidance)`;
+        }
+        if (buffs.global) {
+            const parsedGlobal = gmParseComplexFormula(buffs.global);
+            if (parsedGlobal.text) {
+                extraTotal += parsedGlobal.total;
+                extraText += ` +${parsedGlobal.text}(Global)`;
+            }
+        }
+        const cleanBonus = Math.round(toNumber(bonus, 0));
+        const total = result.total + cleanBonus + extraTotal;
+        const formula = `${result.formula}${cleanBonus ? ` ${cleanBonus >= 0 ? '+' : ''}${cleanBonus}` : ''}${extraText}`;
+        return {
+            ok: true,
+            character,
+            label,
+            total,
+            formula,
+            type,
+            detail: opts.detail || '',
+            isCrit: result.isCrit,
+            isFail: result.isFail
+        };
+    };
+    const rollSheetDie = (character, sides, bonus, label, options = {}) => {
+        const opts = options && typeof options === 'object' ? options : {};
+        if (Number(sides) === 20) return rollSheetD20(character, bonus, label, opts);
+        const result = gmCoreRoll(1, Math.max(2, parseInt(sides, 10) || 20));
+        const cleanBonus = Math.round(toNumber(bonus, 0));
+        const total = result.total + cleanBonus;
+        return {
+            ok: true,
+            character,
+            label,
+            total,
+            formula: `${result.formula}${cleanBonus ? ` ${cleanBonus >= 0 ? '+' : ''}${cleanBonus}` : ''}`,
+            type: opts.type || 'check',
+            detail: opts.detail || ''
+        };
+    };
+    const rollSheetFormula = (character, label, formulaSource, options = {}) => {
+        const parsed = gmParseComplexFormula(formulaSource);
+        if (!parsed.text) return { ok: false, reason: 'invalid' };
+        const opts = options && typeof options === 'object' ? options : {};
+        const ability = String(opts.ability || '').trim().toLowerCase();
+        const abilityBonus = DEFENCE_KEYS.includes(ability) ? getSheetMod(character, ability) : 0;
+        const total = parsed.total + abilityBonus;
+        const formula = `${parsed.text}${abilityBonus ? ` ${abilityBonus >= 0 ? '+' : ''}${abilityBonus} (${ability.toUpperCase()})` : ''}`;
+        return {
+            ok: true,
+            character,
+            label,
+            total,
+            formula,
+            type: opts.type || 'dmg',
+            detail: opts.detail || ''
+        };
+    };
+    const runSheetActionDirect = (item) => {
+        const bundle = getActiveSheetBundle(sheetActionState && sheetActionState.sheetKey);
+        const character = bundle && bundle.character ? bundle.character : null;
+        if (!character || !item || !item.action) return { ok: false, reason: 'missing-character' };
+        const action = item.action;
+        if (action.kind === 'spell') return { ok: false, reason: 'unsupported' };
+        const code = String(action.code || '').trim();
+        let match = code.match(/^rollDie\(\s*(\d+)\s*,\s*([^,]+)\s*,\s*'([^']*)'\s*,\s*(true|false)\s*,\s*'([^']*)'/);
+        if (match) {
+            return rollSheetDie(character, parseInt(match[1], 10) || 20, parseInt(match[2], 10) || 0, match[3] || `d${match[1]}`, {
+                allowAdvantage: match[4] === 'true',
+                type: match[5] || 'check'
+            });
+        }
+        if (code === 'rollInitiative()') {
+            const dexScore = character && character.stats && character.stats.dex ? Number(character.stats.dex.val) : 10;
+            const dexMod = getSheetMod(character, 'dex');
+            const parsedInit = gmParseComplexFormula(character && character.meta ? character.meta.init : '');
+            const result = rollSheetD20(character, dexMod + parsedInit.total, 'Initiative', { type: 'check' });
+            result.formula = `${result.formula}${parsedInit.text ? ` + ${parsedInit.text}(Init)` : ''}`;
+            result.total = Math.round(toNumber(result.total, 0));
+            result.detail = `Tie ${Math.max(1, Math.min(30, Math.round(toNumber(dexScore, 10))))}`;
+            return result;
+        }
+        match = code.match(/^rollCheck\(\s*'([a-z]{3})'\s*\)$/i);
+        if (match) {
+            const stat = match[1].toLowerCase();
+            return rollSheetD20(character, getSheetMod(character, stat), `${stat.toUpperCase()} Check`, { type: 'check' });
+        }
+        match = code.match(/^rollSave\(\s*'([a-z]{3})'\s*\)$/i);
+        if (match) {
+            const stat = match[1].toLowerCase();
+            const proficient = !!(character.stats && character.stats[stat] && character.stats[stat].save);
+            return rollSheetD20(character, getSheetMod(character, stat) + (proficient ? getSheetPB(character) : 0), `${stat.toUpperCase()} Save`, { type: 'save' });
+        }
+        match = code.match(/^rollSkill\(\s*'([^']+)'\s*\)$/i);
+        if (match) {
+            const skillName = String(match[1] || '').trim().toLowerCase();
+            const stat = character.skillOverrides && character.skillOverrides[skillName] ? character.skillOverrides[skillName] : sheetSkillsMap[skillName];
+            const profLevel = character.skills && Number.isFinite(Number(character.skills[skillName])) ? Number(character.skills[skillName]) : 0;
+            const bonus = getSheetMod(character, stat) + (profLevel * getSheetPB(character)) + getSheetSkillMiscBonus(character, skillName);
+            return rollSheetD20(character, bonus, `${toTitleCaseWords(skillName)} (${String(stat || '').toUpperCase()})`, { type: 'check' });
+        }
+        match = code.match(/^rollAttack\(\s*(\d+)\s*\)$/);
+        if (match) {
+            const attack = Array.isArray(character.attacks) ? character.attacks[parseInt(match[1], 10)] : null;
+            if (!attack) return { ok: false, reason: 'missing-attack' };
+            const stat = DEFENCE_KEYS.includes(attack.atkStat) ? attack.atkStat : (DEFENCE_KEYS.includes(attack.stat) ? attack.stat : '');
+            const bonus = (stat ? getSheetMod(character, stat) : 0) + getSheetPB(character) + (parseInt(attack.atkBonus, 10) || 0);
+            return rollSheetD20(character, bonus, `${attack.name || 'Weapon'} Atk`, { type: 'atk', detail: attack.desc || '' });
+        }
+        match = code.match(/^rollDamage\(\s*(\d+)\s*\)$/);
+        if (match) {
+            const attack = Array.isArray(character.attacks) ? character.attacks[parseInt(match[1], 10)] : null;
+            if (!attack) return { ok: false, reason: 'missing-attack' };
+            const stat = DEFENCE_KEYS.includes(attack.dmgStat) ? attack.dmgStat : (DEFENCE_KEYS.includes(attack.stat) ? attack.stat : '');
+            const formula = `${attack.dmg || ''} ${typeof attack.dmgBonus === 'string' ? attack.dmgBonus : ''}`.trim();
+            return rollSheetFormula(character, `${attack.name || 'Weapon'} Dmg`, formula, { type: 'dmg', ability: stat, detail: attack.desc || '' });
+        }
+        match = code.match(/^rollResRecharge\(\s*(\d+)\s*\)$/);
+        if (match) {
+            const resource = Array.isArray(character.resources) ? character.resources[parseInt(match[1], 10)] : null;
+            if (!resource) return { ok: false, reason: 'missing-resource' };
+            return rollSheetFormula(character, `Recharge: ${resource.name || 'Resource'}`, resource.rFormula || '1d6', { type: 'check' });
+        }
+        return { ok: false, reason: 'unsupported' };
+    };
+    const postSheetDiscordRoll = (character, label, total, formula, type = 'check', detail = '') => {
+        if (!character || !character.meta || !character.meta.discordActive || !String(character.meta.webhook || '').trim()) return Promise.resolve(false);
+        const color = type === 'atk' ? 0xe74c3c : (type === 'dmg' ? 0xf39c12 : 0x4ecdc4);
+        const payload = {
+            embeds: [{
+                author: { name: character.meta.name || character.meta.player || 'Character' },
+                title: label,
+                description: `**${total}**\nDice: ${formula}${detail ? `\n${detail}` : ''}`,
+                color
+            }]
+        };
+        return fetch(String(character.meta.webhook || '').trim(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then((response) => !!response.ok);
+    };
+
+    const gmParseRollModifiers = (value = '') => {
+        const source = String(value || '').trim();
+        return {
+            r: Math.max(0, parseInt((source.match(/r(\d+)/i) || [])[1], 10) || 0),
+            dl: Math.max(0, parseInt((source.match(/d[l]?(\d+)/i) || [])[1], 10) || 0),
+            kh: Math.max(0, parseInt((source.match(/k[h]?(\d+)/i) || [])[1], 10) || 0)
+        };
+    };
+
+    const gmCoreRoll = (count, sides, mods = {}) => {
+        const rolls = [];
+        let total = 0;
+        for (let i = 0; i < Math.max(1, count); i += 1) {
+            let value = randomIntInclusive(1, Math.max(2, sides));
+            let safety = 0;
+            while (mods.r > 0 && value <= mods.r && safety < 50) {
+                value = randomIntInclusive(1, Math.max(2, sides));
+                safety += 1;
+            }
+            rolls.push({ value, dropped: false });
+        }
+        if (mods.dl > 0 || mods.kh > 0) {
+            const sorted = [...rolls].sort((a, b) => a.value - b.value);
+            let dropCount = mods.dl;
+            if (mods.kh > 0) dropCount = Math.max(dropCount, rolls.length - mods.kh);
+            for (let i = 0; i < dropCount; i += 1) {
+                if (sorted[i]) sorted[i].dropped = true;
+            }
+        }
+        const formula = `[${rolls.map((roll) => {
+            if (!roll.dropped) total += roll.value;
+            return roll.dropped ? `~~${roll.value}~~` : String(roll.value);
+        }).join('+')}]`;
+        return { total, formula };
+    };
+
+    const gmParseComplexFormula = (value = '') => {
+        const source = String(value || '').trim();
+        if (!source) return { total: 0, text: '' };
+        let total = 0;
+        const parts = [];
+        const diceRegex = /([+-]?)\s*(\d*)d(\d+)\s*([a-z0-9]*)/gi;
+        const pushPart = (sign, text) => {
+            const clean = String(text || '').trim();
+            if (!clean) return;
+            parts.push(parts.length ? `${sign === -1 ? '-' : '+'} ${clean}` : `${sign === -1 ? '-' : ''}${clean}`);
+        };
+        let match;
+        while ((match = diceRegex.exec(source)) !== null) {
+            const sign = (match[1] || '').trim() === '-' ? -1 : 1;
+            const result = gmCoreRoll(parseInt(match[2], 10) || 1, parseInt(match[3], 10) || 20, gmParseRollModifiers(match[4] || ''));
+            total += result.total * sign;
+            pushPart(sign, match[4] ? `${result.formula}${match[4]}` : result.formula);
+        }
+        const staticSource = source.replace(diceRegex, ' ');
+        const staticRegex = /([+-]?)\s*(\d+)(?!\s*d)/gi;
+        while ((match = staticRegex.exec(staticSource)) !== null) {
+            const sign = (match[1] || '').trim() === '-' ? -1 : 1;
+            const flat = parseInt(match[2], 10) || 0;
+            total += flat * sign;
+            pushPart(sign, String(flat));
+        }
+        return { total, text: parts.join(' ').trim() };
+    };
+
+    const postGMDiscordRoll = (name, reason, total, formula) => {
+        const gmData = readJSONStorage(GM_STORAGE_KEY, {});
+        if (!gmData || !gmData.discordActive || !String(gmData.webhook || '').trim()) return Promise.resolve(false);
+        const payload = {
+            embeds: [{
+                author: { name },
+                title: reason,
+                description: `**${total}**\n${formula}`,
+                color: 0x4ecdc4
+            }]
+        };
+        return fetch(String(gmData.webhook || '').trim(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then((response) => !!response.ok);
+    };
+
+    const renderNPCRollPopover = (result = null) => {
+        if (!npcRollPopoverEl) return;
+        if (!npcRollState) {
+            npcRollPopoverEl.hidden = true;
+            npcRollPopoverEl.innerHTML = '';
+            return;
+        }
+        const token = getTokenById(npcRollState.tokenId) || {};
+        const tokenName = String(token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
+        npcRollPopoverEl.hidden = false;
+        npcRollPopoverEl.innerHTML = `
+            <div class="vtt-popover-head">
+                <div>
+                    <strong>Roll For NPC</strong>
+                    <span>${escapeHtml(tokenName)}</span>
+                </div>
+                <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-npc-roll" aria-label="Close NPC roll">X</button>
+            </div>
+            <div class="vtt-npc-roll-grid">
+                <label class="vtt-field vtt-field-tight">
+                    <span>Label</span>
+                    <input type="text" data-npc-roll-field="label" value="${escapeHtml(npcRollState.label || tokenName)}">
+                </label>
+                <label class="vtt-field vtt-field-tight">
+                    <span>Formula</span>
+                    <input type="text" data-npc-roll-field="formula" value="${escapeHtml(npcRollState.formula || '1d20')}">
+                </label>
+            </div>
+            <div class="vtt-chip-row">
+                ${['1d20', '1d20 + 3', '2d20kh1', '2d20dl1', '1d4', '1d6', '1d8', '2d6', '1d10', '1d12'].map((formula) => `
+                    <button class="vtt-chip-btn" type="button" data-action="set-npc-roll-formula" data-formula="${escapeHtml(formula)}">${escapeHtml(formula)}</button>
+                `).join('')}
+            </div>
+            <div class="vtt-entry-actions">
+                <button class="vtt-inline-btn strong" type="button" data-action="roll-npc-dice">Roll</button>
+            </div>
+            ${result ? `<div class="vtt-npc-roll-result"><strong>${escapeHtml(String(result.total))}</strong><span>${escapeHtml(result.text)}</span></div>` : ''}
+        `;
+        requestAnimationFrame(positionNPCRollPopover);
+    };
+
+    const openNPCRollPopover = (token, clientX, clientY) => {
+        if (!token || !isDM()) return false;
+        npcRollState = {
+            tokenId: token.id,
+            tokenName: token.label || 'NPC',
+            label: token.label || 'NPC',
+            formula: '1d20',
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
+        };
+        closeSheetActionPopover();
+        renderNPCRollPopover();
+        return true;
+    };
+
     const renderSceneList = () => {
         if (!sceneListEl) return;
         const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
@@ -3638,16 +4354,19 @@
         const viewedSceneId = getViewedSceneId(vttState, localRole);
         const sharedScene = getSceneById(sharedSceneId, vttState);
         const viewedScene = getSceneById(viewedSceneId, vttState) || scenes[0] || null;
-        const routeNote = `DM scene selection is authoritative. Players follow ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'} immediately.`;
+        const isLocalView = isUsingLocalSceneView(vttState, localRole);
+        const routeNote = isLocalView
+            ? `DM previewing ${viewedScene && viewedScene.name ? viewedScene.name : 'a scene'}. Players remain on ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}.`
+            : `Players are following ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}. Use Show Everyone when the table should move.`;
         sceneListEl.innerHTML = scenes.length
             ? `
                 <div class="vtt-scene-manager">
                     <div class="vtt-scene-select-grid">
                         <label class="vtt-field vtt-field-tight vtt-scene-select-field">
-                            <span>Scene</span>
-                            <select data-scene-picker="shared">
+                            <span>DM View</span>
+                            <select data-scene-picker="local">
                                 ${scenes.map((scene) => `
-                                    <option value="${escapeHtml(scene.id)}"${scene.id === sharedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
+                                    <option value="${escapeHtml(scene.id)}"${scene.id === viewedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
                                 `).join('')}
                             </select>
                         </label>
@@ -3660,12 +4379,14 @@
                                 <span class="vtt-scene-summary-meta">${escapeHtml(describeScene(viewedScene))}</span>
                             </div>
                             <div class="vtt-scene-tag-row">
-                                <span class="vtt-scene-tag">Shared</span>
+                                <span class="vtt-scene-tag">${isLocalView ? 'DM Only' : 'Shared'}</span>
                                 <span class="vtt-scene-tag">${scenes.length} Scene${scenes.length === 1 ? '' : 's'}</span>
                             </div>
                         </div>
                         <div class="vtt-scene-summary-note">${escapeHtml(routeNote)}</div>
                         <div class="vtt-scene-action-row">
+                            <button class="vtt-chip-btn" data-action="view-scene-local" data-id="${escapeHtml(viewedSceneId)}"${viewedScene ? '' : ' disabled'}>DM Preview</button>
+                            <button class="vtt-chip-btn strong" data-action="show-scene-everyone" data-id="${escapeHtml(viewedSceneId)}"${viewedScene ? '' : ' disabled'}>Show Everyone</button>
                             <button class="vtt-chip-btn" data-action="clone-current-scene"${viewedScene ? '' : ' disabled'}>Clone Current</button>
                             <button class="vtt-chip-btn danger" data-action="delete-current-scene"${scenes.length <= 1 || !viewedScene ? ' disabled' : ''}>Delete Current</button>
                         </div>
@@ -4466,6 +5187,8 @@
         renderQuickSpawnMenu();
         renderTokenInspector();
         renderTokenInspectorPopover();
+        renderSheetActionPopover();
+        renderNPCRollPopover();
         renderInitiativeList();
         renderInitiativeDetail();
         renderSpawnGhost();
@@ -4810,6 +5533,38 @@
             closeInitiativeDetail();
             return;
         }
+        if (action === 'close-sheet-actions') {
+            closeSheetActionPopover();
+            return;
+        }
+        if (action === 'close-npc-roll') {
+            closeNPCRollPopover();
+            return;
+        }
+        if (action === 'run-sheet-action') {
+            runSheetActionByKey(id);
+            return;
+        }
+        if (action === 'set-npc-roll-formula') {
+            if (!npcRollState) return;
+            npcRollState.formula = String(actionEl.dataset.formula || '').trim() || '1d20';
+            renderNPCRollPopover();
+            return;
+        }
+        if (action === 'roll-npc-dice') {
+            if (!npcRollState) return;
+            const parsed = gmParseComplexFormula(npcRollState.formula || '1d20');
+            if (!parsed.text) {
+                renderNPCRollPopover({ total: 'Invalid', text: 'Use a formula like 1d20 + 3 or 2d6.' });
+                return;
+            }
+            const label = String(npcRollState.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
+            renderNPCRollPopover(parsed);
+            postGMDiscordRoll(label, 'NPC Roll', parsed.total, parsed.text).catch((err) => {
+                console.warn('VTT NPC roll Discord post failed', err);
+            });
+            return;
+        }
         if (action === 'toggle-nav-menu') {
             navMenuOpen = !navMenuOpen;
             if (navMenuOpen) {
@@ -5065,11 +5820,11 @@
             const sourceScene = getActiveScene(vttState);
             if (!sourceScene) return;
             const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
-            setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 if (!Array.isArray(draft.scenes)) draft.scenes = [];
                 draft.scenes.push(nextScene);
-                draft.activeSceneId = nextScene.id;
+                if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+                else draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
             }, { fitView: true, flushNow: true });
             return;
@@ -5105,26 +5860,26 @@
 
         if (action === 'create-scene') {
             const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : []);
-            setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 if (!Array.isArray(draft.scenes)) draft.scenes = [];
                 draft.scenes.push(nextScene);
-                draft.activeSceneId = nextScene.id;
+                if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+                else draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
             }, { fitView: true, flushNow: true });
             return;
         }
 
         if (action === 'view-scene-local') {
-            setSceneViewPreference(SCENE_VIEW_SHARED);
-            withDraft((draft) => {
-                const scene = Array.isArray(draft.scenes)
-                    ? draft.scenes.find((entry) => entry.id === id)
-                    : null;
-                if (!scene) return;
-                draft.activeSceneId = scene.id;
-                previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            const scene = Array.isArray(vttState && vttState.scenes)
+                ? vttState.scenes.find((entry) => entry.id === id)
+                : null;
+            if (!scene) return;
+            setSceneViewPreference(SCENE_VIEW_LOCAL, scene.id);
+            previewTokenId = '';
+            fitViewOnNextMapLoad = true;
+            normalizeSelections();
+            render();
             return;
         }
 
@@ -5146,11 +5901,11 @@
                 ? vttState.scenes.find((entry) => entry.id === id) || getActiveScene(vttState)
                 : null;
             const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
-            setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 if (!Array.isArray(draft.scenes)) draft.scenes = [];
                 draft.scenes.push(nextScene);
-                draft.activeSceneId = nextScene.id;
+                if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
+                else draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
             }, { fitView: true, flushNow: true });
             return;
@@ -5358,6 +6113,14 @@
             const sceneId = String(target.value || '').trim();
             const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
             if (!sceneId || !scenes.some((scene) => scene.id === sceneId)) return;
+            if (target.dataset.scenePicker === 'local' && isDM()) {
+                setSceneViewPreference(SCENE_VIEW_LOCAL, sceneId);
+                previewTokenId = '';
+                fitViewOnNextMapLoad = true;
+                normalizeSelections();
+                render();
+                return;
+            }
             setSceneViewPreference(SCENE_VIEW_SHARED);
             withDraft((draft) => {
                 const scene = Array.isArray(draft.scenes)
@@ -5367,6 +6130,20 @@
                 draft.activeSceneId = scene.id;
                 previewTokenId = '';
             }, { fitView: true, flushNow: true });
+            return;
+        }
+
+        if (target instanceof HTMLInputElement && target.dataset.sheetActionSearch !== undefined) {
+            sheetActionQuery = String(target.value || '');
+            renderSheetActionPopover();
+            return;
+        }
+
+        if (target instanceof HTMLInputElement && target.dataset.npcRollField) {
+            if (!npcRollState) return;
+            const field = target.dataset.npcRollField;
+            if (field === 'label') npcRollState.label = String(target.value || '').slice(0, 120);
+            if (field === 'formula') npcRollState.formula = String(target.value || '').slice(0, 120);
             return;
         }
 
@@ -6366,6 +7143,19 @@
             tokenInspectorState = null;
             needsRender = true;
         }
+        if (sheetActionState
+            && !targetEl.closest('#vtt-sheet-action-popover')
+            && !targetEl.closest('.vtt-token')) {
+            sheetActionState = null;
+            sheetActionQuery = '';
+            needsRender = true;
+        }
+        if (npcRollState
+            && !targetEl.closest('#vtt-npc-roll-popover')
+            && !targetEl.closest('.vtt-token')) {
+            npcRollState = null;
+            needsRender = true;
+        }
 
         if (previewTokenId && !targetEl.closest('.vtt-token')) {
             previewTokenId = '';
@@ -6425,12 +7215,20 @@
             event.preventDefault();
             activateTokenSelection(token.id);
             if (isDM()) {
-                if (event.shiftKey && token.imageUrl) {
+                if (event.altKey && String(token.sourceType || '').trim().toLowerCase() === 'npc') {
+                    previewTokenId = '';
+                    closeTokenInspectorPopover();
+                    openNPCRollPopover(token, event.clientX, event.clientY);
+                } else if (event.shiftKey && token.imageUrl) {
                     previewTokenId = previewTokenId === token.id ? '' : token.id;
                 } else {
                     previewTokenId = '';
                     openTokenInspectorPopover(token.id, event.clientX, event.clientY);
                 }
+            } else if (String(token.sourceType || '').trim().toLowerCase() === 'player') {
+                previewTokenId = '';
+                closeTokenInspectorPopover();
+                openSheetActionPopover(token, event.clientX, event.clientY);
             } else if (token.imageUrl) {
                 previewTokenId = previewTokenId === token.id ? '' : token.id;
             } else if (previewTokenId) {
@@ -6440,6 +7238,8 @@
             renderInitiativeDetail();
             renderTokenInspector();
             renderTokenInspectorPopover();
+            renderSheetActionPopover();
+            renderNPCRollPopover();
             renderToolsMenu();
             renderStage();
             return;
@@ -6499,11 +7299,13 @@
             const clearedTemplatePlacement = clearTemplatePlacementState();
             const closedInitiativeDetail = closeInitiativeDetail();
             const closedTokenInspector = closeTokenInspectorPopover();
+            const closedSheetActions = closeSheetActionPopover();
+            const closedNPCRoll = closeNPCRollPopover();
             if (previewTokenId) {
                 previewTokenId = '';
                 renderStage();
                 event.preventDefault();
-            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector) {
+            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll) {
                 render();
                 event.preventDefault();
             }
@@ -6562,6 +7364,8 @@
                 renderQuickSpawnMenu();
                 positionNPCSearchPopover();
                 positionTokenInspectorPopover();
+                positionSheetActionPopover();
+                positionNPCRollPopover();
                 positionInitiativeDetail();
                 return;
             }
@@ -6570,10 +7374,14 @@
             renderSpawnGhost();
             positionNPCSearchPopover();
             positionTokenInspectorPopover();
+            positionSheetActionPopover();
+            positionNPCRollPopover();
             positionInitiativeDetail();
         });
         window.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
         window.addEventListener('scroll', positionTokenInspectorPopover, { passive: true });
+        window.addEventListener('scroll', positionSheetActionPopover, { passive: true });
+        window.addEventListener('scroll', positionNPCRollPopover, { passive: true });
         if (sidebarEl) sidebarEl.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
     };
 

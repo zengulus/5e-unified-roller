@@ -1488,21 +1488,36 @@ class VTTCollabSession {
             const roomPayloadSig = buildSnapshotSignature(roomPayload, this.coerceSnapshot.bind(this));
             const localDocSig = buildSnapshotSignature(localDocPayload, this.coerceSnapshot.bind(this));
             const cloudStamp = Date.parse(cloudRow.snapshot.updatedAt || '') || toNonNegativeInt(cloudRow.snapshot.revision, 0);
+            const liveStoreStamp = this.getSharedStoreUpdatedAt();
+            const canonicalSeed = chooseCanonicalSnapshot([
+                { kind: 'cloud-room', snapshot: roomPayload, stamp: cloudStamp, priority: 40 },
+                { kind: 'live-store', snapshot: currentPayload, stamp: liveStoreStamp, priority: 30 },
+                { kind: 'local-doc', snapshot: localDocPayload, stamp: localDocStamp, priority: 20 },
+                { kind: 'seed', snapshot: seedPayload, stamp: 0, priority: 10 }
+            ], {
+                kind: 'cloud-room',
+                snapshot: roomPayload,
+                stamp: cloudStamp,
+                priority: 40
+            }, this.coerceSnapshot.bind(this));
+            const canonicalPayload = this.coerceSnapshot(canonicalSeed && canonicalSeed.snapshot ? canonicalSeed.snapshot : roomPayload);
+            const canonicalSig = buildSnapshotSignature(canonicalPayload, this.coerceSnapshot.bind(this));
+            const canonicalStamp = Math.max(Date.now(), canonicalSeed && canonicalSeed.stamp ? canonicalSeed.stamp : 0);
             this.lastSavedRevision = Math.max(0, toNonNegativeInt(cloudRow.snapshot.revision, 0));
             roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
             this.lastCloudSnapshotSignature = roomPayloadSig;
 
-            if (!hasVTTContent(localDocPayload, this.coerceSnapshot.bind(this)) || localDocSig !== roomPayloadSig) {
+            if (!hasVTTContent(localDocPayload, this.coerceSnapshot.bind(this)) || localDocSig !== canonicalSig) {
                 applySnapshotToDoc(
                     this.doc,
-                    roomPayload,
+                    canonicalPayload,
                     this.coerceSnapshot.bind(this),
-                    this.originRemoteRestore,
-                    cloudStamp || Date.now()
+                    canonicalSeed && canonicalSeed.kind === 'cloud-room' ? this.originRemoteRestore : this.originBootstrap,
+                    canonicalStamp
                 );
             }
-            this.pendingReadyFlush = false;
-            this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
+            this.pendingReadyFlush = canonicalSig && canonicalSig !== roomPayloadSig;
+            this.persistSnapshotToSharedState(canonicalPayload, canonicalSig);
         } else {
             const liveStoreStamp = this.getSharedStoreUpdatedAt();
             const canonicalSeed = chooseCanonicalSnapshot([
@@ -1967,7 +1982,19 @@ class VTTCollabSession {
     }
 
     scheduleCloudFlush() {
+        if (this.destroyed) return;
+        if (!this.ready) {
+            this.pendingReadyFlush = true;
+            return;
+        }
         this.pendingReadyFlush = false;
+        if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
+        this.pendingFlushTimer = setTimeout(() => {
+            this.pendingFlushTimer = null;
+            this.flushSnapshotNow().catch((err) => {
+                console.warn('RTF_VTT_COLLAB: Delayed cloud flush failed', err);
+            });
+        }, CLOUD_FLUSH_DELAY_MS);
     }
 
     shouldMirrorCompatibilityCloud(force = false) {
