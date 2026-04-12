@@ -2047,15 +2047,15 @@ class VTTCollabSession {
             return { ok: true, reason: 'unchanged' };
         }
 
+        const previousRevision = Math.max(0, toNonNegativeInt(this.lastSavedRevision, 0));
         const nextRevision = this.nextLocalRevision();
         this.flushQueuedWhilePending = false;
-        this.applyRevisionState(nextRevision, this.instanceId);
         this.pendingFlushPromise = this.store.saveVTTRoomSnapshot({
             roomId: this.roomId,
             caseId: this.caseId,
             payload: snapshotToSave,
             checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
-            previousRevision: this.lastSavedRevision,
+            previousRevision,
             revision: nextRevision,
             updatedAt: toIsoString(getDocUpdatedAt(this.doc), '') || new Date().toISOString(),
             updatedBy: this.instanceId,
