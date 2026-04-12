@@ -5751,6 +5751,21 @@
                 }
 
                 this.sync.userId = authResult.userId || '';
+                if (!silent) {
+                    const liveConnected = this.hasLiveSyncConnection();
+                    this.updateSyncStatus({
+                        mode: liveConnected ? 'ready' : 'idle',
+                        connected: liveConnected,
+                        enabled: true,
+                        userId: this.sync.userId,
+                        campaignId: config.campaignId,
+                        profileName: config.profileName,
+                        message: liveConnected
+                            ? 'Connected to cloud sync.'
+                            : 'Authorized for cloud sync.',
+                        lastError: ''
+                    });
+                }
                 return {
                     ok: true,
                     client: this.sync.client,

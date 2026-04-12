@@ -443,8 +443,8 @@
                     status.lastError ? `Last problem: ${status.lastError}.` : '',
                     sharedMeta
                 ].filter(Boolean).join(' '),
-                primaryAction: configured ? (hasLocalEdits ? 'sync-now' : 'connect') : 'settings',
-                primaryLabel: configured ? (hasLocalEdits ? 'Sync now' : 'Reconnect now') : 'Open connect actions',
+                primaryAction: configured ? (hasLocalEdits ? 'sync-now' : (isAuthorizedIdle ? 'refresh' : 'authorize')) : 'settings',
+                primaryLabel: configured ? (hasLocalEdits ? 'Sync now' : (isAuthorizedIdle ? 'Check for updates' : 'Authorize now')) : 'Open connect actions',
                 secondaryAction: '',
                 secondaryLabel: ''
             };
@@ -933,7 +933,7 @@
 
             const store = getStore();
             const config = store && typeof store.getSyncConfig === 'function' ? store.getSyncConfig() : null;
-            if (!hasConfiguredSync(config) || typeof store.connectSync !== 'function') return;
+            if (!hasConfiguredSync(config) || typeof store.ensureCloudAccess !== 'function') return;
 
             const now = Date.now();
             if (status.mode === 'error' && now - syncAutoConnectLastAttemptAt < 60000) return;
@@ -941,8 +941,12 @@
 
             syncAutoConnectLastAttemptAt = now;
             syncAutoConnectInFlight = true;
-            store.connectSync({ explicit: true }).catch((err) => {
-                console.warn('RTF_NAV: Auto-connect failed', err);
+            store.ensureCloudAccess({ explicit: true, silent: false }).then((result) => {
+                if (!result || result.ok === false) {
+                    throw new Error((result && (result.error || result.message)) || 'Authorization failed.');
+                }
+            }).catch((err) => {
+                console.warn('RTF_NAV: Auto-auth failed', err);
             }).finally(() => {
                 syncAutoConnectInFlight = false;
                 refreshSyncSnapshots();
@@ -971,6 +975,15 @@
                     }
                     store.setSyncConfig({ enabled: true }, { reconnect: true });
                     setSyncNotice('Turning shared sync back on.');
+                } else if (action === 'authorize') {
+                    if (typeof store.ensureCloudAccess !== 'function') {
+                        throw new Error('Authorization is unavailable on this page.');
+                    }
+                    const result = await store.ensureCloudAccess({ explicit: true, silent: false });
+                    if (!result || result.ok === false) {
+                        throw new Error((result && (result.error || result.message)) || 'Authorization failed.');
+                    }
+                    setSyncNotice('Authorized for the shared campaign.');
                 } else if (action === 'connect') {
                     if (typeof store.connectSync !== 'function') {
                         throw new Error('Reconnect is unavailable on this page.');
