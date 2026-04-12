@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260404g">
+    <link rel="stylesheet" href="css/vtt.css?v=20260413a">
 </head>
 
 <body data-player-nav="vtt">
@@ -18,61 +18,17 @@
             <p class="hero-eyebrow">Ravnica Task Force</p>
             <div class="vtt-topbar-meta">
                 <span class="vtt-topbar-case">Case: <strong id="vtt-case-name">Primary Case</strong></span>
-                <span class="vtt-topbar-location">- Location: <strong id="vtt-location-name">Scene 1</strong></span>
                 <span class="vtt-sync-chip" id="vtt-sync-chip">Local</span>
             </div>
         </div>
-        <div class="vtt-topbar-quick-controls">
-            <button class="hero-btn ghost" data-action="toggle-role" id="vtt-role-toggle">DM Mode</button>
-            <button class="hero-btn ghost" data-action="zoom-out">-</button>
-            <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
-            <button class="hero-btn ghost" data-action="zoom-in">+</button>
-            <button class="hero-btn ghost" data-action="toggle-ruler-mode" id="vtt-ruler-toggle"
-                aria-pressed="false" aria-label="Toggle ruler" title="Ruler">📏</button>
-        </div>
-        <div class="hero-actions vtt-topbar-actions">
-            <div class="hero-action-bar primary"></div>
-            <div class="hero-action-bar secondary">
-                <div class="vtt-popover-anchor vtt-topbar-tools">
-                    <button class="hero-btn ghost" data-action="toggle-tools-menu" id="vtt-tools-menu-toggle"
-                        aria-controls="vtt-tools-menu" aria-expanded="false">Tools</button>
-                    <div class="vtt-popover vtt-tools-menu" id="vtt-tools-menu" hidden>
-                        <div class="vtt-menu-section">
-                            <div class="vtt-menu-title">Table Tools</div>
-                            <div class="vtt-tool-mode-row">
-                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="navigate" id="vtt-tool-mode-navigate"
-                                    aria-pressed="true">Navigate</button>
-                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="circle" id="vtt-tool-mode-circle"
-                                    aria-pressed="false">Circle</button>
-                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="cone" id="vtt-tool-mode-cone"
-                                    aria-pressed="false">Cone</button>
-                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="note" id="vtt-tool-mode-note"
-                                    aria-pressed="false">Zones</button>
-                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog" id="vtt-tool-mode-fog"
-                                    aria-pressed="false">Fog</button>
-                                <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog-remove" id="vtt-tool-mode-fog-remove"
-                                    aria-pressed="false">Unfog</button>
-                            </div>
-                            <label class="vtt-field vtt-field-tight">
-                                <span>Squares</span>
-                                <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="4">
-                            </label>
-                        </div>
-                        <div class="vtt-menu-section" data-dm-only="1">
-                            <div class="vtt-menu-title">Stealth</div>
-                            <div class="vtt-menu-list">
-                                <button class="vtt-chip-btn" data-action="toggle-stealth-mode" id="vtt-stealth-mode-toggle"
-                                    aria-pressed="false">Sight Cones: Off</button>
-                            </div>
-                        </div>
-                        <div class="vtt-menu-section" data-dm-only="1">
-                            <div class="vtt-menu-title">Fog</div>
-                            <div class="vtt-menu-list">
-                                <button class="vtt-chip-btn" data-action="clear-scene-fog" id="vtt-clear-fog">Clear Fog</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        <div class="vtt-topbar-toolbar">
+            <div class="vtt-topbar-quick-controls">
+                <button class="hero-btn ghost" data-action="toggle-role" id="vtt-role-toggle">DM Mode</button>
+                <button class="hero-btn ghost" data-action="zoom-out">-</button>
+                <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
+                <button class="hero-btn ghost" data-action="zoom-in">+</button>
+            </div>
+            <div class="vtt-topbar-local-controls">
                 <button class="hero-btn ghost" id="vtt-accent-btn" type="button">🎨 Accent</button>
                 <input type="color" id="accent-picker-input" class="vtt-accent-picker-input">
                 <div class="vtt-popover-anchor vtt-topbar-menu">
@@ -105,6 +61,9 @@
                         </div>
                     </div>
                 </div>
+            </div>
+            <div class="hero-actions vtt-topbar-actions">
+                <div class="hero-action-bar primary"></div>
             </div>
         </div>
     </header>
@@ -196,8 +155,36 @@
 
         <section class="vtt-stage-panel">
             <div class="vtt-stage-toolbar">
-                <div>
+                <div class="vtt-stage-toolbar-copy">
                     <strong id="vtt-stage-title">Scene 1</strong>
+                </div>
+                <div class="vtt-stage-toolbar-controls">
+                    <div class="vtt-tool-mode-row vtt-stage-tool-row" role="group" aria-label="Table tools">
+                        <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="navigate" id="vtt-tool-mode-navigate"
+                            aria-pressed="true">Navigate</button>
+                        <button class="vtt-chip-btn" data-action="toggle-ruler-mode" id="vtt-ruler-toggle"
+                            aria-pressed="false">Ruler</button>
+                        <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="circle" id="vtt-tool-mode-circle"
+                            aria-pressed="false">Circle</button>
+                        <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="cone" id="vtt-tool-mode-cone"
+                            aria-pressed="false">Cone</button>
+                        <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="note" id="vtt-tool-mode-note"
+                            aria-pressed="false">Zones</button>
+                        <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog" id="vtt-tool-mode-fog"
+                            aria-pressed="false">Fog</button>
+                        <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog-remove" id="vtt-tool-mode-fog-remove"
+                            aria-pressed="false">Unfog</button>
+                    </div>
+                    <div class="vtt-stage-tool-extras">
+                        <label class="vtt-field vtt-field-tight vtt-stage-tool-size">
+                            <span>Squares</span>
+                            <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="4">
+                        </label>
+                        <button class="vtt-chip-btn" data-action="toggle-stealth-mode" id="vtt-stealth-mode-toggle"
+                            data-dm-only="1" aria-pressed="false">Sight Cones: Off</button>
+                        <button class="vtt-chip-btn" data-action="clear-scene-fog" id="vtt-clear-fog"
+                            data-dm-only="1">Clear Fog</button>
+                    </div>
                 </div>
             </div>
             <div class="vtt-stage" id="vtt-stage">
@@ -281,7 +268,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260408c"></script>
+    <script src="js/vtt.js?v=20260413a"></script>
 </body>
 
 </html>

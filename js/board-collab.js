@@ -864,29 +864,34 @@ class BoardCollabSession {
                 console.warn('RTF_BOARD_COLLAB: Failed seeding board room', seeded.error || seeded.reason);
             }
 
-            const canonicalRoom = await this.store.loadBoardRoomSnapshot({
-                roomId: this.roomId,
-                scope: this.scope,
-                caseId: this.caseId
-            });
-
-            if (canonicalRoom.ok && canonicalRoom.snapshot) {
-                const roomUpdatedAt = Date.parse(canonicalRoom.snapshot.updatedAt || '') || canonicalRoom.snapshot.revision || seedStamp;
-                const roomPayload = sanitizeBoardSnapshot(canonicalRoom.snapshot.payload, {
+            if (seeded.ok) {
+                this.lastSavedRevision = Math.max(0, seeded.revision || seedStamp);
+                roomSnapshotSource = this.instanceId;
+            } else {
+                const canonicalRoom = await this.store.loadBoardRoomSnapshot({
+                    roomId: this.roomId,
                     scope: this.scope,
                     caseId: this.caseId
-                }, canonicalSeed);
-                this.lastSavedRevision = Math.max(0, canonicalRoom.snapshot.revision || 0);
-                roomSnapshotSource = toTrimmedString(canonicalRoom.snapshot.updatedBy, '', 120).trim();
-                if (buildSnapshotSignature(roomPayload) !== buildSnapshotSignature(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
-                    applySnapshotToDoc(
-                        this.doc,
-                        roomPayload,
-                        this.scope,
-                        this.caseId,
-                        this.originRemoteRestore,
-                        roomUpdatedAt
-                    );
+                });
+
+                if (canonicalRoom.ok && canonicalRoom.snapshot) {
+                    const roomUpdatedAt = Date.parse(canonicalRoom.snapshot.updatedAt || '') || canonicalRoom.snapshot.revision || seedStamp;
+                    const roomPayload = sanitizeBoardSnapshot(canonicalRoom.snapshot.payload, {
+                        scope: this.scope,
+                        caseId: this.caseId
+                    }, canonicalSeed);
+                    this.lastSavedRevision = Math.max(0, canonicalRoom.snapshot.revision || 0);
+                    roomSnapshotSource = toTrimmedString(canonicalRoom.snapshot.updatedBy, '', 120).trim();
+                    if (buildSnapshotSignature(roomPayload) !== buildSnapshotSignature(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
+                        applySnapshotToDoc(
+                            this.doc,
+                            roomPayload,
+                            this.scope,
+                            this.caseId,
+                            this.originRemoteRestore,
+                            roomUpdatedAt
+                        );
+                    }
                 }
             }
         } else if (!hasBoardContent(localDocPayload)) {

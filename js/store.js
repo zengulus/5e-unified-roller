@@ -308,6 +308,8 @@
         presenceHeartbeatMs: 3000,
         lockTtlMs: 20000
     };
+    const AUTO_SYNC_BOOT_DELAY_MS = 180;
+    const AUTO_SYNC_FOREGROUND_MIN_INTERVAL_MS = 15000;
 
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
@@ -2431,9 +2433,7 @@
         return sanitizeSyncConfig({ ...DEFAULT_SYNC_CONFIG, ...(boot || {}), ...(stored || {}) });
     };
 
-    const shouldAutoConnectOnThisPage = (config = null) => {
-        const cfg = config && typeof config === 'object' ? config : null;
-        if (cfg && cfg.enabled && cfg.autoConnect !== false && cfg.loginEmail && cfg.loginPassword) return true;
+    const shouldAutoConnectOnThisPage = () => {
         const body = global.document && global.document.body ? global.document.body : null;
         return !!(body && body.dataset && body.dataset.syncAutoconnect === '1');
     };
@@ -2498,6 +2498,7 @@
                 remotePeers: new Map(),
                 hadStoredStateAtBoot: false,
                 lastForegroundPullAt: 0,
+                autoSyncBootTimer: null,
                 roomHydrationInflight: new Map(),
                 roomHydrationSeenAt: new Map(),
                 queryCache: new Map()
@@ -2552,16 +2553,35 @@
             this.load();
             this.updateSyncStatus({});
 
-            if (this.sync.config.enabled && this.sync.config.autoConnect && shouldAutoConnectOnThisPage(this.sync.config)) {
-                this.connectSync().catch((err) => {
-                    this.updateSyncStatus({
-                        mode: 'error',
-                        connected: false,
-                        message: 'Sync connect failed.',
-                        lastError: err && err.message ? err.message : String(err)
-                    });
-                });
+            if (this.sync.config.enabled && this.sync.config.autoConnect && shouldAutoConnectOnThisPage()) {
+                this.scheduleAutoSyncBoot();
             }
+        }
+
+        hasLiveSyncConnection() {
+            return !!this.sync.channel;
+        }
+
+        isAutoSyncEnabledOnPage() {
+            return !!(this.sync.config
+                && this.sync.config.enabled
+                && this.sync.config.autoConnect
+                && shouldAutoConnectOnThisPage());
+        }
+
+        scheduleAutoSyncBoot() {
+            if (!this.isAutoSyncEnabledOnPage()) return;
+            if (this.sync.autoSyncBootTimer) clearTimeout(this.sync.autoSyncBootTimer);
+            const shouldForceInitialPull = !this.sync.hadStoredStateAtBoot && !this.sync.lastPullAt;
+            this.sync.autoSyncBootTimer = setTimeout(() => {
+                this.sync.autoSyncBootTimer = null;
+                this.pullFromCloud({
+                    force: shouldForceInitialPull,
+                    silent: true,
+                    reason: 'boot',
+                    requirePageSync: true
+                }).catch(() => { });
+            }, AUTO_SYNC_BOOT_DELAY_MS);
         }
 
         onStorageSyncEvent(event) {
@@ -2602,11 +2622,20 @@
         }
 
         scheduleForegroundPull(reason = 'foreground') {
-            if (!this.syncStatus.connected) return;
+            if (!this.hasLiveSyncConnection() && !this.isAutoSyncEnabledOnPage()) return;
             const now = Date.now();
-            if (now - toTimestamp(this.sync.lastForegroundPullAt, 0) < 2000) return;
+            const minInterval = this.hasLiveSyncConnection()
+                ? 2000
+                : AUTO_SYNC_FOREGROUND_MIN_INTERVAL_MS;
+            if (now - toTimestamp(this.sync.lastForegroundPullAt, 0) < minInterval) return;
+            if (!this.hasLiveSyncConnection() && (now - toTimestamp(this.sync.lastPullAt, 0) < AUTO_SYNC_FOREGROUND_MIN_INTERVAL_MS)) return;
             this.sync.lastForegroundPullAt = now;
-            this.pullFromCloud({ force: false, silent: true, reason }).catch(() => { });
+            this.pullFromCloud({
+                force: false,
+                silent: true,
+                reason,
+                requirePageSync: true
+            }).catch(() => { });
         }
 
         persistScopeBaselines() {
@@ -3876,18 +3905,22 @@
                 profileName: next.profileName,
                 backendMode: next.backendMode
             });
-            if (this.syncStatus.connected) this.startReconcileLoop();
+            if (this.hasLiveSyncConnection()) this.startReconcileLoop();
 
             if (reconnect) {
                 if (next.enabled) {
-                    this.connectSync({ explicit: shouldAutoConnectOnThisPage(next) }).catch((err) => {
-                        this.updateSyncStatus({
-                            mode: 'error',
-                            connected: false,
-                            message: 'Sync connect failed.',
-                            lastError: err && err.message ? err.message : String(err)
+                    if (this.hasLiveSyncConnection()) {
+                        this.connectSync({ explicit: true }).catch((err) => {
+                            this.updateSyncStatus({
+                                mode: 'error',
+                                connected: false,
+                                message: 'Sync connect failed.',
+                                lastError: err && err.message ? err.message : String(err)
+                            });
                         });
-                    });
+                    } else if (next.autoConnect && shouldAutoConnectOnThisPage()) {
+                        this.scheduleAutoSyncBoot();
+                    }
                 } else {
                     this.disconnectSync('disabled').catch(() => { });
                 }
@@ -3956,7 +3989,9 @@
         }
 
         updateSyncStatus(patch) {
+            const hasConnectedPatch = !!(patch && typeof patch === 'object' && Object.prototype.hasOwnProperty.call(patch, 'connected'));
             const derived = {
+                connected: this.hasLiveSyncConnection(),
                 localRevision: toNonNegativeInt(this.state && this.state.meta ? this.state.meta.syncRevision : 0, 0),
                 remoteRevision: toNonNegativeInt(this.sync.lastKnownRemoteRevision, 0),
                 dirtyScopes: this.sync.localDirtyScopes ? this.sync.localDirtyScopes.size : 0,
@@ -3971,6 +4006,7 @@
                 ...this.syncStatus,
                 ...derived,
                 ...(patch || {}),
+                connected: hasConnectedPatch ? !!patch.connected : derived.connected,
                 updatedAt: Date.now()
             };
             this.emitSyncStatus();
@@ -4062,7 +4098,7 @@
         }
 
         touchSoftLockScopes(scopes, ttlMs = null) {
-            if (!this.syncStatus.connected) return;
+            if (!this.hasLiveSyncConnection()) return;
             if (!this.sync.localSoftLocks) this.sync.localSoftLocks = new Map();
             const ttl = Math.max(5000, toNonNegativeInt(ttlMs, this.sync.config.lockTtlMs) || this.sync.config.lockTtlMs);
             const expiresAt = Date.now() + ttl;
@@ -4159,15 +4195,8 @@
 
         startReconcileLoop() {
             this.stopReconcileLoop();
-            if (!this.syncStatus.connected) return;
-            const reconcileEvery = Math.max(5000, toNonNegativeInt(this.sync.config.reconcileIntervalMs, DEFAULT_SYNC_CONFIG.reconcileIntervalMs));
+            if (!this.hasLiveSyncConnection()) return;
             const presenceEvery = Math.max(3000, toNonNegativeInt(this.sync.config.presenceHeartbeatMs, DEFAULT_SYNC_CONFIG.presenceHeartbeatMs));
-
-            this.sync.reconcileTimer = setInterval(() => {
-                if (!this.syncStatus.connected) return;
-                if (global.document && global.document.visibilityState === 'hidden') return;
-                this.pullFromCloud({ silent: true, force: false }).catch(() => { });
-            }, reconcileEvery);
 
             this.sync.presenceTimer = setInterval(() => {
                 this.clearExpiredSoftLocks();
@@ -4270,7 +4299,7 @@
             this.clearNormalizedRealtimePull({ clearScopes: false, clearMeta: false });
             this.sync.normalizedPullTimer = setTimeout(() => {
                 this.sync.normalizedPullTimer = null;
-                if (!this.syncStatus.connected) return;
+                if (!this.hasLiveSyncConnection()) return;
                 const pendingScopes = this.sync.normalizedPendingScopes instanceof Set
                     ? Array.from(this.sync.normalizedPendingScopes.values())
                     : [];
@@ -5209,7 +5238,7 @@
             const opts = options && typeof options === 'object' ? options : {};
             const silent = !!opts.silent;
 
-            if (!this.sync.client || !this.syncStatus.connected) {
+            if (!this.sync.client) {
                 return { ok: false, reason: 'not-connected' };
             }
 
@@ -5418,7 +5447,7 @@
             if (!opts.skipStatus) {
                 this.updateSyncStatus({
                     mode: 'ready',
-                    connected: true,
+                    connected: this.hasLiveSyncConnection(),
                     pendingPush: !!retainedDirtyScopes.length,
                     message: opts.message || (retainedDirtyScopes.length
                         ? 'Merged remote changes with remaining local edits.'
@@ -5610,6 +5639,103 @@
             return this.sync.supabaseLoadPromise;
         }
 
+        async ensureCloudAccess(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const explicit = opts.explicit === true;
+            const silent = !!opts.silent;
+            const requirePageSync = opts.requirePageSync === true;
+            const coerced = coerceAutoConnectBackendMode(this.sync.config);
+            if (coerced.changed) {
+                this.sync.config = coerced.config;
+                try {
+                    localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(coerced.config));
+                } catch (err) {
+                    console.warn('RTF_STORE: Failed to persist coerced sync backend mode', err);
+                }
+            }
+
+            const config = this.sync.config;
+            if (!config.enabled) {
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'disabled',
+                        connected: false,
+                        enabled: false,
+                        message: 'Cloud sync is disabled.',
+                        pendingPush: false
+                    });
+                }
+                return { ok: false, reason: 'disabled' };
+            }
+
+            if (!config.supabaseUrl || !config.anonKey || !config.campaignId) {
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        connected: false,
+                        enabled: true,
+                        message: 'Missing sync config: URL, anon key, or campaign ID.',
+                        lastError: 'Missing required sync config.'
+                    });
+                }
+                return { ok: false, reason: 'missing-config' };
+            }
+
+            if (requirePageSync && !explicit && !shouldAutoConnectOnThisPage()) {
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'idle',
+                        connected: this.hasLiveSyncConnection(),
+                        enabled: true,
+                        campaignId: config.campaignId,
+                        profileName: config.profileName,
+                        message: 'Cloud sync is idle on this page.',
+                        pendingPush: false,
+                        lastError: ''
+                    });
+                }
+                return { ok: false, reason: 'page-blocked' };
+            }
+
+            try {
+                await this.ensureSupabaseClient(config);
+
+                const authResult = await this.ensureSyncUser();
+                if (!authResult.ok) {
+                    if (!silent) {
+                        this.updateSyncStatus({
+                            mode: 'auth_required',
+                            connected: this.hasLiveSyncConnection(),
+                            userId: '',
+                            message: authResult.message || 'Authentication required for sync.',
+                            lastError: authResult.message || 'Authentication required.'
+                        });
+                    }
+                    return { ok: false, reason: 'auth-required', error: authResult.message || 'Authentication required.' };
+                }
+
+                this.sync.userId = authResult.userId || '';
+                return {
+                    ok: true,
+                    client: this.sync.client,
+                    config,
+                    userId: this.sync.userId || '',
+                    profileName: config.profileName || ''
+                };
+            } catch (err) {
+                const msg = err && err.message ? err.message : String(err);
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        connected: this.hasLiveSyncConnection(),
+                        message: 'Failed to reach cloud sync.',
+                        lastError: msg
+                    });
+                }
+                return { ok: false, reason: 'error', error: msg };
+            }
+        }
+
         async connectSync(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
             const explicit = opts.explicit === true;
@@ -5646,7 +5772,7 @@
                 return { ok: false, reason: 'missing-config' };
             }
 
-            if (!explicit && !shouldAutoConnectOnThisPage(config)) {
+            if (!explicit && !shouldAutoConnectOnThisPage()) {
                 this.updateSyncStatus({
                     mode: 'idle',
                     connected: false,
@@ -5699,7 +5825,7 @@
                 });
 
                 const shouldForceInitialPull = !this.sync.hadStoredStateAtBoot && !this.sync.lastPullAt;
-                const pull = await this.pullFromCloud({ force: shouldForceInitialPull, silent: true });
+                const pull = await this.pullFromCloud({ force: shouldForceInitialPull, silent: true, skipAccessCheck: true });
                 if (!pull.ok && pull.reason !== 'conflict') {
                     throw new Error(pull.error || 'Initial cloud pull failed.');
                 }
@@ -5767,7 +5893,7 @@
                 instanceId: this.sync.instanceId,
                 userId: this.sync.userId || '',
                 profileName: this.sync.config && this.sync.config.profileName ? this.sync.config.profileName : '',
-                syncConnected: !!this.syncStatus.connected
+                syncConnected: this.hasLiveSyncConnection()
             };
         }
 
@@ -7118,6 +7244,10 @@
         }
 
         async disconnectSync(reason = 'manual') {
+            if (this.sync.autoSyncBootTimer) {
+                clearTimeout(this.sync.autoSyncBootTimer);
+                this.sync.autoSyncBootTimer = null;
+            }
             this.cancelCloudPush();
             this.stopReconcileLoop();
             this.clearNormalizedRealtimePull();
@@ -7413,7 +7543,7 @@
                 if (normalizedRevision > this.sync.lastKnownRemoteRevision) {
                     this.sync.lastKnownRemoteRevision = normalizedRevision;
                     this.updateSyncStatus({
-                        connected: true,
+                        connected: this.hasLiveSyncConnection(),
                         message: this.sync.pendingConflict
                             ? this.syncStatus.message
                             : 'Shared update detected. Catching up.'
@@ -7467,7 +7597,7 @@
             if (applied) {
                 this.updateSyncStatus({
                     mode: 'ready',
-                    connected: true,
+                    connected: this.hasLiveSyncConnection(),
                     message: 'Remote update received.'
                 });
             }
@@ -7481,7 +7611,7 @@
             if (!changedScopes.length) {
                 return { ok: true, reason: 'no-scopes', applied: false };
             }
-            if (!this.sync.client || !this.syncStatus.connected) {
+            if (!this.sync.client) {
                 return { ok: false, reason: 'not-connected' };
             }
 
@@ -7542,7 +7672,7 @@
                 this.updateSyncStatus({
                     lastPullAt: this.sync.lastPullAt,
                     mode: 'ready',
-                    connected: true,
+                    connected: this.hasLiveSyncConnection(),
                     pendingPush: !!dirtyScopes.length,
                     message: dirtyScopes.length
                         ? 'Applied scoped cloud updates with local edits preserved.'
@@ -7554,15 +7684,16 @@
         }
 
         scheduleCloudPush(reason = 'scheduled') {
-            if (!this.sync.config.enabled || !this.syncStatus.connected || !this.sync.client) return;
+            if (!this.hasLiveSyncConnection() && !this.isAutoSyncEnabledOnPage()) return;
+            if (!this.sync.config.enabled) return;
 
             if (this.sync.pushTimer) clearTimeout(this.sync.pushTimer);
             this.sync.pushTimer = setTimeout(() => {
                 this.sync.pushTimer = null;
-                this.pushToCloud({ reason, silent: true }).catch((err) => {
+                this.pushToCloud({ reason, silent: true, requirePageSync: !this.hasLiveSyncConnection() }).catch((err) => {
                     this.updateSyncStatus({
                         mode: 'error',
-                        connected: false,
+                        connected: this.hasLiveSyncConnection(),
                         pendingPush: false,
                         message: 'Cloud push failed.',
                         lastError: err && err.message ? err.message : String(err)
@@ -8187,7 +8318,7 @@
         }
 
         async writeNormalizedStateByScopes(state, scopes, meta = {}) {
-            if (!this.sync.client || !this.syncStatus.connected) {
+            if (!this.sync.client) {
                 return { ok: false, error: 'Not connected.' };
             }
 
@@ -8295,7 +8426,7 @@
             const startAttempt = toNonNegativeInt(opts.attempt, 0);
             let dirtyScopes = precomputedDirtyScopes || this.getDirtyScopesSnapshot(opts.scopes);
 
-            if (!this.sync.client || !this.syncStatus.connected) {
+            if (!this.sync.client) {
                 return { ok: false, reason: 'not-connected' };
             }
 
@@ -8358,7 +8489,7 @@
                             this.clearPendingConflict({ keepStatus: true });
                             this.updateSyncStatus({
                                 mode: 'ready',
-                                connected: true,
+                                connected: this.hasLiveSyncConnection(),
                                 pendingPush: false,
                                 message: pushFilter.remoteWinScopes.length
                                     ? 'Kept newer remote row updates.'
@@ -8394,7 +8525,7 @@
                                 this.clearPendingConflict({ keepStatus: true });
                                 this.updateSyncStatus({
                                     mode: 'ready',
-                                    connected: true,
+                                    connected: this.hasLiveSyncConnection(),
                                     pendingPush: false,
                                     message: 'Kept newer remote row updates.',
                                     lastError: ''
@@ -8423,7 +8554,7 @@
                     if (nextSig === this.sync.lastCloudStateSig && !hasLocalDirty) {
                         this.updateSyncStatus({
                             mode: 'ready',
-                            connected: true,
+                            connected: this.hasLiveSyncConnection(),
                             pendingPush: false
                         });
                         return { ok: true, reason: 'no-change' };
@@ -8450,7 +8581,7 @@
                         if (!silent) {
                             this.updateSyncStatus({
                                 mode: 'error',
-                                connected: false,
+                                connected: this.hasLiveSyncConnection(),
                                 pendingPush: false,
                                 message: 'Cloud push failed.',
                                 lastError: message
@@ -8475,7 +8606,7 @@
 
                     this.updateSyncStatus({
                         mode: 'ready',
-                        connected: true,
+                        connected: this.hasLiveSyncConnection(),
                         pendingPush: false,
                         lastPushAt: this.sync.lastPushAt,
                         message: 'Cloud sync updated.',
@@ -8491,7 +8622,7 @@
                 if (!silent) {
                     this.updateSyncStatus({
                         mode: 'error',
-                        connected: false,
+                        connected: this.hasLiveSyncConnection(),
                         pendingPush: false,
                         message: 'Cloud push failed.',
                         lastError: message
@@ -8511,9 +8642,18 @@
             const opts = options && typeof options === 'object' ? options : {};
             const force = !!opts.force;
             const silent = !!opts.silent;
+            const access = opts.skipAccessCheck
+                ? { ok: !!this.sync.client }
+                : await this.ensureCloudAccess({
+                    explicit: opts.explicit === true,
+                    silent,
+                    requirePageSync: opts.requirePageSync === true
+                });
 
-            if (!this.sync.client || !this.syncStatus.connected) {
-                return { ok: false, reason: 'not-connected' };
+            if (!access.ok) {
+                return access.reason === 'disabled' || access.reason === 'missing-config' || access.reason === 'page-blocked'
+                    ? { ok: false, reason: access.reason, error: access.error || '' }
+                    : { ok: false, reason: access.reason || 'not-connected', error: access.error || '' };
             }
 
             const fetched = (this.isNormalizedReadMode() && !force)
@@ -8595,7 +8735,7 @@
                         this.updateSyncStatus({
                             lastPullAt: this.sync.lastPullAt,
                             mode: 'ready',
-                            connected: true,
+                            connected: this.hasLiveSyncConnection(),
                             pendingPush: false,
                             message: 'Pulled latest cloud state (local was older).'
                         });
@@ -8623,7 +8763,7 @@
                 this.updateSyncStatus({
                     lastPullAt: this.sync.lastPullAt,
                     mode: 'ready',
-                    connected: true,
+                    connected: this.hasLiveSyncConnection(),
                     pendingPush: false
                 });
                 return { ok: true, reason: 'up-to-date', applied: false };
@@ -8643,7 +8783,7 @@
                 this.updateSyncStatus({
                     lastPullAt: this.sync.lastPullAt,
                     mode: 'ready',
-                    connected: true,
+                    connected: this.hasLiveSyncConnection(),
                     pendingPush: false,
                     message: 'Pulled latest cloud state.'
                 });
@@ -8658,9 +8798,13 @@
             const force = !!opts.force;
             const startAttempt = toNonNegativeInt(opts.attempt, 0);
             const dirtyScopes = this.getDirtyScopesSnapshot(opts.scopes);
-
-            if (!this.sync.client || !this.syncStatus.connected) {
-                return { ok: false, reason: 'not-connected' };
+            const access = await this.ensureCloudAccess({
+                explicit: opts.explicit === true,
+                silent,
+                requirePageSync: opts.requirePageSync === true
+            });
+            if (!access.ok) {
+                return { ok: false, reason: access.reason || 'not-connected', error: access.error || '' };
             }
 
             if (this.isNormalizedReadMode()) {
@@ -8730,7 +8874,7 @@
                     if (nextSig === this.sync.lastCloudStateSig && !hasLocalDirty) {
                         this.updateSyncStatus({
                             mode: 'ready',
-                            connected: true,
+                            connected: this.hasLiveSyncConnection(),
                             pendingPush: false
                         });
                         return { ok: true, reason: 'no-change' };
@@ -8769,7 +8913,7 @@
                             if (!silent) {
                                 this.updateSyncStatus({
                                     mode: 'error',
-                                    connected: false,
+                                    connected: this.hasLiveSyncConnection(),
                                     pendingPush: false,
                                     message: 'Cloud push failed.',
                                     lastError: message
@@ -8792,7 +8936,7 @@
                                 if (!silent) {
                                     this.updateSyncStatus({
                                         mode: 'error',
-                                        connected: false,
+                                        connected: this.hasLiveSyncConnection(),
                                         pendingPush: false,
                                         message: 'Cloud push failed.',
                                         lastError: message
@@ -8843,7 +8987,7 @@
 
                     this.updateSyncStatus({
                         mode: 'ready',
-                        connected: true,
+                        connected: this.hasLiveSyncConnection(),
                         pendingPush: false,
                         lastPushAt: this.sync.lastPushAt,
                         message: 'Cloud sync updated.',
@@ -8870,7 +9014,7 @@
                 if (!silent) {
                     this.updateSyncStatus({
                         mode: 'error',
-                        connected: false,
+                        connected: this.hasLiveSyncConnection(),
                         pendingPush: false,
                         message: 'Cloud push failed.',
                         lastError: message

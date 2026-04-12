@@ -1800,7 +1800,17 @@ async function tryAutoConnectFromBundledDefault() {
 
     const payload = await readBundledConnect();
     if (!payload) return;
-    await applyConnectProfile(payload);
+    const result = await applyConnectProfile(payload, { connect: false });
+    if (!result.ok) {
+        setQuickStatus(result.error || 'failed using bundled connect.json.');
+        return;
+    }
+    await window.RTF_STORE.pullFromCloud({
+        force: true,
+        silent: true,
+        requirePageSync: true
+    }).catch(() => { });
+    setQuickStatus('bundled connect.json applied.');
 }
 
 function applySyncConfigToForm(config) {
@@ -2217,7 +2227,7 @@ async function cancelAutoConnect() {
 
 async function pullSyncNow() {
     if (!window.RTF_STORE) return;
-    const result = await window.RTF_STORE.pullFromCloud({ force: true });
+    const result = await window.RTF_STORE.pullFromCloud({ force: true, explicit: true });
     if (!result.ok) {
         if (result.reason === 'conflict') {
             alert('Protected sync conflict detected while pulling. Resolve it in the Cloud Sync panel.');
@@ -2230,7 +2240,7 @@ async function pullSyncNow() {
 
 async function pushSyncNow() {
     if (!window.RTF_STORE) return;
-    const result = await window.RTF_STORE.pushToCloud();
+    const result = await window.RTF_STORE.pushToCloud({ explicit: true });
     if (!result.ok) {
         if (result.reason === 'conflict') {
             alert('Protected sync conflict detected. Routine row edits auto-resolve; use "Accept Remote" or "Keep Local + Merge Push" for shared boards/core/HQ changes.');
@@ -2239,7 +2249,7 @@ async function pushSyncNow() {
         if (result.reason === 'locked') {
             const proceed = confirm('Another player has an active soft lock on one of your dirty scopes. Force push anyway?');
             if (proceed) {
-                const forced = await window.RTF_STORE.pushToCloud({ force: true });
+                const forced = await window.RTF_STORE.pushToCloud({ force: true, explicit: true });
                 if (forced.ok) return;
             }
         }

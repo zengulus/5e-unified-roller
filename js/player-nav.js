@@ -952,7 +952,7 @@
                     if (typeof store.pullFromCloud !== 'function') {
                         throw new Error('Refresh is unavailable on this page.');
                     }
-                    const result = await store.pullFromCloud({ force: false, silent: false });
+                    const result = await store.pullFromCloud({ force: false, silent: false, explicit: true });
                     if (result && result.ok === false) {
                         if (result.reason === 'conflict') {
                             setSyncNotice('The latest shared version needs review.', false);
@@ -970,20 +970,11 @@
                     const currentStatus = typeof store.getSyncStatus === 'function'
                         ? store.getSyncStatus()
                         : latestSyncStatus;
-                    if (!currentStatus || !currentStatus.connected) {
-                        if (typeof store.connectSync !== 'function') {
-                            throw new Error('Reconnect is unavailable on this page.');
-                        }
-                        const result = await store.connectSync({ explicit: true });
-                        if (!result || result.ok === false) {
-                            throw new Error((store.getSyncStatus && store.getSyncStatus().lastError) || 'Reconnect failed.');
-                        }
-                        setSyncNotice('Connected to the shared campaign.');
-                    } else if (currentStatus.pendingPush || Number(currentStatus.dirtyScopes) > 0) {
+                    if (currentStatus && (currentStatus.pendingPush || Number(currentStatus.dirtyScopes) > 0)) {
                         if (typeof store.pushToCloud !== 'function') {
                             throw new Error('Sync is unavailable on this page.');
                         }
-                        const result = await store.pushToCloud({ silent: false });
+                        const result = await store.pushToCloud({ silent: false, explicit: true });
                         if (result && result.ok === false) {
                             if (result.reason === 'conflict') {
                                 setSyncNotice('The latest shared version needs review.', false);
@@ -996,7 +987,7 @@
                             setSyncNotice('Shared changes sent.');
                         }
                     } else if (typeof store.pullFromCloud === 'function') {
-                        const result = await store.pullFromCloud({ force: false, silent: false });
+                        const result = await store.pullFromCloud({ force: false, silent: false, explicit: true });
                         if (result && result.ok === false) {
                             if (result.reason === 'conflict') {
                                 setSyncNotice('The latest shared version needs review.', false);
