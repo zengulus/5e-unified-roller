@@ -44,6 +44,7 @@
         'schema',
         'tableName',
         'boardRoomsTable',
+        'boardHistoryTable',
         'normalizedCoreTable',
         'normalizedHQTable',
         'normalizedCaseStateTable',
@@ -69,6 +70,9 @@
         const anonKey = String(source.anonKey || source.key || '').trim();
         const campaignId = String(source.campaignId || source.campaign || '').trim().toLowerCase();
         const backendMode = String(source.backendMode || source.syncBackend || '').trim() || 'normalized';
+        const rawLogin = source.login && typeof source.login === 'object' ? source.login : {};
+        const loginEmail = String(source.loginEmail || source.email || rawLogin.email || '').trim();
+        const loginPassword = String(source.loginPassword || source.password || rawLogin.password || '').trim();
         if (!supabaseUrl || !anonKey || !campaignId) return null;
 
         const payload = {
@@ -80,6 +84,10 @@
             collabRelayUrl: String(source.collabRelayUrl || source.collabServerUrl || source.relayUrl || '').trim(),
             backendMode
         };
+        if (loginEmail && loginPassword) {
+            payload.loginEmail = loginEmail;
+            payload.loginPassword = loginPassword;
+        }
 
         CONNECT_OPTIONAL_TABLE_KEYS.forEach((key) => {
             const value = String(source[key] || '').trim();
@@ -120,6 +128,10 @@
         if (profileField) profileField.value = payload.profileName;
 
         store.setSyncConfig(payload, { reconnect: false });
+        if (payload.loginEmail && payload.loginPassword && typeof store.signInWithPassword === 'function') {
+            const login = await store.signInWithPassword(payload.loginEmail, payload.loginPassword, payload.profileName);
+            if (!login || login.ok === false) return { ok: false, error: login && login.error ? login.error : 'Player login failed.' };
+        }
         const result = await store.connectSync({ explicit: true });
         if (!result || result.ok === false) {
             const status = (typeof store.getSyncStatus === 'function') ? store.getSyncStatus() : null;
@@ -186,6 +198,14 @@
             backendMode: String(config && config.backendMode || 'legacy').trim() || 'legacy',
             autoConnect: config ? (config.autoConnect !== false) : true
         };
+        const loginEmail = String(config && config.loginEmail || '').trim();
+        const loginPassword = String(config && config.loginPassword || '');
+        if (loginEmail && loginPassword) {
+            payload.login = {
+                email: loginEmail,
+                password: loginPassword
+            };
+        }
         CONNECT_OPTIONAL_TABLE_KEYS.forEach((key) => {
             const value = String(config && config[key] || '').trim();
             if (value) payload[key] = value;

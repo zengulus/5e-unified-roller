@@ -7180,15 +7180,19 @@
             this.sync.authPromise = (async () => {
                 const sessionResult = await this.sync.client.auth.getSession();
                 const existingSession = sessionResult && sessionResult.data ? sessionResult.data.session : null;
-                if (existingSession && existingSession.user && existingSession.user.id) {
-                    this.sync.userId = existingSession.user.id;
-                    this.sync.authCheckedAt = Date.now();
-                    return { ok: true, userId: existingSession.user.id };
-                }
-
                 const loginEmail = this.sync.config && this.sync.config.loginEmail ? this.sync.config.loginEmail : '';
                 const loginPassword = this.sync.config && this.sync.config.loginPassword ? this.sync.config.loginPassword : '';
                 if (loginEmail && loginPassword) {
+                    const existingEmail = existingSession && existingSession.user && existingSession.user.email
+                        ? String(existingSession.user.email).trim().toLowerCase()
+                        : '';
+                    if (existingSession && existingSession.user && existingSession.user.id
+                        && existingEmail === loginEmail.toLowerCase()) {
+                        this.sync.userId = existingSession.user.id;
+                        this.sync.authCheckedAt = Date.now();
+                        return { ok: true, userId: existingSession.user.id };
+                    }
+
                     const passwordResult = await this.sync.client.auth.signInWithPassword({
                         email: loginEmail,
                         password: loginPassword
@@ -7206,6 +7210,12 @@
                         return { ok: true, userId: passwordSession.user.id };
                     }
                     return { ok: false, message: 'No authenticated user session.' };
+                }
+
+                if (existingSession && existingSession.user && existingSession.user.id) {
+                    this.sync.userId = existingSession.user.id;
+                    this.sync.authCheckedAt = Date.now();
+                    return { ok: true, userId: existingSession.user.id };
                 }
 
                 const anonResult = await this.sync.client.auth.signInAnonymously({

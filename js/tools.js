@@ -1620,13 +1620,21 @@ async function clearBoardAdminLocalCache() {
 
 function getSyncFormValues() {
     const autoConnectEl = document.getElementById('sync-autoconnect');
+    const currentConfig = (window.RTF_STORE && typeof window.RTF_STORE.getSyncConfig === 'function')
+        ? window.RTF_STORE.getSyncConfig()
+        : null;
+    const loginEmail = (document.getElementById('sync-email').value || '').trim();
+    const rawLoginPassword = (document.getElementById('sync-password').value || '').trim();
+    const storedLoginEmail = String(currentConfig && currentConfig.loginEmail || '').trim();
+    const storedLoginPassword = String(currentConfig && currentConfig.loginPassword || '');
+    const loginPassword = rawLoginPassword || (loginEmail && loginEmail === storedLoginEmail ? storedLoginPassword : '');
     return {
         supabaseUrl: (document.getElementById('sync-url').value || '').trim(),
         anonKey: (document.getElementById('sync-key').value || '').trim(),
         campaignId: (document.getElementById('sync-campaign').value || '').trim(),
         profileName: (document.getElementById('sync-profile').value || '').trim(),
-        loginEmail: (document.getElementById('sync-email').value || '').trim(),
-        loginPassword: (document.getElementById('sync-password').value || '').trim(),
+        loginEmail,
+        loginPassword,
         collabRelayUrl: (document.getElementById('sync-collab-relay').value || '').trim(),
         autoConnect: autoConnectEl ? !!autoConnectEl.checked : true
     };
@@ -2301,8 +2309,9 @@ function exportConnectFile() {
         backendMode: config.backendMode || 'legacy',
         autoConnect: config.autoConnect !== false
     };
-    const loginEmail = (document.getElementById('sync-email').value || '').trim();
-    const loginPassword = (document.getElementById('sync-password').value || '').trim();
+    const form = getSyncFormValues();
+    const loginEmail = form.loginEmail;
+    const loginPassword = form.loginPassword;
     if (loginEmail || loginPassword) {
         if (!loginEmail || !loginPassword) {
             alert('Enter both Login Email and Login Password before exporting them in connect.json.');
