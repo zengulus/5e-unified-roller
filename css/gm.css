@@ -242,7 +242,14 @@
             min-width: 96px;
         }
 
-        button {
+        button,
+        a.btn-main,
+        a.btn-sec,
+        a.btn-danger,
+        a.btn-success {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             border: none;
             border-radius: 8px;
             font-weight: 700;
@@ -254,9 +261,15 @@
             position: relative;
             overflow: hidden;
             letter-spacing: 0.5px;
+            text-decoration: none;
+            box-sizing: border-box;
         }
 
-        button:active {
+        button:active,
+        a.btn-main:active,
+        a.btn-sec:active,
+        a.btn-danger:active,
+        a.btn-success:active {
             transform: scale(0.96);
         }
 
