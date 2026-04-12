@@ -7231,6 +7231,45 @@
             return { ok: true };
         }
 
+        async signInWithPassword(email, password, profileName = '') {
+            const cleanEmail = typeof email === 'string' ? email.trim() : '';
+            const cleanPassword = typeof password === 'string' ? password : '';
+            if (!cleanEmail || !cleanPassword) return { ok: false, error: 'Email and password required.' };
+
+            const config = sanitizeSyncConfig(this.sync && this.sync.config ? this.sync.config : getMergedSyncConfig());
+            if (!config.supabaseUrl || !config.anonKey) return { ok: false, error: 'Supabase URL and anon key required.' };
+
+            const cleanName = sanitizeProfileName(profileName);
+            if (cleanName) this.setSyncConfig({ profileName: cleanName }, { reconnect: false });
+
+            try {
+                await this.ensureSupabaseClient(config);
+                const result = await this.sync.client.auth.signInWithPassword({
+                    email: cleanEmail,
+                    password: cleanPassword
+                });
+                if (result.error) return { ok: false, error: result.error.message || 'Password sign-in failed.' };
+
+                const session = result.data ? result.data.session : null;
+                if (!session || !session.user || !session.user.id) return { ok: false, error: 'No authenticated user session.' };
+                this.sync.userId = session.user.id;
+                this.sync.authCheckedAt = Date.now();
+                this.sync.authPromise = null;
+                this.updateSyncStatus({
+                    mode: 'idle',
+                    connected: false,
+                    enabled: this.sync.config.enabled,
+                    userId: this.sync.userId,
+                    campaignId: this.sync.config.campaignId,
+                    profileName: this.sync.config.profileName,
+                    message: 'Signed in for cloud sync.'
+                });
+                return { ok: true, userId: this.sync.userId };
+            } catch (err) {
+                return { ok: false, error: err && err.message ? err.message : 'Password sign-in failed.' };
+            }
+        }
+
         async signInAnonymously(profileName = '') {
             const patch = {};
             const cleanName = sanitizeProfileName(profileName);

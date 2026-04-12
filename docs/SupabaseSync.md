@@ -186,7 +186,11 @@ If you place a `connect.json` file at the site root (same level as `tools.html`)
   "anonKey": "your-anon-public-key",
   "campaignId": "ravnica-main",
   "profileName": "",
-  "collabRelayUrl": "wss://your-render-service.onrender.com"
+  "collabRelayUrl": "wss://your-render-service.onrender.com",
+  "login": {
+    "email": "players@example.com",
+    "password": "shared-player-password"
+  }
 }
 ```
 
@@ -195,6 +199,9 @@ Accepted aliases are also supported:
 - `key` or `publicKey` for `anonKey`
 - `slug` or `campaign` for `campaignId`
 - `collabServerUrl` or `relayUrl` for `collabRelayUrl`
+- `loginEmail` / `loginPassword` or top-level `email` / `password` for the shared player login
+
+If `login.email` and `login.password` are present, importing `connect.json` signs in with that shared Supabase Auth account before connecting sync. This is meant for a generic table/player login, not per-player identity.
 
 ## Notes
 

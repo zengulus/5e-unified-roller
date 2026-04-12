@@ -1625,6 +1625,8 @@ function getSyncFormValues() {
         anonKey: (document.getElementById('sync-key').value || '').trim(),
         campaignId: (document.getElementById('sync-campaign').value || '').trim(),
         profileName: (document.getElementById('sync-profile').value || '').trim(),
+        loginEmail: (document.getElementById('sync-email').value || '').trim(),
+        loginPassword: (document.getElementById('sync-password').value || '').trim(),
         collabRelayUrl: (document.getElementById('sync-collab-relay').value || '').trim(),
         autoConnect: autoConnectEl ? !!autoConnectEl.checked : true
     };
@@ -1636,6 +1638,9 @@ function normalizeConnectPayload(raw) {
     const anonKey = (raw.anonKey || raw.key || raw.publicKey || '').trim();
     const campaignId = (raw.campaignId || raw.slug || raw.campaign || '').trim();
     const profileName = (raw.profileName || raw.profile || '').trim();
+    const rawLogin = raw.login && typeof raw.login === 'object' ? raw.login : {};
+    const loginEmail = String(raw.loginEmail || raw.email || rawLogin.email || '').trim();
+    const loginPassword = String(raw.loginPassword || raw.password || rawLogin.password || '').trim();
     const autoConnect = parseBooleanInput(raw.autoConnect, true);
     const backendMode = String(raw.backendMode || raw.syncBackend || '').trim() || 'normalized';
     if (!supabaseUrl || !anonKey || !campaignId) return null;
@@ -1649,6 +1654,10 @@ function normalizeConnectPayload(raw) {
         autoConnect,
         backendMode
     };
+    if (loginEmail && loginPassword) {
+        payload.loginEmail = loginEmail;
+        payload.loginPassword = loginPassword;
+    }
     const optionalMap = [
         ['schema', raw.schema || ''],
         ['tableName', raw.tableName || raw.stateTable || ''],
@@ -1699,6 +1708,11 @@ async function applyConnectProfile(raw, opts = {}) {
     applySyncConfigToForm(window.RTF_STORE.getSyncConfig());
 
     if (options.connect === false) return { ok: true, connected: false };
+
+    if (payload.loginEmail && payload.loginPassword && typeof window.RTF_STORE.signInWithPassword === 'function') {
+        const login = await window.RTF_STORE.signInWithPassword(payload.loginEmail, payload.loginPassword, payload.profileName);
+        if (!login.ok) return { ok: false, error: login.error || 'Player login failed.' };
+    }
 
     const result = await window.RTF_STORE.connectSync({ explicit: true });
     if (!result.ok) {
@@ -1787,6 +1801,10 @@ function applySyncConfigToForm(config) {
     document.getElementById('sync-key').value = config.anonKey || '';
     document.getElementById('sync-campaign').value = config.campaignId || '';
     document.getElementById('sync-profile').value = config.profileName || '';
+    const emailEl = document.getElementById('sync-email');
+    const passwordEl = document.getElementById('sync-password');
+    if (emailEl && !emailEl.value) emailEl.value = config.loginEmail || '';
+    if (passwordEl && !passwordEl.value) passwordEl.value = '';
     document.getElementById('sync-collab-relay').value = config.collabRelayUrl || '';
     const autoConnectEl = document.getElementById('sync-autoconnect');
     if (autoConnectEl) autoConnectEl.checked = config.autoConnect !== false;
@@ -2232,6 +2250,19 @@ async function anonymousSignIn() {
     }
 }
 
+async function passwordSignIn() {
+    if (!window.RTF_STORE || typeof window.RTF_STORE.signInWithPassword !== 'function') return;
+    const email = (document.getElementById('sync-email').value || '').trim();
+    const password = (document.getElementById('sync-password').value || '').trim();
+    const profile = (document.getElementById('sync-profile').value || '').trim();
+    const result = await window.RTF_STORE.signInWithPassword(email, password, profile);
+    if (!result.ok) {
+        alert(result.error || 'Player login failed.');
+        return;
+    }
+    setQuickStatus('player login saved for this browser.');
+}
+
 async function signOutSync() {
     if (!window.RTF_STORE) return;
     const result = await window.RTF_STORE.signOutSyncUser();
@@ -2270,6 +2301,18 @@ function exportConnectFile() {
         backendMode: config.backendMode || 'legacy',
         autoConnect: config.autoConnect !== false
     };
+    const loginEmail = (document.getElementById('sync-email').value || '').trim();
+    const loginPassword = (document.getElementById('sync-password').value || '').trim();
+    if (loginEmail || loginPassword) {
+        if (!loginEmail || !loginPassword) {
+            alert('Enter both Login Email and Login Password before exporting them in connect.json.');
+            return;
+        }
+        payload.login = {
+            email: loginEmail,
+            password: loginPassword
+        };
+    }
     const optionalTableKeys = [
         'schema',
         'tableName',
