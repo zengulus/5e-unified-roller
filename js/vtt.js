@@ -127,6 +127,7 @@
     let sheetActionState = null;
     let sheetActionQuery = '';
     let npcRollState = null;
+    let lastContextPointerState = null;
     let navMenuOpen = false;
     let viewMenuOpen = false;
     let toolsMenuOpen = false;
@@ -3976,8 +3977,8 @@
         requestAnimationFrame(positionSheetActionPopover);
     };
 
-    const openSheetActionPopover = (token, clientX, clientY) => {
-        const rosterPlayer = getRosterPlayerForRecord(token);
+    const openSheetActionPopover = (token = null, clientX, clientY) => {
+        const rosterPlayer = token ? getRosterPlayerForRecord(token) : null;
         sheetActionState = {
             tokenId: token && token.id ? token.id : '',
             sheetKey: String(rosterPlayer && rosterPlayer.sheetKey || '').trim(),
@@ -4345,6 +4346,13 @@
         closeSheetActionPopover();
         renderNPCRollPopover();
         return true;
+    };
+
+    const isNPCRollTarget = (token) => {
+        if (!token) return false;
+        if (String(token.sourceType || '').trim().toLowerCase() === 'npc') return true;
+        const side = String(token.side || '').trim().toLowerCase();
+        return side === 'enemy' || side === 'neutral';
     };
 
     const renderSceneList = () => {
@@ -7100,6 +7108,16 @@
     const handleDocumentPointerDown = (event) => {
         const targetEl = getEventTargetElement(event);
         if (!targetEl) return;
+        if (event.button === 2) {
+            const tokenEl = targetEl.closest('.vtt-token');
+            lastContextPointerState = {
+                altKey: !!(event.altKey || (typeof event.getModifierState === 'function' && event.getModifierState('Alt'))),
+                clientX: Math.round(toNumber(event.clientX, 0)),
+                clientY: Math.round(toNumber(event.clientY, 0)),
+                tokenId: tokenEl ? String(tokenEl.getAttribute('data-token-id') || '').trim() : '',
+                at: Date.now()
+            };
+        }
         const spawnEl = event.button === 0 ? targetEl.closest('[data-spawn-kind]') : null;
         if (spawnEl instanceof HTMLElement) {
             const kind = String(spawnEl.dataset.spawnKind || '').trim();
@@ -7187,6 +7205,24 @@
         const targetEl = getEventTargetElement(event);
         if (!targetEl) return;
         if (targetEl.closest('#vtt-quick-spawn-menu')) return;
+        const tokenEl = targetEl.closest('.vtt-token');
+        const token = tokenEl ? getTokenById(String(tokenEl.getAttribute('data-token-id') || '')) : null;
+        if (!isDM()) {
+            event.preventDefault();
+            if (token) activateTokenSelection(token.id);
+            previewTokenId = '';
+            closeTokenInspectorPopover();
+            openSheetActionPopover(token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null, event.clientX, event.clientY);
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderTokenInspector();
+            renderTokenInspectorPopover();
+            renderSheetActionPopover();
+            renderNPCRollPopover();
+            renderToolsMenu();
+            renderStage();
+            return;
+        }
         const noteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
         if (noteEl) {
             const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
@@ -7207,15 +7243,19 @@
             renderStage();
             return;
         }
-        const tokenEl = targetEl.closest('.vtt-token');
         if (tokenEl) {
-            const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
             if (!token) return;
 
             event.preventDefault();
             activateTokenSelection(token.id);
             if (isDM()) {
-                if (event.altKey && String(token.sourceType || '').trim().toLowerCase() === 'npc') {
+                const recentContextPointer = lastContextPointerState
+                    && Date.now() - lastContextPointerState.at < 1200
+                    && (!lastContextPointerState.tokenId || lastContextPointerState.tokenId === token.id)
+                    ? lastContextPointerState
+                    : null;
+                const hasAltContext = !!(event.altKey || (typeof event.getModifierState === 'function' && event.getModifierState('Alt')) || (recentContextPointer && recentContextPointer.altKey));
+                if (hasAltContext && isNPCRollTarget(token)) {
                     previewTokenId = '';
                     closeTokenInspectorPopover();
                     openNPCRollPopover(token, event.clientX, event.clientY);
