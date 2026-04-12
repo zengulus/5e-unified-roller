@@ -309,7 +309,6 @@
         lockTtlMs: 20000
     };
     const AUTO_SYNC_BOOT_DELAY_MS = 180;
-    const AUTO_SYNC_FOREGROUND_MIN_INTERVAL_MS = 15000;
 
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
@@ -2446,6 +2445,14 @@
         }
     };
 
+    const isBoardPage = () => {
+        try {
+            return /\/(?:board|campaign-board)\.html$/i.test(String(global.location && global.location.pathname || ''));
+        } catch (err) {
+            return false;
+        }
+    };
+
     const coerceAutoConnectBackendMode = (config) => {
         const clean = sanitizeSyncConfig(config);
         if (!clean.enabled || !clean.autoConnect) {
@@ -2517,7 +2524,7 @@
 
             this.syncStatus = {
                 mode: this.sync.config.enabled ? 'idle' : 'disabled',
-                message: this.sync.config.enabled ? 'Cloud sync is configured but not connected.' : 'Cloud sync is disabled.',
+                message: this.sync.config.enabled ? 'Cloud sync is signed out or standing by until needed.' : 'Cloud sync is disabled.',
                 enabled: this.sync.config.enabled,
                 connected: false,
                 campaignId: this.sync.config.campaignId,
@@ -2569,17 +2576,34 @@
                 && shouldAutoConnectOnThisPage());
         }
 
+        canAutoPushCloud(reason = 'scheduled') {
+            if (!this.sync.config || !this.sync.config.enabled) return false;
+            if (this.hasLiveSyncConnection()) return true;
+            return false;
+        }
+
         scheduleAutoSyncBoot() {
             if (!this.isAutoSyncEnabledOnPage()) return;
             if (this.sync.autoSyncBootTimer) clearTimeout(this.sync.autoSyncBootTimer);
-            const shouldForceInitialPull = !this.sync.hadStoredStateAtBoot && !this.sync.lastPullAt;
             this.sync.autoSyncBootTimer = setTimeout(() => {
                 this.sync.autoSyncBootTimer = null;
-                this.pullFromCloud({
-                    force: shouldForceInitialPull,
+                this.ensureCloudAccess({
                     silent: true,
-                    reason: 'boot',
                     requirePageSync: true
+                }).then((result) => {
+                    if (!result || !result.ok) return;
+                    this.updateSyncStatus({
+                        mode: 'idle',
+                        connected: false,
+                        enabled: true,
+                        userId: result.userId || this.sync.userId || '',
+                        campaignId: this.sync.config.campaignId,
+                        profileName: this.sync.config.profileName,
+                        message: result.userId
+                            ? 'Signed in. Cloud sync will fetch or push only when needed.'
+                            : 'Cloud sync is standing by until needed.',
+                        lastError: ''
+                    });
                 }).catch(() => { });
             }, AUTO_SYNC_BOOT_DELAY_MS);
         }
@@ -2622,13 +2646,10 @@
         }
 
         scheduleForegroundPull(reason = 'foreground') {
-            if (!this.hasLiveSyncConnection() && !this.isAutoSyncEnabledOnPage()) return;
+            if (!this.hasLiveSyncConnection()) return;
             const now = Date.now();
-            const minInterval = this.hasLiveSyncConnection()
-                ? 2000
-                : AUTO_SYNC_FOREGROUND_MIN_INTERVAL_MS;
+            const minInterval = 2000;
             if (now - toTimestamp(this.sync.lastForegroundPullAt, 0) < minInterval) return;
-            if (!this.hasLiveSyncConnection() && (now - toTimestamp(this.sync.lastPullAt, 0) < AUTO_SYNC_FOREGROUND_MIN_INTERVAL_MS)) return;
             this.sync.lastForegroundPullAt = now;
             this.pullFromCloud({
                 force: false,
@@ -3693,7 +3714,20 @@
                 if (cloudScopes.length) this.touchSoftLockScopes(cloudScopes);
                 localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
 
-                if (!skipCloud && !this.isApplyingRemote && cloudScopes.length) this.scheduleCloudPush('local-save');
+                if (!skipCloud && !this.isApplyingRemote && cloudScopes.length) {
+                    if (this.canAutoPushCloud('local-save')) {
+                        this.scheduleCloudPush('local-save');
+                    } else {
+                        this.updateSyncStatus({
+                            pendingPush: true,
+                            mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
+                            connected: this.hasLiveSyncConnection(),
+                            message: this.sync.userId
+                                ? 'Local edits are ready to sync when needed.'
+                                : this.syncStatus.message
+                        });
+                    }
+                }
                 if (!skipEvent) this.broadcastStoreUpdate('local', { scopes });
             } catch (e) {
                 console.error("RTF_STORE: Save failed", e);
@@ -5689,7 +5723,9 @@
                         enabled: true,
                         campaignId: config.campaignId,
                         profileName: config.profileName,
-                        message: 'Cloud sync is idle on this page.',
+                        message: this.sync.userId
+                            ? 'Signed in. Cloud sync will fetch or push only when needed.'
+                            : 'Cloud sync is standing by until needed.',
                         pendingPush: false,
                         lastError: ''
                     });
@@ -5779,7 +5815,9 @@
                     enabled: true,
                     campaignId: config.campaignId,
                     profileName: config.profileName,
-                    message: 'Full cloud sync is idle on this page.',
+                    message: this.sync.userId
+                        ? 'Signed in. Full cloud sync will connect only when you ask for it.'
+                        : 'Full cloud sync is standing by until you ask for it.',
                     pendingPush: false,
                     lastError: ''
                 });
@@ -7434,7 +7472,7 @@
                     userId: this.sync.userId,
                     campaignId: this.sync.config.campaignId,
                     profileName: this.sync.config.profileName,
-                    message: 'Signed in for cloud sync.'
+                    message: 'Signed in. Cloud sync will fetch or push only when needed.'
                 });
                 return { ok: true, userId: this.sync.userId };
             } catch (err) {
@@ -7684,8 +7722,18 @@
         }
 
         scheduleCloudPush(reason = 'scheduled') {
-            if (!this.hasLiveSyncConnection() && !this.isAutoSyncEnabledOnPage()) return;
             if (!this.sync.config.enabled) return;
+            if (!this.canAutoPushCloud(reason)) {
+                this.updateSyncStatus({
+                    pendingPush: !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size),
+                    connected: this.hasLiveSyncConnection(),
+                    mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
+                    message: this.sync.userId
+                        ? 'Local edits are ready to sync when needed.'
+                        : this.syncStatus.message
+                });
+                return;
+            }
 
             if (this.sync.pushTimer) clearTimeout(this.sync.pushTimer);
             this.sync.pushTimer = setTimeout(() => {
@@ -9694,6 +9742,7 @@
         maybeHydrateBoardRoom(options = {}) {
             const cfg = this.sync && this.sync.config ? this.sync.config : null;
             if (!cfg || !cfg.enabled || !cfg.supabaseUrl || !cfg.anonKey || !cfg.campaignId) return null;
+            if (isBoardPage()) return null;
             const target = this.resolveBoardRoomTarget(options);
             const key = `board:${target.scope}:${target.caseId || 'campaign'}`;
             return this.queueRoomHydration(key, async () => {

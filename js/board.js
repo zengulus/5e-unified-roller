@@ -4249,7 +4249,7 @@ function finalizeDraggedNode(clientX, clientY, options = {}) {
             }
         }
         if (isGroupNodeType(sourceNodeType)) syncGroupNodeMeta(sourceNode);
-        saveBoard({ flushNow: true });
+        saveBoard();
     }
 
     draggedNode = null;
@@ -5236,7 +5236,7 @@ function clearBoard() {
     const emptyPayload = getEmptyBoardPayload();
     loadBoard({}, emptyPayload);
     updateViewCSS();
-    saveBoard({ flushNow: true, forceHistory: true, historyReason: 'clear' });
+    saveBoard({ forceHistory: true, historyReason: 'clear' });
     showShortcutAlert(lastClearedBoardPayload ? 'Board cleared. Undo Clear is available.' : 'Board cleared.');
 }
 
@@ -5296,7 +5296,7 @@ function undoClearBoard() {
     updateUndoClearButton();
     loadBoard({}, payload);
     updateViewCSS();
-    saveBoard({ flushNow: true, forceHistory: true, historyReason: 'undo-clear' });
+    saveBoard({ forceHistory: true, historyReason: 'undo-clear' });
     showShortcutAlert('Board restored after clear');
 }
 

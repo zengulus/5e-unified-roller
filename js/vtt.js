@@ -5805,7 +5805,7 @@
                 if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
                 else draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            }, { fitView: true });
             return;
         }
 
@@ -5833,7 +5833,7 @@
                     setSceneViewPreference(SCENE_VIEW_SHARED);
                 }
                 previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            }, { fitView: true });
             return;
         }
 
@@ -5845,7 +5845,7 @@
                 if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
                 else draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            }, { fitView: true });
             return;
         }
 
@@ -5871,7 +5871,7 @@
                 if (!scene) return;
                 draft.activeSceneId = scene.id;
                 previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            }, { fitView: true });
             return;
         }
 
@@ -5886,7 +5886,7 @@
                 if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
                 else draft.activeSceneId = nextScene.id;
                 previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            }, { fitView: true });
             return;
         }
 
@@ -5912,7 +5912,7 @@
                     setSceneViewPreference(SCENE_VIEW_SHARED);
                 }
                 previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            }, { fitView: true });
             return;
         }
 
@@ -6108,7 +6108,7 @@
                 if (!scene) return;
                 draft.activeSceneId = scene.id;
                 previewTokenId = '';
-            }, { fitView: true, flushNow: true });
+            }, { fitView: true });
             return;
         }
 

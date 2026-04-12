@@ -427,19 +427,24 @@
 
         if (!status.connected) {
             const hasLocalEdits = !!(status.pendingPush || Number(status.dirtyScopes) > 0);
+            const isSignedInIdle = !hasLocalEdits && status.mode === 'idle' && !!status.userId;
             return {
-                state: 'offline',
-                buttonLabel: hasLocalEdits ? 'Reconnect' : 'Not connected',
-                title: hasLocalEdits ? 'Your latest edits are still local' : 'Not connected to shared campaign',
+                state: isSignedInIdle ? 'local-page' : 'offline',
+                buttonLabel: hasLocalEdits ? 'Needs sync' : (isSignedInIdle ? 'Signed in' : 'Not connected'),
+                title: hasLocalEdits
+                    ? 'Your latest edits are ready to sync'
+                    : (isSignedInIdle ? 'Signed in and standing by' : 'Not connected to shared campaign'),
                 detail: hasLocalEdits
-                    ? 'Reconnect to share these edits and catch up to the latest campaign state.'
-                    : 'You may not have the latest shared version on this page until it reconnects.',
+                    ? 'Sync when you want to share these edits or catch up to the latest campaign state.'
+                    : (isSignedInIdle
+                        ? 'Your browser session is ready. Shared data will only load when this page actually needs it.'
+                        : 'You may not have the latest shared version on this page until it reconnects.'),
                 meta: [
                     status.lastError ? `Last problem: ${status.lastError}.` : '',
                     sharedMeta
                 ].filter(Boolean).join(' '),
-                primaryAction: configured ? 'connect' : 'settings',
-                primaryLabel: configured ? 'Reconnect now' : 'Open connect actions',
+                primaryAction: configured ? (hasLocalEdits ? 'sync-now' : 'connect') : 'settings',
+                primaryLabel: configured ? (hasLocalEdits ? 'Sync now' : 'Reconnect now') : 'Open connect actions',
                 secondaryAction: '',
                 secondaryLabel: ''
             };

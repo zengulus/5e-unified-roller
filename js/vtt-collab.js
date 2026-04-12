@@ -11,10 +11,9 @@ import * as decoding from './vendor/lib0/decoding.js';
 import { createCollabRelayChannel } from './collab-relay-client.js';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 2500;
+const CLOUD_FLUSH_DELAY_MS = 8000;
 const SYNC_RECONCILE_INTERVAL_MS = 15000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 30000;
-const DURABLE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
@@ -1290,6 +1289,7 @@ class VTTCollabSession {
         this.lastTrackedPresenceKey = '';
         this.pendingMirrorTimer = null;
         this.pendingFlushTimer = null;
+        this.pendingFlushOptions = null;
         this.pendingFlushPromise = null;
         this.pendingReadyFlush = false;
         this.pendingReconnectTimer = null;
@@ -1638,13 +1638,7 @@ class VTTCollabSession {
 
     startPeriodicSave() {
         if (this.periodicSaveTimer) clearInterval(this.periodicSaveTimer);
-        this.periodicSaveTimer = setInterval(() => {
-            if (this.destroyed || !this.connected || !this.ready || !this.isDirty) return;
-            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-            this.flushSnapshotNow().catch((err) => {
-                console.warn('RTF_VTT_COLLAB: Periodic save failed', err);
-            });
-        }, DURABLE_SAVE_INTERVAL_MS);
+        this.periodicSaveTimer = null;
     }
 
     stopPeriodicSave() {
@@ -1741,7 +1735,6 @@ class VTTCollabSession {
                     this.connected = true;
                     this.reconnectAttempts = 0;
                     this.startPeriodicSync();
-                    this.startPeriodicSave();
                     this.updateStatus({
                         state: 'live',
                         detail: 'Live VTT connected.',
@@ -1981,17 +1974,30 @@ class VTTCollabSession {
         }, LOCAL_MIRROR_DELAY_MS);
     }
 
-    scheduleCloudFlush() {
+    scheduleCloudFlush(options = {}) {
         if (this.destroyed) return;
+        const opts = options && typeof options === 'object' ? options : {};
         if (!this.ready) {
             this.pendingReadyFlush = true;
+            this.pendingFlushOptions = {
+                ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
+                ...opts
+            };
             return;
         }
         this.pendingReadyFlush = false;
+        this.pendingFlushOptions = {
+            ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
+            ...opts
+        };
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
         this.pendingFlushTimer = setTimeout(() => {
+            const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
+                ? { ...this.pendingFlushOptions }
+                : {};
             this.pendingFlushTimer = null;
-            this.flushSnapshotNow().catch((err) => {
+            this.pendingFlushOptions = null;
+            this.flushSnapshotNow(pendingOpts).catch((err) => {
                 console.warn('RTF_VTT_COLLAB: Delayed cloud flush failed', err);
             });
         }, CLOUD_FLUSH_DELAY_MS);
@@ -2134,14 +2140,16 @@ class VTTCollabSession {
         }
         if (base && nextSig === buildSnapshotSignature(base, this.coerceSnapshot.bind(this))) {
             if (opts.flushNow) {
-                return this.flushSnapshotNow({ forceCompatibilityMirror: true });
+                this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+                return Promise.resolve({ ok: true, reason: 'scheduled' });
             }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
         const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this));
         if (nextSig === currentSig) {
             if (opts.flushNow) {
-                return this.flushSnapshotNow();
+                this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+                return Promise.resolve({ ok: true, reason: 'scheduled' });
             }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
@@ -2156,7 +2164,8 @@ class VTTCollabSession {
             );
             if (!patched) {
                 if (opts.flushNow) {
-                    return this.flushSnapshotNow();
+                    this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+                    return Promise.resolve({ ok: true, reason: 'scheduled' });
                 }
                 return Promise.resolve({ ok: true, reason: 'unchanged' });
             }
@@ -2164,7 +2173,8 @@ class VTTCollabSession {
             applySnapshotToDoc(this.doc, next, this.coerceSnapshot.bind(this), this.originLocalSnapshot, Date.now());
         }
         if (opts.flushNow) {
-            return this.flushSnapshotNow({ forceCompatibilityMirror: true });
+            this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+            return Promise.resolve({ ok: true, reason: 'scheduled' });
         }
         return Promise.resolve({ ok: true });
     }
@@ -2205,9 +2215,7 @@ class VTTCollabSession {
             Math.max(Date.now(), nextSnapshotUpdatedAt || scopeUpdatedAt || this.getSharedStoreUpdatedAt())
         );
         if (opts.flushNow) {
-            this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch((err) => {
-                console.warn('RTF_VTT_COLLAB: Shared-store flush failed', err);
-            });
+            this.scheduleCloudFlush({ forceCompatibilityMirror: true });
         }
         return true;
     }

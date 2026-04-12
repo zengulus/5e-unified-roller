@@ -15,7 +15,7 @@ const DEFAULT_CASE_NAME = 'UNNAMED CASE';
 const DEFAULT_CAMPAIGN_NAME = 'CAMPAIGN META BOARD';
 const CURSOR_PRECISION = 10;
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 2500;
+const CLOUD_FLUSH_DELAY_MS = 8000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 30000;
 const HISTORY_CAPTURE_MIN_INTERVAL_MS = 12000;
 const BOARD_ADMIN_EVENT_APPLY_SNAPSHOT = 'admin-apply-snapshot';
@@ -651,6 +651,7 @@ class BoardCollabSession {
         this.lastSnapshotSource = '';
         this.pendingMirrorTimer = null;
         this.pendingFlushTimer = null;
+        this.pendingFlushOptions = null;
         this.pendingFlushPromise = null;
         this.pendingSnapshot = null;
         this.remotePresence = new Map();
@@ -1426,12 +1427,21 @@ class BoardCollabSession {
         }, LOCAL_MIRROR_DELAY_MS);
     }
 
-    scheduleCloudFlush() {
+    scheduleCloudFlush(options = {}) {
         if (this.roomResetRequired || !this.ready || this.destroyed || typeof this.store.saveBoardRoomSnapshot !== 'function') return;
+        const opts = options && typeof options === 'object' ? options : {};
+        this.pendingFlushOptions = {
+            ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
+            ...opts
+        };
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
         this.pendingFlushTimer = setTimeout(() => {
+            const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
+                ? { ...this.pendingFlushOptions }
+                : {};
             this.pendingFlushTimer = null;
-            this.flushSnapshotNow().catch((err) => {
+            this.pendingFlushOptions = null;
+            this.flushSnapshotNow(pendingOpts).catch((err) => {
                 console.warn('RTF_BOARD_COLLAB: Scheduled flush failed', err);
             });
         }, CLOUD_FLUSH_DELAY_MS);
@@ -1601,22 +1611,24 @@ class BoardCollabSession {
         }
         if (nextSig && nextSig === buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot)) {
             if (opts.flushNow) {
-                return this.flushSnapshotNow({
+                this.scheduleCloudFlush({
                     forceHistory: !!opts.forceHistory,
                     historyReason: opts.historyReason || '',
                     forceCompatibilityMirror: true
                 });
+                return Promise.resolve({ ok: true, reason: 'scheduled' });
             }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
         const stamp = Date.now();
         applySnapshotToDoc(this.doc, next, this.scope, this.caseId, this.originLocalSnapshot, stamp);
         if (opts.flushNow) {
-            return this.flushSnapshotNow({
+            this.scheduleCloudFlush({
                 forceHistory: !!opts.forceHistory,
                 historyReason: opts.historyReason || '',
                 forceCompatibilityMirror: true
             });
+            return Promise.resolve({ ok: true, reason: 'scheduled' });
         }
         return Promise.resolve({ ok: true });
     }
@@ -1635,12 +1647,10 @@ class BoardCollabSession {
         const stamp = Math.max(Date.now(), next.updatedAt || 0);
         applySnapshotToDoc(this.doc, next, this.scope, this.caseId, this.originSharedStore, stamp);
         if (opts.flushNow) {
-            this.flushSnapshotNow({
+            this.scheduleCloudFlush({
                 forceHistory: !!opts.forceHistory,
                 historyReason: opts.historyReason || 'shared-store',
                 forceCompatibilityMirror: true
-            }).catch((err) => {
-                console.warn('RTF_BOARD_COLLAB: Shared-store flush failed', err);
             });
         }
         return true;
@@ -1678,11 +1688,7 @@ class BoardCollabSession {
                 changes: normalizedChanges
             }).catch(() => { });
         }
-        if (opts.flushNow) {
-            this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch((err) => {
-                console.warn('RTF_BOARD_COLLAB: Position flush failed', err);
-            });
-        }
+        if (opts.flushNow) this.scheduleCloudFlush({ forceCompatibilityMirror: true });
     }
 
     setCursor(cursor) {
@@ -1883,7 +1889,7 @@ class BoardCollabSession {
 
     handleVisibilityChange() {
         if (!document.hidden) return;
-        this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
+        this.scheduleCloudFlush({ forceCompatibilityMirror: true });
     }
 
     handleBeforeUnload() {

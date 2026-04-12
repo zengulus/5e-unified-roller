@@ -1921,6 +1921,18 @@ function setQuickStatusFromSync(status) {
         setQuickStatus(`connected to "${campaign}" as ${user}.`);
         return;
     }
+    if ((status.pendingPush || Number(status.dirtyScopes) > 0) && status.mode === 'idle' && status.userId) {
+        const campaign = status.campaignId || 'unknown';
+        const user = status.userId.slice(0, 8) + '…';
+        setQuickStatus(`signed in to "${campaign}" as ${user}; local edits are ready to sync.`);
+        return;
+    }
+    if (status.mode === 'idle' && status.userId) {
+        const campaign = status.campaignId || 'unknown';
+        const user = status.userId.slice(0, 8) + '…';
+        setQuickStatus(`signed in to "${campaign}" as ${user}; cloud data stays idle until needed.`);
+        return;
+    }
     if (status.mode === 'connecting') {
         setQuickStatus('connecting...');
         return;
