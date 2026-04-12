@@ -158,6 +158,7 @@
     const tokenLayerEl = document.getElementById('vtt-token-layer');
     const visionLayerEl = document.getElementById('vtt-vision-layer');
     const caseNameEl = document.getElementById('vtt-case-name');
+    const locationNameEl = document.getElementById('vtt-location-name');
     const syncChipEl = document.getElementById('vtt-sync-chip');
     const settingsToggleEl = document.getElementById('vtt-settings-toggle');
     const initiativeToggleEl = document.getElementById('vtt-initiative-toggle');
@@ -5150,6 +5151,7 @@
         renderToolsMenu();
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
+        if (locationNameEl) locationNameEl.textContent = scene.name || 'Scene';
         if (roleToggleEl) roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
         if (activeSceneLabelEl) activeSceneLabelEl.textContent = `Scene: ${sharedScene.name || 'Scene'}`;
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';

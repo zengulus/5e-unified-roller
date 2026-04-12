@@ -16,21 +16,22 @@
     <header class="hero-header vtt-topbar">
         <div class="vtt-topbar-brand">
             <p class="hero-eyebrow">Ravnica Task Force</p>
-            <h1>Light VTT</h1>
             <div class="vtt-topbar-meta">
-                <span class="vtt-topbar-case">Case <strong id="vtt-case-name">Primary Case</strong></span>
+                <span class="vtt-topbar-case">Case: <strong id="vtt-case-name">Primary Case</strong></span>
+                <span class="vtt-topbar-location">- Location: <strong id="vtt-location-name">Scene 1</strong></span>
                 <span class="vtt-sync-chip" id="vtt-sync-chip">Local</span>
             </div>
         </div>
+        <div class="vtt-topbar-quick-controls">
+            <button class="hero-btn ghost" data-action="toggle-role" id="vtt-role-toggle">DM Mode</button>
+            <button class="hero-btn ghost" data-action="zoom-out">-</button>
+            <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
+            <button class="hero-btn ghost" data-action="zoom-in">+</button>
+            <button class="hero-btn ghost" data-action="toggle-ruler-mode" id="vtt-ruler-toggle"
+                aria-pressed="false" aria-label="Toggle ruler" title="Ruler">📏</button>
+        </div>
         <div class="hero-actions vtt-topbar-actions">
-            <div class="hero-action-bar primary">
-                <button class="hero-btn ghost" data-action="toggle-role" id="vtt-role-toggle">DM Mode</button>
-                <button class="hero-btn ghost" data-action="zoom-out">-</button>
-                <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
-                <button class="hero-btn ghost" data-action="zoom-in">+</button>
-                <button class="hero-btn ghost" data-action="toggle-ruler-mode" id="vtt-ruler-toggle"
-                    aria-pressed="false" aria-label="Toggle ruler" title="Ruler">📏</button>
-            </div>
+            <div class="hero-action-bar primary"></div>
             <div class="hero-action-bar secondary">
                 <div class="vtt-popover-anchor vtt-topbar-tools">
                     <button class="hero-btn ghost" data-action="toggle-tools-menu" id="vtt-tools-menu-toggle"
