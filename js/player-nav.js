@@ -427,17 +427,17 @@
 
         if (!status.connected) {
             const hasLocalEdits = !!(status.pendingPush || Number(status.dirtyScopes) > 0);
-            const isSignedInIdle = !hasLocalEdits && status.mode === 'idle' && !!status.userId;
+            const isAuthorizedIdle = !hasLocalEdits && !!status.userId;
             return {
-                state: isSignedInIdle ? 'local-page' : 'offline',
-                buttonLabel: hasLocalEdits ? 'Needs sync' : (isSignedInIdle ? 'Signed in' : 'Not connected'),
+                state: isAuthorizedIdle ? 'ready' : 'offline',
+                buttonLabel: hasLocalEdits ? 'Needs sync' : (isAuthorizedIdle ? 'Connected' : 'Not connected'),
                 title: hasLocalEdits
                     ? 'Your latest edits are ready to sync'
-                    : (isSignedInIdle ? 'Signed in and standing by' : 'Not connected to shared campaign'),
+                    : (isAuthorizedIdle ? 'Connected to shared campaign' : 'Not connected to shared campaign'),
                 detail: hasLocalEdits
                     ? 'Sync when you want to share these edits or catch up to the latest campaign state.'
-                    : (isSignedInIdle
-                        ? 'Your browser session is ready. Shared data will only load when this page actually needs it.'
+                    : (isAuthorizedIdle
+                        ? 'Your browser is authorized. Shared data will load when this page needs it.'
                         : 'You may not have the latest shared version on this page until it reconnects.'),
                 meta: [
                     status.lastError ? `Last problem: ${status.lastError}.` : '',
@@ -843,6 +843,8 @@
         let latestSyncStatus = null;
         let latestSyncConflict = null;
         let syncActionInFlight = false;
+        let syncAutoConnectInFlight = false;
+        let syncAutoConnectLastAttemptAt = 0;
         let syncActionNotice = '';
         let syncActionNoticeIsError = false;
 
@@ -921,6 +923,31 @@
             setSyncActionButton(syncPrimaryBtn, experience.primaryAction, experience.primaryLabel);
             setSyncActionButton(syncSecondaryBtn, experience.secondaryAction, experience.secondaryLabel);
             syncActions.hidden = syncPrimaryBtn.hidden && syncSecondaryBtn.hidden;
+        };
+
+        const maybeAutoConnectSync = () => {
+            const status = latestSyncStatus && typeof latestSyncStatus === 'object' ? latestSyncStatus : null;
+            if (!status || status.connected || !status.enabled || syncActionInFlight || syncAutoConnectInFlight) return;
+            if (status.mode === 'connecting' || status.mode === 'auth_required' || status.mode === 'disabled') return;
+            if (status.pendingConflict || latestSyncConflict) return;
+
+            const store = getStore();
+            const config = store && typeof store.getSyncConfig === 'function' ? store.getSyncConfig() : null;
+            if (!hasConfiguredSync(config) || typeof store.connectSync !== 'function') return;
+
+            const now = Date.now();
+            if (status.mode === 'error' && now - syncAutoConnectLastAttemptAt < 60000) return;
+            if (now - syncAutoConnectLastAttemptAt < 10000) return;
+
+            syncAutoConnectLastAttemptAt = now;
+            syncAutoConnectInFlight = true;
+            store.connectSync({ explicit: true }).catch((err) => {
+                console.warn('RTF_NAV: Auto-connect failed', err);
+            }).finally(() => {
+                syncAutoConnectInFlight = false;
+                refreshSyncSnapshots();
+                renderSyncExperience();
+            });
         };
 
         async function runSyncAction(action) {
@@ -1123,6 +1150,7 @@
 
         refreshSyncSnapshots();
         renderSyncExperience();
+        maybeAutoConnectSync();
 
         const store = getStore();
         if (store && typeof store.onSyncStatus === 'function') {
@@ -1133,6 +1161,7 @@
                     ? store.getPendingConflict()
                     : null;
                 renderSyncExperience();
+                maybeAutoConnectSync();
             });
         }
         window.addEventListener('rtf-sync-conflict', () => {
