@@ -284,6 +284,8 @@
         anonKey: '',
         campaignId: '',
         profileName: '',
+        loginEmail: '',
+        loginPassword: '',
         collabRelayUrl: '',
         backendMode: SYNC_BACKEND_LEGACY,
         schema: 'public',
@@ -2397,6 +2399,8 @@
             anonKey: typeof source.anonKey === 'string' ? source.anonKey.trim() : '',
             campaignId: sanitizeCampaignId(source.campaignId),
             profileName: sanitizeProfileName(source.profileName),
+            loginEmail: typeof source.loginEmail === 'string' ? source.loginEmail.trim() : '',
+            loginPassword: typeof source.loginPassword === 'string' ? source.loginPassword : '',
             collabRelayUrl: typeof source.collabRelayUrl === 'string' ? source.collabRelayUrl.trim() : '',
             backendMode: sanitizeSyncBackendMode(source.backendMode),
             schema: sanitizeIdentifier(source.schema, DEFAULT_SYNC_CONFIG.schema),
@@ -2427,7 +2431,9 @@
         return sanitizeSyncConfig({ ...DEFAULT_SYNC_CONFIG, ...(boot || {}), ...(stored || {}) });
     };
 
-    const shouldAutoConnectOnThisPage = () => {
+    const shouldAutoConnectOnThisPage = (config = null) => {
+        const cfg = config && typeof config === 'object' ? config : null;
+        if (cfg && cfg.enabled && cfg.autoConnect !== false && cfg.loginEmail && cfg.loginPassword) return true;
         const body = global.document && global.document.body ? global.document.body : null;
         return !!(body && body.dataset && body.dataset.syncAutoconnect === '1');
     };
@@ -2546,7 +2552,7 @@
             this.load();
             this.updateSyncStatus({});
 
-            if (this.sync.config.enabled && this.sync.config.autoConnect && shouldAutoConnectOnThisPage()) {
+            if (this.sync.config.enabled && this.sync.config.autoConnect && shouldAutoConnectOnThisPage(this.sync.config)) {
                 this.connectSync().catch((err) => {
                     this.updateSyncStatus({
                         mode: 'error',
@@ -3874,7 +3880,7 @@
 
             if (reconnect) {
                 if (next.enabled) {
-                    this.connectSync({ explicit: shouldAutoConnectOnThisPage() }).catch((err) => {
+                    this.connectSync({ explicit: shouldAutoConnectOnThisPage(next) }).catch((err) => {
                         this.updateSyncStatus({
                             mode: 'error',
                             connected: false,
@@ -5640,7 +5646,7 @@
                 return { ok: false, reason: 'missing-config' };
             }
 
-            if (!explicit && !shouldAutoConnectOnThisPage()) {
+            if (!explicit && !shouldAutoConnectOnThisPage(config)) {
                 this.updateSyncStatus({
                     mode: 'idle',
                     connected: false,
@@ -7180,6 +7186,28 @@
                     return { ok: true, userId: existingSession.user.id };
                 }
 
+                const loginEmail = this.sync.config && this.sync.config.loginEmail ? this.sync.config.loginEmail : '';
+                const loginPassword = this.sync.config && this.sync.config.loginPassword ? this.sync.config.loginPassword : '';
+                if (loginEmail && loginPassword) {
+                    const passwordResult = await this.sync.client.auth.signInWithPassword({
+                        email: loginEmail,
+                        password: loginPassword
+                    });
+                    if (passwordResult.error) {
+                        return {
+                            ok: false,
+                            message: passwordResult.error.message || 'Player login failed.'
+                        };
+                    }
+                    const passwordSession = passwordResult.data ? passwordResult.data.session : null;
+                    if (passwordSession && passwordSession.user && passwordSession.user.id) {
+                        this.sync.userId = passwordSession.user.id;
+                        this.sync.authCheckedAt = Date.now();
+                        return { ok: true, userId: passwordSession.user.id };
+                    }
+                    return { ok: false, message: 'No authenticated user session.' };
+                }
+
                 const anonResult = await this.sync.client.auth.signInAnonymously({
                     options: {
                         data: this.sync.config.profileName ? { profile_name: this.sync.config.profileName } : {}
@@ -7240,7 +7268,11 @@
             if (!config.supabaseUrl || !config.anonKey) return { ok: false, error: 'Supabase URL and anon key required.' };
 
             const cleanName = sanitizeProfileName(profileName);
-            if (cleanName) this.setSyncConfig({ profileName: cleanName }, { reconnect: false });
+            this.setSyncConfig({
+                ...(cleanName ? { profileName: cleanName } : {}),
+                loginEmail: cleanEmail,
+                loginPassword: cleanPassword
+            }, { reconnect: false });
 
             try {
                 await this.ensureSupabaseClient(config);
