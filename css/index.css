@@ -1969,9 +1969,14 @@ textarea:focus {
     white-space: pre-wrap;
 }
 
+.favorite-feature-resource {
+    font-size: 0.76rem;
+    color: var(--accent-muted);
+}
+
 .favorite-feature-actions {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 8px;
     margin-top: 6px;
 }
@@ -4170,12 +4175,36 @@ button {
 }
 
 .feat-controls {
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) auto auto;
 }
 
 .feat-post-btn {
     background: var(--accent-feat);
     color: #fff;
+}
+
+.feat-resource-link {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    font-size: 0.74rem;
+    color: #9a9a9a;
+}
+
+.feat-resource-link label {
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.feat-resource-link select {
+    min-width: 0;
+}
+
+.feat-use-resource-btn {
+    background: #26322c;
+    color: #d7f3df;
+    border: 1px solid #355542;
 }
 
 .feat-favorite-btn {

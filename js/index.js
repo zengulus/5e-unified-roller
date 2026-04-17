@@ -1796,10 +1796,12 @@ function sanitizeCharacterData(rawChar) {
 
     out.features = Array.isArray(source.features) ? source.features.slice(0, 200).map((entry) => {
         const row = isPlainObject(entry) ? entry : {};
+        const resourceIdRaw = sanitizeString(row.resourceId || '', '', 80);
         return {
             name: sanitizeString(row.name || '', '', 200),
             desc: sanitizeString(row.desc || '', '', 10000),
-            favorite: sanitizeBoolean(row.favorite, false)
+            favorite: sanitizeBoolean(row.favorite, false),
+            resourceId: resourceIdRaw.replace(/[^A-Za-z0-9_-]/g, '')
         };
     }) : [];
 
@@ -1823,7 +1825,10 @@ function sanitizeCharacterData(rawChar) {
         const row = isPlainObject(entry) ? entry : {};
         const display = ['none', 'bar', 'bubble'].includes(row.display) ? row.display : 'none';
         const rest = ['none', 'sr', 'lr'].includes(row.rest) ? row.rest : 'none';
+        const idRaw = sanitizeString(row.id || generateInventoryId('resource'), '', 80);
+        const id = idRaw.replace(/[^A-Za-z0-9_-]/g, '') || generateInventoryId('resource');
         return {
+            id,
             name: sanitizeString(row.name || '', '', 160),
             curr: sanitizeNumber(row.curr, 0, 0, 999999),
             max: sanitizeNumber(row.max, 0, 0, 999999),
@@ -1833,6 +1838,13 @@ function sanitizeCharacterData(rawChar) {
             rFormula: sanitizeString(row.rFormula || '1d6', '1d6', 120)
         };
     }) : [];
+
+    const resourceIds = new Set(out.resources.map((res) => res.id));
+    out.features.forEach((feature) => {
+        if (feature.resourceId && !resourceIds.has(feature.resourceId)) {
+            feature.resourceId = '';
+        }
+    });
 
     if (Array.isArray(source.quickActions)) {
         out.quickActions = sanitizeQuickActions(source.quickActions, { allowEmpty: true });
@@ -3237,6 +3249,7 @@ function shortRest() {
 
     save();
     renderResources();
+    renderFeatures();
     renderSpells();
     showLog("Short Rest", "Counters Reset");
 }
@@ -3800,14 +3813,47 @@ function renderFavoriteFeatures() {
     list.innerHTML = favorites.map(({ feat, idx }) => {
         const safeName = escapeHtml(feat.name || 'Unnamed Feature');
         const safeDesc = escapeHtml(feat.desc || '');
+        const linkedResource = getFeatureLinkedResource(feat);
+        const resourceHtml = linkedResource
+            ? `<div class="favorite-feature-resource" >Linked: ${escapeHtml(getResourceLabel(linkedResource))}</div>`
+            : '';
+        const primaryActionHtml = linkedResource
+            ? `<button class="feat-use-resource-btn" data-onclick="useFeatureResource(${idx})" >Use ${escapeHtml(getResourceName(linkedResource))}</button>`
+            : `<button class="feat-post-btn" data-onclick="postFeature(${idx})" >📢 Post to Chat</button>`;
         return `<div class="favorite-feature-row" > <div class="favorite-feature-head" >${safeName
             }</div> <div class="favorite-feature-desc" >${safeDesc || 'No description.'
-            }</div> <div class="favorite-feature-actions" > <button class="feat-post-btn" data-onclick="postFeature(${idx})" >📢 Post to Chat</button> <button class="feat-favorite-btn active" title="Unfavorite feature" data-onclick="toggleFeatureFavorite(${idx})" >&#9733;</button> </div> </div>`;
+            }</div> ${resourceHtml} <div class="favorite-feature-actions" > ${primaryActionHtml} <button class="feat-favorite-btn active" title="Unfavorite feature" data-onclick="toggleFeatureFavorite(${idx})" >&#9733;</button> </div> </div>`;
     }).join('');
 }
 
 function featureFavoriteClass(feat) {
     return feat && feat.favorite ? ' active' : '';
+}
+
+function getResourceName(res) {
+    return String(res && res.name ? res.name : 'Resource');
+}
+
+function getResourceLabel(res) {
+    if (!res) return '';
+    const curr = Number.isFinite(Number(res.curr)) ? Number(res.curr) : 0;
+    const max = Number.isFinite(Number(res.max)) ? Number(res.max) : 0;
+    return `${getResourceName(res)} (${curr}/${max})`;
+}
+
+function getFeatureLinkedResource(feat) {
+    if (!feat || !feat.resourceId || !Array.isArray(data.resources)) return null;
+    return data.resources.find((res) => res && res.id === feat.resourceId) || null;
+}
+
+function renderFeatureResourceOptions(selectedId = '') {
+    const resources = Array.isArray(data.resources) ? data.resources : [];
+    if (!resources.length) return '<option value="">No class resources yet</option>';
+    return `<option value="">No linked resource</option>${resources.map((res) => {
+        const id = res && res.id ? res.id : '';
+        const selected = id && id === selectedId ? 'selected' : '';
+        return `<option value="${escapeHtml(id)}"${selected}>${escapeHtml(getResourceLabel(res))}</option>`;
+    }).join('')}`;
 }
 
 function renderSkills() {
@@ -4002,12 +4048,18 @@ function renderFeatures() {
     document.getElementById('featureList').innerHTML = data.features.map((feat, i) => {
         const safeName = escapeHtml(feat && feat.name ? feat.name : '');
         const safeDesc = escapeHtml(feat && feat.desc ? feat.desc : '');
+        const linkedResource = getFeatureLinkedResource(feat);
+        const linkedResourceId = linkedResource ? linkedResource.id : '';
+        const resourceOptions = renderFeatureResourceOptions(linkedResourceId);
+        const primaryActionHtml = linkedResource
+            ? `<button class="feat-use-resource-btn" data-onclick="useFeatureResource(${i})" >Use ${escapeHtml(getResourceName(linkedResource))}</button>`
+            : `<button class="feat-post-btn" data-onclick="postFeature(${i})" >📢 Post to Chat</button>`;
         const favClass = featureFavoriteClass(feat);
         const favTitle = feat && feat.favorite ? 'Unfavorite feature' : 'Favorite feature';
         return ` <div class="atk-row" > <input class="atk-name-input" type="text" placeholder="Feature Name" value="${safeName}" data-oninput="updateFeature(${i}, 'name', this.value)" > <textarea class="atk-desc feat-desc" placeholder="Feature description..." data-oninput="updateFeature(${i}, 'desc', this.value)" >${safeDesc
         }
 
-                </textarea> <div class="atk-controls feat-controls" > <button class="feat-post-btn" data-onclick="postFeature(${i})" >📢 Post to Chat</button> <button class="feat-favorite-btn${favClass}" title="${favTitle}" data-onclick="toggleFeatureFavorite(${i})" >${feat && feat.favorite ? '&#9733;' : '&#9734;'
+                </textarea> <div class="feat-resource-link" > <label>Linked Resource</label> <select data-onchange="updateFeature(${i}, 'resourceId', this.value)" >${resourceOptions}</select> </div> <div class="atk-controls feat-controls" > ${primaryActionHtml} <button class="feat-favorite-btn${favClass}" title="${favTitle}" data-onclick="toggleFeatureFavorite(${i})" >${feat && feat.favorite ? '&#9733;' : '&#9734;'
             }</button> <button class="atk-btn-del" data-onclick="delFeature(${i})" >&times; </button> </div> </div> `;
     }).join('');
     renderFavoriteFeatures();
@@ -6431,7 +6483,7 @@ function delAttack(idx) {
 
 function addFeature() {
     data.features.push({
-        name: '', desc: '', favorite: false
+        name: '', desc: '', favorite: false, resourceId: ''
     });
     save();
     renderFeatures();
@@ -6439,9 +6491,17 @@ function addFeature() {
 
 function updateFeature(idx, field, val) {
     if (!Array.isArray(data.features) || !data.features[idx]) return;
-    if (!['name', 'desc', 'favorite'].includes(field)) return;
+    if (!['name', 'desc', 'favorite', 'resourceId'].includes(field)) return;
     if (field === 'favorite') {
         data.features[idx][field] = !!val;
+        save();
+        renderFeatures();
+        return;
+    }
+    if (field === 'resourceId') {
+        const nextId = String(val || '').replace(/[^A-Za-z0-9_-]/g, '');
+        const hasResource = Array.isArray(data.resources) && data.resources.some((res) => res && res.id === nextId);
+        data.features[idx].resourceId = hasResource ? nextId : '';
         save();
         renderFeatures();
         return;
@@ -6474,10 +6534,11 @@ function postFeature(idx) {
 
 function addResource() {
     data.resources.push({
-        name: '', curr: 0, max: 0, rest: 'none', display: 'none', rCheck: false, rFormula: '1d6'
+        id: generateInventoryId('resource'), name: '', curr: 0, max: 0, rest: 'none', display: 'none', rCheck: false, rFormula: '1d6'
     });
     save();
     renderResources();
+    renderFeatures();
 }
 
 function updateRes(i, field, val) {
@@ -6498,6 +6559,7 @@ function updateRes(i, field, val) {
     data.resources[i][field] = val;
     save();
     renderResources();
+    renderFeatures();
 }
 
 function modifyRes(i, delta) {
@@ -6507,6 +6569,7 @@ function modifyRes(i, delta) {
     res.curr = Math.max(0, Math.min(res.max, newVal));
     save();
     renderResources();
+    renderFeatures();
 }
 
 function setResValue(i) {
@@ -6521,15 +6584,23 @@ function setResValue(i) {
             res.curr = Math.max(0, Math.min(res.max, parsed));
             save();
             renderResources();
+            renderFeatures();
         }
     }
 }
 
 function delRes(i) {
     if (!Array.isArray(data.resources) || i < 0 || i >= data.resources.length) return;
+    const removedId = data.resources[i] && data.resources[i].id;
     data.resources.splice(i, 1);
+    if (removedId && Array.isArray(data.features)) {
+        data.features.forEach((feat) => {
+            if (feat && feat.resourceId === removedId) feat.resourceId = '';
+        });
+    }
     save();
     renderResources();
+    renderFeatures();
 }
 
 function toggleResBubble(i, bubbleIdx) {
@@ -6546,6 +6617,27 @@ function toggleResBubble(i, bubbleIdx) {
 
     save();
     renderResources();
+    renderFeatures();
+}
+
+function useFeatureResource(idx) {
+    if (!Array.isArray(data.features) || !data.features[idx]) return;
+    const feat = data.features[idx];
+    const res = getFeatureLinkedResource(feat);
+    if (!res) {
+        showLog('No Resource', 'Linked');
+        return;
+    }
+    const curr = Number.isFinite(Number(res.curr)) ? Number(res.curr) : 0;
+    if (curr <= 0) {
+        showLog(getResourceName(res).substr(0, 10), 'Empty');
+        return;
+    }
+    res.curr = Math.max(0, curr - 1);
+    save();
+    renderResources();
+    renderFeatures();
+    showLog(getResourceName(res).substr(0, 10), `${res.curr}/${res.max}`);
 }
 
 function rollResRecharge(i) {
@@ -6568,6 +6660,7 @@ function rollResRecharge(i) {
     res.curr = Math.min(res.max, res.curr + total);
     save();
     renderResources();
+    renderFeatures();
 
     showLog(`Recharge ${formula}`, total);
 
