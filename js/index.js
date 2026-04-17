@@ -17,6 +17,7 @@ const statFullNames = {
     cha: 'Charisma'
 };
 const QUICK_ACTION_SEARCH_DICE = [20, 12, 10, 8, 6, 4, 100];
+const DEFAULT_TOOL_STAT = 'dex';
 
 const skillsMap = {
     'acrobatics': 'dex', 'animal handling': 'wis', 'arcana': 'int', 'athletics': 'str',
@@ -731,7 +732,7 @@ function normalizeQuickActionCode(value) {
 
 function isSupportedQuickActionCode(code) {
     const normalized = normalizeQuickActionCode(code);
-    return /^(rollInitiative|rollDie|rollCheck|rollSave|rollSkill|rollAttack|rollDamage|rollHitDie|rollDeathSave|rollResRecharge|rollCustom|castSpell|castSpellRitual|createNewCharacter|openCharCreator|openLevelUpWizard|Importer\.triggerImport)\s*\(/.test(normalized);
+    return /^(rollInitiative|rollDie|rollCheck|rollSave|rollSkill|rollTool|rollAttack|rollDamage|rollHitDie|rollDeathSave|rollResRecharge|rollCustom|castSpell|castSpellRitual|createNewCharacter|openCharCreator|openLevelUpWizard|Importer\.triggerImport)\s*\(/.test(normalized);
 }
 
 function getQuickActionMetaForCode(code, fallbackLabel = '') {
@@ -811,6 +812,18 @@ function getQuickActionMetaForCode(code, fallbackLabel = '') {
         return {
             label: skillName || 'Skill Check',
             summary: 'd20 skill check'
+        };
+    }
+
+    match = normalized.match(/^rollTool\(\s*(\d+)\s*\)$/);
+    if (match) {
+        const idx = parseInt(match[1], 10);
+        const toolName = data && Array.isArray(data.toolProficiencies) && data.toolProficiencies[idx]
+            ? String(data.toolProficiencies[idx].name || '').trim()
+            : '';
+        return {
+            label: toolName || `Tool ${idx + 1}`,
+            summary: 'd20 tool check'
         };
     }
 
@@ -1190,6 +1203,9 @@ function getDefaultChar() {
 
         ,
         skillMisc: {}
+
+        ,
+        toolProficiencies: []
 
         ,
         // NEW: Store manual skill bonuses
@@ -1747,6 +1763,20 @@ function sanitizeCharacterData(rawChar) {
         });
     }
 
+    out.toolProficiencies = Array.isArray(source.toolProficiencies) ? source.toolProficiencies.slice(0, 80).map((entry, idx) => {
+        const row = isPlainObject(entry) ? entry : {};
+        const idRaw = sanitizeString(row.id || `tool_${idx}`, `tool_${idx}`, 80);
+        const id = idRaw.replace(/[^A-Za-z0-9_-]/g, '') || `tool_${idx}`;
+        const stat = stats.includes(row.stat) ? row.stat : DEFAULT_TOOL_STAT;
+        return {
+            id,
+            name: sanitizeString(row.name || '', '', 120),
+            state: sanitizeNumber(row.state, 1, 0, 2),
+            stat,
+            misc: sanitizeString(row.misc || '', '', 24).toLowerCase()
+        };
+    }) : [];
+
     out.attacks = Array.isArray(source.attacks) ? source.attacks.slice(0, 100).map((entry) => {
         const row = isPlainObject(entry) ? entry : {};
         const legacyStatRaw = sanitizeString(row.stat || 'none', 'none', 16).toLowerCase();
@@ -2067,6 +2097,7 @@ function populateUI() {
     if (!data.skillOverrides) data.skillOverrides = {}
 
         ;
+    if (!Array.isArray(data.toolProficiencies)) data.toolProficiencies = [];
     if (!Array.isArray(data.spellbook)) data.spellbook = [];
     if (!Array.isArray(data.quickActions)) data.quickActions = getDefaultQuickActions();
     ensureQuickActionsState();
@@ -2149,6 +2180,7 @@ function populateUI() {
         'atk',
         'feats',
         'skills',
+        'tools',
         'roller',
         'io'];
 
@@ -2169,6 +2201,7 @@ function populateUI() {
     renderStats();
     renderFavoriteFeatures();
     renderSkills();
+    renderToolProficiencies();
     renderAttacks();
     renderFeatures();
     renderSpells();
@@ -2712,6 +2745,17 @@ function updateAll() {
         const bonus = mod + (profLevel * pb) + misc;
 
         document.getElementById(`skill-bonus-${s}`).innerText = (bonus >= 0 ? "+" : "") + bonus;
+    });
+
+    ensureToolProficiencies().forEach((tool) => {
+        const bonusEl = document.getElementById(`tool-bonus-${tool.id}`);
+        if (!bonusEl) return;
+        const stat = stats.includes(tool.stat) ? tool.stat : DEFAULT_TOOL_STAT;
+        const mod = getMod(data.stats[stat].val);
+        const profLevel = tool.state || 0;
+        const misc = getToolProficiencyMiscBonus(tool);
+        const bonus = mod + (profLevel * pb) + misc;
+        bonusEl.innerText = (bonus >= 0 ? "+" : "") + bonus;
     });
 
     updateSpellcastingDisplays();
@@ -3802,6 +3846,104 @@ function getSkillMiscBonus(skill) {
 
     // Otherwise parse as number
     return parseInt(val) || 0;
+}
+
+function generateToolProficiencyId() {
+    return `tool_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function ensureToolProficiencies() {
+    if (!Array.isArray(data.toolProficiencies)) data.toolProficiencies = [];
+    data.toolProficiencies = data.toolProficiencies.map((entry, idx) => {
+        const row = entry && typeof entry === 'object' ? entry : {};
+        return {
+            id: String(row.id || `tool_${idx}`).replace(/[^A-Za-z0-9_-]/g, '') || `tool_${idx}`,
+            name: String(row.name || ''),
+            state: Math.max(0, Math.min(2, parseInt(row.state, 10) || 0)),
+            stat: stats.includes(row.stat) ? row.stat : DEFAULT_TOOL_STAT,
+            misc: String(row.misc || '').toLowerCase().trim()
+        };
+    });
+    return data.toolProficiencies;
+}
+
+function getToolProficiencyById(toolId) {
+    const id = String(toolId || '');
+    return ensureToolProficiencies().find((tool) => tool.id === id) || null;
+}
+
+function getToolProficiencyMiscBonus(tool) {
+    const val = String(tool && tool.misc ? tool.misc : '').toLowerCase().trim();
+    if (!val) return 0;
+    if (stats.includes(val)) return getMod(data.stats[val].val);
+    return parseInt(val, 10) || 0;
+}
+
+function renderToolProficiencies() {
+    const list = document.getElementById('toolProficiencyList');
+    if (!list) return;
+    const tools = ensureToolProficiencies();
+
+    if (!tools.length) {
+        list.innerHTML = '<div class="tool-proficiency-empty">No tools yet. Add Thieves\' Tools, Herbalism Kit, Vehicles, or whatever weird little specialty your character picked up.</div>';
+        return;
+    }
+
+    list.innerHTML = tools.map((tool, idx) => {
+        const state = tool.state || 0;
+        const icon = state === 2 ? '◈' : (state === 1 ? '◆' : '◇');
+        const cls = state === 2 ? 'exp' : (state === 1 ? 'prof' : '');
+        const safeId = escapeJsString(tool.id);
+        const safeName = escapeHtml(tool.name || '');
+        const safeMisc = escapeHtml(tool.misc || '');
+        const statLabel = String(tool.stat || DEFAULT_TOOL_STAT).toUpperCase().substr(0, 3);
+
+        return `<div class="skill-row tool-proficiency-row">
+            <span class="prof-toggle ${cls}" data-onclick="cycleToolProficiency('${safeId}')" title="Click to change proficiency">${icon}</span>
+            <span class="skill-attr" data-onclick="cycleToolProficiencyAttr('${safeId}')" title="Click to change Attribute">${statLabel}</span>
+            <input type="text" class="tool-name-input" placeholder="Tool name" value="${safeName}" data-oninput="updateToolProficiencyName('${safeId}', this.value)">
+            <span class="skill-bonus tool-bonus" id="tool-bonus-${safeId}">+0</span>
+            <input type="text" class="skill-misc" placeholder="+0" value="${safeMisc}" data-onchange="updateToolProficiencyMisc('${safeId}', this.value)" title="Enter flat bonus (2) or stat name (cha)">
+            <button class="btn-roll-skill" data-onclick="rollTool(${idx})">🎲</button>
+            <button class="tool-remove-btn" data-onclick="removeToolProficiency('${safeId}')" title="Remove tool">×</button>
+        </div>`;
+    }).join('');
+}
+
+function addToolProficiency() {
+    ensureToolProficiencies().push({
+        id: generateToolProficiencyId(),
+        name: '',
+        state: 1,
+        stat: DEFAULT_TOOL_STAT,
+        misc: ''
+    });
+    save();
+    renderToolProficiencies();
+    updateAll();
+}
+
+function removeToolProficiency(toolId) {
+    const id = String(toolId || '');
+    data.toolProficiencies = ensureToolProficiencies().filter((tool) => tool.id !== id);
+    save();
+    renderToolProficiencies();
+    updateAll();
+}
+
+function updateToolProficiencyName(toolId, value) {
+    const tool = getToolProficiencyById(toolId);
+    if (!tool) return;
+    tool.name = String(value || '').slice(0, 120);
+    save();
+}
+
+function updateToolProficiencyMisc(toolId, value) {
+    const tool = getToolProficiencyById(toolId);
+    if (!tool) return;
+    tool.misc = String(value || '').toLowerCase().trim().slice(0, 24);
+    save();
+    updateAll();
 }
 
 function renderAttacks() {
@@ -5098,6 +5240,24 @@ function getQuickActionSearchCatalog() {
         }));
     });
 
+    if (Array.isArray(data.toolProficiencies)) {
+        data.toolProficiencies.forEach((tool, idx) => {
+            const toolName = String(tool && tool.name ? tool.name : '').trim();
+            if (!toolName) return;
+            const ability = stats.includes(tool.stat) ? tool.stat : DEFAULT_TOOL_STAT;
+            const abilityName = statFullNames[ability] || ability.toUpperCase();
+            items.push(buildQuickActionSearchCodeItem({
+                key: `tool:${idx}`,
+                category: 'Tool',
+                code: `rollTool(${idx})`,
+                label: toolName,
+                detail: abilityName,
+                priority: 830,
+                searchTerms: `${toolName} ${ability} ${abilityName} tool proficiency check`
+            }));
+        });
+    }
+
     if (Array.isArray(data.attacks)) {
         data.attacks.forEach((atk, idx) => {
             if (!hasQuickActionSearchAttack(atk)) return;
@@ -6099,6 +6259,27 @@ function rollSkill(skill) {
     }
 }
 
+function rollTool(idx) {
+    const tool = ensureToolProficiencies()[idx];
+    if (!tool) return;
+
+    const pb = getPB(data.meta.level);
+    const activeStat = stats.includes(tool.stat) ? tool.stat : DEFAULT_TOOL_STAT;
+    const mod = getMod(data.stats[activeStat].val);
+    const profLevel = tool.state || 0;
+    const misc = getToolProficiencyMiscBonus(tool);
+    const miscRaw = String(tool.misc || '').toLowerCase().trim();
+    const name = String(tool.name || '').trim() || `Tool ${idx + 1}`;
+    let label = `${name} (${activeStat.toUpperCase()})`;
+
+    if (misc !== 0) {
+        if (stats.includes(miscRaw)) label += ` +${miscRaw.toUpperCase()}`;
+        else label += ` +Bonus`;
+    }
+
+    rollDie(20, mod + (profLevel * pb) + misc, label, true, 'check');
+}
+
 function rollAttack(idx) {
     const atk = data.attacks[idx];
     const pb = getPB(data.meta.level);
@@ -6132,6 +6313,26 @@ function cycleSkill(skill) {
     data.skills[skill] = ((data.skills[skill] || 0) + 1) % 3;
     save();
     renderSkills();
+    updateAll();
+}
+
+function cycleToolProficiency(toolId) {
+    const tool = getToolProficiencyById(toolId);
+    if (!tool) return;
+    tool.state = ((tool.state || 0) + 1) % 3;
+    save();
+    renderToolProficiencies();
+    updateAll();
+}
+
+function cycleToolProficiencyAttr(toolId) {
+    const tool = getToolProficiencyById(toolId);
+    if (!tool) return;
+    const current = stats.includes(tool.stat) ? tool.stat : DEFAULT_TOOL_STAT;
+    const idx = stats.indexOf(current);
+    tool.stat = stats[(idx + 1) % stats.length];
+    save();
+    renderToolProficiencies();
     updateAll();
 }
 

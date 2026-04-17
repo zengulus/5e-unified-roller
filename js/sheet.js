@@ -85,6 +85,7 @@ export const Sheet = {
             skills: {},
             skillOverrides: {},
             skillMisc: {},
+            toolProficiencies: [],
             attacks: [],
             features: [],
             spells: [],

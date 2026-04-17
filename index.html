@@ -10,7 +10,7 @@
 
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/index.css?v=20260328b">
+    <link rel="stylesheet" href="css/index.css?v=20260417a">
 
 </head>
 
@@ -355,6 +355,17 @@
                         </div>
                         <div class="accordion-content" id="body-skills">
                             <div class="skill-list" id="skillGrid"></div>
+                        </div>
+                    </div>
+                    <div class="card" id="card-tools">
+                        <div class="drag-grip"></div>
+                        <div class="section-title" id="head-tools">
+                            <span>Tool Proficiencies</span>
+                            <span class="accordion-trigger-abs" data-onclick="toggleSection('tools')"></span>
+                        </div>
+                        <div class="accordion-content" id="body-tools">
+                            <div class="skill-list tool-proficiency-list" id="toolProficiencyList"></div>
+                            <button class="add-btn" data-onclick="addToolProficiency()">+Add Tool</button>
                         </div>
                     </div>
                     <div class="card" id="card-roller">
@@ -807,7 +818,7 @@
     <script src="js/pdf.min.js"></script>
     <script src="js/importer.js?v=20260222e"></script>
     <script src="js/store.js?v=20260413a"></script>
-    <script src="js/index.js?v=20260328b"></script>
+    <script src="js/index.js?v=20260417a"></script>
     <script src="js/player-nav.js?v=20260413a"></script>
     <script src="js/vector-field.js?v=20260224h"></script>
 </body>
