@@ -2507,7 +2507,7 @@ function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check', cus
     sendToDiscord(label + (effectiveMode !== 'norm' && allowAdvantage ? ` (${effectiveMode.toUpperCase()})` : ''),
         `Dice: ${formulaText}`, `**${total}**`, type, customDesc);
 
-    if (consumedInsp) consumeInspiration();
+    if (allowAdvantage) consumeRollModeAfterRoll(effectiveMode, consumedInsp);
     return { total, formulaText, result, effectiveMode };
 }
 
@@ -3283,6 +3283,17 @@ function useInspiration() {
     showLog("Inspiration!", "Active");
 }
 
+function consumeRollModeAfterRoll(effectiveMode, consumedInsp = false) {
+    if (consumedInsp) {
+        consumeInspiration();
+        return;
+    }
+
+    if (effectiveMode === 'adv' || effectiveMode === 'dis') {
+        setMode('norm');
+    }
+}
+
 function consumeInspiration() {
     if (consumeInspirationOnNextRoll) {
         consumeInspirationOnNextRoll = false;
@@ -3702,7 +3713,7 @@ function rollInitiative() {
     };
     queueInitiativeForTracker(initiativePacket);
     pushInitiativeToSharedVTT(initiativePacket);
-    if (consumedInsp) consumeInspiration();
+    consumeRollModeAfterRoll(effectiveMode, consumedInsp);
 }
 
 function rollDeathSave() {
@@ -4391,7 +4402,7 @@ function rollSpellAttack(name, attackBonus) {
     if (effectiveMode !== 'norm') formulaText += ` (${effectiveMode.toUpperCase()})`;
 
     showLog(`${name} Spell Atk`, total, result.isCrit, result.isFail);
-    if (consumedInsp) consumeInspiration();
+    consumeRollModeAfterRoll(effectiveMode, consumedInsp);
 
     return {
         ok: true,
