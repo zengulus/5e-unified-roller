@@ -7,7 +7,7 @@
         style.id = STYLE_ID;
         style.textContent = `
             #vtt-fog-layer > .vtt-fog-mask:not(.is-preview):not(.is-remove-preview) {
-                background: rgba(128, 128, 128, 0.75) !important;
+                background: rgba(64, 64, 64, 0.75) !important;
                 opacity: 1 !important;
                 box-shadow: none !important;
                 filter: none !important;
