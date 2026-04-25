@@ -7866,11 +7866,94 @@
                 : NON_YJS_AUTO_SAVE_DELAY_MS;
             this.sync.pushTimer = setTimeout(() => {
                 this.sync.pushTimer = null;
-                this.pushToCloud({ reason, silent: true, requirePageSync: !this.hasLiveSyncConnection() }).catch((err) => {
+
+                this.pushToCloud({
+                    reason,
+                    silent: true,
+                    requirePageSync: !this.hasLiveSyncConnection()
+                }).then((result) => {
+                    if (!result || result.ok !== false) return;
+
+                    const stillDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
+                    const reasonText = String(result.reason || 'error');
+
+                    if (reasonText === 'queued') {
+                        this.updateSyncStatus({
+                            pendingPush: true,
+                            connected: this.hasLiveSyncConnection(),
+                            message: 'Cloud push is queued.'
+                        });
+                        return;
+                    }
+
+                    if (reasonText === 'conflict') {
+                        this.updateSyncStatus({
+                            mode: 'conflict',
+                            connected: this.hasLiveSyncConnection(),
+                            pendingPush: stillDirty,
+                            message: 'The latest shared version needs review.',
+                            lastError: ''
+                        });
+                        return;
+                    }
+
+                    if (reasonText === 'locked') {
+                        this.updateSyncStatus({
+                            mode: 'locked',
+                            connected: this.hasLiveSyncConnection(),
+                            pendingPush: true,
+                            message: 'Another player is actively editing one of these scopes.',
+                            lastError: ''
+                        });
+                        return;
+                    }
+
+                    if (reasonText === 'auth-required') {
+                        this.updateSyncStatus({
+                            mode: 'auth_required',
+                            connected: this.hasLiveSyncConnection(),
+                            pendingPush: stillDirty,
+                            message: 'Authentication is required before autosave can finish.',
+                            lastError: result.error || 'Authentication required.'
+                        });
+                        return;
+                    }
+
+                    if (reasonText === 'missing-config') {
+                        this.updateSyncStatus({
+                            mode: 'error',
+                            connected: false,
+                            pendingPush: stillDirty,
+                            message: 'Missing sync config: URL, anon key, or campaign ID.',
+                            lastError: result.error || 'Missing required sync config.'
+                        });
+                        return;
+                    }
+
+                    if (reasonText === 'page-blocked') {
+                        this.updateSyncStatus({
+                            mode: 'idle',
+                            connected: this.hasLiveSyncConnection(),
+                            pendingPush: stillDirty,
+                            message: 'Local edits are waiting, but this page is not allowed to autosync.',
+                            lastError: ''
+                        });
+                        return;
+                    }
+
                     this.updateSyncStatus({
                         mode: 'error',
                         connected: this.hasLiveSyncConnection(),
-                        pendingPush: false,
+                        pendingPush: stillDirty,
+                        message: 'Cloud push failed.',
+                        lastError: result.error || `Cloud push failed: ${reasonText}`
+                    });
+                }).catch((err) => {
+                    const stillDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        connected: this.hasLiveSyncConnection(),
+                        pendingPush: stillDirty,
                         message: 'Cloud push failed.',
                         lastError: err && err.message ? err.message : String(err)
                     });

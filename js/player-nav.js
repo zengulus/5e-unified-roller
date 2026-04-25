@@ -473,6 +473,46 @@
             };
         }
 
+        const hasLocalEdits = !!(status.pendingPush || Number(status.dirtyScopes) > 0);
+
+        if (status.mode === 'auth_required') {
+            return {
+                state: 'offline',
+                buttonLabel: 'Authorize',
+                title: 'Autosave needs authorization',
+                detail: hasLocalEdits
+                    ? 'Your edits are still local. Sign in or authorize sync before they can be shared.'
+                    : 'Shared sync needs authorization before this page can update.',
+                meta: [
+                    status.lastError ? `Last problem: ${status.lastError}.` : '',
+                    sharedMeta
+                ].filter(Boolean).join(' '),
+                primaryAction: configured ? 'authorize' : 'settings',
+                primaryLabel: configured ? 'Authorize now' : 'Open connect actions',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
+        if (status.mode === 'error' || status.lastError) {
+            return {
+                state: 'offline',
+                buttonLabel: 'Sync problem',
+                title: hasLocalEdits ? 'Autosave could not finish' : 'Sync problem',
+                detail: hasLocalEdits
+                    ? 'Your edits are still local, but the last autosave attempt failed.'
+                    : 'The last shared sync attempt failed.',
+                meta: [
+                    status.lastError ? `Last problem: ${status.lastError}.` : '',
+                    sharedMeta
+                ].filter(Boolean).join(' '),
+                primaryAction: configured ? 'sync-now' : 'settings',
+                primaryLabel: configured ? 'Try again' : 'Open connect actions',
+                secondaryAction: '',
+                secondaryLabel: ''
+            };
+        }
+
         if (status.pendingPush || Number(status.dirtyScopes) > 0) {
             return {
                 state: usesYjsCollab ? 'saving' : 'editing',
@@ -482,8 +522,8 @@
                     ? 'Your edits are on their way to the shared campaign.'
                     : 'Autosave will share these edits after 3 seconds of inactivity.',
                 meta: sharedMeta,
-                primaryAction: usesYjsCollab ? 'sync-now' : '',
-                primaryLabel: usesYjsCollab ? 'Sync now' : '',
+                primaryAction: configured ? 'sync-now' : '',
+                primaryLabel: configured ? (usesYjsCollab ? 'Sync now' : 'Save now') : '',
                 secondaryAction: '',
                 secondaryLabel: ''
             };
