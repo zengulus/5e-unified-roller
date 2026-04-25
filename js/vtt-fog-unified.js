@@ -96,42 +96,31 @@
                 pointer-events: none;
             }
 
-            .vtt-fog-unified-base {
+            .vtt-fog-unified-cell-base {
                 fill: rgba(11, 14, 19, 0.68);
             }
 
-            .vtt-fog-unified-vignette {
+            .vtt-fog-unified-cell-vignette {
                 fill: rgba(190, 198, 205, 0.09);
                 mix-blend-mode: screen;
             }
 
-            .vtt-fog-unified-noise-layer {
-                pointer-events: none;
-                mix-blend-mode: screen;
-                will-change: transform;
-                transform-box: fill-box;
-                transform-origin: center center;
-                backface-visibility: hidden;
-            }
-
-            .vtt-fog-unified-noise-layer.is-primary {
+            .vtt-fog-unified-cell-noise-primary {
+                fill: url(#vtt-fog-pattern-primary);
                 opacity: 0.66;
-                animation: vtt-fog-unified-slide-x 32s linear infinite;
+                mix-blend-mode: screen;
             }
 
-            .vtt-fog-unified-noise-layer.is-cross {
+            .vtt-fog-unified-cell-noise-cross {
+                fill: url(#vtt-fog-pattern-cross);
                 opacity: 0.56;
-                animation: vtt-fog-unified-slide-y 47s linear infinite;
+                mix-blend-mode: screen;
             }
 
-            @keyframes vtt-fog-unified-slide-x {
-                from { transform: translateX(-${FOG_TILE_PX}px); }
-                to { transform: translateX(0); }
-            }
-
-            @keyframes vtt-fog-unified-slide-y {
-                from { transform: translateY(-${FOG_TILE_PX}px); }
-                to { transform: translateY(0); }
+            @media (prefers-reduced-motion: reduce) {
+                .vtt-fog-pattern-motion {
+                    display: none;
+                }
             }
         `;
         document.head.appendChild(style);
@@ -141,32 +130,49 @@
         .filter((maskEl) => maskEl.classList.contains('is-preview') || maskEl.classList.contains('is-remove-preview'))
         .map((maskEl) => maskEl.cloneNode(true));
 
-    const createClipRect = (documentRef, rect, minLeft, minTop) => {
-        const clipRect = documentRef.createElementNS(SVG_NS, 'rect');
-        clipRect.setAttribute('x', String(Math.round(rect.left - minLeft)));
-        clipRect.setAttribute('y', String(Math.round(rect.top - minTop)));
-        clipRect.setAttribute('width', String(Math.max(1, Math.round(rect.width))));
-        clipRect.setAttribute('height', String(Math.max(1, Math.round(rect.height))));
-        return clipRect;
+    const createCellRect = (documentRef, rect, minLeft, minTop, className) => {
+        const cellRect = documentRef.createElementNS(SVG_NS, 'rect');
+        cellRect.setAttribute('class', className);
+        cellRect.setAttribute('x', String(Math.round(rect.left - minLeft)));
+        cellRect.setAttribute('y', String(Math.round(rect.top - minTop)));
+        cellRect.setAttribute('width', String(Math.max(1, Math.round(rect.width))));
+        cellRect.setAttribute('height', String(Math.max(1, Math.round(rect.height))));
+        return cellRect;
     };
 
-    const createTiledNoiseLayer = (documentRef, className, href, clipId, roundedWidth, roundedHeight) => {
-        const layer = documentRef.createElementNS(SVG_NS, 'g');
-        layer.setAttribute('class', `vtt-fog-unified-noise-layer ${className}`);
-        layer.setAttribute('clip-path', `url(#${clipId})`);
-        for (let y = -FOG_TILE_PX; y <= roundedHeight + FOG_TILE_PX; y += FOG_TILE_PX) {
-            for (let x = -FOG_TILE_PX; x <= roundedWidth + FOG_TILE_PX; x += FOG_TILE_PX) {
-                const image = documentRef.createElementNS(SVG_NS, 'image');
-                image.setAttribute('x', String(x));
-                image.setAttribute('y', String(y));
-                image.setAttribute('width', String(FOG_TILE_PX));
-                image.setAttribute('height', String(FOG_TILE_PX));
-                image.setAttribute('preserveAspectRatio', 'none');
-                image.setAttribute('href', href);
-                layer.appendChild(image);
-            }
-        }
-        return layer;
+    const createFogPattern = (documentRef, id, href, animateAxis, durationSeconds) => {
+        const pattern = documentRef.createElementNS(SVG_NS, 'pattern');
+        pattern.setAttribute('id', id);
+        pattern.setAttribute('patternUnits', 'userSpaceOnUse');
+        pattern.setAttribute('x', '0');
+        pattern.setAttribute('y', '0');
+        pattern.setAttribute('width', String(FOG_TILE_PX));
+        pattern.setAttribute('height', String(FOG_TILE_PX));
+
+        const animate = documentRef.createElementNS(SVG_NS, 'animateTransform');
+        animate.setAttribute('class', 'vtt-fog-pattern-motion');
+        animate.setAttribute('attributeName', 'patternTransform');
+        animate.setAttribute('type', 'translate');
+        animate.setAttribute('from', animateAxis === 'x' ? `-${FOG_TILE_PX} 0` : `0 -${FOG_TILE_PX}`);
+        animate.setAttribute('to', '0 0');
+        animate.setAttribute('dur', `${durationSeconds}s`);
+        animate.setAttribute('repeatCount', 'indefinite');
+        pattern.appendChild(animate);
+
+        const image = documentRef.createElementNS(SVG_NS, 'image');
+        image.setAttribute('x', '0');
+        image.setAttribute('y', '0');
+        image.setAttribute('width', String(FOG_TILE_PX));
+        image.setAttribute('height', String(FOG_TILE_PX));
+        image.setAttribute('preserveAspectRatio', 'none');
+        image.setAttribute('href', href);
+        pattern.appendChild(image);
+
+        return pattern;
+    };
+
+    const appendCellRects = (documentRef, parent, rects, minLeft, minTop, className) => {
+        rects.forEach((rect) => parent.appendChild(createCellRect(documentRef, rect, minLeft, minTop, className)));
     };
 
     const buildUnifiedFog = (sourceMasks) => {
@@ -184,7 +190,6 @@
         const height = Math.max(1, maxBottom - minTop);
         const roundedWidth = Math.max(1, Math.round(width));
         const roundedHeight = Math.max(1, Math.round(height));
-        const clipId = `vtt-fog-clip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         const fogTilePrimary = buildFogTile(0);
         const fogTileCross = buildFogTile(1);
 
@@ -207,35 +212,25 @@
         svg.setAttribute('aria-hidden', 'true');
 
         const defs = document.createElementNS(SVG_NS, 'defs');
-        const clipPath = document.createElementNS(SVG_NS, 'clipPath');
-        clipPath.setAttribute('id', clipId);
-        clipPath.setAttribute('clipPathUnits', 'userSpaceOnUse');
-        rects.forEach((rect) => clipPath.appendChild(createClipRect(document, rect, minLeft, minTop)));
-        defs.appendChild(clipPath);
+        defs.appendChild(createFogPattern(document, 'vtt-fog-pattern-primary', fogTilePrimary, 'x', 32));
+        defs.appendChild(createFogPattern(document, 'vtt-fog-pattern-cross', fogTileCross, 'y', 47));
         svg.appendChild(defs);
 
-        const baseRect = document.createElementNS(SVG_NS, 'rect');
-        baseRect.setAttribute('class', 'vtt-fog-unified-base');
-        baseRect.setAttribute('x', '0');
-        baseRect.setAttribute('y', '0');
-        baseRect.setAttribute('width', String(roundedWidth));
-        baseRect.setAttribute('height', String(roundedHeight));
-        baseRect.setAttribute('clip-path', `url(#${clipId})`);
-        svg.appendChild(baseRect);
+        const baseGroup = document.createElementNS(SVG_NS, 'g');
+        appendCellRects(document, baseGroup, rects, minLeft, minTop, 'vtt-fog-unified-cell-base');
+        svg.appendChild(baseGroup);
 
-        const primaryLayer = createTiledNoiseLayer(document, 'is-primary', fogTilePrimary, clipId, roundedWidth, roundedHeight);
-        const crossLayer = createTiledNoiseLayer(document, 'is-cross', fogTileCross, clipId, roundedWidth, roundedHeight);
-        svg.appendChild(primaryLayer);
-        svg.appendChild(crossLayer);
+        const primaryGroup = document.createElementNS(SVG_NS, 'g');
+        appendCellRects(document, primaryGroup, rects, minLeft, minTop, 'vtt-fog-unified-cell-noise-primary');
+        svg.appendChild(primaryGroup);
 
-        const vignetteRect = document.createElementNS(SVG_NS, 'rect');
-        vignetteRect.setAttribute('class', 'vtt-fog-unified-vignette');
-        vignetteRect.setAttribute('x', '0');
-        vignetteRect.setAttribute('y', '0');
-        vignetteRect.setAttribute('width', String(roundedWidth));
-        vignetteRect.setAttribute('height', String(roundedHeight));
-        vignetteRect.setAttribute('clip-path', `url(#${clipId})`);
-        svg.appendChild(vignetteRect);
+        const crossGroup = document.createElementNS(SVG_NS, 'g');
+        appendCellRects(document, crossGroup, rects, minLeft, minTop, 'vtt-fog-unified-cell-noise-cross');
+        svg.appendChild(crossGroup);
+
+        const vignetteGroup = document.createElementNS(SVG_NS, 'g');
+        appendCellRects(document, vignetteGroup, rects, minLeft, minTop, 'vtt-fog-unified-cell-vignette');
+        svg.appendChild(vignetteGroup);
 
         wrapper.appendChild(svg);
 
