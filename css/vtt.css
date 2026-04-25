@@ -1581,7 +1581,14 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
         0 18px 30px rgba(0, 0, 0, 0.3);
 }
 
+@property --vtt-token-corona-angle {
+    syntax: "<angle>";
+    inherits: false;
+    initial-value: 0deg;
+}
+
 .vtt-token-corona {
+    --vtt-token-corona-angle: 0deg;
     position: absolute;
     inset: -10px;
     z-index: 0;
@@ -1590,18 +1597,20 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     opacity: 0;
     background:
         conic-gradient(
-            from 0deg,
-            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.05) 0deg,
-            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.78) 30deg,
-            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.12) 60deg,
-            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.7) 150deg,
-            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.1) 180deg,
-            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.74) 270deg,
+            from var(--vtt-token-corona-angle),
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.08) 0deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.82) 24deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.16) 54deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.06) 102deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.78) 144deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.14) 174deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.06) 222deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.82) 264deg,
+            rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.16) 294deg,
             rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.05) 360deg
         );
     filter: blur(4px);
-    transform-origin: center;
-    animation: vtt-token-corona-spin 3.6s linear infinite;
+    animation: vtt-token-corona-flow 3s linear infinite;
     -webkit-mask:
         linear-gradient(#000 0 0) content-box,
         linear-gradient(#000 0 0);
@@ -1627,13 +1636,13 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
         0 0 18px rgba(var(--vtt-token-side-rgb, var(--accent-rgb, 78, 205, 196)), 0.2);
 }
 
-@keyframes vtt-token-corona-spin {
+@keyframes vtt-token-corona-flow {
     from {
-        transform: rotate(0deg);
+        --vtt-token-corona-angle: 0deg;
     }
 
     to {
-        transform: rotate(360deg);
+        --vtt-token-corona-angle: 360deg;
     }
 }
 

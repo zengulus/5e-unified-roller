@@ -1282,7 +1282,7 @@
     const beginTouchContextInteraction = (event, scene, worldPoint) => {
         if (!canUseTouchContextActions(event)) return false;
         const pointerType = String(event && event.pointerType || '').toLowerCase();
-        if (!isDM() || localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
+        if (localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
         clearPendingTouchContext();
         const targetEl = getEventTargetElement(event);
         const tokenEl = targetEl ? targetEl.closest('.vtt-token') : null;
@@ -4070,6 +4070,7 @@
             <div class="vtt-stage-context-section">
                 <div class="vtt-menu-title">Measure & Areas</div>
                 <div class="vtt-stage-context-grid">
+                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="navigate">Navigate</button>
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="ruler">Ruler</button>
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="circle">Circle</button>
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="cone">Cone</button>
@@ -7726,22 +7727,6 @@
         if (targetEl.closest('#vtt-quick-spawn-menu')) return;
         const tokenEl = targetEl.closest('.vtt-token');
         const token = tokenEl ? getTokenById(String(tokenEl.getAttribute('data-token-id') || '')) : null;
-        if (!isDM()) {
-            event.preventDefault();
-            if (token) activateTokenSelection(token.id);
-            previewTokenId = '';
-            closeTokenInspectorPopover();
-            openSheetActionPopover(token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null, event.clientX, event.clientY);
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderTokenInspectorPopover();
-            renderSheetActionPopover();
-            renderNPCRollPopover();
-            renderToolsMenu();
-            renderStage();
-            return;
-        }
         const noteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
         if (noteEl) {
             const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
@@ -7788,10 +7773,6 @@
             return;
         }
         if (previewTokenId) previewTokenId = '';
-        if (!isDM()) {
-            renderStage();
-            return;
-        }
         event.preventDefault();
         openStageContextMenu(event.clientX, event.clientY, {
             worldPoint: screenToWorld(event.clientX, event.clientY)
