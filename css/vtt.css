@@ -1430,6 +1430,31 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     transform: scale(1);
 }
 
+.vtt-token.has-mood-corner::before {
+    right: auto;
+    left: -0.18rem;
+}
+
+.vtt-token-mood-corner {
+    position: absolute;
+    top: -0.28rem;
+    right: -0.18rem;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: calc(1.28rem * var(--vtt-token-font-scale, 1));
+    height: calc(1.28rem * var(--vtt-token-font-scale, 1));
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    background: rgba(5, 9, 16, 0.92);
+    box-shadow:
+        0 8px 16px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    font-size: calc(0.88rem * var(--vtt-token-font-scale, 1));
+    line-height: 1;
+    pointer-events: none;
+}
+
 .vtt-token[data-stealth-status="detected"]::after {
     content: "Detected";
     border-color: rgba(255, 132, 132, 0.38);

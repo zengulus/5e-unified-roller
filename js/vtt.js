@@ -5315,10 +5315,11 @@
             const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
             const isBloodied = isTokenBloodied(token);
             const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
+            const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
             const moodText = getTokenMoodText(token);
             const hasHoverCard = !!(usableImageUrl || moodText);
             return `
-                <div class="vtt-token${usableImageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
+                <div class="vtt-token${usableImageUrl ? ' has-image' : ''}${moodEmoji ? ' has-mood-corner' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
                     data-token-id="${escapeHtml(token.id)}"
                     data-id="${escapeHtml(token.id)}"
                     data-action="select-token"
@@ -5333,6 +5334,7 @@
                     <div class="vtt-token-face">
                         ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
                     </div>
+                    ${moodEmoji ? `<div class="vtt-token-mood-corner" title="${escapeHtml(moodText || moodEmoji)}">${escapeHtml(moodEmoji)}</div>` : ''}
                     ${hasHoverCard ? `
                         <div class="vtt-token-hover-card${usableImageUrl ? '' : ' has-mood-only'}">
                             ${usableImageUrl ? `<img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false">` : ''}
