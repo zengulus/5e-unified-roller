@@ -160,6 +160,7 @@
     let pendingTouchContextState = null;
     let templateExpiryTimer = 0;
     let pingExpiryTimer = 0;
+    const tokenImageRetryKeys = new Map();
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
@@ -284,6 +285,23 @@
             return window.RTF_MEDIA_CACHE.getUsableUrl(raw);
         }
         return raw;
+    };
+    const appendTokenImageRetryKey = (value, retryKey) => {
+        const raw = toImageUrl(value);
+        const key = String(retryKey || '').trim();
+        if (!raw || !key || /^data:image\//i.test(raw)) return raw;
+        try {
+            const parsed = new URL(raw, window.location.href);
+            parsed.searchParams.set('rtfTokenRetry', key);
+            return parsed.toString();
+        } catch (err) {
+            return raw;
+        }
+    };
+    const getTokenImageRenderUrl = (token) => {
+        if (!token) return '';
+        const retryKey = tokenImageRetryKeys.get(String(token.id || '').trim()) || '';
+        return getUsableMediaUrl(appendTokenImageRetryKey(token.imageUrl, retryKey));
     };
     const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
     const randomIntInclusive = (min, max) => {
@@ -4577,6 +4595,7 @@
                     </label>
                 </div>
                 <div class="vtt-chip-row">
+                    <button class="vtt-chip-btn" data-action="token-retry-image" data-id="${escapeHtml(token.id)}" data-image-url="${escapeHtml(imageUrlValue)}"${imageUrlValue ? '' : ' disabled'}>Retry Image</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="1">1x1</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="2">2x2</button>
                 </div>
@@ -5315,7 +5334,7 @@
 
         tokenLayerEl.innerHTML = visibleTokens.map((token) => {
             const renderedCells = getRenderableTokenCells(token, scene, renderTime);
-            const usableImageUrl = getUsableMediaUrl(token.imageUrl);
+            const usableImageUrl = getTokenImageRenderUrl(token);
             const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
             const isBloodied = isTokenBloodied(token);
             const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
@@ -5993,6 +6012,18 @@
             updateSelectedToken((token) => {
                 token.conditions = [];
             });
+            return;
+        }
+        if (action === 'token-retry-image') {
+            selectedTokenId = id || selectedTokenId;
+            const token = getTokenById(selectedTokenId);
+            const imageUrl = toImageUrl(actionEl.dataset.imageUrl || (token ? token.imageUrl : ''));
+            if (imageUrl && window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberSuccess === 'function') {
+                window.RTF_MEDIA_CACHE.rememberSuccess(imageUrl);
+            }
+            if (selectedTokenId) tokenImageRetryKeys.set(selectedTokenId, String(Date.now()));
+            renderStage();
+            renderTokenInspector();
             return;
         }
         if (action === 'quick-spawn-custom') {
