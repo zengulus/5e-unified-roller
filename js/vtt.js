@@ -137,6 +137,7 @@
     let pendingRemoteVTTSnapshot = null;
     let spawnDragState = null;
     let quickSpawnMenuState = null;
+    let stageContextMenuState = null;
     let tokenInspectorState = null;
     let initiativeDetailState = null;
     let sheetActionState = null;
@@ -192,6 +193,7 @@
     const tokenInspectorEl = document.getElementById('vtt-token-inspector');
     const inspectorPanelEl = document.getElementById('vtt-inspector-panel');
     const tokenInspectorPopoverEl = document.getElementById('vtt-token-inspector-popover');
+    const stageContextMenuEl = document.getElementById('vtt-stage-context-menu');
     const sheetActionPopoverEl = document.getElementById('vtt-sheet-action-popover');
     const npcRollPopoverEl = document.getElementById('vtt-npc-roll-popover');
     const clockListEl = document.getElementById('vtt-clock-list');
@@ -870,21 +872,32 @@
             y: Math.round((toNumber(worldPoint.y, offsetY) - offsetY) / cellPx) * cellPx + offsetY
         };
     };
+    const getFogCellAtWorldPoint = (scene, worldPoint) => {
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        return {
+            col: Math.floor((toNumber(worldPoint && worldPoint.x, offsetX) - offsetX) / cellPx),
+            row: Math.floor((toNumber(worldPoint && worldPoint.y, offsetY) - offsetY) / cellPx)
+        };
+    };
     const buildFogMaskFromWorldPoints = (scene, startWorldPoint, endWorldPoint, id = buildId('fog')) => {
         if (!scene || !startWorldPoint || !endWorldPoint) return null;
         const cellPx = getSceneCellPx(scene);
-        const start = snapWorldPointToFogCorner(scene, startWorldPoint);
-        const end = snapWorldPointToFogCorner(scene, endWorldPoint);
-        const left = Math.min(start.x, end.x);
-        const top = Math.min(start.y, end.y);
-        const width = Math.max(cellPx, Math.abs(end.x - start.x));
-        const height = Math.max(cellPx, Math.abs(end.y - start.y));
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        const start = getFogCellAtWorldPoint(scene, startWorldPoint);
+        const end = getFogCellAtWorldPoint(scene, endWorldPoint);
+        const leftCol = Math.min(start.col, end.col);
+        const topRow = Math.min(start.row, end.row);
+        const widthCells = Math.max(1, Math.abs(end.col - start.col) + 1);
+        const heightCells = Math.max(1, Math.abs(end.row - start.row) + 1);
         return {
             id: String(id || buildId('fog')).trim() || buildId('fog'),
-            x: Math.round(left),
-            y: Math.round(top),
-            w: Math.max(1, Math.round(width)),
-            h: Math.max(1, Math.round(height))
+            x: Math.round(offsetX + leftCol * cellPx),
+            y: Math.round(offsetY + topRow * cellPx),
+            w: Math.max(1, Math.round(widthCells * cellPx)),
+            h: Math.max(1, Math.round(heightCells * cellPx))
         };
     };
     const buildFogCellKey = (col, row) => `${Math.round(toNumber(col, 0))},${Math.round(toNumber(row, 0))}`;
@@ -1298,7 +1311,11 @@
                 state.triggered = true;
                 previewTokenId = '';
                 activateTokenSelection(state.tokenId);
-                openTokenInspectorPopover(state.tokenId, state.clientX, state.clientY);
+                openStageContextMenu(state.clientX, state.clientY, {
+                    tokenId: state.tokenId,
+                    worldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
+                    source: 'touch'
+                });
                 render();
             }, TOUCH_CONTEXT_HOLD_MS);
             pendingTouchContextState = state;
@@ -1327,7 +1344,10 @@
             if (pendingTouchContextState !== state) return;
             state.triggered = true;
             previewTokenId = '';
-            openQuickSpawnMenu(state.clientX, state.clientY);
+            openStageContextMenu(state.clientX, state.clientY, {
+                worldPoint: state.worldPoint,
+                source: 'touch'
+            });
             render();
         }, TOUCH_CONTEXT_HOLD_MS);
         pendingTouchContextState = state;
@@ -1838,6 +1858,7 @@
 
     const positionSheetActionPopover = () => positionAnchoredPopover(sheetActionPopoverEl, sheetActionState, 380, 460);
     const positionNPCRollPopover = () => positionAnchoredPopover(npcRollPopoverEl, npcRollState, 360, 340);
+    const positionStageContextMenu = () => positionAnchoredPopover(stageContextMenuEl, stageContextMenuState, 340, 520);
 
     const closeSheetActionPopover = () => {
         if (!sheetActionState && (!sheetActionPopoverEl || sheetActionPopoverEl.hidden)) return false;
@@ -1856,6 +1877,16 @@
         if (npcRollPopoverEl) {
             npcRollPopoverEl.hidden = true;
             npcRollPopoverEl.innerHTML = '';
+        }
+        return true;
+    };
+
+    const closeStageContextMenu = () => {
+        if (!stageContextMenuState && (!stageContextMenuEl || stageContextMenuEl.hidden)) return false;
+        stageContextMenuState = null;
+        if (stageContextMenuEl) {
+            stageContextMenuEl.hidden = true;
+            stageContextMenuEl.innerHTML = '';
         }
         return true;
     };
@@ -3215,8 +3246,14 @@
     };
 
     const getContextSpawnWorldPoint = () => {
+        if (stageContextMenuState && stageContextMenuState.worldPoint) return stageContextMenuState.worldPoint;
         if (quickSpawnMenuState && quickSpawnMenuState.worldPoint) return quickSpawnMenuState.worldPoint;
         if (npcSearchState && npcSearchState.worldPoint) return npcSearchState.worldPoint;
+        return null;
+    };
+
+    const getStageContextWorldPoint = () => {
+        if (stageContextMenuState && stageContextMenuState.worldPoint) return stageContextMenuState.worldPoint;
         return null;
     };
 
@@ -3231,6 +3268,7 @@
 
     const openNPCSearchAt = (clientX, clientY, worldPoint = null) => {
         if (!isDM()) return false;
+        closeStageContextMenu();
         closeQuickSpawnMenu();
         closeTokenInspectorPopover();
         closeInitiativeDetail();
@@ -3265,6 +3303,7 @@
     const openTokenInspectorPopover = (tokenId, clientX, clientY) => {
         const targetId = String(tokenId || '').trim();
         if (!targetId || !isDM()) return false;
+        closeStageContextMenu();
         closeQuickSpawnMenu();
         closeNPCSearch();
         closeInitiativeDetail();
@@ -3281,6 +3320,7 @@
     const openEvidenceNoteInspectorPopover = (noteId, clientX, clientY) => {
         const targetId = String(noteId || '').trim();
         if (!targetId || !isDM()) return false;
+        closeStageContextMenu();
         closeQuickSpawnMenu();
         closeNPCSearch();
         closeInitiativeDetail();
@@ -3295,6 +3335,7 @@
 
     const openQuickSpawnMenu = (clientX, clientY) => {
         if (!stageEl || !isDM()) return false;
+        closeStageContextMenu();
         closeNPCSearch();
         closeViewMenu();
         closeToolsMenu();
@@ -3998,6 +4039,82 @@
         const top = clamp(quickSpawnMenuState.stageY, 12, Math.max(12, stageRect.height - menuHeight - 12));
         quickSpawnMenuEl.style.left = `${left}px`;
         quickSpawnMenuEl.style.top = `${top}px`;
+    };
+
+    const renderStageContextMenu = () => {
+        if (!stageContextMenuEl) return;
+        if (!stageContextMenuState || !stageEl) {
+            stageContextMenuEl.hidden = true;
+            stageContextMenuEl.innerHTML = '';
+            return;
+        }
+        const token = stageContextMenuState.tokenId ? getTokenById(stageContextMenuState.tokenId) : null;
+        const note = stageContextMenuState.noteId ? getEvidenceNoteById(stageContextMenuState.noteId) : null;
+        const canRoll = !!(token || !isDM());
+        const canPreview = !!(token && token.imageUrl);
+        const canEditToken = !!(isDM() && token);
+        const canEditNote = !!(isDM() && note);
+        stageContextMenuEl.hidden = false;
+        stageContextMenuEl.innerHTML = `
+            <div class="vtt-stage-context-head">
+                <strong>${escapeHtml(token ? (token.label || 'Token') : (note ? getEvidenceNoteDisplayTitle(note) : 'Stage'))}</strong>
+                <span>${escapeHtml(stageContextMenuState.source === 'touch' ? 'Touch actions' : 'Context actions')}</span>
+            </div>
+            <div class="vtt-stage-context-list">
+                <button class="vtt-stage-context-item strong" type="button" data-action="context-ping">Ping</button>
+                ${canRoll ? `<button class="vtt-stage-context-item" type="button" data-action="context-make-roll"${token && isDM() && !isNPCRollTarget(token) && String(token.sourceType || '').trim().toLowerCase() !== 'player' ? ' disabled' : ''}>Make a dice roll</button>` : ''}
+                ${canEditToken ? `<button class="vtt-stage-context-item" type="button" data-action="context-token-inspector">Token inspector</button>` : ''}
+                ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-inspector">Zone inspector</button>` : ''}
+                ${canPreview ? `<button class="vtt-stage-context-item" type="button" data-action="context-preview-token">${token.id === previewTokenId ? 'Hide portrait' : 'Preview portrait'}</button>` : ''}
+            </div>
+            <div class="vtt-stage-context-section">
+                <div class="vtt-menu-title">Measure & Areas</div>
+                <div class="vtt-stage-context-grid">
+                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="ruler">Ruler</button>
+                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="circle">Circle</button>
+                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="cone">Cone</button>
+                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="note"${isDM() ? '' : ' disabled'}>Pins/Zones</button>
+                </div>
+            </div>
+            <div class="vtt-stage-context-section">
+                <div class="vtt-menu-title">Fog</div>
+                <div class="vtt-stage-context-grid">
+                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog"${isDM() ? '' : ' disabled'}>Fog</button>
+                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog-remove"${isDM() ? '' : ' disabled'}>Unfog</button>
+                    <button class="vtt-stage-context-item" type="button" data-action="clear-scene-fog"${isDM() ? '' : ' disabled'}>Clear</button>
+                </div>
+            </div>
+            ${isDM() ? `
+                <div class="vtt-stage-context-section">
+                    <div class="vtt-menu-title">Spawn</div>
+                    <div class="vtt-stage-context-list">
+                        <button class="vtt-stage-context-item" type="button" data-action="context-quick-spawn">Quick spawn</button>
+                        <button class="vtt-stage-context-item" type="button" data-action="context-npc-search">NPC search here</button>
+                    </div>
+                </div>
+            ` : ''}
+        `;
+        requestAnimationFrame(positionStageContextMenu);
+    };
+
+    const openStageContextMenu = (clientX, clientY, options = {}) => {
+        if (!stageEl) return false;
+        closeQuickSpawnMenu();
+        closeNPCSearch();
+        closeTokenInspectorPopover();
+        closeSheetActionPopover();
+        closeNPCRollPopover();
+        closeInitiativeDetail();
+        stageContextMenuState = {
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2)),
+            worldPoint: options.worldPoint || screenToWorld(clientX, clientY),
+            tokenId: String(options.tokenId || '').trim(),
+            noteId: String(options.noteId || '').trim(),
+            source: String(options.source || 'pointer').trim()
+        };
+        renderStageContextMenu();
+        return true;
     };
 
     const renderSpawnGhost = () => {
@@ -5354,6 +5471,7 @@
                     data-world-width="${escapeHtml(String(token.w * scene.grid.cellPx))}"
                     data-world-height="${escapeHtml(String(token.h * scene.grid.cellPx))}"
                     style="--vtt-token-damage:${getTokenDamageFraction(token)};">
+                    <div class="vtt-token-corona"></div>
                     <div class="vtt-token-face">
                         ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
                     </div>
@@ -5436,6 +5554,7 @@
         renderNPCSearchPopover();
         renderStage();
         renderQuickSpawnMenu();
+        renderStageContextMenu();
         renderTokenInspector();
         renderTokenInspectorPopover();
         renderSheetActionPopover();
@@ -5817,6 +5936,71 @@
             });
             return;
         }
+        if (action === 'context-ping') {
+            const scene = getActiveScene();
+            const worldPoint = getStageContextWorldPoint();
+            closeStageContextMenu();
+            if (scene && worldPoint) queueSharedPing(scene, worldPoint);
+            render();
+            return;
+        }
+        if (action === 'context-make-roll') {
+            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
+            const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
+            closeStageContextMenu();
+            if (token && isDM() && isNPCRollTarget(token)) {
+                openNPCRollPopover(token, menuState.clientX, menuState.clientY);
+            } else {
+                openSheetActionPopover(token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
+            }
+            render();
+            return;
+        }
+        if (action === 'context-token-inspector') {
+            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
+            closeStageContextMenu();
+            if (menuState && menuState.tokenId) openTokenInspectorPopover(menuState.tokenId, menuState.clientX, menuState.clientY);
+            render();
+            return;
+        }
+        if (action === 'context-note-inspector') {
+            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
+            closeStageContextMenu();
+            if (menuState && menuState.noteId) openEvidenceNoteInspectorPopover(menuState.noteId, menuState.clientX, menuState.clientY);
+            render();
+            return;
+        }
+        if (action === 'context-preview-token') {
+            const tokenId = stageContextMenuState ? String(stageContextMenuState.tokenId || '').trim() : '';
+            closeStageContextMenu();
+            const token = tokenId ? getTokenById(tokenId) : null;
+            previewTokenId = token && token.imageUrl && previewTokenId !== token.id ? token.id : '';
+            render();
+            return;
+        }
+        if (action === 'context-set-tool') {
+            const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
+            if (nextMode === TOOL_MODE_NOTE && !isDM()) return;
+            if ((nextMode === TOOL_MODE_FOG || nextMode === TOOL_MODE_FOG_REMOVE) && !isDM()) return;
+            closeStageContextMenu();
+            setToolMode(nextMode);
+            render();
+            return;
+        }
+        if (action === 'context-quick-spawn') {
+            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
+            closeStageContextMenu();
+            if (menuState) openQuickSpawnMenu(menuState.clientX, menuState.clientY);
+            render();
+            return;
+        }
+        if (action === 'context-npc-search') {
+            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
+            closeStageContextMenu();
+            if (menuState) openNPCSearchAt(menuState.clientX, menuState.clientY, menuState.worldPoint);
+            render();
+            return;
+        }
         if (action === 'toggle-view-menu') {
             viewMenuOpen = !viewMenuOpen;
             if (viewMenuOpen) {
@@ -5890,6 +6074,7 @@
         }
         if (action === 'clear-scene-fog') {
             if (!isDM()) return;
+            closeStageContextMenu();
             withDraft((draft) => {
                 const scene = getActiveScene(draft);
                 if (!scene) return;
@@ -6901,7 +7086,9 @@
         if (!targetEl) return;
         if (event.button !== 0) return;
         if (targetEl.closest('#vtt-quick-spawn-menu')) return;
+        if (targetEl.closest('#vtt-stage-context-menu')) return;
         closeQuickSpawnMenu();
+        closeStageContextMenu();
         closeTokenInspectorPopover();
 
         const scene = getActiveScene();
@@ -7466,6 +7653,10 @@
             needsRender = true;
         }
 
+        if (stageContextMenuState && !targetEl.closest('#vtt-stage-context-menu')) {
+            stageContextMenuState = null;
+            needsRender = true;
+        }
         if (quickSpawnMenuState && !targetEl.closest('#vtt-quick-spawn-menu')) {
             quickSpawnMenuState = null;
             needsRender = true;
@@ -7557,16 +7748,16 @@
             if (!noteId) return;
             event.preventDefault();
             activateEvidenceNoteSelection(noteId);
-            if (isDM()) {
-                previewTokenId = '';
-                openEvidenceNoteInspectorPopover(noteId, event.clientX, event.clientY);
-            } else {
-                closeTokenInspectorPopover();
-            }
+            previewTokenId = '';
+            openStageContextMenu(event.clientX, event.clientY, {
+                noteId,
+                worldPoint: screenToWorld(event.clientX, event.clientY)
+            });
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
             renderTokenInspectorPopover();
+            renderStageContextMenu();
             renderToolsMenu();
             renderStage();
             return;
@@ -7576,38 +7767,18 @@
 
             event.preventDefault();
             activateTokenSelection(token.id);
-            if (isDM()) {
-                const recentContextPointer = lastContextPointerState
-                    && Date.now() - lastContextPointerState.at < 1200
-                    && (!lastContextPointerState.tokenId || lastContextPointerState.tokenId === token.id)
-                    ? lastContextPointerState
-                    : null;
-                const hasAltContext = !!(event.altKey || (typeof event.getModifierState === 'function' && event.getModifierState('Alt')) || (recentContextPointer && recentContextPointer.altKey));
-                if (hasAltContext && isNPCRollTarget(token)) {
-                    previewTokenId = '';
-                    closeTokenInspectorPopover();
-                    openNPCRollPopover(token, event.clientX, event.clientY);
-                } else if (event.shiftKey && token.imageUrl) {
-                    previewTokenId = previewTokenId === token.id ? '' : token.id;
-                } else {
-                    previewTokenId = '';
-                    openTokenInspectorPopover(token.id, event.clientX, event.clientY);
-                }
-            } else if (String(token.sourceType || '').trim().toLowerCase() === 'player') {
-                previewTokenId = '';
-                closeTokenInspectorPopover();
-                openSheetActionPopover(token, event.clientX, event.clientY);
-            } else if (token.imageUrl) {
-                previewTokenId = previewTokenId === token.id ? '' : token.id;
-            } else if (previewTokenId) {
-                previewTokenId = '';
-            }
+            previewTokenId = '';
+            openStageContextMenu(event.clientX, event.clientY, {
+                tokenId: token.id,
+                worldPoint: screenToWorld(event.clientX, event.clientY)
+            });
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
             renderTokenInspectorPopover();
             renderSheetActionPopover();
             renderNPCRollPopover();
+            renderStageContextMenu();
             renderToolsMenu();
             renderStage();
             return;
@@ -7622,7 +7793,9 @@
             return;
         }
         event.preventDefault();
-        openQuickSpawnMenu(event.clientX, event.clientY);
+        openStageContextMenu(event.clientX, event.clientY, {
+            worldPoint: screenToWorld(event.clientX, event.clientY)
+        });
         renderStage();
     };
 
@@ -7663,6 +7836,7 @@
             const closedNavMenu = closeNavMenu();
             const closedViewMenu = closeViewMenu();
             const closedToolsMenu = closeToolsMenu();
+            const closedStageContext = closeStageContextMenu();
             const clearedSpawn = clearSpawnDrag();
             const clearedTemplatePlacement = clearTemplatePlacementState();
             const closedInitiativeDetail = closeInitiativeDetail();
@@ -7673,7 +7847,7 @@
                 previewTokenId = '';
                 renderStage();
                 event.preventDefault();
-            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll) {
+            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll) {
                 render();
                 event.preventDefault();
             }
@@ -7730,6 +7904,7 @@
             if (fitViewOnNextMapLoad) {
                 fitViewToWorld();
                 renderQuickSpawnMenu();
+                positionStageContextMenu();
                 positionNPCSearchPopover();
                 positionTokenInspectorPopover();
                 positionSheetActionPopover();
@@ -7740,6 +7915,7 @@
             applyWorldTransform();
             renderQuickSpawnMenu();
             renderSpawnGhost();
+            positionStageContextMenu();
             positionNPCSearchPopover();
             positionTokenInspectorPopover();
             positionSheetActionPopover();
@@ -7750,6 +7926,7 @@
         window.addEventListener('scroll', positionTokenInspectorPopover, { passive: true });
         window.addEventListener('scroll', positionSheetActionPopover, { passive: true });
         window.addEventListener('scroll', positionNPCRollPopover, { passive: true });
+        window.addEventListener('scroll', positionStageContextMenu, { passive: true });
         if (sidebarEl) sidebarEl.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
     };
 
