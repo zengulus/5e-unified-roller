@@ -535,20 +535,43 @@ const serializeYPingRecord = (record, pingId) => ({
 const syncYFogRecord = (record, fog) => {
     const source = fog && typeof fog === 'object' ? fog : {};
     setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
-    setYScalar(record, 'x', source.x);
-    setYScalar(record, 'y', source.y);
-    setYScalar(record, 'w', source.w);
-    setYScalar(record, 'h', source.h);
-    removeExtraneousMapKeys(record, new Set(['id', 'x', 'y', 'w', 'h']));
+    if (source.col !== undefined || source.row !== undefined) {
+        setYScalar(record, 'col', source.col);
+        setYScalar(record, 'row', source.row);
+        ['x', 'y', 'w', 'h'].forEach((key) => {
+            if (record.has(key)) record.delete(key);
+        });
+    } else {
+        setYScalar(record, 'x', source.x);
+        setYScalar(record, 'y', source.y);
+        setYScalar(record, 'w', source.w);
+        setYScalar(record, 'h', source.h);
+        ['col', 'row'].forEach((key) => {
+            if (record.has(key)) record.delete(key);
+        });
+    }
+    removeExtraneousMapKeys(record, new Set(['id', 'col', 'row', 'x', 'y', 'w', 'h']));
 };
 
-const serializeYFogRecord = (record, fogId) => ({
-    id: toTrimmedString(record.get('id'), fogId, 120).trim() || fogId,
-    x: record.get('x'),
-    y: record.get('y'),
-    w: record.get('w'),
-    h: record.get('h')
-});
+const serializeYFogRecord = (record, fogId) => {
+    const base = {
+        id: toTrimmedString(record.get('id'), fogId, 120).trim() || fogId
+    };
+    if (record.has('col') || record.has('row')) {
+        return {
+            ...base,
+            col: record.get('col'),
+            row: record.get('row')
+        };
+    }
+    return {
+        ...base,
+        x: record.get('x'),
+        y: record.get('y'),
+        w: record.get('w'),
+        h: record.get('h')
+    };
+};
 
 const syncYSceneRecord = (record, scene) => {
     const source = scene && typeof scene === 'object' ? scene : {};
@@ -802,10 +825,27 @@ const patchYPingRecord = (record, basePing = {}, nextPing = {}) => {
 const patchYFogRecord = (record, baseFog = {}, nextFog = {}) => {
     let mutated = false;
     mutated = patchYScalar(record, 'id', baseFog.id, nextFog.id) || mutated;
+    if (nextFog.col !== undefined || nextFog.row !== undefined) {
+        mutated = patchYScalar(record, 'col', baseFog.col, nextFog.col) || mutated;
+        mutated = patchYScalar(record, 'row', baseFog.row, nextFog.row) || mutated;
+        ['x', 'y', 'w', 'h'].forEach((key) => {
+            if (record.has(key)) {
+                record.delete(key);
+                mutated = true;
+            }
+        });
+        return mutated;
+    }
     mutated = patchYScalar(record, 'x', baseFog.x, nextFog.x) || mutated;
     mutated = patchYScalar(record, 'y', baseFog.y, nextFog.y) || mutated;
     mutated = patchYScalar(record, 'w', baseFog.w, nextFog.w) || mutated;
     mutated = patchYScalar(record, 'h', baseFog.h, nextFog.h) || mutated;
+    ['col', 'row'].forEach((key) => {
+        if (record.has(key)) {
+            record.delete(key);
+            mutated = true;
+        }
+    });
     return mutated;
 };
 

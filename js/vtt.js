@@ -902,6 +902,7 @@
         };
     };
     const buildFogCellKey = (col, row) => `${Math.round(toNumber(col, 0))},${Math.round(toNumber(row, 0))}`;
+    const buildFogCellId = (col, row) => `fog_${Math.round(toNumber(col, 0))}_${Math.round(toNumber(row, 0))}`;
     const parseFogCellKey = (key) => {
         const parts = String(key || '').split(',');
         return {
@@ -909,15 +910,25 @@
             row: Math.round(toNumber(parts[1], 0))
         };
     };
-    const getFogMaskCellBounds = (scene, mask) => {
-        if (!scene || !mask) return null;
+    const getFogEntryCellBounds = (scene, fogEntry) => {
+        if (!scene || !fogEntry) return null;
+        if (fogEntry.col !== undefined || fogEntry.row !== undefined) {
+            const left = Math.round(toNumber(fogEntry.col, 0));
+            const top = Math.round(toNumber(fogEntry.row, 0));
+            return {
+                left,
+                top,
+                right: left + 1,
+                bottom: top + 1
+            };
+        }
         const cellPx = getSceneCellPx(scene);
         const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
         const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const left = Math.round((toNumber(mask.x, offsetX) - offsetX) / cellPx);
-        const top = Math.round((toNumber(mask.y, offsetY) - offsetY) / cellPx);
-        const widthCells = Math.max(1, Math.round(Math.max(1, toNumber(mask.w, cellPx)) / cellPx));
-        const heightCells = Math.max(1, Math.round(Math.max(1, toNumber(mask.h, cellPx)) / cellPx));
+        const left = Math.round((toNumber(fogEntry.x, offsetX) - offsetX) / cellPx);
+        const top = Math.round((toNumber(fogEntry.y, offsetY) - offsetY) / cellPx);
+        const widthCells = Math.max(1, Math.round(Math.max(1, toNumber(fogEntry.w, cellPx)) / cellPx));
+        const heightCells = Math.max(1, Math.round(Math.max(1, toNumber(fogEntry.h, cellPx)) / cellPx));
         return {
             left,
             top,
@@ -927,7 +938,7 @@
     };
     const mutateFogCellSetForMask = (cellSet, scene, mask, add = true) => {
         if (!(cellSet instanceof Set) || !scene || !mask) return cellSet;
-        const bounds = getFogMaskCellBounds(scene, mask);
+        const bounds = getFogEntryCellBounds(scene, mask);
         if (!bounds) return cellSet;
         for (let row = bounds.top; row < bounds.bottom; row += 1) {
             for (let col = bounds.left; col < bounds.right; col += 1) {
@@ -946,109 +957,56 @@
         });
         return cellSet;
     };
-    const buildFogMasksFromCellSet = (scene, cellSet) => {
+    const buildFogCellsFromCellSet = (scene, cellSet) => {
         if (!scene || !(cellSet instanceof Set) || !cellSet.size) return [];
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const rows = new Map();
-        cellSet.forEach((key) => {
-            const parsed = parseFogCellKey(key);
-            if (!rows.has(parsed.row)) rows.set(parsed.row, []);
-            rows.get(parsed.row).push(parsed.col);
-        });
-        const sortedRows = Array.from(rows.keys()).sort((left, right) => left - right);
-        const finalized = [];
-        let openRects = new Map();
-        let prevRow = null;
-
-        sortedRows.forEach((row) => {
-            const cols = Array.from(new Set(rows.get(row) || [])).sort((left, right) => left - right);
-            const runs = [];
-            let runStart = null;
-            let runEnd = null;
-            cols.forEach((col) => {
-                if (runStart === null) {
-                    runStart = col;
-                    runEnd = col + 1;
-                    return;
-                }
-                if (col === runEnd) {
-                    runEnd = col + 1;
-                    return;
-                }
-                runs.push({ left: runStart, right: runEnd });
-                runStart = col;
-                runEnd = col + 1;
-            });
-            if (runStart !== null && runEnd !== null) runs.push({ left: runStart, right: runEnd });
-
-            const canContinue = prevRow !== null && row === prevRow + 1;
-            const nextOpenRects = new Map();
-            runs.forEach((run) => {
-                const runKey = `${run.left}:${run.right}`;
-                if (canContinue && openRects.has(runKey)) {
-                    const existingRect = openRects.get(runKey);
-                    existingRect.bottom = row + 1;
-                    nextOpenRects.set(runKey, existingRect);
-                    openRects.delete(runKey);
-                    return;
-                }
-                nextOpenRects.set(runKey, {
-                    left: run.left,
-                    right: run.right,
-                    top: row,
-                    bottom: row + 1
-                });
-            });
-
-            openRects.forEach((rect) => {
-                finalized.push(rect);
-            });
-            openRects = nextOpenRects;
-            prevRow = row;
-        });
-
-        openRects.forEach((rect) => {
-            finalized.push(rect);
-        });
-
-        return finalized.map((rect) => ({
-            id: buildId('fog'),
-            x: Math.round(offsetX + rect.left * cellPx),
-            y: Math.round(offsetY + rect.top * cellPx),
-            w: Math.max(1, Math.round((rect.right - rect.left) * cellPx)),
-            h: Math.max(1, Math.round((rect.bottom - rect.top) * cellPx))
-        }));
+        return Array.from(cellSet)
+            .map((key) => parseFogCellKey(key))
+            .sort((left, right) => left.row - right.row || left.col - right.col)
+            .map((cell) => ({
+                id: buildFogCellId(cell.col, cell.row),
+                col: cell.col,
+                row: cell.row
+            }));
     };
     const applyFogMaskMutation = (scene, mask, mode = 'add') => {
         if (!scene || !mask) return Array.isArray(scene && scene.fog) ? scene.fog.slice() : [];
         const cellSet = collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
         mutateFogCellSetForMask(cellSet, scene, mask, mode !== 'remove');
-        return buildFogMasksFromCellSet(scene, cellSet);
+        return buildFogCellsFromCellSet(scene, cellSet);
     };
     const findFogMaskIndexAtWorldPoint = (scene, worldPoint) => {
         if (!scene || !worldPoint || !Array.isArray(scene.fog)) return -1;
-        const worldX = toNumber(worldPoint.x, -1);
-        const worldY = toNumber(worldPoint.y, -1);
+        const cell = getFogCellAtWorldPoint(scene, worldPoint);
         for (let idx = scene.fog.length - 1; idx >= 0; idx -= 1) {
-            const mask = scene.fog[idx];
-            const left = toNumber(mask && mask.x, 0);
-            const top = toNumber(mask && mask.y, 0);
-            const width = Math.max(1, toNumber(mask && mask.w, 1));
-            const height = Math.max(1, toNumber(mask && mask.h, 1));
-            if (worldX >= left && worldX <= left + width && worldY >= top && worldY <= top + height) return idx;
+            const bounds = getFogEntryCellBounds(scene, scene.fog[idx]);
+            if (!bounds) continue;
+            if (cell.col >= bounds.left && cell.col < bounds.right && cell.row >= bounds.top && cell.row < bounds.bottom) return idx;
         }
         return -1;
     };
-    const buildFogMaskMarkup = (mask, className = '') => {
-        if (!mask) return '';
+    const getFogEntryWorldRect = (scene, fogEntry) => {
+        if (!scene || !fogEntry) return null;
+        const bounds = getFogEntryCellBounds(scene, fogEntry);
+        if (!bounds) return null;
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        return {
+            x: Math.round(offsetX + bounds.left * cellPx),
+            y: Math.round(offsetY + bounds.top * cellPx),
+            w: Math.max(1, Math.round((bounds.right - bounds.left) * cellPx)),
+            h: Math.max(1, Math.round((bounds.bottom - bounds.top) * cellPx))
+        };
+    };
+    const buildFogMaskMarkup = (scene, mask, className = '') => {
+        const rect = getFogEntryWorldRect(scene, mask);
+        if (!rect) return '';
         return `
             <div class="vtt-fog-mask${className ? ` ${className}` : ''}"
-                data-world-left="${escapeHtml(String(mask.x))}"
-                data-world-top="${escapeHtml(String(mask.y))}"
-                data-world-width="${escapeHtml(String(mask.w))}"
-                data-world-height="${escapeHtml(String(mask.h))}"></div>
+                data-world-left="${escapeHtml(String(rect.x))}"
+                data-world-top="${escapeHtml(String(rect.y))}"
+                data-world-width="${escapeHtml(String(rect.w))}"
+                data-world-height="${escapeHtml(String(rect.h))}"></div>
         `;
     };
     const getEvidenceNoteCategoryConfig = (category) => {
@@ -2819,14 +2777,18 @@
 
     const isTokenUnderFog = (scene, token) => {
         if (!scene || !token || !Array.isArray(scene.fog) || !scene.fog.length) return false;
-        const tokenRect = getTokenWorldRect(token, scene);
-        if (!tokenRect) return false;
-        return scene.fog.some((mask) => doWorldRectsOverlap(tokenRect, {
-            left: toNumber(mask && mask.x, 0),
-            top: toNumber(mask && mask.y, 0),
-            right: toNumber(mask && mask.x, 0) + Math.max(1, toNumber(mask && mask.w, 1)),
-            bottom: toNumber(mask && mask.y, 0) + Math.max(1, toNumber(mask && mask.h, 1))
-        }));
+        const cellSet = collectFogCellSet(scene, scene.fog);
+        if (!cellSet.size) return false;
+        const left = Math.floor(toNumber(token.x, 0));
+        const top = Math.floor(toNumber(token.y, 0));
+        const right = Math.ceil(toNumber(token.x, 0) + Math.max(1, toNumber(token.w, 1)));
+        const bottom = Math.ceil(toNumber(token.y, 0) + Math.max(1, toNumber(token.h, 1)));
+        for (let row = top; row < bottom; row += 1) {
+            for (let col = left; col < right; col += 1) {
+                if (cellSet.has(buildFogCellKey(col, row))) return true;
+            }
+        }
+        return false;
     };
 
     const isTokenHiddenForRole = (token, scene, role = localRole) => {
@@ -3115,10 +3077,14 @@
 
         fogLayerEl.querySelectorAll('.vtt-fog-mask').forEach((maskEl) => {
             if (!(maskEl instanceof HTMLElement)) return;
-            maskEl.style.left = `${scaleForZoom(toNumber(maskEl.dataset.worldLeft, 0))}px`;
-            maskEl.style.top = `${scaleForZoom(toNumber(maskEl.dataset.worldTop, 0))}px`;
+            const worldLeft = toNumber(maskEl.dataset.worldLeft, 0);
+            const worldTop = toNumber(maskEl.dataset.worldTop, 0);
+            maskEl.style.left = `${scaleForZoom(worldLeft)}px`;
+            maskEl.style.top = `${scaleForZoom(worldTop)}px`;
             maskEl.style.width = `${scaleForZoom(toNumber(maskEl.dataset.worldWidth, 0))}px`;
             maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
+            maskEl.style.setProperty('--vtt-fog-texture-x', `${-scaleForZoom(worldLeft)}px`);
+            maskEl.style.setProperty('--vtt-fog-texture-y', `${-scaleForZoom(worldTop)}px`);
         });
 
         noteLayerEl.querySelectorAll('.vtt-map-note').forEach((noteEl) => {
@@ -5433,9 +5399,9 @@
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
 
-        const fogMarkup = Array.isArray(scene.fog) ? scene.fog.map((mask) => buildFogMaskMarkup(mask)).join('') : '';
+        const fogMarkup = Array.isArray(scene.fog) ? scene.fog.map((mask) => buildFogMaskMarkup(scene, mask)).join('') : '';
         const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
-            ? buildFogMaskMarkup(fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
+            ? buildFogMaskMarkup(scene, fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
             : '';
         fogLayerEl.innerHTML = `${fogMarkup}${fogPreviewMarkup}`;
 

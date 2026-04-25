@@ -670,6 +670,19 @@
         };
     };
 
+    const buildVTTFogCellId = (col, row) => `fog_${Math.round(toNumber(col, 0))}_${Math.round(toNumber(row, 0))}`;
+
+    const sanitizeVTTFogCell = (cell, idx = 0) => {
+        const source = cell && typeof cell === 'object' ? cell : {};
+        const col = Math.round(toNumber(source.col, 0));
+        const row = Math.round(toNumber(source.row, 0));
+        return {
+            id: toTrimmedString(source.id, buildVTTFogCellId(col, row) || `fog_${idx + 1}`, 120).trim() || buildVTTFogCellId(col, row) || `fog_${idx + 1}`,
+            col,
+            row
+        };
+    };
+
     const sanitizeVTTFogMask = (mask, idx = 0) => {
         const source = mask && typeof mask === 'object' ? mask : {};
         return {
@@ -679,6 +692,47 @@
             w: Math.max(1, Math.round(toNumber(source.w, 1))),
             h: Math.max(1, Math.round(toNumber(source.h, 1)))
         };
+    };
+
+    const sanitizeVTTFogEntries = (entries, grid, legacyScaleFactor = 1) => {
+        if (!Array.isArray(entries) || !entries.length) return [];
+        const cellPx = Math.max(1, toNumber(grid && grid.cellPx, DEFAULT_VTT_CELL_PX));
+        const offsetX = Math.round(toNumber(grid && grid.offsetX, 0));
+        const offsetY = Math.round(toNumber(grid && grid.offsetY, 0));
+        const cells = new Map();
+        entries.forEach((entry, entryIdx) => {
+            const source = entry && typeof entry === 'object' ? entry : {};
+            if (source.col !== undefined || source.row !== undefined) {
+                const cell = sanitizeVTTFogCell(source, entryIdx);
+                cells.set(`${cell.col},${cell.row}`, {
+                    ...cell,
+                    id: buildVTTFogCellId(cell.col, cell.row)
+                });
+                return;
+            }
+            const mask = sanitizeVTTFogMask(source, entryIdx);
+            const scaledMask = {
+                ...mask,
+                x: Math.round(mask.x * legacyScaleFactor),
+                y: Math.round(mask.y * legacyScaleFactor),
+                w: Math.max(1, Math.round(mask.w * legacyScaleFactor)),
+                h: Math.max(1, Math.round(mask.h * legacyScaleFactor))
+            };
+            const left = Math.round((scaledMask.x - offsetX) / cellPx);
+            const top = Math.round((scaledMask.y - offsetY) / cellPx);
+            const widthCells = Math.max(1, Math.round(Math.max(1, scaledMask.w) / cellPx));
+            const heightCells = Math.max(1, Math.round(Math.max(1, scaledMask.h) / cellPx));
+            for (let row = top; row < top + heightCells; row += 1) {
+                for (let col = left; col < left + widthCells; col += 1) {
+                    cells.set(`${col},${row}`, {
+                        id: buildVTTFogCellId(col, row),
+                        col,
+                        row
+                    });
+                }
+            }
+        });
+        return Array.from(cells.values()).sort((left, right) => left.row - right.row || left.col - right.col);
     };
 
     const sanitizeVTTTemplate = (template, idx = 0) => {
@@ -782,18 +836,11 @@
             pings: Array.isArray(source.pings)
                 ? source.pings.map((pingEntry, pingIdx) => sanitizeVTTPing(pingEntry, pingIdx)).slice(-24)
                 : [],
-            fog: Array.isArray(source.fog)
-                ? source.fog.map((maskEntry, maskIdx) => {
-                    const mask = sanitizeVTTFogMask(maskEntry, maskIdx);
-                    return {
-                        ...mask,
-                        x: Math.round(mask.x * legacyScaleFactor),
-                        y: Math.round(mask.y * legacyScaleFactor),
-                        w: Math.max(1, Math.round(mask.w * legacyScaleFactor)),
-                        h: Math.max(1, Math.round(mask.h * legacyScaleFactor))
-                    };
-                })
-                : []
+            fog: sanitizeVTTFogEntries(source.fog, {
+                cellPx: DEFAULT_VTT_CELL_PX,
+                offsetX: Math.round(legacyGrid.offsetX * legacyScaleFactor),
+                offsetY: Math.round(legacyGrid.offsetY * legacyScaleFactor)
+            }, legacyScaleFactor)
         };
     };
 
