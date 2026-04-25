@@ -186,6 +186,7 @@
     const tokenNamesToggleEl = document.getElementById('vtt-token-names-toggle');
     const zoomResetEl = document.querySelector('[data-action="zoom-reset"]');
     const activeSceneLabelEl = document.getElementById('vtt-active-scene-label');
+    const scenePanelSceneLabelEl = document.getElementById('vtt-scene-panel-scene-label');
     const stageTitleEl = document.getElementById('vtt-stage-title');
     const stageMetaEl = document.getElementById('vtt-stage-meta');
     const roundPillEl = document.getElementById('vtt-round-pill');
@@ -4076,6 +4077,14 @@
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="cone">Cone</button>
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="note"${isDM() ? '' : ' disabled'}>Pins/Zones</button>
                 </div>
+                <label class="vtt-stage-context-size">
+                    <span>Template size</span>
+                    <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="${escapeHtml(String(localToolState.sizeCells))}" aria-label="Circle radius and cone length in squares">
+                    <small>Circle radius / cone length, in squares</small>
+                </label>
+                ${isDM() ? `
+                    <button class="vtt-stage-context-item" type="button" data-action="toggle-stealth-mode">Sight Cones: ${getActiveScene() && getActiveScene().stealthMode ? 'On' : 'Off'}</button>
+                ` : ''}
             </div>
             <div class="vtt-stage-context-section">
                 <div class="vtt-menu-title">Fog</div>
@@ -5528,6 +5537,7 @@
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
         if (roleToggleEl) roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
         if (activeSceneLabelEl) activeSceneLabelEl.textContent = `Scene: ${sharedScene.name || 'Scene'}`;
+        if (scenePanelSceneLabelEl) scenePanelSceneLabelEl.textContent = scene.name || 'Scene';
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
         if (stageMetaEl) {
             stageMetaEl.textContent = `${toolMeta} ${stealthMeta}`;
@@ -6585,7 +6595,6 @@
         if (target instanceof HTMLInputElement && target.dataset.toolSizeField) {
             const nextSize = normalizeToolSizeCells(target.value, localToolState.sizeCells);
             localToolState.sizeCells = nextSize;
-            renderToolsMenu();
             return;
         }
         if (event.type === 'input' && target instanceof HTMLInputElement) return;

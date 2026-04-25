@@ -17,7 +17,10 @@
         <div class="vtt-topbar-brand">
             <p class="hero-eyebrow">Ravnica Task Force</p>
             <div class="vtt-topbar-meta">
-                <span class="vtt-topbar-case">Case: <strong id="vtt-case-name">Primary Case</strong></span>
+                <span class="vtt-topbar-case-stack">
+                    <span class="vtt-topbar-case">Case: <strong id="vtt-case-name">Primary Case</strong></span>
+                    <span class="vtt-topbar-scene" id="vtt-active-scene-label">Scene: Scene 1</span>
+                </span>
                 <span class="vtt-sync-chip" id="vtt-sync-chip">Local</span>
             </div>
         </div>
@@ -74,7 +77,7 @@
                 <div class="vtt-panel-head">
                     <h2>Scene</h2>
                     <div class="vtt-panel-head-actions">
-                        <span class="vtt-panel-pill" id="vtt-active-scene-label">Scene 1</span>
+                        <span class="vtt-panel-pill" id="vtt-scene-panel-scene-label">Scene 1</span>
                         <button class="vtt-chip-btn" data-action="create-scene">New Scene</button>
                     </div>
                 </div>
@@ -154,21 +157,6 @@
         </aside>
 
         <section class="vtt-stage-panel">
-            <div class="vtt-stage-toolbar">
-                <div class="vtt-stage-toolbar-copy">
-                    <strong id="vtt-stage-title">Scene 1</strong>
-                </div>
-                <div class="vtt-stage-toolbar-controls">
-                    <div class="vtt-stage-tool-extras">
-                        <label class="vtt-field vtt-field-tight vtt-stage-tool-size">
-                            <span>Squares</span>
-                            <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="4">
-                        </label>
-                        <button class="vtt-chip-btn" data-action="toggle-stealth-mode" id="vtt-stealth-mode-toggle"
-                            data-dm-only="1" aria-pressed="false">Sight Cones: Off</button>
-                    </div>
-                </div>
-            </div>
             <div class="vtt-stage" id="vtt-stage">
                 <div class="vtt-map-world" id="vtt-map-world">
                     <img id="vtt-map-image" class="vtt-map-image" alt="" draggable="false">
