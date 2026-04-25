@@ -1,7 +1,8 @@
 (function () {
     const FOG_LAYER_ID = 'vtt-fog-layer';
     const SOURCE_SELECTOR = ':scope > .vtt-fog-mask:not(.vtt-fog-unified-mask)';
-    const UNIFIED_SELECTOR = ':scope > .vtt-fog-unified-mask';
+    const STYLE_ID = 'vtt-fog-unified-style';
+    const XHTML_NS = 'http://www.w3.org/1999/xhtml';
 
     const toPx = (value, fallback = 0) => {
         const parsed = Number.parseFloat(String(value || '').replace('px', ''));
@@ -9,32 +10,113 @@
     };
 
     const getRectForMask = (maskEl) => {
-        const left = toPx(maskEl.style.left, maskEl.offsetLeft);
-        const top = toPx(maskEl.style.top, maskEl.offsetTop);
-        const width = Math.max(1, toPx(maskEl.style.width, maskEl.offsetWidth));
-        const height = Math.max(1, toPx(maskEl.style.height, maskEl.offsetHeight));
+        const worldLeft = Number.parseFloat(maskEl.dataset.worldLeft || '');
+        const worldTop = Number.parseFloat(maskEl.dataset.worldTop || '');
+        const worldWidth = Number.parseFloat(maskEl.dataset.worldWidth || '');
+        const worldHeight = Number.parseFloat(maskEl.dataset.worldHeight || '');
+        const left = Number.isFinite(worldLeft) ? worldLeft : toPx(maskEl.style.left, maskEl.offsetLeft);
+        const top = Number.isFinite(worldTop) ? worldTop : toPx(maskEl.style.top, maskEl.offsetTop);
+        const width = Math.max(1, Number.isFinite(worldWidth) ? worldWidth : toPx(maskEl.style.width, maskEl.offsetWidth));
+        const height = Math.max(1, Number.isFinite(worldHeight) ? worldHeight : toPx(maskEl.style.height, maskEl.offsetHeight));
         return { left, top, width, height, right: left + width, bottom: top + height };
     };
 
-    const encodeMaskSvg = (rects, width, height, minLeft, minTop) => {
-        const safeWidth = Math.max(1, Math.ceil(width));
-        const safeHeight = Math.max(1, Math.ceil(height));
-        const rectMarkup = rects.map((rect) => {
-            const x = Math.round(rect.left - minLeft);
-            const y = Math.round(rect.top - minTop);
-            const w = Math.max(1, Math.round(rect.width));
-            const h = Math.max(1, Math.round(rect.height));
-            return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="white"/>`;
-        }).join('');
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}"><rect width="100%" height="100%" fill="black"/>${rectMarkup}</svg>`;
-        return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    const installStyle = () => {
+        if (document.getElementById(STYLE_ID)) return;
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            .vtt-fog-unified-mask {
+                background: transparent !important;
+                box-shadow: none !important;
+                filter: none !important;
+                opacity: 1 !important;
+                overflow: visible !important;
+            }
+
+            .vtt-fog-unified-mask::before,
+            .vtt-fog-unified-mask::after {
+                content: none !important;
+            }
+
+            .vtt-fog-unified-svg {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                overflow: visible;
+                pointer-events: none;
+            }
+
+            .vtt-fog-unified-fill {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                background:
+                    radial-gradient(circle at 46px 62px, rgba(224, 229, 232, 0.34) 0 18px, transparent 58px),
+                    radial-gradient(circle at 180px 86px, rgba(149, 158, 166, 0.36) 0 26px, transparent 74px),
+                    radial-gradient(circle at 124px 178px, rgba(236, 239, 240, 0.25) 0 22px, transparent 68px),
+                    linear-gradient(135deg, rgba(31, 36, 43, 0.62), rgba(7, 9, 13, 0.84));
+                background-repeat: repeat;
+                background-size: 260px 220px, 300px 250px, 220px 280px, auto;
+                background-position: var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
+                box-shadow: inset 0 0 1.4rem rgba(225, 231, 234, 0.08);
+                filter: saturate(0.72) blur(0.2px);
+                overflow: hidden;
+                opacity: 0.94;
+            }
+
+            .vtt-fog-unified-fill::before,
+            .vtt-fog-unified-fill::after {
+                content: "";
+                position: absolute;
+                inset: 0;
+                pointer-events: none;
+                background-repeat: repeat;
+                mix-blend-mode: screen;
+            }
+
+            .vtt-fog-unified-fill::before {
+                background:
+                    radial-gradient(circle at 12px 18px, rgba(238, 241, 242, 0.28) 0 8px, transparent 18px),
+                    radial-gradient(circle at 54px 34px, rgba(142, 151, 160, 0.28) 0 11px, transparent 25px),
+                    radial-gradient(circle at 34px 70px, rgba(211, 216, 220, 0.18) 0 9px, transparent 23px);
+                background-size: 88px 74px;
+                background-position: var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
+                filter: blur(7px);
+                opacity: 0.76;
+                animation: vtt-fog-drift-a 18s linear infinite;
+            }
+
+            .vtt-fog-unified-fill::after {
+                background:
+                    radial-gradient(circle at 24px 22px, rgba(255, 255, 255, 0.2) 0 7px, transparent 20px),
+                    radial-gradient(circle at 68px 58px, rgba(113, 122, 132, 0.24) 0 13px, transparent 30px);
+                background-size: 104px 92px;
+                background-position: var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
+                filter: blur(11px);
+                opacity: 0.62;
+                animation: vtt-fog-drift-b 27s linear infinite;
+            }
+        `;
+        document.head.appendChild(style);
     };
 
-    const copyPreviewMasks = (maskEls) => maskEls
+    const clonePreviewMasks = (maskEls) => maskEls
         .filter((maskEl) => maskEl.classList.contains('is-preview') || maskEl.classList.contains('is-remove-preview'))
         .map((maskEl) => maskEl.cloneNode(true));
 
-    const buildUnifiedMask = (sourceMasks) => {
+    const createClipRect = (documentRef, rect, minLeft, minTop) => {
+        const clipRect = documentRef.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        clipRect.setAttribute('x', String(Math.round(rect.left - minLeft)));
+        clipRect.setAttribute('y', String(Math.round(rect.top - minTop)));
+        clipRect.setAttribute('width', String(Math.max(1, Math.round(rect.width))));
+        clipRect.setAttribute('height', String(Math.max(1, Math.round(rect.height))));
+        return clipRect;
+    };
+
+    const buildUnifiedFog = (sourceMasks) => {
         const normalMasks = sourceMasks.filter((maskEl) =>
             !maskEl.classList.contains('is-preview') && !maskEl.classList.contains('is-remove-preview')
         );
@@ -47,33 +129,58 @@
         const maxBottom = Math.max(...rects.map((rect) => rect.bottom));
         const width = Math.max(1, maxRight - minLeft);
         const height = Math.max(1, maxBottom - minTop);
-        const maskUrl = encodeMaskSvg(rects, width, height, minLeft, minTop);
+        const roundedWidth = Math.max(1, Math.round(width));
+        const roundedHeight = Math.max(1, Math.round(height));
+        const clipId = `vtt-fog-clip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-        const unified = document.createElement('div');
-        unified.className = 'vtt-fog-mask vtt-fog-unified-mask';
-        unified.setAttribute('aria-hidden', 'true');
-        unified.dataset.worldLeft = String(minLeft);
-        unified.dataset.worldTop = String(minTop);
-        unified.dataset.worldWidth = String(width);
-        unified.dataset.worldHeight = String(height);
-        unified.style.left = `${minLeft}px`;
-        unified.style.top = `${minTop}px`;
-        unified.style.width = `${width}px`;
-        unified.style.height = `${height}px`;
-        unified.style.webkitMaskImage = maskUrl;
-        unified.style.maskImage = maskUrl;
-        unified.style.webkitMaskRepeat = 'no-repeat';
-        unified.style.maskRepeat = 'no-repeat';
-        unified.style.webkitMaskSize = '100% 100%';
-        unified.style.maskSize = '100% 100%';
-        unified.style.setProperty('--vtt-fog-texture-x', `${-minLeft}px`);
-        unified.style.setProperty('--vtt-fog-texture-y', `${-minTop}px`);
-        return unified;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'vtt-fog-mask vtt-fog-unified-mask';
+        wrapper.setAttribute('aria-hidden', 'true');
+        wrapper.dataset.worldLeft = String(minLeft);
+        wrapper.dataset.worldTop = String(minTop);
+        wrapper.dataset.worldWidth = String(width);
+        wrapper.dataset.worldHeight = String(height);
+        wrapper.style.left = `${minLeft}px`;
+        wrapper.style.top = `${minTop}px`;
+        wrapper.style.width = `${width}px`;
+        wrapper.style.height = `${height}px`;
+        wrapper.style.setProperty('--vtt-fog-texture-x', `${-minLeft}px`);
+        wrapper.style.setProperty('--vtt-fog-texture-y', `${-minTop}px`);
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.classList.add('vtt-fog-unified-svg');
+        svg.setAttribute('viewBox', `0 0 ${roundedWidth} ${roundedHeight}`);
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.setAttribute('aria-hidden', 'true');
+
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+        clipPath.setAttribute('id', clipId);
+        clipPath.setAttribute('clipPathUnits', 'userSpaceOnUse');
+        rects.forEach((rect) => clipPath.appendChild(createClipRect(document, rect, minLeft, minTop)));
+        defs.appendChild(clipPath);
+        svg.appendChild(defs);
+
+        const foreignObject = document.createElementNS('http://www.w3.org/2000/svg', 'foreignObject');
+        foreignObject.setAttribute('x', '0');
+        foreignObject.setAttribute('y', '0');
+        foreignObject.setAttribute('width', String(roundedWidth));
+        foreignObject.setAttribute('height', String(roundedHeight));
+        foreignObject.setAttribute('clip-path', `url(#${clipId})`);
+
+        const fill = document.createElementNS(XHTML_NS, 'div');
+        fill.setAttribute('class', 'vtt-fog-unified-fill');
+        foreignObject.appendChild(fill);
+        svg.appendChild(foreignObject);
+        wrapper.appendChild(svg);
+
+        return wrapper;
     };
 
     const installUnifiedFogCompositor = () => {
         const fogLayer = document.getElementById(FOG_LAYER_ID);
         if (!fogLayer) return false;
+        installStyle();
 
         let scheduled = false;
         let applying = false;
@@ -84,8 +191,8 @@
             const sourceMasks = Array.from(fogLayer.querySelectorAll(SOURCE_SELECTOR));
             if (!sourceMasks.length) return;
 
-            const unified = buildUnifiedMask(sourceMasks);
-            const previews = copyPreviewMasks(sourceMasks);
+            const unified = buildUnifiedFog(sourceMasks);
+            const previews = clonePreviewMasks(sourceMasks);
             if (!unified && !previews.length) return;
 
             applying = true;
