@@ -967,9 +967,6 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     position: absolute;
     --vtt-fog-texture-x: 0px;
     --vtt-fog-texture-y: 0px;
-    --vtt-fog-edge-a: 0% 0%, 100% 0%, 100% 100%, 0% 100%;
-    --vtt-fog-edge-b: var(--vtt-fog-edge-a);
-    --vtt-fog-edge-c: var(--vtt-fog-edge-a);
     background: rgba(64, 64, 64, 0.75);
     background-repeat: repeat;
     background-position: var(--vtt-fog-texture-x) var(--vtt-fog-texture-y);
@@ -977,9 +974,22 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     filter: none;
     overflow: hidden;
     opacity: 1;
-    clip-path: polygon(var(--vtt-fog-edge-a));
-    animation: vtt-fog-edge-wibble 7.8s ease-in-out infinite;
-    will-change: clip-path;
+}
+
+.vtt-fog-edge-svg {
+    position: absolute;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.vtt-fog-edge-path {
+    fill: none;
+    stroke: rgba(72, 72, 72, 0.78);
+    stroke-width: 1.35px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+    filter: blur(0.15px);
 }
 
 .vtt-fog-mask::before,

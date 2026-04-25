@@ -916,28 +916,111 @@
         });
         return (hash >>> 0) / 4294967295;
     };
-    const buildFogWibblePoint = (side, step, steps, amplitude, phaseA, phaseB) => {
-        const t = steps <= 0 ? 0 : step / steps;
-        const wobble = Math.sin((t * Math.PI * 2) + phaseA) * amplitude
-            + Math.sin((t * Math.PI * 4.6) + phaseB) * amplitude * 0.55;
-        const along = t * 100;
-        if (side === 'top') return `${along.toFixed(2)}% ${clamp(wobble, -8, 8).toFixed(2)}%`;
-        if (side === 'right') return `${(100 - clamp(wobble, -8, 8)).toFixed(2)}% ${along.toFixed(2)}%`;
-        if (side === 'bottom') return `${(100 - along).toFixed(2)}% ${(100 - clamp(wobble, -8, 8)).toFixed(2)}%`;
-        return `${clamp(wobble, -8, 8).toFixed(2)}% ${(100 - along).toFixed(2)}%`;
-    };
-    const buildFogWibblePolygon = (seed, phaseOffset = 0) => {
+    const FOG_EDGE_WIBBLE_POINTS = 4;
+    const FOG_EDGE_WIBBLE_PX = 1.15;
+
+    const buildFogBoundarySegmentPath = (scene, side, col, row, phaseOffset = 0) => {
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+
+        const x0 = offsetX + col * cellPx;
+        const y0 = offsetY + row * cellPx;
+        const x1 = x0 + cellPx;
+        const y1 = y0 + cellPx;
+
+        const seed = `${side}:${col}:${row}`;
         const seedUnit = hashStringToUnit(seed);
         const phaseA = seedUnit * Math.PI * 2 + phaseOffset;
-        const phaseB = (seedUnit * 1.73 + 0.31) * Math.PI * 2 - phaseOffset * 0.74;
-        const amplitude = 2.4 + seedUnit * 2.2;
+        const phaseB = (seedUnit * 1.91 + 0.17) * Math.PI * 2 - phaseOffset * 0.63;
+
         const points = [];
-        const steps = FOG_EDGE_POINT_COUNT - 1;
-        for (let step = 0; step < FOG_EDGE_POINT_COUNT; step += 1) points.push(buildFogWibblePoint('top', step, steps, amplitude, phaseA, phaseB));
-        for (let step = 1; step < FOG_EDGE_POINT_COUNT; step += 1) points.push(buildFogWibblePoint('right', step, steps, amplitude, phaseA + 1.4, phaseB + 0.7));
-        for (let step = 1; step < FOG_EDGE_POINT_COUNT; step += 1) points.push(buildFogWibblePoint('bottom', step, steps, amplitude, phaseA + 2.8, phaseB + 1.9));
-        for (let step = 1; step < steps; step += 1) points.push(buildFogWibblePoint('left', step, steps, amplitude, phaseA + 4.2, phaseB + 3.1));
-        return points.join(', ');
+        const steps = Math.max(1, FOG_EDGE_WIBBLE_POINTS - 1);
+
+        for (let step = 0; step < FOG_EDGE_WIBBLE_POINTS; step += 1) {
+            const t = step / steps;
+
+            const wobble =
+                Math.sin(t * Math.PI * 2 + phaseA) * FOG_EDGE_WIBBLE_PX
+                + Math.sin(t * Math.PI * 3.7 + phaseB) * FOG_EDGE_WIBBLE_PX * 0.35;
+
+            if (side === 'top') {
+                points.push({ x: x0 + t * cellPx, y: y0 + wobble });
+            } else if (side === 'right') {
+                points.push({ x: x1 + wobble, y: y0 + t * cellPx });
+            } else if (side === 'bottom') {
+                points.push({ x: x1 - t * cellPx, y: y1 + wobble });
+            } else {
+                points.push({ x: x0 + wobble, y: y1 - t * cellPx });
+            }
+        }
+
+        return points
+            .map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+            .join(' ');
+    };
+
+    const buildFogBoundaryPath = (scene, cellSet, phaseOffset = 0) => {
+        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return '';
+
+        const parts = [];
+
+        cellSet.forEach((key) => {
+            const cell = parseFogCellKey(key);
+            const col = cell.col;
+            const row = cell.row;
+
+            if (!cellSet.has(buildFogCellKey(col, row - 1))) {
+                parts.push(buildFogBoundarySegmentPath(scene, 'top', col, row, phaseOffset));
+            }
+
+            if (!cellSet.has(buildFogCellKey(col + 1, row))) {
+                parts.push(buildFogBoundarySegmentPath(scene, 'right', col, row, phaseOffset));
+            }
+
+            if (!cellSet.has(buildFogCellKey(col, row + 1))) {
+                parts.push(buildFogBoundarySegmentPath(scene, 'bottom', col, row, phaseOffset));
+            }
+
+            if (!cellSet.has(buildFogCellKey(col - 1, row))) {
+                parts.push(buildFogBoundarySegmentPath(scene, 'left', col, row, phaseOffset));
+            }
+        });
+
+        return parts.filter(Boolean).join(' ');
+    };
+
+    const buildFogEdgeMarkup = (scene, cellSet) => {
+        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return '';
+
+        const width = Math.max(1, worldSize.width || DEFAULT_WORLD_SIZE.width);
+        const height = Math.max(1, worldSize.height || DEFAULT_WORLD_SIZE.height);
+
+        const pathA = buildFogBoundaryPath(scene, cellSet, 0);
+        const pathB = buildFogBoundaryPath(scene, cellSet, Math.PI * 0.72);
+        const pathC = buildFogBoundaryPath(scene, cellSet, Math.PI * 1.43);
+
+        if (!pathA || !pathB || !pathC) return '';
+
+        return `
+            <svg class="vtt-fog-edge-svg"
+                data-world-left="0"
+                data-world-top="0"
+                data-world-width="${escapeHtml(String(width))}"
+                data-world-height="${escapeHtml(String(height))}"
+                viewBox="0 0 ${escapeHtml(String(width))} ${escapeHtml(String(height))}"
+                preserveAspectRatio="none"
+                aria-hidden="true">
+                <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}">
+                    <animate
+                        attributeName="d"
+                        dur="9.5s"
+                        repeatCount="indefinite"
+                        values="${escapeHtml(`${pathA};${pathB};${pathC};${pathA}`)}"
+                        keyTimes="0;0.48;0.74;1" />
+                </path>
+            </svg>
+        `;
     };
     const parseFogCellKey = (key) => {
         const parts = String(key || '').split(',');
@@ -1005,6 +1088,55 @@
                 col: cell.col,
                 row: cell.row
             }));
+    };
+    const areFogEntriesEquivalent = (left = [], right = []) => {
+        if (!Array.isArray(left) || !Array.isArray(right)) return false;
+        if (left.length !== right.length) return false;
+
+        for (let idx = 0; idx < left.length; idx += 1) {
+            const a = left[idx] || {};
+            const b = right[idx] || {};
+            if (
+                String(a.id || '') !== String(b.id || '')
+                || Math.round(toNumber(a.col, 0)) !== Math.round(toNumber(b.col, 0))
+                || Math.round(toNumber(a.row, 0)) !== Math.round(toNumber(b.row, 0))
+                || Math.round(toNumber(a.cols, 1)) !== Math.round(toNumber(b.cols, 1))
+                || Math.round(toNumber(a.rows, 1)) !== Math.round(toNumber(b.rows, 1))
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    const coerceSceneFogToCellMask = (scene) => {
+        if (!scene) return false;
+
+        if (!Array.isArray(scene.fog)) {
+            scene.fog = [];
+            return true;
+        }
+
+        const cellSet = collectFogCellSet(scene, scene.fog);
+        const nextFog = buildFogCellsFromCellSet(scene, cellSet);
+
+        if (areFogEntriesEquivalent(scene.fog, nextFog)) return false;
+
+        scene.fog = nextFog;
+        return true;
+    };
+
+    const coerceSnapshotFogToCellMasks = (snapshot) => {
+        if (!snapshot || !Array.isArray(snapshot.scenes)) return false;
+
+        let mutated = false;
+
+        snapshot.scenes.forEach((scene) => {
+            if (coerceSceneFogToCellMask(scene)) mutated = true;
+        });
+
+        return mutated;
     };
     const buildFogRenderRectsFromCellSet = (scene, cellSet) => {
         if (!scene || !(cellSet instanceof Set) || !cellSet.size) return [];
@@ -1109,16 +1241,12 @@
         const isPreview = String(className || '').includes('preview');
         const overdraw = isPreview ? 0 : FOG_EDGE_OVERDRAW_PX;
         const edgeSeed = `${mask && mask.id || ''}:${rect.x}:${rect.y}:${rect.w}:${rect.h}`;
-        const edgeStyle = isPreview
-            ? ''
-            : `--vtt-fog-edge-a: ${buildFogWibblePolygon(edgeSeed, 0)}; --vtt-fog-edge-b: ${buildFogWibblePolygon(edgeSeed, Math.PI * 0.78)}; --vtt-fog-edge-c: ${buildFogWibblePolygon(edgeSeed, Math.PI * 1.56)};`;
         return `
             <div class="vtt-fog-mask${className ? ` ${className}` : ''}"
                 data-world-left="${escapeHtml(String(rect.x - overdraw))}"
                 data-world-top="${escapeHtml(String(rect.y - overdraw))}"
                 data-world-width="${escapeHtml(String(rect.w + overdraw * 2))}"
                 data-world-height="${escapeHtml(String(rect.h + overdraw * 2))}"
-                style="${escapeHtml(edgeStyle)}"></div>
         `;
     };
     const getEvidenceNoteCategoryConfig = (category) => {
@@ -3090,12 +3218,18 @@
     const withDraft = (mutator, options = {}) => {
         const draft = readSharedVTTSnapshot();
         if (!draft) return;
+
         const baseSnapshot = deepClone(draft);
+
         mutator(draft);
+
+        coerceSnapshotFogToCellMasks(draft);
+
         const saved = persistSharedVTTSnapshot(draft, {
             ...options,
             baseSnapshot
         });
+
         vttState = deepClone(saved || draft);
         syncRosterLinkedPlayerPresentation(vttState);
         normalizeSelections();
@@ -3230,6 +3364,20 @@
             maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
             maskEl.style.setProperty('--vtt-fog-texture-x', `${-scaleForZoom(worldLeft)}px`);
             maskEl.style.setProperty('--vtt-fog-texture-y', `${-scaleForZoom(worldTop)}px`);
+        });
+
+        fogLayerEl.querySelectorAll('.vtt-fog-edge-svg').forEach((edgeEl) => {
+            if (!(edgeEl instanceof SVGSVGElement)) return;
+
+            const worldLeft = toNumber(edgeEl.dataset.worldLeft, 0);
+            const worldTop = toNumber(edgeEl.dataset.worldTop, 0);
+            const worldWidth = toNumber(edgeEl.dataset.worldWidth, worldSize.width);
+            const worldHeight = toNumber(edgeEl.dataset.worldHeight, worldSize.height);
+
+            edgeEl.style.left = `${scaleForZoom(worldLeft)}px`;
+            edgeEl.style.top = `${scaleForZoom(worldTop)}px`;
+            edgeEl.style.width = `${scaleForZoom(worldWidth)}px`;
+            edgeEl.style.height = `${scaleForZoom(worldHeight)}px`;
         });
 
         noteLayerEl.querySelectorAll('.vtt-map-note').forEach((noteEl) => {
@@ -5544,11 +5692,21 @@
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
 
-        const fogMarkup = Array.isArray(scene.fog) ? buildFogRenderRects(scene, scene.fog).map((mask) => buildFogMaskMarkup(scene, mask)).join('') : '';
+        const fogCellSet = Array.isArray(scene.fog)
+            ? collectFogCellSet(scene, scene.fog)
+            : new Set();
+
+        const fogMarkup = buildFogRenderRectsFromCellSet(scene, fogCellSet)
+            .map((mask) => buildFogMaskMarkup(scene, mask))
+            .join('');
+
+        const fogEdgeMarkup = buildFogEdgeMarkup(scene, fogCellSet);
+
         const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
             ? buildFogMaskMarkup(scene, fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
             : '';
-        fogLayerEl.innerHTML = `${fogMarkup}${fogPreviewMarkup}`;
+
+        fogLayerEl.innerHTML = `${fogMarkup}${fogEdgeMarkup}${fogPreviewMarkup}`;
 
         const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
         const evidenceMarkup = visibleEvidenceNotes
@@ -8063,8 +8221,25 @@
         bindEvents();
         loadRolePreference();
         loadUIPreferences();
-        const initialSnapshot = readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(getActiveCaseId()));
-        vttState = ensureRosterLinkedPlayerPresentationPersisted(initialSnapshot, { reason: 'roster-player-presentation-sync' }).snapshot;
+        const initialSnapshot =
+            readSharedVTTSnapshot({ syncRosterPresentation: false })
+            || deepClone(store.getVTTState(getActiveCaseId()));
+
+        const fogMigrated = coerceSnapshotFogToCellMasks(initialSnapshot);
+
+        let initialSynced = ensureRosterLinkedPlayerPresentationPersisted(initialSnapshot, {
+            reason: fogMigrated ? 'fog-mask-migration' : 'roster-player-presentation-sync'
+        }).snapshot;
+
+        if (fogMigrated) {
+            const saved = persistSharedVTTSnapshot(initialSynced, {
+                reason: 'fog-mask-migration',
+                baseSnapshot: null
+            });
+            initialSynced = deepClone(saved || initialSynced);
+        }
+
+        vttState = initialSynced;
         normalizeSelections();
         render();
         initVTTCollab().catch((err) => {
