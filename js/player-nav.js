@@ -317,8 +317,13 @@
         return `${days} day${days === 1 ? '' : 's'} ago`;
     }
 
+    function isYjsCollabPage() {
+        return activeId === 'board' || activeId === 'campaign-board' || activeId === 'vtt';
+    }
+
     function describeSyncExperience(status, conflict) {
         const store = getStore();
+        const usesYjsCollab = isYjsCollabPage();
         const config = store && typeof store.getSyncConfig === 'function'
             ? store.getSyncConfig()
             : null;
@@ -429,13 +434,17 @@
             const hasLocalEdits = !!(status.pendingPush || Number(status.dirtyScopes) > 0);
             const isAuthorizedIdle = !hasLocalEdits && !!status.userId;
             return {
-                state: isAuthorizedIdle ? 'ready' : 'offline',
-                buttonLabel: hasLocalEdits ? 'Needs sync' : (isAuthorizedIdle ? 'Connected' : 'Not connected'),
+                state: hasLocalEdits && !usesYjsCollab ? 'editing' : (isAuthorizedIdle ? 'ready' : 'offline'),
+                buttonLabel: hasLocalEdits
+                    ? (usesYjsCollab ? 'Needs sync' : 'Editing')
+                    : (isAuthorizedIdle ? 'Connected' : 'Not connected'),
                 title: hasLocalEdits
-                    ? 'Your latest edits are ready to sync'
+                    ? (usesYjsCollab ? 'Your latest edits are ready to sync' : 'Editing')
                     : (isAuthorizedIdle ? 'Connected to shared campaign' : 'Not connected to shared campaign'),
                 detail: hasLocalEdits
-                    ? 'Sync when you want to share these edits or catch up to the latest campaign state.'
+                    ? (usesYjsCollab
+                        ? 'Sync when you want to share these edits or catch up to the latest campaign state.'
+                        : 'Autosave will share these edits after 30 seconds of inactivity.')
                     : (isAuthorizedIdle
                         ? 'Your browser is authorized. Shared data will load when this page needs it.'
                         : 'You may not have the latest shared version on this page until it reconnects.'),
@@ -443,8 +452,8 @@
                     status.lastError ? `Last problem: ${status.lastError}.` : '',
                     sharedMeta
                 ].filter(Boolean).join(' '),
-                primaryAction: configured ? (hasLocalEdits ? 'sync-now' : (isAuthorizedIdle ? 'refresh' : 'authorize')) : 'settings',
-                primaryLabel: configured ? (hasLocalEdits ? 'Sync now' : (isAuthorizedIdle ? 'Check for updates' : 'Authorize now')) : 'Open connect actions',
+                primaryAction: configured ? (hasLocalEdits ? (usesYjsCollab ? 'sync-now' : '') : (isAuthorizedIdle ? 'refresh' : 'authorize')) : 'settings',
+                primaryLabel: configured ? (hasLocalEdits ? (usesYjsCollab ? 'Sync now' : '') : (isAuthorizedIdle ? 'Check for updates' : 'Authorize now')) : 'Open connect actions',
                 secondaryAction: '',
                 secondaryLabel: ''
             };
@@ -466,13 +475,15 @@
 
         if (status.pendingPush || Number(status.dirtyScopes) > 0) {
             return {
-                state: 'saving',
-                buttonLabel: 'Saving',
-                title: 'Saving your changes',
-                detail: 'Your edits are on their way to the shared campaign.',
+                state: usesYjsCollab ? 'saving' : 'editing',
+                buttonLabel: usesYjsCollab ? 'Saving' : 'Editing',
+                title: usesYjsCollab ? 'Saving your changes' : 'Editing',
+                detail: usesYjsCollab
+                    ? 'Your edits are on their way to the shared campaign.'
+                    : 'Autosave will share these edits after 30 seconds of inactivity.',
                 meta: sharedMeta,
-                primaryAction: 'sync-now',
-                primaryLabel: 'Sync now',
+                primaryAction: usesYjsCollab ? 'sync-now' : '',
+                primaryLabel: usesYjsCollab ? 'Sync now' : '',
                 secondaryAction: '',
                 secondaryLabel: ''
             };

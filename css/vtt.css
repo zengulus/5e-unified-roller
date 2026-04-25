@@ -4,6 +4,7 @@ body {
 
 body[data-player-nav="vtt"] {
     background: #000;
+    overflow-x: hidden;
 }
 
 body[data-player-nav="vtt"] canvas#vector-cloud {
@@ -14,6 +15,7 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     position: sticky;
     top: 0;
     z-index: 24;
+    box-sizing: border-box;
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
@@ -2286,13 +2288,13 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
     }
 
     .vtt-initiative-panel {
-        right: 0.75rem;
-        top: auto;
-        bottom: 0.75rem;
-        max-height: min(42vh, 420px);
+        position: static;
+        width: 100%;
+        max-height: none;
+        margin-top: 0.75rem;
     }
 
-    body[data-settings-collapsed="0"] .vtt-stage-panel {
+    body[data-settings-collapsed="0"]:not([data-vtt-role="player"]) .vtt-stage-panel {
         padding-top: min(46vh, 460px);
     }
 }

@@ -320,6 +320,7 @@
         lockTtlMs: 20000
     };
     const AUTO_SYNC_BOOT_DELAY_MS = 180;
+    const NON_YJS_AUTO_SAVE_DELAY_MS = 30000;
 
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
@@ -2510,6 +2511,8 @@
         }
     };
 
+    const isYjsCollabPage = () => isBoardPage() || isVTTPage();
+
     const coerceAutoConnectBackendMode = (config) => {
         const clean = sanitizeSyncConfig(config);
         if (!clean.enabled || !clean.autoConnect) {
@@ -2636,6 +2639,9 @@
         canAutoPushCloud(reason = 'scheduled') {
             if (!this.sync.config || !this.sync.config.enabled) return false;
             if (this.hasLiveSyncConnection()) return true;
+            if (!isYjsCollabPage() && shouldAutoConnectOnThisPage()) {
+                return !!(this.sync.config.supabaseUrl && this.sync.config.anonKey && this.sync.config.campaignId);
+            }
             return false;
         }
 
@@ -3780,7 +3786,7 @@
                             mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                             connected: this.hasLiveSyncConnection(),
                             message: this.sync.userId
-                                ? 'Local edits are ready to sync when needed.'
+                                ? 'Editing. Autosave will run after 30 seconds of inactivity.'
                                 : this.syncStatus.message
                         });
                     }
@@ -7801,13 +7807,16 @@
                     connected: this.hasLiveSyncConnection(),
                     mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                     message: this.sync.userId
-                        ? 'Local edits are ready to sync when needed.'
+                        ? 'Editing. Autosave will run after 30 seconds of inactivity.'
                         : this.syncStatus.message
                 });
                 return;
             }
 
             if (this.sync.pushTimer) clearTimeout(this.sync.pushTimer);
+            const pushDelayMs = isYjsCollabPage()
+                ? this.sync.config.syncDelayMs
+                : NON_YJS_AUTO_SAVE_DELAY_MS;
             this.sync.pushTimer = setTimeout(() => {
                 this.sync.pushTimer = null;
                 this.pushToCloud({ reason, silent: true, requirePageSync: !this.hasLiveSyncConnection() }).catch((err) => {
@@ -7819,10 +7828,14 @@
                         lastError: err && err.message ? err.message : String(err)
                     });
                 });
-            }, this.sync.config.syncDelayMs);
+            }, pushDelayMs);
 
             this.updateSyncStatus({
-                pendingPush: true
+                pendingPush: true,
+                mode: 'editing',
+                message: isYjsCollabPage()
+                    ? 'Saving board collaboration snapshot.'
+                    : 'Editing. Autosave will run after 30 seconds of inactivity.'
             });
         }
 

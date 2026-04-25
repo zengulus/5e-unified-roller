@@ -76,6 +76,7 @@
 }
 
 .hero-actions.has-hero-menu [data-sync-state='saving'] .hero-menu-sync-dot,
+.hero-actions.has-hero-menu [data-sync-state='editing'] .hero-menu-sync-dot,
 .hero-actions.has-hero-menu [data-sync-state='updating'] .hero-menu-sync-dot,
 .hero-actions.has-hero-menu [data-sync-state='connecting'] .hero-menu-sync-dot,
 .hero-actions.has-hero-menu [data-sync-state='checking'] .hero-menu-sync-dot {
@@ -105,6 +106,7 @@
 }
 
 .hero-actions.has-hero-menu .hero-menu-sync[data-sync-state='saving'],
+.hero-actions.has-hero-menu .hero-menu-sync[data-sync-state='editing'],
 .hero-actions.has-hero-menu .hero-menu-sync[data-sync-state='updating'],
 .hero-actions.has-hero-menu .hero-menu-sync[data-sync-state='connecting'],
 .hero-actions.has-hero-menu .hero-menu-sync[data-sync-state='checking'] {

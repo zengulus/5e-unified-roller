@@ -1,0 +1,27 @@
+{
+  "name": "5e-unified-roller",
+  "version": "1.0.0",
+  "description": "A suite of lightweight, offline-first HTML tools for 5th Edition tabletop roleplaying games. Zero dependencies—just open the files in your browser.",
+  "main": "sw.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zengulus/5e-unified-roller.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/zengulus/5e-unified-roller/issues"
+  },
+  "homepage": "https://github.com/zengulus/5e-unified-roller#readme",
+  "devDependencies": {
+    "playwright": "^1.59.1"
+  }
+}

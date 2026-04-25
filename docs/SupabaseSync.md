@@ -152,7 +152,7 @@ Then click:
 - `Save Config`
 - `Connect`
 
-Use `Pull Latest` and `Push Now` for manual control; normal edits auto-sync with a short debounce.
+Use `Pull Latest` and `Push Now` for manual control. Non-Yjs campaign pages show `Editing` while local edits are pending, then auto-sync after 30 seconds of inactivity. Board/VTT Yjs collaboration still uses its room-specific snapshot timing.
 
 ## 6. `connect.json` Workflow (Recommended For Players)
 
