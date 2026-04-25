@@ -21,8 +21,68 @@
         return { left, top, width, height, right: left + width, bottom: top + height };
     };
 
+    const buildFogTile = (variant = 0) => {
+        const fills = variant === 0
+            ? {
+                bright: 'rgba(246, 249, 252, 0.26)',
+                mid: 'rgba(220, 228, 236, 0.18)',
+                dim: 'rgba(154, 166, 178, 0.12)',
+                speck: 'rgba(235, 241, 246, 0.22)'
+            }
+            : {
+                bright: 'rgba(240, 245, 249, 0.22)',
+                mid: 'rgba(208, 217, 226, 0.16)',
+                dim: 'rgba(138, 150, 163, 0.11)',
+                speck: 'rgba(226, 233, 240, 0.19)'
+            };
+        const offset = variant === 0 ? 0 : 31;
+        const wrap = (value) => ((value % 256) + 256) % 256;
+        const ellipsePoints = [
+            [0, 30, 28, 10], [48, 32, 34, 12], [102, 24, 22, 9], [166, 38, 36, 13], [226, 28, 30, 11], [256, 30, 28, 10],
+            [22, 76, 20, 8], [78, 88, 42, 14], [142, 78, 30, 11], [206, 92, 36, 12], [252, 78, 18, 8],
+            [4, 132, 28, 10], [58, 146, 38, 13], [118, 134, 28, 10], [178, 150, 42, 15], [236, 138, 26, 10],
+            [30, 202, 32, 12], [92, 222, 44, 15], [156, 206, 34, 12], [216, 226, 30, 11],
+            [0, 246, 34, 12], [68, 252, 28, 10], [142, 242, 40, 14], [224, 252, 34, 12], [256, 246, 34, 12]
+        ];
+        const smallPoints = [
+            [18, 54, 10, 5], [48, 60, 14, 6], [90, 54, 9, 4], [124, 64, 13, 5], [158, 54, 16, 7], [202, 66, 14, 6], [238, 56, 10, 5],
+            [16, 116, 12, 5], [54, 124, 16, 7], [92, 112, 10, 4], [128, 120, 14, 6], [170, 126, 18, 7], [218, 116, 12, 5], [252, 122, 10, 4],
+            [28, 174, 12, 5], [70, 188, 18, 7], [112, 178, 12, 5], [148, 192, 15, 6], [198, 184, 18, 7], [232, 194, 12, 5],
+            [18, 232, 10, 4], [56, 214, 16, 6], [118, 234, 12, 5], [176, 222, 18, 7], [238, 232, 12, 5]
+        ];
+        const specks = Array.from({ length: 76 }, (_, idx) => {
+            const x = wrap((idx * 47 + 19 + offset * 3));
+            const y = wrap((idx * 83 + 37 + offset * 5));
+            const r = 1 + ((idx * 7) % 4);
+            return `<circle cx='${x}' cy='${y}' r='${r}'/>`;
+        }).join('');
+        const ellipses = ellipsePoints.map(([x, y, rx, ry]) =>
+            `<ellipse cx='${wrap(x + offset)}' cy='${wrap(y + Math.round(offset / 2))}' rx='${rx}' ry='${ry}'/>`
+        ).join('');
+        const smallEllipses = smallPoints.map(([x, y, rx, ry]) =>
+            `<ellipse cx='${wrap(x + Math.round(offset / 2))}' cy='${wrap(y + offset)}' rx='${rx}' ry='${ry}'/>`
+        ).join('');
+        const svg = `
+            <svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 256 256'>
+                <rect width='256' height='256' fill='transparent'/>
+                <g fill='${fills.bright}'>${ellipses}</g>
+                <g fill='${fills.mid}'>${smallEllipses}</g>
+                <g fill='${fills.dim}' opacity='0.9'>
+                    <circle cx='26' cy='34' r='5'/><circle cx='84' cy='18' r='4'/><circle cx='146' cy='34' r='5'/><circle cx='204' cy='24' r='4'/><circle cx='236' cy='42' r='5'/>
+                    <circle cx='24' cy='98' r='5'/><circle cx='70' cy='78' r='4'/><circle cx='126' cy='100' r='5'/><circle cx='182' cy='86' r='4'/><circle cx='234' cy='104' r='5'/>
+                    <circle cx='34' cy='168' r='4'/><circle cx='96' cy='158' r='5'/><circle cx='154' cy='170' r='4'/><circle cx='214' cy='160' r='5'/>
+                    <circle cx='22' cy='230' r='4'/><circle cx='84' cy='210' r='5'/><circle cx='146' cy='232' r='4'/><circle cx='210' cy='220' r='5'/>
+                </g>
+                <g fill='${fills.speck}' opacity='0.72'>${specks}</g>
+            </svg>
+        `.replace(/\s+/g, ' ');
+        return encodeURIComponent(svg);
+    };
+
     const installStyle = () => {
         if (document.getElementById(STYLE_ID)) return;
+        const fogTilePrimary = buildFogTile(0);
+        const fogTileCross = buildFogTile(1);
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = `
@@ -58,53 +118,51 @@
                 width: 100%;
                 height: 100%;
                 background:
-                    radial-gradient(circle at 22% 28%, rgba(190, 198, 205, 0.16) 0 8%, transparent 31%),
-                    linear-gradient(135deg, rgba(31, 36, 43, 0.58), rgba(7, 9, 13, 0.84));
+                    radial-gradient(circle at 22% 28%, rgba(202, 210, 217, 0.16) 0 8%, transparent 31%),
+                    linear-gradient(135deg, rgba(31, 36, 43, 0.62), rgba(7, 9, 13, 0.88));
                 box-shadow: inset 0 0 1.4rem rgba(225, 231, 234, 0.08);
                 overflow: hidden;
-                opacity: 0.94;
+                opacity: 0.96;
                 contain: paint;
             }
 
             .vtt-fog-unified-stream {
                 position: absolute;
-                left: -320px;
-                top: -320px;
-                width: calc(100% + 640px);
-                height: calc(100% + 640px);
+                left: -256px;
+                top: -256px;
+                width: calc(100% + 512px);
+                height: calc(100% + 512px);
                 pointer-events: none;
-                background:
-                    radial-gradient(circle at 46px 62px, rgba(224, 229, 232, 0.32) 0 18px, transparent 58px),
-                    radial-gradient(circle at 180px 86px, rgba(149, 158, 166, 0.34) 0 26px, transparent 74px),
-                    radial-gradient(circle at 124px 178px, rgba(236, 239, 240, 0.22) 0 22px, transparent 68px),
-                    radial-gradient(circle at 24px 22px, rgba(255, 255, 255, 0.16) 0 7px, transparent 20px);
                 background-repeat: repeat;
-                background-size: 260px 220px, 300px 250px, 220px 280px, 104px 92px;
+                background-size: 256px 256px;
                 mix-blend-mode: screen;
-                opacity: 0.5;
                 will-change: transform;
                 transform: translate3d(0, 0, 0);
                 backface-visibility: hidden;
             }
 
             .vtt-fog-unified-stream.is-primary {
-                animation: vtt-fog-unified-slide-x 54s linear infinite;
+                background-image: url("data:image/svg+xml,${fogTilePrimary}");
+                opacity: 0.56;
+                filter: blur(10px) contrast(1.08);
+                animation: vtt-fog-unified-slide-x 28s linear infinite;
             }
 
             .vtt-fog-unified-stream.is-cross {
-                animation: vtt-fog-unified-slide-y 83s linear infinite;
-                background-position: 41px 17px, 113px 71px, 67px 149px, 29px 43px;
-                transform-origin: center center;
+                background-image: url("data:image/svg+xml,${fogTileCross}");
+                opacity: 0.5;
+                filter: blur(12px) contrast(1.04);
+                animation: vtt-fog-unified-slide-y 41s linear infinite;
             }
 
             @keyframes vtt-fog-unified-slide-x {
-                from { transform: translate3d(-260px, 0, 0); }
+                from { transform: translate3d(-256px, 0, 0); }
                 to { transform: translate3d(0, 0, 0); }
             }
 
             @keyframes vtt-fog-unified-slide-y {
-                from { transform: rotate(90deg) scale(1.08) translate3d(0, -220px, 0); }
-                to { transform: rotate(90deg) scale(1.08) translate3d(0, 0, 0); }
+                from { transform: translate3d(0, -256px, 0); }
+                to { transform: translate3d(0, 0, 0); }
             }
         `;
         document.head.appendChild(style);
