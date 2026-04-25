@@ -320,7 +320,7 @@
         lockTtlMs: 20000
     };
     const AUTO_SYNC_BOOT_DELAY_MS = 180;
-    const NON_YJS_AUTO_SAVE_DELAY_MS = 30000;
+    const NON_YJS_AUTO_SAVE_DELAY_MS = 3000;
 
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
@@ -3833,7 +3833,7 @@
                             mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                             connected: this.hasLiveSyncConnection(),
                             message: this.sync.userId
-                                ? 'Editing. Autosave will run after 30 seconds of inactivity.'
+                                ? 'Editing. Autosave will run after 3 seconds of inactivity.'
                                 : this.syncStatus.message
                         });
                     }
@@ -7854,7 +7854,7 @@
                     connected: this.hasLiveSyncConnection(),
                     mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                     message: this.sync.userId
-                        ? 'Editing. Autosave will run after 30 seconds of inactivity.'
+                        ? 'Editing. Autosave will run after 3 seconds of inactivity.'
                         : this.syncStatus.message
                 });
                 return;
@@ -7882,7 +7882,7 @@
                 mode: 'editing',
                 message: isYjsCollabPage()
                     ? 'Saving board collaboration snapshot.'
-                    : 'Editing. Autosave will run after 30 seconds of inactivity.'
+                    : 'Editing. Autosave will run after 3 seconds of inactivity.'
             });
         }
 

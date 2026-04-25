@@ -444,7 +444,7 @@
                 detail: hasLocalEdits
                     ? (usesYjsCollab
                         ? 'Sync when you want to share these edits or catch up to the latest campaign state.'
-                        : 'Autosave will share these edits after 30 seconds of inactivity.')
+                        : 'Autosave will share these edits after 3 seconds of inactivity.')
                     : (isAuthorizedIdle
                         ? 'Your browser is authorized. Shared data will load when this page needs it.'
                         : 'You may not have the latest shared version on this page until it reconnects.'),
@@ -480,7 +480,7 @@
                 title: usesYjsCollab ? 'Saving your changes' : 'Editing',
                 detail: usesYjsCollab
                     ? 'Your edits are on their way to the shared campaign.'
-                    : 'Autosave will share these edits after 30 seconds of inactivity.',
+                    : 'Autosave will share these edits after 3 seconds of inactivity.',
                 meta: sharedMeta,
                 primaryAction: usesYjsCollab ? 'sync-now' : '',
                 primaryLabel: usesYjsCollab ? 'Sync now' : '',
