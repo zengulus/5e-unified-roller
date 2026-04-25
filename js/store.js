@@ -159,9 +159,18 @@
     const DEFAULT_VTT_CELL_PX = 70;
     const VTT_ZONE_CATEGORY_META = Object.freeze({
         evidence: { label: 'Evidence', color: '#39b66b', defaultTitle: 'Evidence Zone' },
+        clue: { label: 'Clue', color: '#58d4f7', defaultTitle: 'Clue Pin' },
+        poi: { label: 'Point Of Interest', color: '#9b7cff', defaultTitle: 'Point Of Interest' },
         danger: { label: 'Danger', color: '#d85b5b', defaultTitle: 'Danger Zone' },
-        info: { label: 'Info', color: '#4f8dff', defaultTitle: 'Info Zone' },
         objective: { label: 'Objective', color: '#f0b357', defaultTitle: 'Objective Zone' },
+        exit: { label: 'Exit', color: '#70d98b', defaultTitle: 'Exit' },
+        sound: { label: 'Sound', color: '#d6b4ff', defaultTitle: 'Sound Source' },
+        cover: { label: 'Cover', color: '#7aa2f7', defaultTitle: 'Cover' },
+        difficult: { label: 'Difficult Terrain', color: '#c9a45f', defaultTitle: 'Difficult Terrain' },
+        obscured: { label: 'Obscured', color: '#8aa0aa', defaultTitle: 'Obscured Area' },
+        hazard: { label: 'Hazard', color: '#f07178', defaultTitle: 'Hazard' },
+        safe: { label: 'Safe Zone', color: '#5fd38d', defaultTitle: 'Safe Zone' },
+        info: { label: 'Info', color: '#4f8dff', defaultTitle: 'Info Zone' },
         other: { label: 'Other', color: '#8f9aa8', defaultTitle: 'Zone' }
     });
     const DEFAULT_VTT_ZONE_CATEGORY = 'evidence';
@@ -196,6 +205,8 @@
                     tokens: [],
                     templates: [],
                     evidenceNotes: [],
+                    clocks: [],
+                    pings: [],
                     fog: []
                 }
             ],
@@ -593,6 +604,14 @@
             : []
     );
 
+    const sanitizeVTTColor = (value, fallback = '#4f8dff') => {
+        const clean = toTrimmedString(value, fallback, 20).trim();
+        return /^#[0-9A-Fa-f]{6}$/.test(clean) ? clean : fallback;
+    };
+
+    const sanitizeVTTTokenMoodEmoji = (value) => toTrimmedString(value, '', 16).trim();
+    const sanitizeVTTTokenMoodLabel = (value) => toTrimmedString(value, '', 40).trim();
+
     const sanitizeVTTGrid = (grid) => {
         const source = grid && typeof grid === 'object' ? grid : {};
         return {
@@ -642,6 +661,8 @@
             passivePerception: hasPassivePerception ? Math.max(0, Math.min(99, Math.round(toNumber(source.passivePerception, 10)))) : null,
             defences: sanitizeVTTDefences(source.defences),
             conditions: sanitizeVTTConditions(source.conditions),
+            moodEmoji: sanitizeVTTTokenMoodEmoji(source.moodEmoji),
+            moodLabel: sanitizeVTTTokenMoodLabel(source.moodLabel),
             hidden: !!source.hidden,
             stealthRoll: hasStealthRoll ? Math.max(0, Math.min(99, Math.round(toNumber(rawStealthRoll, 10)))) : null,
             vision: sanitizeVTTVision(source.vision)
@@ -693,6 +714,35 @@
         };
     };
 
+    const sanitizeVTTClock = (clock, idx = 0) => {
+        const source = clock && typeof clock === 'object' ? clock : {};
+        const id = toTrimmedString(source.id, `clock_${idx + 1}`, 120).trim() || `clock_${idx + 1}`;
+        const max = Math.max(1, Math.min(20, Math.round(toNumber(source.max, 4))));
+        const current = Math.max(0, Math.min(max, Math.round(toNumber(source.current, 0))));
+        return {
+            id,
+            title: toTrimmedString(source.title, `Clock ${idx + 1}`, 120).trim() || `Clock ${idx + 1}`,
+            current,
+            max,
+            hidden: !!source.hidden,
+            color: sanitizeVTTColor(source.color, '#f0b357'),
+            note: toTrimmedString(source.note, '', 240).trim()
+        };
+    };
+
+    const sanitizeVTTPing = (ping, idx = 0) => {
+        const source = ping && typeof ping === 'object' ? ping : {};
+        return {
+            id: toTrimmedString(source.id, `ping_${idx + 1}`, 120).trim() || `ping_${idx + 1}`,
+            x: Math.round(toNumber(source.x, 0)),
+            y: Math.round(toNumber(source.y, 0)),
+            label: toTrimmedString(source.label, 'Ping', 80).trim() || 'Ping',
+            color: sanitizeVTTColor(source.color, '#4f8dff'),
+            createdAt: Math.max(0, Math.round(toNumber(source.createdAt, 0))),
+            expiresAt: Math.max(0, Math.round(toNumber(source.expiresAt, 0)))
+        };
+    };
+
     const sanitizeVTTScene = (scene, idx = 0) => {
         const source = scene && typeof scene === 'object' ? scene : {};
         const id = toTrimmedString(source.id, `scene_${idx + 1}`, 120).trim() || `scene_${idx + 1}`;
@@ -724,6 +774,12 @@
                         h: Math.max(1, Math.round(note.h * legacyScaleFactor))
                     };
                 })
+                : [],
+            clocks: Array.isArray(source.clocks)
+                ? source.clocks.map((clockEntry, clockIdx) => sanitizeVTTClock(clockEntry, clockIdx))
+                : [],
+            pings: Array.isArray(source.pings)
+                ? source.pings.map((pingEntry, pingIdx) => sanitizeVTTPing(pingEntry, pingIdx)).slice(-24)
                 : [],
             fog: Array.isArray(source.fog)
                 ? source.fog.map((maskEntry, maskIdx) => {
@@ -1487,6 +1543,7 @@
             (Array.isArray(scene && scene.tokens) && scene.tokens.length)
             || (Array.isArray(scene && scene.templates) && scene.templates.length)
             || (Array.isArray(scene && scene.evidenceNotes) && scene.evidenceNotes.length)
+            || (Array.isArray(scene && scene.clocks) && scene.clocks.length)
             || (Array.isArray(scene && scene.fog) && scene.fog.length)
             || !!toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim()
             || !!toTrimmedString(scene && scene.name, '', 160).trim()

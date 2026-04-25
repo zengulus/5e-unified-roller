@@ -130,6 +130,8 @@ const fallbackSnapshot = () => ({
             stealthMode: false,
             tokens: [],
             evidenceNotes: [],
+            clocks: [],
+            pings: [],
             templates: [],
             fog: []
         }
@@ -396,6 +398,8 @@ const syncYTokenRecord = (record, token) => {
     setYScalar(record, 'passivePerception', source.passivePerception ?? null);
     setYScalar(record, 'hidden', !!source.hidden);
     setYScalar(record, 'stealthRoll', source.stealthRoll ?? null);
+    setYScalar(record, 'moodEmoji', source.moodEmoji || '');
+    setYScalar(record, 'moodLabel', source.moodLabel || '');
     syncYDefencesMap(record, 'defences', source.defences || {});
     syncYStringArray(ensureYArrayEntry(record, 'conditions'), Array.isArray(source.conditions) ? source.conditions.slice(0, 24) : [], 80);
     syncYVisionMap(record, 'vision', source.vision || {});
@@ -403,7 +407,7 @@ const syncYTokenRecord = (record, token) => {
         'id', 'label', 'side', 'imageUrl', 'x', 'y', 'w', 'h',
         'sourceType', 'sourceId', 'moveAccess', 'hpCurrent', 'hpMax',
         'ac', 'passivePerception', 'hidden', 'stealthRoll',
-        'defences', 'conditions', 'vision'
+        'moodEmoji', 'moodLabel', 'defences', 'conditions', 'vision'
     ]));
 };
 
@@ -427,6 +431,8 @@ const serializeYTokenRecord = (record, tokenId) => ({
     conditions: getYArrayEntry(record, 'conditions') instanceof Y.Array
         ? getYArrayEntry(record, 'conditions').toArray()
         : [],
+    moodEmoji: toTrimmedString(record.get('moodEmoji'), '', 16),
+    moodLabel: toTrimmedString(record.get('moodLabel'), '', 40),
     hidden: !!record.get('hidden'),
     stealthRoll: record.get('stealthRoll') ?? null,
     vision: serializeYVisionMap(record, 'vision')
@@ -482,6 +488,50 @@ const serializeYEvidenceNoteRecord = (record, noteId) => ({
     highlightColor: toTrimmedString(record.get('highlightColor'), '', 20)
 });
 
+const syncYClockRecord = (record, clock) => {
+    const source = clock && typeof clock === 'object' ? clock : {};
+    setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
+    setYScalar(record, 'title', source.title || '');
+    setYScalar(record, 'current', source.current);
+    setYScalar(record, 'max', source.max);
+    setYScalar(record, 'hidden', !!source.hidden);
+    setYScalar(record, 'color', source.color || '');
+    setYScalar(record, 'note', source.note || '');
+    removeExtraneousMapKeys(record, new Set(['id', 'title', 'current', 'max', 'hidden', 'color', 'note']));
+};
+
+const serializeYClockRecord = (record, clockId) => ({
+    id: toTrimmedString(record.get('id'), clockId, 120).trim() || clockId,
+    title: toTrimmedString(record.get('title'), '', 120),
+    current: record.get('current'),
+    max: record.get('max'),
+    hidden: !!record.get('hidden'),
+    color: toTrimmedString(record.get('color'), '', 20),
+    note: toTrimmedString(record.get('note'), '', 240)
+});
+
+const syncYPingRecord = (record, ping) => {
+    const source = ping && typeof ping === 'object' ? ping : {};
+    setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
+    setYScalar(record, 'x', source.x);
+    setYScalar(record, 'y', source.y);
+    setYScalar(record, 'label', source.label || '');
+    setYScalar(record, 'color', source.color || '');
+    setYScalar(record, 'createdAt', source.createdAt);
+    setYScalar(record, 'expiresAt', source.expiresAt);
+    removeExtraneousMapKeys(record, new Set(['id', 'x', 'y', 'label', 'color', 'createdAt', 'expiresAt']));
+};
+
+const serializeYPingRecord = (record, pingId) => ({
+    id: toTrimmedString(record.get('id'), pingId, 120).trim() || pingId,
+    x: record.get('x'),
+    y: record.get('y'),
+    label: toTrimmedString(record.get('label'), '', 80),
+    color: toTrimmedString(record.get('color'), '', 20),
+    createdAt: record.get('createdAt'),
+    expiresAt: record.get('expiresAt')
+});
+
 const syncYFogRecord = (record, fog) => {
     const source = fog && typeof fog === 'object' ? fog : {};
     setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
@@ -527,6 +577,18 @@ const syncYSceneRecord = (record, scene) => {
         syncYEvidenceNoteRecord
     );
     syncOrderedEntityCollection(
+        ensureYMapEntry(record, 'clocks'),
+        ensureYArrayEntry(record, 'clockOrder'),
+        source.clocks,
+        syncYClockRecord
+    );
+    syncOrderedEntityCollection(
+        ensureYMapEntry(record, 'pings'),
+        ensureYArrayEntry(record, 'pingOrder'),
+        source.pings,
+        syncYPingRecord
+    );
+    syncOrderedEntityCollection(
         ensureYMapEntry(record, 'fog'),
         ensureYArrayEntry(record, 'fogOrder'),
         source.fog,
@@ -535,7 +597,8 @@ const syncYSceneRecord = (record, scene) => {
     removeExtraneousMapKeys(record, new Set([
         'id', 'name', 'mapImageUrl', 'mapScale', 'stealthMode',
         'grid', 'tokens', 'tokenOrder', 'templates', 'templateOrder',
-        'evidenceNotes', 'evidenceOrder', 'fog', 'fogOrder'
+        'evidenceNotes', 'evidenceOrder', 'clocks', 'clockOrder',
+        'pings', 'pingOrder', 'fog', 'fogOrder'
     ]));
 };
 
@@ -549,6 +612,8 @@ const serializeYSceneRecord = (record, sceneId) => ({
     tokens: serializeOrderedEntityCollection(getYMapEntry(record, 'tokens'), getYArrayEntry(record, 'tokenOrder'), serializeYTokenRecord),
     templates: serializeOrderedEntityCollection(getYMapEntry(record, 'templates'), getYArrayEntry(record, 'templateOrder'), serializeYTemplateRecord),
     evidenceNotes: serializeOrderedEntityCollection(getYMapEntry(record, 'evidenceNotes'), getYArrayEntry(record, 'evidenceOrder'), serializeYEvidenceNoteRecord),
+    clocks: serializeOrderedEntityCollection(getYMapEntry(record, 'clocks'), getYArrayEntry(record, 'clockOrder'), serializeYClockRecord),
+    pings: serializeOrderedEntityCollection(getYMapEntry(record, 'pings'), getYArrayEntry(record, 'pingOrder'), serializeYPingRecord),
     fog: serializeOrderedEntityCollection(getYMapEntry(record, 'fog'), getYArrayEntry(record, 'fogOrder'), serializeYFogRecord)
 });
 
@@ -670,6 +735,8 @@ const patchYTokenRecord = (record, baseToken = {}, nextToken = {}) => {
     mutated = patchYScalar(record, 'passivePerception', baseToken.passivePerception, nextToken.passivePerception) || mutated;
     mutated = patchYScalar(record, 'hidden', !!baseToken.hidden, !!nextToken.hidden) || mutated;
     mutated = patchYScalar(record, 'stealthRoll', baseToken.stealthRoll, nextToken.stealthRoll) || mutated;
+    mutated = patchYScalar(record, 'moodEmoji', baseToken.moodEmoji || '', nextToken.moodEmoji || '') || mutated;
+    mutated = patchYScalar(record, 'moodLabel', baseToken.moodLabel || '', nextToken.moodLabel || '') || mutated;
     mutated = patchYDefencesMap(record, 'defences', baseToken.defences || {}, nextToken.defences || {}) || mutated;
     mutated = patchYStringArray(
         ensureYArrayEntry(record, 'conditions'),
@@ -705,6 +772,30 @@ const patchYEvidenceNoteRecord = (record, baseNote = {}, nextNote = {}) => {
     mutated = patchYScalar(record, 'h', baseNote.h, nextNote.h) || mutated;
     mutated = patchYScalar(record, 'hidden', !!baseNote.hidden, !!nextNote.hidden) || mutated;
     mutated = patchYScalar(record, 'highlightColor', baseNote.highlightColor, nextNote.highlightColor) || mutated;
+    return mutated;
+};
+
+const patchYClockRecord = (record, baseClock = {}, nextClock = {}) => {
+    let mutated = false;
+    mutated = patchYScalar(record, 'id', baseClock.id, nextClock.id) || mutated;
+    mutated = patchYScalar(record, 'title', baseClock.title, nextClock.title) || mutated;
+    mutated = patchYScalar(record, 'current', baseClock.current, nextClock.current) || mutated;
+    mutated = patchYScalar(record, 'max', baseClock.max, nextClock.max) || mutated;
+    mutated = patchYScalar(record, 'hidden', !!baseClock.hidden, !!nextClock.hidden) || mutated;
+    mutated = patchYScalar(record, 'color', baseClock.color, nextClock.color) || mutated;
+    mutated = patchYScalar(record, 'note', baseClock.note, nextClock.note) || mutated;
+    return mutated;
+};
+
+const patchYPingRecord = (record, basePing = {}, nextPing = {}) => {
+    let mutated = false;
+    mutated = patchYScalar(record, 'id', basePing.id, nextPing.id) || mutated;
+    mutated = patchYScalar(record, 'x', basePing.x, nextPing.x) || mutated;
+    mutated = patchYScalar(record, 'y', basePing.y, nextPing.y) || mutated;
+    mutated = patchYScalar(record, 'label', basePing.label, nextPing.label) || mutated;
+    mutated = patchYScalar(record, 'color', basePing.color, nextPing.color) || mutated;
+    mutated = patchYScalar(record, 'createdAt', basePing.createdAt, nextPing.createdAt) || mutated;
+    mutated = patchYScalar(record, 'expiresAt', basePing.expiresAt, nextPing.expiresAt) || mutated;
     return mutated;
 };
 
@@ -828,6 +919,22 @@ const patchYSceneRecord = (record, baseScene = {}, nextScene = {}) => {
         nextItems: nextScene.evidenceNotes || [],
         syncRecord: syncYEvidenceNoteRecord,
         patchRecord: patchYEvidenceNoteRecord
+    }) || mutated;
+    mutated = patchOrderedEntityCollection({
+        containerMap: ensureYMapEntry(record, 'clocks'),
+        orderArray: ensureYArrayEntry(record, 'clockOrder'),
+        baseItems: baseScene.clocks || [],
+        nextItems: nextScene.clocks || [],
+        syncRecord: syncYClockRecord,
+        patchRecord: patchYClockRecord
+    }) || mutated;
+    mutated = patchOrderedEntityCollection({
+        containerMap: ensureYMapEntry(record, 'pings'),
+        orderArray: ensureYArrayEntry(record, 'pingOrder'),
+        baseItems: baseScene.pings || [],
+        nextItems: nextScene.pings || [],
+        syncRecord: syncYPingRecord,
+        patchRecord: patchYPingRecord
     }) || mutated;
     mutated = patchOrderedEntityCollection({
         containerMap: ensureYMapEntry(record, 'fog'),
@@ -1048,14 +1155,17 @@ const buildCheckpointSummary = (snapshot, coerceSnapshot) => {
     const clean = coerceSnapshot(snapshot);
     const scenes = Array.isArray(clean.scenes) ? clean.scenes : [];
     let tokenCount = 0;
+    let clockCount = 0;
     scenes.forEach((scene) => {
         tokenCount += Array.isArray(scene && scene.tokens) ? scene.tokens.length : 0;
+        clockCount += Array.isArray(scene && scene.clocks) ? scene.clocks.length : 0;
     });
     return {
         updatedAt: Math.max(0, toNonNegativeInt(clean.updatedAt, 0)),
         activeSceneId: toTrimmedString(clean.activeSceneId, '', 120).trim(),
         sceneCount: scenes.length,
-        tokenCount
+        tokenCount,
+        clockCount
     };
 };
 
@@ -1212,6 +1322,8 @@ const diffVTTSnapshots = (previousSnapshot, nextSnapshot, coerceSnapshot) => {
         }
         if (!compareOrderedEntityCollections(previousScene && previousScene.templates || [], scene && scene.templates || [])
             || !compareOrderedEntityCollections(previousScene && previousScene.evidenceNotes || [], scene && scene.evidenceNotes || [])
+            || !compareOrderedEntityCollections(previousScene && previousScene.clocks || [], scene && scene.clocks || [])
+            || !compareOrderedEntityCollections(previousScene && previousScene.pings || [], scene && scene.pings || [])
             || !compareOrderedEntityCollections(previousScene && previousScene.fog || [], scene && scene.fog || [])) {
             return { structural: true, positions: [] };
         }

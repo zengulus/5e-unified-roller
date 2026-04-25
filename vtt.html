@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260320b">
-    <link rel="stylesheet" href="css/vtt.css?v=20260425a">
+    <link rel="stylesheet" href="css/vtt.css?v=20260425b">
 </head>
 
 <body data-player-nav="vtt">
@@ -162,6 +162,8 @@
                     <div class="vtt-tool-mode-row vtt-stage-tool-row" role="group" aria-label="Table tools">
                         <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="navigate" id="vtt-tool-mode-navigate"
                             aria-pressed="true">Navigate</button>
+                        <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="ping" id="vtt-tool-mode-ping"
+                            aria-pressed="false">Ping</button>
                         <button class="vtt-chip-btn" data-action="toggle-ruler-mode" id="vtt-ruler-toggle"
                             aria-pressed="false">Ruler</button>
                         <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="circle" id="vtt-tool-mode-circle"
@@ -169,7 +171,7 @@
                         <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="cone" id="vtt-tool-mode-cone"
                             aria-pressed="false">Cone</button>
                         <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="note" id="vtt-tool-mode-note"
-                            aria-pressed="false">Zones</button>
+                            aria-pressed="false">Pins/Zones</button>
                         <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog" id="vtt-tool-mode-fog"
                             aria-pressed="false">Fog</button>
                         <button class="vtt-chip-btn" data-action="set-tool-mode" data-tool-mode="fog-remove" id="vtt-tool-mode-fog-remove"
@@ -205,6 +207,16 @@
         </section>
 
         <aside class="vtt-initiative-panel" id="vtt-initiative-panel">
+            <section class="vtt-panel" id="vtt-clock-panel">
+                <div class="vtt-panel-head">
+                    <h2>Clocks</h2>
+                    <div class="vtt-panel-head-actions">
+                        <button class="vtt-chip-btn" data-action="add-scene-clock" data-dm-only="1">New Clock</button>
+                    </div>
+                </div>
+                <div class="vtt-clock-list" id="vtt-clock-list"></div>
+            </section>
+
             <section class="vtt-panel">
                 <div class="vtt-panel-head">
                     <h2>Initiative</h2>
@@ -236,11 +248,11 @@
     <script src="js/sw-register.js"></script>
     <script src="js/media-cache.js"></script>
     <script src="js/data-loader.js"></script>
-    <script src="js/store.js?v=20260413a"></script>
+    <script src="js/store.js?v=20260425b"></script>
     <script src="js/player-nav.js?v=20260413a"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
-        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260413b')
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260425b')
             .then(() => window.RTF_VTT_COLLAB || null)
             .catch((err) => {
                 console.warn('VTT collaboration module failed to load', err);
@@ -268,7 +280,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260413a"></script>
+    <script src="js/vtt.js?v=20260425b"></script>
 </body>
 
 </html>

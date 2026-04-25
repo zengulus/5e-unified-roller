@@ -839,9 +839,12 @@ body[data-spawn-dragging="1"] .vtt-stage {
 }
 
 body[data-tool-mode="ruler"] .vtt-stage,
+body[data-tool-mode="ping"] .vtt-stage,
 body[data-tool-mode="circle"] .vtt-stage,
 body[data-tool-mode="cone"] .vtt-stage,
-body[data-tool-mode="note"] .vtt-stage {
+body[data-tool-mode="note"] .vtt-stage,
+body[data-tool-mode="fog"] .vtt-stage,
+body[data-tool-mode="fog-remove"] .vtt-stage {
     cursor: crosshair;
 }
 
@@ -1156,6 +1159,63 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-area-template {
     cursor: default;
+}
+
+.vtt-ping {
+    pointer-events: none;
+    display: grid;
+    place-items: center;
+    z-index: 7;
+}
+
+.vtt-ping-ring {
+    position: absolute;
+    inset: 12%;
+    border: 3px solid rgba(var(--vtt-ping-rgb), 0.96);
+    border-radius: 999px;
+    box-shadow:
+        0 0 0 0 rgba(var(--vtt-ping-rgb), 0.42),
+        0 0 28px rgba(var(--vtt-ping-rgb), 0.42);
+    animation: vtt-ping-ring 1.05s ease-out infinite;
+}
+
+.vtt-ping-ring::after {
+    content: "";
+    position: absolute;
+    inset: 24%;
+    border-radius: inherit;
+    background: rgba(var(--vtt-ping-rgb), 0.28);
+}
+
+.vtt-ping-label {
+    position: absolute;
+    top: calc(100% + 0.15rem);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.18rem 0.5rem;
+    border: 1px solid rgba(var(--vtt-ping-rgb), 0.46);
+    border-radius: 999px;
+    background: rgba(5, 9, 16, 0.94);
+    color: rgba(247, 252, 255, 0.98);
+    font-size: 0.68rem;
+    line-height: 1.1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+@keyframes vtt-ping-ring {
+    0% {
+        opacity: 0.95;
+        transform: scale(0.58);
+        box-shadow: 0 0 0 0 rgba(var(--vtt-ping-rgb), 0.38);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(1.28);
+        box-shadow: 0 0 0 1rem rgba(var(--vtt-ping-rgb), 0);
+    }
 }
 
 .vtt-vision-cone,
@@ -1509,9 +1569,18 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     transition: opacity 120ms ease, transform 120ms ease;
 }
 
+.vtt-token:hover .vtt-token-hover-card,
 .vtt-token.is-preview-open .vtt-token-hover-card {
     opacity: 1;
     transform: translateY(-50%) scale(1);
+}
+
+.vtt-token-hover-card.has-mood-only {
+    width: max-content;
+    min-width: 7.5rem;
+    max-width: min(14rem, calc(100vw - 3rem));
+    aspect-ratio: auto;
+    padding: 0.55rem 0.65rem;
 }
 
 .vtt-token-hover-image {
@@ -1520,6 +1589,30 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     object-fit: cover;
     border-radius: 0.75rem;
     display: block;
+}
+
+.vtt-token-mood-badge {
+    position: absolute;
+    left: 0.55rem;
+    right: 0.55rem;
+    bottom: 0.55rem;
+    padding: 0.32rem 0.48rem;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    background: rgba(5, 9, 16, 0.9);
+    color: rgba(247, 252, 255, 0.98);
+    font-size: 0.74rem;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vtt-token-hover-card.has-mood-only .vtt-token-mood-badge {
+    position: static;
+    display: block;
+    background: rgba(255, 255, 255, 0.06);
 }
 
 .vtt-token-initials {
@@ -1596,6 +1689,111 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     background: rgba(4, 8, 15, 0.72);
     color: #eef6ff;
     resize: vertical;
+}
+
+.vtt-clock-list {
+    display: grid;
+    gap: 0.65rem;
+}
+
+.vtt-clock {
+    --vtt-clock-color: #f0b357;
+    --vtt-clock-rgb: 240, 179, 87;
+    display: grid;
+    gap: 0.65rem;
+    padding: 0.78rem 0.82rem;
+    border: 1px solid rgba(var(--vtt-clock-rgb), 0.24);
+    border-radius: 1rem;
+    background:
+        linear-gradient(180deg, rgba(var(--vtt-clock-rgb), 0.1), rgba(var(--vtt-clock-rgb), 0.025)),
+        rgba(255, 255, 255, 0.025);
+}
+
+.vtt-clock.is-hidden {
+    opacity: 0.68;
+    border-style: dashed;
+}
+
+.vtt-clock.is-complete {
+    box-shadow: inset 0 0 0 1px rgba(var(--vtt-clock-rgb), 0.34);
+}
+
+.vtt-clock-main {
+    display: grid;
+    gap: 0.45rem;
+    min-width: 0;
+}
+
+.vtt-clock-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem;
+    min-width: 0;
+}
+
+.vtt-clock-title {
+    min-width: 0;
+    color: rgba(247, 252, 255, 0.98);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-clock-count {
+    flex: 0 0 auto;
+    padding: 0.16rem 0.48rem;
+    border-radius: 999px;
+    background: rgba(var(--vtt-clock-rgb), 0.16);
+    color: rgba(247, 252, 255, 0.92);
+    font-size: 0.74rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.vtt-clock-segments {
+    display: grid;
+    grid-template-columns: repeat(var(--vtt-clock-max, 4), minmax(0, 1fr));
+    gap: 0.28rem;
+}
+
+.vtt-clock-segment {
+    min-height: 0.62rem;
+    border: 1px solid rgba(var(--vtt-clock-rgb), 0.26);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.vtt-clock-segment.is-filled {
+    border-color: rgba(var(--vtt-clock-rgb), 0.76);
+    background: rgba(var(--vtt-clock-rgb), 0.76);
+    box-shadow: 0 0 14px rgba(var(--vtt-clock-rgb), 0.22);
+}
+
+.vtt-clock-note {
+    color: rgba(226, 236, 248, 0.76);
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.vtt-clock-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.42rem;
+}
+
+.vtt-clock-controls .vtt-inline-btn {
+    padding: 0.45rem 0.65rem;
+}
+
+.vtt-clock-edit-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(4.2rem, 0.6fr) minmax(4.2rem, 0.6fr) minmax(4.4rem, 0.55fr);
+    gap: 0.5rem;
+    align-items: end;
+}
+
+.vtt-clock-note-field {
+    grid-column: 1 / -1;
 }
 
 .vtt-note-view-body {
@@ -1998,6 +2196,10 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
         grid-template-columns: 1fr;
     }
 
+    .vtt-clock-edit-grid {
+        grid-template-columns: 1fr;
+    }
+
     .vtt-scene-summary-top {
         flex-direction: column;
     }
@@ -2123,7 +2325,8 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
 
     .vtt-field-grid,
     .vtt-inspector-grid,
-    .vtt-entry-detail-grid {
+    .vtt-entry-detail-grid,
+    .vtt-clock-edit-grid {
         grid-template-columns: 1fr;
         gap: 0.55rem;
     }

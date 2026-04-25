@@ -14,6 +14,7 @@
     const MOVE_ACCESS_OPTIONS = ['dm', 'player'];
     const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const TOOL_MODE_NAVIGATE = 'navigate';
+    const TOOL_MODE_PING = 'ping';
     const TOOL_MODE_RULER = 'ruler';
     const TOOL_MODE_CIRCLE = 'circle';
     const TOOL_MODE_CONE = 'cone';
@@ -26,6 +27,7 @@
     const DEFAULT_TEMPLATE_CONE_ARC_DEG = 53.13010235415598;
     const TEMPLATE_HOLD_PERSIST_MS = 1000;
     const TEMPLATE_SHARED_LIFETIME_MS = 5000;
+    const PING_SHARED_LIFETIME_MS = 4200;
     const LIVE_STATUS_DROPOUT_GRACE_MS = 5000;
     const TOUCH_CONTEXT_HOLD_MS = 420;
     const TOUCH_CONTEXT_MOVE_PX = 14;
@@ -40,11 +42,21 @@
     const DEFAULT_EVIDENCE_NOTE_COLOR = '#39b66b';
     const EVIDENCE_NOTE_CATEGORY_META = Object.freeze({
         evidence: { label: 'Evidence', shortLabel: 'E', color: '#39b66b', defaultTitle: 'Evidence Zone' },
+        clue: { label: 'Clue', shortLabel: '?', color: '#58d4f7', defaultTitle: 'Clue Pin' },
+        poi: { label: 'Point Of Interest', shortLabel: 'P', color: '#9b7cff', defaultTitle: 'Point Of Interest' },
         danger: { label: 'Danger', shortLabel: '!', color: '#d85b5b', defaultTitle: 'Danger Zone' },
-        info: { label: 'Info', shortLabel: 'i', color: '#4f8dff', defaultTitle: 'Info Zone' },
         objective: { label: 'Objective', shortLabel: 'O', color: '#f0b357', defaultTitle: 'Objective Zone' },
+        exit: { label: 'Exit', shortLabel: 'X', color: '#70d98b', defaultTitle: 'Exit' },
+        sound: { label: 'Sound', shortLabel: '~', color: '#d6b4ff', defaultTitle: 'Sound Source' },
+        cover: { label: 'Cover', shortLabel: 'C', color: '#7aa2f7', defaultTitle: 'Cover' },
+        difficult: { label: 'Difficult Terrain', shortLabel: 'D', color: '#c9a45f', defaultTitle: 'Difficult Terrain' },
+        obscured: { label: 'Obscured', shortLabel: 'V', color: '#8aa0aa', defaultTitle: 'Obscured Area' },
+        hazard: { label: 'Hazard', shortLabel: 'H', color: '#f07178', defaultTitle: 'Hazard' },
+        safe: { label: 'Safe Zone', shortLabel: '+', color: '#5fd38d', defaultTitle: 'Safe Zone' },
+        info: { label: 'Info', shortLabel: 'i', color: '#4f8dff', defaultTitle: 'Info Zone' },
         other: { label: 'Other', shortLabel: '?', color: '#8f9aa8', defaultTitle: 'Zone' }
     });
+    const MOOD_EMOJI_OPTIONS = ['🙂', '😠', '😰', '🤔', '😏', '😢', '😨', '😤', '🫡', '👁️', '🩸', '🏃', '🛡️', '✨'];
     const TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
@@ -71,6 +83,8 @@
                 tokens: [],
                 templates: [],
                 evidenceNotes: [],
+                clocks: [],
+                pings: [],
                 fog: []
             }
         ],
@@ -86,6 +100,7 @@
     let selectedEntryId = '';
     let selectedTemplateId = '';
     let selectedEvidenceNoteId = '';
+    let selectedClockId = '';
     let localRole = 'player';
     let uiState = {
         settingsCollapsed: false,
@@ -144,6 +159,7 @@
     let evidenceNotePlacementState = null;
     let pendingTouchContextState = null;
     let templateExpiryTimer = 0;
+    let pingExpiryTimer = 0;
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
@@ -177,6 +193,7 @@
     const tokenInspectorPopoverEl = document.getElementById('vtt-token-inspector-popover');
     const sheetActionPopoverEl = document.getElementById('vtt-sheet-action-popover');
     const npcRollPopoverEl = document.getElementById('vtt-npc-roll-popover');
+    const clockListEl = document.getElementById('vtt-clock-list');
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
     const sceneListEl = document.getElementById('vtt-scene-list');
@@ -191,6 +208,7 @@
     const toolsMenuEl = document.getElementById('vtt-tools-menu');
     const rulerToggleEl = document.getElementById('vtt-ruler-toggle');
     const toolModeNavigateEl = document.getElementById('vtt-tool-mode-navigate');
+    const toolModePingEl = document.getElementById('vtt-tool-mode-ping');
     const toolModeCircleEl = document.getElementById('vtt-tool-mode-circle');
     const toolModeConeEl = document.getElementById('vtt-tool-mode-cone');
     const toolModeNoteEl = document.getElementById('vtt-tool-mode-note');
@@ -542,6 +560,10 @@
             ...note,
             id: buildId('evidence')
         }));
+        const clonedClocks = deepClone(Array.isArray(source && source.clocks) ? source.clocks : []).map((clock) => ({
+            ...clock,
+            id: buildId('clock')
+        }));
         return {
             id: buildId('scene'),
             name: nextName,
@@ -557,6 +579,8 @@
             tokens: clonedTokens,
             templates: clonedTemplates,
             evidenceNotes: clonedEvidenceNotes,
+            clocks: clonedClocks,
+            pings: [],
             fog: deepClone(Array.isArray(source && source.fog) ? source.fog : [])
         };
     };
@@ -566,6 +590,24 @@
         .map((entry) => entry.trim())
         .filter(Boolean)
         .slice(0, 24);
+    const normalizeHexColor = (value, fallback = '#4f8dff') => {
+        const clean = String(value || '').trim();
+        return /^#[0-9A-Fa-f]{6}$/.test(clean) ? clean : fallback;
+    };
+    const getHexColorRgbString = (value, fallback = '#4f8dff') => {
+        const clean = normalizeHexColor(value, fallback).slice(1);
+        const parsed = parseInt(clean, 16);
+        if (!Number.isFinite(parsed)) return '79, 141, 255';
+        return `${(parsed >> 16) & 255}, ${(parsed >> 8) & 255}, ${parsed & 255}`;
+    };
+    const normalizeMoodEmoji = (value) => String(value || '').trim().slice(0, 16);
+    const normalizeMoodLabel = (value) => String(value || '').trim().slice(0, 40);
+    const hasTokenMood = (token) => !!(normalizeMoodEmoji(token && token.moodEmoji) || normalizeMoodLabel(token && token.moodLabel));
+    const getTokenMoodText = (token) => {
+        const emoji = normalizeMoodEmoji(token && token.moodEmoji);
+        const label = normalizeMoodLabel(token && token.moodLabel);
+        return `${emoji}${emoji && label ? ' ' : ''}${label}`.trim();
+    };
     const serializeHp = (current, max) => {
         const hasCurrent = hasValue(current);
         const hasMax = hasValue(max);
@@ -738,6 +780,47 @@
             if (!Array.isArray(scene.templates)) scene.templates = [];
             scene.templates.push(payload);
         });
+    };
+    const getRenderableScenePings = (scene, now = Date.now()) => {
+        if (!scene || !Array.isArray(scene.pings)) return [];
+        return scene.pings.filter((ping) => toNumber(ping && ping.expiresAt, 0) > now);
+    };
+    const schedulePingExpiryRender = (scene) => {
+        if (pingExpiryTimer) {
+            window.clearTimeout(pingExpiryTimer);
+            pingExpiryTimer = 0;
+        }
+        const pings = getRenderableScenePings(scene);
+        if (!pings.length) return;
+        const nextExpiry = Math.min(...pings.map((ping) => Math.max(0, toNumber(ping && ping.expiresAt, 0))));
+        if (!Number.isFinite(nextExpiry) || nextExpiry <= 0) return;
+        const delay = Math.max(0, nextExpiry - Date.now() + 32);
+        pingExpiryTimer = window.setTimeout(() => {
+            pingExpiryTimer = 0;
+            renderStage();
+        }, delay);
+    };
+    const queueSharedPing = (scene, worldPoint, options = {}) => {
+        if (!scene || !worldPoint) return false;
+        const now = Date.now();
+        const label = String(options.label || 'Ping').trim().slice(0, 80) || 'Ping';
+        const color = normalizeHexColor(options.color, '#4f8dff');
+        const ping = {
+            id: buildId('ping'),
+            x: Math.round(toNumber(worldPoint.x, 0)),
+            y: Math.round(toNumber(worldPoint.y, 0)),
+            label,
+            color,
+            createdAt: now,
+            expiresAt: now + PING_SHARED_LIFETIME_MS
+        };
+        withDraft((draft) => {
+            const draftScene = getActiveScene(draft);
+            if (!draftScene) return;
+            const activePings = getRenderableScenePings(draftScene, now);
+            draftScene.pings = activePings.concat(ping).slice(-18);
+        });
+        return true;
     };
     const scheduleTemplateExpiryRender = (scene) => {
         if (templateExpiryTimer) {
@@ -962,14 +1045,7 @@
         return getDefaultEvidenceNoteHighlightColor(category);
     };
     const getEvidenceNoteHighlightRgb = (note) => {
-        const hex = getEvidenceNoteHighlightColor(note);
-        const clean = hex.slice(1);
-        const normalized = clean.length === 3
-            ? clean.split('').map((char) => char + char).join('')
-            : clean;
-        const value = parseInt(normalized, 16);
-        if (!Number.isFinite(value)) return '255, 215, 120';
-        return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
+        return getHexColorRgbString(getEvidenceNoteHighlightColor(note), DEFAULT_EVIDENCE_NOTE_COLOR);
     };
     const getEvidenceNoteDisplayTitle = (note) => {
         const category = normalizeEvidenceNoteCategory(note && note.category);
@@ -1063,6 +1139,31 @@
         if (role === 'dm') return notes;
         const fogCellSet = collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
         return notes.filter((note) => isEvidenceNoteVisibleToRole(note, scene, role, fogCellSet));
+    };
+    const getSceneClocks = (scene) => (Array.isArray(scene && scene.clocks) ? scene.clocks : []);
+    const getVisibleSceneClocksForRole = (scene, role = localRole) => {
+        const clocks = getSceneClocks(scene);
+        if (role === 'dm') return clocks;
+        return clocks.filter((clock) => !clock.hidden);
+    };
+    const normalizeClockTitle = (value, fallback = 'Scene Clock') => {
+        const clean = String(value || '').trim().slice(0, 120);
+        return clean || fallback;
+    };
+    const normalizeClockMax = (value, fallback = 4) => clamp(Math.round(toNumber(value, fallback)), 1, 20);
+    const normalizeClockCurrent = (value, max, fallback = 0) => clamp(Math.round(toNumber(value, fallback)), 0, normalizeClockMax(max, 4));
+    const normalizeClockNote = (value) => String(value || '').trim().slice(0, 240);
+    const updateSceneClock = (clockId, mutator) => {
+        const targetId = String(clockId || '').trim();
+        if (!targetId || typeof mutator !== 'function' || !isDM()) return false;
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.clocks)) return;
+            const idx = scene.clocks.findIndex((clock) => String(clock && clock.id || '').trim() === targetId);
+            if (idx < 0) return;
+            mutator(scene.clocks[idx], scene);
+        });
+        return true;
     };
     const getEvidenceNoteById = (noteId, state = vttState, role = localRole) => {
         const targetId = String(noteId || '').trim();
@@ -1326,7 +1427,7 @@
     };
     const normalizeToolMode = (value) => {
         const token = String(value || '').trim().toLowerCase();
-        if (token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_NOTE || token === TOOL_MODE_FOG || token === TOOL_MODE_FOG_REMOVE) return token;
+        if (token === TOOL_MODE_PING || token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_NOTE || token === TOOL_MODE_FOG || token === TOOL_MODE_FOG_REMOVE) return token;
         return TOOL_MODE_NAVIGATE;
     };
     const normalizeToolSizeCells = (value, fallback = DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
@@ -1599,6 +1700,7 @@
         if (toolsMenuToggleEl) toolsMenuToggleEl.setAttribute('aria-expanded', toolsMenuOpen ? 'true' : 'false');
         if (rulerToggleEl) rulerToggleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false');
         if (toolModeNavigateEl) toolModeNavigateEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NAVIGATE ? 'true' : 'false');
+        if (toolModePingEl) toolModePingEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_PING ? 'true' : 'false');
         if (toolModeCircleEl) toolModeCircleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CIRCLE ? 'true' : 'false');
         if (toolModeConeEl) toolModeConeEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CONE ? 'true' : 'false');
         if (toolModeNoteEl) {
@@ -1617,9 +1719,9 @@
             toolSizeInputEl.value = String(localToolState.sizeCells);
         }
         if (toolSizeInputEl) {
-            const dragAreaModeActive = localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE || localToolState.mode === TOOL_MODE_NOTE;
+            const dragAreaModeActive = localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE || localToolState.mode === TOOL_MODE_NOTE || localToolState.mode === TOOL_MODE_PING;
             toolSizeInputEl.disabled = dragAreaModeActive;
-            toolSizeInputEl.title = dragAreaModeActive ? 'Fog and Zone tools use drag area selection on the scene grid.' : '';
+            toolSizeInputEl.title = dragAreaModeActive ? 'Ping, Fog, and Zone tools do not use template size.' : '';
         }
         if (stealthModeToggleEl) {
             const scene = getActiveScene();
@@ -2856,6 +2958,7 @@
         const scene = getActiveScene();
         const tokens = getVisibleTokensForRole(scene);
         const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
+        const visibleClocks = getVisibleSceneClocksForRole(scene);
         const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
         if (!visibleEntries.some((entry) => entry.id === selectedEntryId)) {
             const activeEntryId = vttState && vttState.initiative ? String(vttState.initiative.activeEntryId || '').trim() : '';
@@ -2868,6 +2971,9 @@
         }
         if (!visibleEvidenceNotes.some((note) => note.id === selectedEvidenceNoteId)) {
             selectedEvidenceNoteId = '';
+        }
+        if (!visibleClocks.some((clock) => clock.id === selectedClockId)) {
+            selectedClockId = '';
         }
         if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
             previewTokenId = '';
@@ -3854,8 +3960,8 @@
                     <span class="vtt-token-spawn-meta">Spawn here</span>
                 </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note">
-                    <span class="vtt-token-spawn-name">Zone Indicator</span>
-                    <span class="vtt-token-spawn-meta">Create a 1x1 zone here and open it</span>
+                    <span class="vtt-token-spawn-name">Pin / Zone Indicator</span>
+                    <span class="vtt-token-spawn-meta">Create a 1x1 public marker here and open it</span>
                 </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-open-npc-search">
                     <span class="vtt-token-spawn-name">NPC Search Here</span>
@@ -3899,7 +4005,8 @@
     const describeScene = (scene) => {
         const tokenCount = scene && Array.isArray(scene.tokens) ? scene.tokens.length : 0;
         const evidenceNoteCount = scene && Array.isArray(scene.evidenceNotes) ? scene.evidenceNotes.length : 0;
-        return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'} - ${evidenceNoteCount} zone${evidenceNoteCount === 1 ? '' : 's'}`;
+        const clockCount = scene && Array.isArray(scene.clocks) ? scene.clocks.length : 0;
+        return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'} - ${evidenceNoteCount} zone${evidenceNoteCount === 1 ? '' : 's'} - ${clockCount} clock${clockCount === 1 ? '' : 's'}`;
     };
 
     const getSheetActionSearchResults = () => {
@@ -4398,12 +4505,31 @@
             ? String(rosterPlayer.imageUrl || token.imageUrl || '').trim()
             : String(token.imageUrl || '').trim();
         const supportsSightCone = !!(token && (token.side === 'enemy' || token.side === 'neutral'));
+        const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
+        const moodLabel = normalizeMoodLabel(token && token.moodLabel);
+        const moodOptions = MOOD_EMOJI_OPTIONS.includes(moodEmoji) || !moodEmoji
+            ? MOOD_EMOJI_OPTIONS
+            : [moodEmoji, ...MOOD_EMOJI_OPTIONS];
         return `
             <div class="vtt-inspector-stack">
                 <label class="vtt-field">
                     <span>Label</span>
                     <input class="vtt-inspector-input" type="text" ${isRosterManagedPlayer ? 'readonly' : 'data-token-field="label"'} value="${escapeHtml(token.label)}">
                 </label>
+                <div class="vtt-subhead">Hover Mood</div>
+                <div class="vtt-inspector-grid">
+                    <label class="vtt-field">
+                        <span>Emoji</span>
+                        <select class="vtt-inspector-select" data-token-field="moodEmoji">
+                            <option value=""${moodEmoji ? '' : ' selected'}>None</option>
+                            ${moodOptions.map((emoji) => `<option value="${escapeHtml(emoji)}"${moodEmoji === emoji ? ' selected' : ''}>${escapeHtml(emoji)}</option>`).join('')}
+                        </select>
+                    </label>
+                    <label class="vtt-field">
+                        <span>Word</span>
+                        <input class="vtt-inspector-input" type="text" data-token-field="moodLabel" value="${escapeHtml(moodLabel)}" placeholder="Suspicious">
+                    </label>
+                </div>
                 <div class="vtt-inspector-grid">
                     <label class="vtt-field">
                         <span>Side</span>
@@ -4686,6 +4812,81 @@
         positionTokenInspectorPopover();
     };
 
+    const buildClockSegmentMarkup = (clock) => {
+        const max = normalizeClockMax(clock && clock.max, 4);
+        const current = normalizeClockCurrent(clock && clock.current, max, 0);
+        return Array.from({ length: max }).map((_, idx) => (
+            `<span class="vtt-clock-segment${idx < current ? ' is-filled' : ''}" aria-hidden="true"></span>`
+        )).join('');
+    };
+
+    const renderClockList = () => {
+        if (!clockListEl) return;
+        const scene = getActiveScene();
+        const clocks = getVisibleSceneClocksForRole(scene, localRole);
+        if (!scene || !clocks.length) {
+            clockListEl.innerHTML = isDM()
+                ? '<div class="vtt-empty">No scene clocks yet. Add one for objectives, alarms, rituals, hazards, or escape pressure.</div>'
+                : '<div class="vtt-empty">No scene clocks are visible.</div>';
+            return;
+        }
+
+        clockListEl.innerHTML = clocks.map((clock) => {
+            const max = normalizeClockMax(clock && clock.max, 4);
+            const current = normalizeClockCurrent(clock && clock.current, max, 0);
+            const title = normalizeClockTitle(clock && clock.title, 'Scene Clock');
+            const color = normalizeHexColor(clock && clock.color, '#f0b357');
+            const rgb = getHexColorRgbString(color, '#f0b357');
+            const note = normalizeClockNote(clock && clock.note);
+            const hidden = !!(clock && clock.hidden);
+            return `
+                <div class="vtt-clock${hidden ? ' is-hidden' : ''}${current >= max ? ' is-complete' : ''}"
+                    style="--vtt-clock-color:${escapeHtml(color)};--vtt-clock-rgb:${escapeHtml(rgb)};">
+                    <div class="vtt-clock-main">
+                        <div class="vtt-clock-title-row">
+                            <strong class="vtt-clock-title">${escapeHtml(title)}</strong>
+                            <span class="vtt-clock-count">${escapeHtml(String(current))}/${escapeHtml(String(max))}</span>
+                        </div>
+                        <div class="vtt-clock-segments" style="--vtt-clock-max:${escapeHtml(String(max))};">
+                            ${buildClockSegmentMarkup(clock)}
+                        </div>
+                        ${note ? `<div class="vtt-clock-note">${escapeHtml(note)}</div>` : ''}
+                    </div>
+                    ${isDM() ? `
+                        <div class="vtt-clock-controls" data-dm-only="1">
+                            <button class="vtt-inline-btn vtt-inline-btn-icon" data-action="clock-step" data-id="${escapeHtml(String(clock.id || ''))}" data-delta="-1" aria-label="Reduce clock">-</button>
+                            <button class="vtt-inline-btn vtt-inline-btn-icon" data-action="clock-step" data-id="${escapeHtml(String(clock.id || ''))}" data-delta="1" aria-label="Advance clock">+</button>
+                            <button class="vtt-inline-btn" data-action="toggle-clock-hidden" data-id="${escapeHtml(String(clock.id || ''))}">${hidden ? 'Show' : 'Hide'}</button>
+                            <button class="vtt-inline-btn danger" data-action="delete-clock" data-id="${escapeHtml(String(clock.id || ''))}">Delete</button>
+                        </div>
+                        <div class="vtt-clock-edit-grid" data-dm-only="1">
+                            <label class="vtt-field vtt-field-tight">
+                                <span>Title</span>
+                                <input class="vtt-inspector-input" type="text" data-clock-field="title" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(title)}">
+                            </label>
+                            <label class="vtt-field vtt-field-tight">
+                                <span>Done</span>
+                                <input class="vtt-inspector-input" type="number" min="0" max="${escapeHtml(String(max))}" data-clock-field="current" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(String(current))}">
+                            </label>
+                            <label class="vtt-field vtt-field-tight">
+                                <span>Max</span>
+                                <input class="vtt-inspector-input" type="number" min="1" max="20" data-clock-field="max" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(String(max))}">
+                            </label>
+                            <label class="vtt-field vtt-field-tight">
+                                <span>Color</span>
+                                <input class="vtt-inspector-input" type="color" data-clock-field="color" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(color)}">
+                            </label>
+                            <label class="vtt-field vtt-field-tight vtt-clock-note-field">
+                                <span>Note</span>
+                                <input class="vtt-inspector-input" type="text" data-clock-field="note" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(note)}">
+                            </label>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    };
+
     const renderInitiativeList = () => {
         if (!initiativeListEl || !roundPillEl) return;
         const initiative = vttState && vttState.initiative ? vttState.initiative : { entries: [], round: 1, activeEntryId: '' };
@@ -4959,6 +5160,26 @@
         `;
     };
 
+    const buildPingMarkup = (ping, scene) => {
+        if (!ping || !scene) return '';
+        const cellPx = getSceneCellPx(scene);
+        const size = Math.max(44, cellPx * 1.6);
+        const color = normalizeHexColor(ping.color, '#4f8dff');
+        const rgb = getHexColorRgbString(color, '#4f8dff');
+        const label = String(ping.label || 'Ping').trim().slice(0, 80) || 'Ping';
+        return `
+            <div class="vtt-overlay-item vtt-ping"
+                data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - size / 2))}"
+                data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - size / 2))}"
+                data-world-width="${escapeHtml(String(size))}"
+                data-world-height="${escapeHtml(String(size))}"
+                style="--vtt-ping-color:${escapeHtml(color)};--vtt-ping-rgb:${escapeHtml(rgb)};">
+                <div class="vtt-ping-ring"></div>
+                <div class="vtt-ping-label">${escapeHtml(label)}</div>
+            </div>
+        `;
+    };
+
     const buildEvidenceNoteMarkup = (note, scene, { preview = false, selected = false } = {}) => {
         if (!note || !scene) return '';
         const classes = ['vtt-overlay-item', 'vtt-map-note'];
@@ -5046,9 +5267,11 @@
         const previewMarkup = templatePlacementState && templatePlacementState.sceneId === scene.id && templatePlacementState.template
             ? buildAreaTemplateMarkup(templatePlacementState.template, scene, { preview: true })
             : '';
+        const pingMarkup = getRenderableScenePings(scene, now).map((ping) => buildPingMarkup(ping, scene)).join('');
         const rulerMarkup = buildRulerMarkup(scene);
-        templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`;
+        templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${pingMarkup}${rulerMarkup}`;
         scheduleTemplateExpiryRender(scene);
+        schedulePingExpiryRender(scene);
     };
 
     const renderStage = () => {
@@ -5092,6 +5315,8 @@
             const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
             const isBloodied = isTokenBloodied(token);
             const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
+            const moodText = getTokenMoodText(token);
+            const hasHoverCard = !!(usableImageUrl || moodText);
             return `
                 <div class="vtt-token${usableImageUrl ? ' has-image' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
                     data-token-id="${escapeHtml(token.id)}"
@@ -5108,7 +5333,12 @@
                     <div class="vtt-token-face">
                         ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
                     </div>
-                    ${usableImageUrl ? `<div class="vtt-token-hover-card"><img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false"></div>` : ''}
+                    ${hasHoverCard ? `
+                        <div class="vtt-token-hover-card${usableImageUrl ? '' : ' has-mood-only'}">
+                            ${usableImageUrl ? `<img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false">` : ''}
+                            ${moodText ? `<div class="vtt-token-mood-badge">${escapeHtml(moodText)}</div>` : ''}
+                        </div>
+                    ` : ''}
                     <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
                 </div>
             `;
@@ -5130,7 +5360,9 @@
         const scene = getActiveScene();
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
-        const toolMeta = localToolState.mode === TOOL_MODE_RULER
+        const toolMeta = localToolState.mode === TOOL_MODE_PING
+            ? 'Ping active: click the map to show every connected player a short-lived ping.'
+            : (localToolState.mode === TOOL_MODE_RULER
             ? 'Ruler active: click and hold on the stage to measure squares and feet.'
             : (localToolState.mode === TOOL_MODE_CIRCLE
                 ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
@@ -5144,7 +5376,7 @@
                             ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
                     : (isDM()
                         ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
-                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))));
+                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.')))))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
@@ -5183,6 +5415,7 @@
         renderTokenInspectorPopover();
         renderSheetActionPopover();
         renderNPCRollPopover();
+        renderClockList();
         renderInitiativeList();
         renderInitiativeDetail();
         renderSpawnGhost();
@@ -5636,6 +5869,54 @@
                 const scene = getActiveScene(draft);
                 if (!scene) return;
                 scene.fog = [];
+            });
+            return;
+        }
+        if (action === 'add-scene-clock') {
+            if (!isDM()) return;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                if (!Array.isArray(scene.clocks)) scene.clocks = [];
+                const nextNumber = scene.clocks.length + 1;
+                const clock = {
+                    id: buildId('clock'),
+                    title: `Clock ${nextNumber}`,
+                    current: 0,
+                    max: 4,
+                    hidden: false,
+                    color: '#f0b357',
+                    note: ''
+                };
+                scene.clocks.push(clock);
+                selectedClockId = clock.id;
+            });
+            return;
+        }
+        if (action === 'clock-step') {
+            if (!isDM()) return;
+            const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
+            updateSceneClock(id, (clock) => {
+                const max = normalizeClockMax(clock.max, 4);
+                clock.max = max;
+                clock.current = normalizeClockCurrent(toNumber(clock.current, 0) + delta, max, 0);
+            });
+            return;
+        }
+        if (action === 'toggle-clock-hidden') {
+            if (!isDM()) return;
+            updateSceneClock(id, (clock) => {
+                clock.hidden = !clock.hidden;
+            });
+            return;
+        }
+        if (action === 'delete-clock') {
+            if (!isDM()) return;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.clocks)) return;
+                scene.clocks = scene.clocks.filter((clock) => String(clock && clock.id || '').trim() !== id);
+                if (selectedClockId === id) selectedClockId = '';
             });
             return;
         }
@@ -6163,6 +6444,36 @@
             return;
         }
 
+        if (target instanceof HTMLInputElement && target.dataset.clockField) {
+            if (!isDM()) return;
+            const field = target.dataset.clockField;
+            const clockId = String(target.dataset.id || '').trim();
+            updateSceneClock(clockId, (clock) => {
+                if (field === 'title') {
+                    clock.title = normalizeClockTitle(target.value, 'Scene Clock');
+                    return;
+                }
+                if (field === 'note') {
+                    clock.note = normalizeClockNote(target.value);
+                    return;
+                }
+                if (field === 'color') {
+                    clock.color = normalizeHexColor(target.value, '#f0b357');
+                    return;
+                }
+                if (field === 'max') {
+                    const nextMax = normalizeClockMax(target.value, clock.max || 4);
+                    clock.max = nextMax;
+                    clock.current = normalizeClockCurrent(clock.current, nextMax, 0);
+                    return;
+                }
+                if (field === 'current') {
+                    clock.current = normalizeClockCurrent(target.value, clock.max || 4, clock.current || 0);
+                }
+            });
+            return;
+        }
+
         if (selectedEntryId && target instanceof HTMLSelectElement && target.dataset.entryTokenLink) {
             if (!canEditInitiative()) return;
             if (event.type !== 'change') return;
@@ -6208,6 +6519,14 @@
                 }
                 if (field === 'label') {
                     token.label = String(target.value || '').trim() || 'Token';
+                    return;
+                }
+                if (field === 'moodEmoji') {
+                    token.moodEmoji = normalizeMoodEmoji(target.value);
+                    return;
+                }
+                if (field === 'moodLabel') {
+                    token.moodLabel = normalizeMoodLabel(target.value);
                     return;
                 }
                 const nextValue = String(target.value || '').trim();
@@ -6551,6 +6870,11 @@
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
+        if (localToolState.mode === TOOL_MODE_PING) {
+            queueSharedPing(scene, worldPoint);
+            event.preventDefault();
+            return;
+        }
         const noteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
         if (noteEl && localToolState.mode === TOOL_MODE_NAVIGATE) {
             const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
