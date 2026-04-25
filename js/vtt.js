@@ -149,6 +149,7 @@
     let dmUnlockReturnFocusEl = null;
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
+    let lastStageToolPointerDownAt = 0;
     let remoteTokenTweens = new Map();
     let remoteTokenTweenFrame = 0;
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
@@ -189,6 +190,7 @@
     const scenePanelSceneLabelEl = document.getElementById('vtt-scene-panel-scene-label');
     const stageTitleEl = document.getElementById('vtt-stage-title');
     const stageMetaEl = document.getElementById('vtt-stage-meta');
+    const modeChipEl = document.getElementById('vtt-mode-chip');
     const roundPillEl = document.getElementById('vtt-round-pill');
     const selectionPillEl = document.getElementById('vtt-selection-pill');
     const tokenInspectorEl = document.getElementById('vtt-token-inspector');
@@ -915,11 +917,13 @@
         if (fogEntry.col !== undefined || fogEntry.row !== undefined) {
             const left = Math.round(toNumber(fogEntry.col, 0));
             const top = Math.round(toNumber(fogEntry.row, 0));
+            const widthCells = Math.max(1, Math.round(toNumber(fogEntry.cols, 1)));
+            const heightCells = Math.max(1, Math.round(toNumber(fogEntry.rows, 1)));
             return {
                 left,
                 top,
-                right: left + 1,
-                bottom: top + 1
+                right: left + widthCells,
+                bottom: top + heightCells
             };
         }
         const cellPx = getSceneCellPx(scene);
@@ -968,6 +972,73 @@
                 row: cell.row
             }));
     };
+    const buildFogRenderRectsFromCellSet = (scene, cellSet) => {
+        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return [];
+        const rows = new Map();
+        cellSet.forEach((key) => {
+            const cell = parseFogCellKey(key);
+            if (!rows.has(cell.row)) rows.set(cell.row, new Set());
+            rows.get(cell.row).add(cell.col);
+        });
+
+        const finalized = [];
+        let openRects = new Map();
+        let previousRow = null;
+        Array.from(rows.keys()).sort((left, right) => left - right).forEach((row) => {
+            const cols = Array.from(rows.get(row) || []).sort((left, right) => left - right);
+            const runs = [];
+            let runStart = null;
+            let runEnd = null;
+            cols.forEach((col) => {
+                if (runStart === null) {
+                    runStart = col;
+                    runEnd = col + 1;
+                    return;
+                }
+                if (col === runEnd) {
+                    runEnd = col + 1;
+                    return;
+                }
+                runs.push({ left: runStart, right: runEnd });
+                runStart = col;
+                runEnd = col + 1;
+            });
+            if (runStart !== null && runEnd !== null) runs.push({ left: runStart, right: runEnd });
+
+            const canContinue = previousRow !== null && row === previousRow + 1;
+            const nextOpenRects = new Map();
+            runs.forEach((run) => {
+                const runKey = `${run.left}:${run.right}`;
+                if (canContinue && openRects.has(runKey)) {
+                    const rect = openRects.get(runKey);
+                    rect.bottom = row + 1;
+                    nextOpenRects.set(runKey, rect);
+                    openRects.delete(runKey);
+                    return;
+                }
+                nextOpenRects.set(runKey, {
+                    left: run.left,
+                    top: row,
+                    right: run.right,
+                    bottom: row + 1
+                });
+            });
+
+            openRects.forEach((rect) => finalized.push(rect));
+            openRects = nextOpenRects;
+            previousRow = row;
+        });
+        openRects.forEach((rect) => finalized.push(rect));
+
+        return finalized.map((rect) => ({
+            id: `fog_rect_${rect.left}_${rect.top}_${rect.right}_${rect.bottom}`,
+            col: rect.left,
+            row: rect.top,
+            cols: Math.max(1, rect.right - rect.left),
+            rows: Math.max(1, rect.bottom - rect.top)
+        }));
+    };
+    const buildFogRenderRects = (scene, masks = []) => buildFogRenderRectsFromCellSet(scene, collectFogCellSet(scene, masks));
     const applyFogMaskMutation = (scene, mask, mode = 'add') => {
         if (!scene || !mask) return Array.isArray(scene && scene.fog) ? scene.fog.slice() : [];
         const cellSet = collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
@@ -1427,6 +1498,17 @@
         if (token === TOOL_MODE_PING || token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_NOTE || token === TOOL_MODE_FOG || token === TOOL_MODE_FOG_REMOVE) return token;
         return TOOL_MODE_NAVIGATE;
     };
+    const getToolModeLabel = (mode = localToolState.mode) => {
+        const clean = normalizeToolMode(mode);
+        if (clean === TOOL_MODE_PING) return 'Ping';
+        if (clean === TOOL_MODE_RULER) return 'Ruler';
+        if (clean === TOOL_MODE_CIRCLE) return 'Circle';
+        if (clean === TOOL_MODE_CONE) return 'Cone';
+        if (clean === TOOL_MODE_NOTE) return 'Zone';
+        if (clean === TOOL_MODE_FOG) return 'Fog';
+        if (clean === TOOL_MODE_FOG_REMOVE) return 'Unfog';
+        return 'Navigate';
+    };
     const normalizeToolSizeCells = (value, fallback = DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
     const normalizeAngleDeg = (value) => {
         const parsed = Math.round(toNumber(value, 0));
@@ -1679,6 +1761,7 @@
     const setToolMode = (mode) => {
         clearTemplatePlacementState();
         localToolState.mode = normalizeToolMode(mode);
+        lastStageToolPointerDownAt = 0;
     };
     const closeToolsMenu = () => {
         if (!toolsMenuOpen) return false;
@@ -1734,6 +1817,19 @@
             clearFogButtonEl.textContent = fogCount > 0 ? `Clear Fog (${fogCount})` : 'Clear Fog';
         }
         if (body) body.dataset.toolMode = localToolState.mode;
+        renderModeChip();
+    };
+
+    const renderModeChip = () => {
+        if (!modeChipEl) return;
+        const activeMode = normalizeToolMode(localToolState.mode);
+        const showChip = activeMode !== TOOL_MODE_NAVIGATE;
+        modeChipEl.hidden = !showChip;
+        if (!showChip) {
+            modeChipEl.textContent = '';
+            return;
+        }
+        modeChipEl.textContent = `Now in ${getToolModeLabel(activeMode)} - double click or tap to go back to normal`;
     };
 
     const positionNPCSearchPopover = () => {
@@ -3053,6 +3149,14 @@
             scene.evidenceNotes.forEach((note) => {
                 width = Math.max(width, toNumber(note && note.x, 0) + Math.max(1, toNumber(note && note.w, grid.cellPx)) + grid.cellPx * 2);
                 height = Math.max(height, toNumber(note && note.y, 0) + Math.max(1, toNumber(note && note.h, grid.cellPx)) + grid.cellPx * 2);
+            });
+        }
+        if (Array.isArray(scene.fog) && scene.fog.length) {
+            scene.fog.forEach((fogEntry) => {
+                const rect = getFogEntryWorldRect(scene, fogEntry);
+                if (!rect) return;
+                width = Math.max(width, rect.x + rect.w + grid.cellPx * 2);
+                height = Math.max(height, rect.y + rect.h + grid.cellPx * 2);
             });
         }
         return {
@@ -5399,7 +5503,7 @@
         const mapDisplaySize = getLoadedMapSizeForScene(scene);
         mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
 
-        const fogMarkup = Array.isArray(scene.fog) ? scene.fog.map((mask) => buildFogMaskMarkup(scene, mask)).join('') : '';
+        const fogMarkup = Array.isArray(scene.fog) ? buildFogRenderRects(scene, scene.fog).map((mask) => buildFogMaskMarkup(scene, mask)).join('') : '';
         const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
             ? buildFogMaskMarkup(scene, fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
             : '';
@@ -5499,6 +5603,7 @@
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
+        renderModeChip();
         renderSceneList();
         if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
         if (roleToggleEl) roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
@@ -7070,6 +7175,19 @@
         const scene = getActiveScene();
         if (!scene) return;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
+        if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
+            const now = Date.now();
+            const isDoublePress = now - lastStageToolPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
+            lastStageToolPointerDownAt = now;
+            if (isDoublePress) {
+                setToolMode(TOOL_MODE_NAVIGATE);
+                render();
+                event.preventDefault();
+                return;
+            }
+        } else {
+            lastStageToolPointerDownAt = 0;
+        }
         if (localToolState.mode === TOOL_MODE_PING) {
             queueSharedPing(scene, worldPoint);
             event.preventDefault();

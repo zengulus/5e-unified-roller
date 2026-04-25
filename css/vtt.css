@@ -854,6 +854,31 @@ body[data-spawn-dragging="1"] .vtt-stage {
     cursor: grabbing;
 }
 
+.vtt-mode-chip {
+    position: absolute;
+    top: 0.85rem;
+    left: 50%;
+    z-index: 12;
+    max-width: min(38rem, calc(100% - 1.5rem));
+    padding: 0.48rem 0.74rem;
+    border: 1px solid rgba(var(--accent-rgb, 78, 205, 196), 0.34);
+    border-radius: 999px;
+    background: rgba(7, 10, 14, 0.88);
+    color: #f5fbff;
+    box-shadow: 0 0.7rem 1.8rem rgba(0, 0, 0, 0.34);
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-align: center;
+    transform: translateX(-50%);
+    pointer-events: none;
+    backdrop-filter: blur(12px);
+}
+
+.vtt-mode-chip[hidden] {
+    display: none;
+}
+
 body[data-tool-mode="ruler"] .vtt-stage,
 body[data-tool-mode="ping"] .vtt-stage,
 body[data-tool-mode="circle"] .vtt-stage,
