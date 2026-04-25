@@ -4811,12 +4811,18 @@
         positionTokenInspectorPopover();
     };
 
-    const buildClockSegmentMarkup = (clock) => {
+    const buildClockPieMarkup = (clock) => {
         const max = normalizeClockMax(clock && clock.max, 4);
         const current = normalizeClockCurrent(clock && clock.current, max, 0);
-        return Array.from({ length: max }).map((_, idx) => (
-            `<span class="vtt-clock-segment${idx < current ? ' is-filled' : ''}" aria-hidden="true"></span>`
-        )).join('');
+        const progressDeg = max > 0 ? Math.round((current / max) * 3600) / 10 : 0;
+        const segmentDeg = Math.round((360 / max) * 1000) / 1000;
+        return `
+            <div class="vtt-clock-pie"
+                aria-label="${escapeHtml(`${current} of ${max}`)}"
+                style="--vtt-clock-progress-deg:${escapeHtml(String(progressDeg))}deg;--vtt-clock-segment-deg:${escapeHtml(String(segmentDeg))}deg;">
+                <span>${escapeHtml(String(current))}/${escapeHtml(String(max))}</span>
+            </div>
+        `;
     };
 
     const renderClockList = () => {
@@ -4841,15 +4847,14 @@
             return `
                 <div class="vtt-clock${hidden ? ' is-hidden' : ''}${current >= max ? ' is-complete' : ''}"
                     style="--vtt-clock-color:${escapeHtml(color)};--vtt-clock-rgb:${escapeHtml(rgb)};">
-                    <div class="vtt-clock-main">
-                        <div class="vtt-clock-title-row">
-                            <strong class="vtt-clock-title">${escapeHtml(title)}</strong>
-                            <span class="vtt-clock-count">${escapeHtml(String(current))}/${escapeHtml(String(max))}</span>
+                    <div class="vtt-clock-layout">
+                        ${buildClockPieMarkup(clock)}
+                        <div class="vtt-clock-main">
+                            <div class="vtt-clock-title-row">
+                                <strong class="vtt-clock-title">${escapeHtml(title)}</strong>
+                            </div>
+                            ${note ? `<div class="vtt-clock-note">${escapeHtml(note)}</div>` : ''}
                         </div>
-                        <div class="vtt-clock-segments" style="--vtt-clock-max:${escapeHtml(String(max))};">
-                            ${buildClockSegmentMarkup(clock)}
-                        </div>
-                        ${note ? `<div class="vtt-clock-note">${escapeHtml(note)}</div>` : ''}
                     </div>
                     ${isDM() ? `
                         <div class="vtt-clock-controls" data-dm-only="1">

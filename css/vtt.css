@@ -1743,6 +1743,65 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     box-shadow: inset 0 0 0 1px rgba(var(--vtt-clock-rgb), 0.34);
 }
 
+.vtt-clock-layout {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: center;
+    min-width: 0;
+}
+
+.vtt-clock-pie {
+    --vtt-clock-progress-deg: 0deg;
+    --vtt-clock-segment-deg: 90deg;
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 3.7rem;
+    height: 3.7rem;
+    border-radius: 999px;
+    background:
+        radial-gradient(circle at center, rgba(7, 11, 19, 0.98) 0 38%, transparent 39%),
+        repeating-conic-gradient(
+            from -90deg,
+            rgba(255, 255, 255, 0.26) 0 1.5deg,
+            transparent 1.5deg var(--vtt-clock-segment-deg)
+        ),
+        conic-gradient(
+            from -90deg,
+            rgba(var(--vtt-clock-rgb), 0.88) 0 var(--vtt-clock-progress-deg),
+            rgba(255, 255, 255, 0.06) var(--vtt-clock-progress-deg) 360deg
+        );
+    border: 1px solid rgba(var(--vtt-clock-rgb), 0.42);
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 12px 22px rgba(0, 0, 0, 0.22),
+        inset 0 0 18px rgba(var(--vtt-clock-rgb), 0.08);
+    flex: 0 0 auto;
+}
+
+.vtt-clock-pie::after {
+    content: "";
+    position: absolute;
+    inset: 38%;
+    border-radius: inherit;
+    background: rgba(var(--vtt-clock-rgb), 0.42);
+    box-shadow: 0 0 10px rgba(var(--vtt-clock-rgb), 0.2);
+}
+
+.vtt-clock-pie span {
+    position: relative;
+    z-index: 1;
+    padding: 0.12rem 0.3rem;
+    border-radius: 999px;
+    background: rgba(5, 9, 16, 0.86);
+    color: rgba(247, 252, 255, 0.96);
+    font-size: 0.68rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+}
+
 .vtt-clock-main {
     display: grid;
     gap: 0.45rem;
@@ -1763,35 +1822,6 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.vtt-clock-count {
-    flex: 0 0 auto;
-    padding: 0.16rem 0.48rem;
-    border-radius: 999px;
-    background: rgba(var(--vtt-clock-rgb), 0.16);
-    color: rgba(247, 252, 255, 0.92);
-    font-size: 0.74rem;
-    font-variant-numeric: tabular-nums;
-}
-
-.vtt-clock-segments {
-    display: grid;
-    grid-template-columns: repeat(var(--vtt-clock-max, 4), minmax(0, 1fr));
-    gap: 0.28rem;
-}
-
-.vtt-clock-segment {
-    min-height: 0.62rem;
-    border: 1px solid rgba(var(--vtt-clock-rgb), 0.26);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.035);
-}
-
-.vtt-clock-segment.is-filled {
-    border-color: rgba(var(--vtt-clock-rgb), 0.76);
-    background: rgba(var(--vtt-clock-rgb), 0.76);
-    box-shadow: 0 0 14px rgba(var(--vtt-clock-rgb), 0.22);
 }
 
 .vtt-clock-note {
@@ -2223,6 +2253,10 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
 
     .vtt-clock-edit-grid {
         grid-template-columns: 1fr;
+    }
+
+    .vtt-clock-layout {
+        grid-template-columns: auto minmax(0, 1fr);
     }
 
     .vtt-scene-summary-top {
