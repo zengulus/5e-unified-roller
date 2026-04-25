@@ -21,8 +21,53 @@
         return { left, top, width, height, right: left + width, bottom: top + height };
     };
 
+    const buildFogTile = (variant = 0) => {
+        const seed = variant === 0 ? 31 : 97;
+        const baseFrequency = variant === 0 ? '0.0625 0.08203125' : '0.078125 0.0546875';
+        const octaveCount = variant === 0 ? 5 : 4;
+        const alphaTable = variant === 0
+            ? '0 0.02 0.08 0.18 0.34 0.56 0.78'
+            : '0 0.015 0.07 0.16 0.30 0.48 0.68';
+        const white = variant === 0 ? '0.96 0.98 1' : '0.88 0.93 0.98';
+        const soft = variant === 0 ? '0.58 0.66 0.74' : '0.50 0.58 0.68';
+        const svg = `
+            <svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 256 256'>
+                <defs>
+                    <filter id='fogNoise' x='0' y='0' width='256' height='256' filterUnits='userSpaceOnUse'>
+                        <feTurbulence type='fractalNoise' baseFrequency='${baseFrequency}' numOctaves='${octaveCount}' seed='${seed}' stitchTiles='stitch' result='noise'/>
+                        <feColorMatrix in='noise' type='matrix' values='
+                            0 0 0 0 ${white.split(' ')[0]}
+                            0 0 0 0 ${white.split(' ')[1]}
+                            0 0 0 0 ${white.split(' ')[2]}
+                            0.34 0.34 0.34 0 -0.18' result='alphaNoise'/>
+                        <feComponentTransfer in='alphaNoise' result='fogNoise'>
+                            <feFuncA type='table' tableValues='${alphaTable}'/>
+                        </feComponentTransfer>
+                    </filter>
+                    <filter id='softNoise' x='0' y='0' width='256' height='256' filterUnits='userSpaceOnUse'>
+                        <feTurbulence type='fractalNoise' baseFrequency='0.0234375 0.03125' numOctaves='3' seed='${seed + 13}' stitchTiles='stitch' result='noise'/>
+                        <feColorMatrix in='noise' type='matrix' values='
+                            0 0 0 0 ${soft.split(' ')[0]}
+                            0 0 0 0 ${soft.split(' ')[1]}
+                            0 0 0 0 ${soft.split(' ')[2]}
+                            0.34 0.34 0.34 0 -0.04' result='alphaNoise'/>
+                        <feComponentTransfer in='alphaNoise' result='softFogNoise'>
+                            <feFuncA type='table' tableValues='0 0.04 0.10 0.18 0.26 0.34'/>
+                        </feComponentTransfer>
+                    </filter>
+                </defs>
+                <rect width='256' height='256' fill='transparent'/>
+                <rect width='256' height='256' filter='url(#softNoise)'/>
+                <rect width='256' height='256' filter='url(#fogNoise)'/>
+            </svg>
+        `.replace(/\s+/g, ' ');
+        return encodeURIComponent(svg);
+    };
+
     const installStyle = () => {
         if (document.getElementById(STYLE_ID)) return;
+        const fogTilePrimary = buildFogTile(0);
+        const fogTileCross = buildFogTile(1);
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = `
@@ -58,53 +103,49 @@
                 width: 100%;
                 height: 100%;
                 background:
-                    radial-gradient(circle at 22% 28%, rgba(190, 198, 205, 0.16) 0 8%, transparent 31%),
-                    linear-gradient(135deg, rgba(31, 36, 43, 0.58), rgba(7, 9, 13, 0.84));
+                    radial-gradient(circle at 22% 28%, rgba(202, 210, 217, 0.16) 0 8%, transparent 31%),
+                    linear-gradient(135deg, rgba(31, 36, 43, 0.62), rgba(7, 9, 13, 0.88));
                 box-shadow: inset 0 0 1.4rem rgba(225, 231, 234, 0.08);
                 overflow: hidden;
-                opacity: 0.94;
+                opacity: 0.96;
                 contain: paint;
             }
 
             .vtt-fog-unified-stream {
                 position: absolute;
-                left: -320px;
-                top: -320px;
-                width: calc(100% + 640px);
-                height: calc(100% + 640px);
+                left: -256px;
+                top: -256px;
+                width: calc(100% + 512px);
+                height: calc(100% + 512px);
                 pointer-events: none;
-                background:
-                    radial-gradient(circle at 46px 62px, rgba(224, 229, 232, 0.32) 0 18px, transparent 58px),
-                    radial-gradient(circle at 180px 86px, rgba(149, 158, 166, 0.34) 0 26px, transparent 74px),
-                    radial-gradient(circle at 124px 178px, rgba(236, 239, 240, 0.22) 0 22px, transparent 68px),
-                    radial-gradient(circle at 24px 22px, rgba(255, 255, 255, 0.16) 0 7px, transparent 20px);
                 background-repeat: repeat;
-                background-size: 260px 220px, 300px 250px, 220px 280px, 104px 92px;
+                background-size: 256px 256px;
                 mix-blend-mode: screen;
-                opacity: 0.5;
                 will-change: transform;
                 transform: translate3d(0, 0, 0);
                 backface-visibility: hidden;
             }
 
             .vtt-fog-unified-stream.is-primary {
-                animation: vtt-fog-unified-slide-x 54s linear infinite;
+                background-image: url("data:image/svg+xml,${fogTilePrimary}");
+                opacity: 0.62;
+                animation: vtt-fog-unified-slide-x 32s linear infinite;
             }
 
             .vtt-fog-unified-stream.is-cross {
-                animation: vtt-fog-unified-slide-y 83s linear infinite;
-                background-position: 41px 17px, 113px 71px, 67px 149px, 29px 43px;
-                transform-origin: center center;
+                background-image: url("data:image/svg+xml,${fogTileCross}");
+                opacity: 0.54;
+                animation: vtt-fog-unified-slide-y 47s linear infinite;
             }
 
             @keyframes vtt-fog-unified-slide-x {
-                from { transform: translate3d(-260px, 0, 0); }
+                from { transform: translate3d(-256px, 0, 0); }
                 to { transform: translate3d(0, 0, 0); }
             }
 
             @keyframes vtt-fog-unified-slide-y {
-                from { transform: rotate(90deg) scale(1.08) translate3d(0, -220px, 0); }
-                to { transform: rotate(90deg) scale(1.08) translate3d(0, 0, 0); }
+                from { transform: translate3d(0, -256px, 0); }
+                to { transform: translate3d(0, 0, 0); }
             }
         `;
         document.head.appendChild(style);
