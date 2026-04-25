@@ -2036,6 +2036,203 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
     }
 }
 
+@media (min-width: 769px) and (max-width: 1180px) and (min-height: 600px) and (pointer: coarse) {
+    .vtt-topbar {
+        gap: 0.65rem;
+        padding: 0.7rem 0.85rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .vtt-topbar-brand {
+        flex: 1 1 18rem;
+    }
+
+    .vtt-topbar-meta {
+        margin-top: 0.55rem;
+    }
+
+    .vtt-topbar-toolbar {
+        flex: 1 1 100%;
+        width: auto;
+        justify-content: space-between;
+        gap: 0.5rem;
+    }
+
+    .vtt-topbar-quick-controls,
+    .vtt-topbar-local-controls {
+        flex-wrap: nowrap;
+        gap: 0.45rem;
+        max-width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .vtt-topbar-quick-controls::-webkit-scrollbar,
+    .vtt-topbar-local-controls::-webkit-scrollbar {
+        display: none;
+    }
+
+    .vtt-topbar .hero-btn {
+        min-height: 44px;
+        padding: 0.52rem 0.78rem;
+        font-size: 0.78rem;
+        white-space: nowrap;
+    }
+
+    .vtt-shell {
+        --vtt-shell-height: calc(100vh - 142px);
+        --vtt-overlay-top: 4.1rem;
+        padding: 0 0.75rem 0.75rem;
+    }
+
+    .vtt-sidebar,
+    .vtt-initiative-panel {
+        top: var(--vtt-overlay-top);
+        bottom: auto;
+        width: min(280px, calc(43vw - 0.75rem));
+        max-height: min(58vh, calc(var(--vtt-shell-height) - var(--vtt-overlay-top)));
+        gap: 0.75rem;
+        overscroll-behavior: contain;
+    }
+
+    .vtt-sidebar {
+        left: 0.75rem;
+    }
+
+    .vtt-initiative-panel {
+        right: 0.75rem;
+    }
+
+    body[data-settings-collapsed="0"] .vtt-stage-panel {
+        padding-top: 0;
+    }
+
+    .vtt-panel {
+        padding: 0.75rem;
+        border-radius: 0.85rem;
+    }
+
+    .vtt-panel-head {
+        gap: 0.55rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .vtt-panel-head h2 {
+        font-size: 0.82rem;
+    }
+
+    .vtt-field-grid,
+    .vtt-inspector-grid,
+    .vtt-entry-detail-grid {
+        grid-template-columns: 1fr;
+        gap: 0.55rem;
+    }
+
+    .vtt-defence-grid,
+    .vtt-defence-chip-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .vtt-chip-btn,
+    .vtt-token-spawn,
+    .vtt-inline-btn {
+        min-height: 44px;
+        padding: 0.5rem 0.78rem;
+        font-size: 0.78rem;
+    }
+
+    .vtt-stage-toolbar {
+        display: grid;
+        grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.58rem 0.65rem;
+        margin-bottom: 0.55rem;
+        border-radius: 0.85rem;
+    }
+
+    .vtt-stage-toolbar-controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+        gap: 0.5rem;
+        flex: 1 1 auto;
+    }
+
+    .vtt-stage-tool-row {
+        display: flex;
+        flex: 1 1 auto;
+        flex-wrap: nowrap;
+        min-width: 0;
+        overflow-x: auto;
+        padding-bottom: 0.1rem;
+        scrollbar-width: none;
+    }
+
+    .vtt-stage-tool-row::-webkit-scrollbar {
+        display: none;
+    }
+
+    .vtt-tool-mode-row .vtt-chip-btn {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 5.2rem;
+        padding-inline: 0.7rem;
+    }
+
+    .vtt-stage-tool-extras {
+        flex-wrap: nowrap;
+        gap: 0.45rem;
+        max-width: min(24rem, 100%);
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .vtt-stage-tool-extras::-webkit-scrollbar {
+        display: none;
+    }
+
+    .vtt-stage-tool-extras .vtt-chip-btn {
+        white-space: nowrap;
+    }
+
+    .vtt-stage-tool-size {
+        width: 5.5rem;
+        min-width: 5.5rem;
+        max-width: none;
+    }
+
+    .vtt-stage-tool-size input {
+        padding: 0.55rem 0.6rem;
+    }
+
+    .vtt-stage {
+        min-height: 22rem;
+        border-radius: 0.85rem;
+    }
+
+    .vtt-floating-popover,
+    .vtt-token-inspector-popover,
+    .vtt-initiative-popover {
+        width: min(24rem, calc(100vw - 1.5rem));
+        max-height: min(76vh, 38rem);
+    }
+}
+
+@supports (height: 100dvh) {
+    @media (min-width: 769px) and (max-width: 1180px) and (min-height: 600px) and (pointer: coarse) {
+        .vtt-shell {
+            --vtt-shell-height: calc(100dvh - 142px);
+        }
+
+        .vtt-floating-popover,
+        .vtt-token-inspector-popover,
+        .vtt-initiative-popover {
+            max-height: min(76dvh, 38rem);
+        }
+    }
+}
+
 @media (pointer: coarse) {
     .vtt-chip-btn,
     .vtt-inline-btn,

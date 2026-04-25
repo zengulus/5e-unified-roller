@@ -1793,6 +1793,179 @@ body.focus-active .header-overlay {
     accent-color: var(--accent);
 }
 
+/* --- TABLET BOARD LAYOUT --- */
+body.tablet-board .board-hero {
+    top: 12px;
+    width: min(980px, calc(100% - 24px));
+    padding: 12px 14px;
+    border-radius: 14px;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+body.tablet-board .board-hero h1 {
+    margin: 1px 0 3px;
+    font-size: clamp(1.35rem, 2.4vw, 1.75rem);
+}
+
+body.tablet-board .board-hero .hero-eyebrow {
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+}
+
+body.tablet-board .board-hero .hero-subtitle {
+    display: none;
+}
+
+body.tablet-board .board-hero .hero-meta {
+    margin-top: 6px;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+}
+
+body.tablet-board .board-collab-status {
+    margin-top: 6px;
+    max-width: min(100%, 300px);
+    padding: 5px 9px;
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+}
+
+body.tablet-board .board-hero .hero-actions {
+    flex: 0 1 400px;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+body.tablet-board .board-hero .hero-action-bar {
+    gap: 6px;
+}
+
+body.tablet-board .board-hero .hero-btn {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+}
+
+body.tablet-board .toolbar-scroll-wrapper {
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    width: calc(100% - 24px);
+    max-width: none;
+    box-sizing: border-box;
+}
+
+body.tablet-board .toolbar {
+    padding: 9px;
+    gap: 12px;
+}
+
+body.tablet-board .tool-group {
+    gap: 8px;
+}
+
+body.tablet-board .tool-item {
+    width: 58px;
+    min-height: 56px;
+    padding: 7px 5px;
+}
+
+body.tablet-board .tool-item .icon {
+    font-size: 1.38rem;
+    margin-bottom: 4px;
+}
+
+body.tablet-board .tool-item .label {
+    font-size: 0.56rem;
+    letter-spacing: 0.06em;
+}
+
+body.tablet-board #toolbar-toggle {
+    left: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 108px);
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+}
+
+body.tablet-board .popup-menu {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+    width: min(720px, calc(100% - 48px));
+    max-width: none;
+    max-height: min(58vh, 480px);
+    border-radius: 14px;
+}
+
+body.tablet-board #npc-list-content,
+body.tablet-board #loc-list-content,
+body.tablet-board #guild-list-content,
+body.tablet-board #player-list-content,
+body.tablet-board #event-list-content,
+body.tablet-board #case-list-content,
+body.tablet-board #req-list-content {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 12px;
+    padding: 14px;
+    max-height: min(34vh, 280px);
+}
+
+body.tablet-board .filter-bar {
+    padding: 10px 12px;
+}
+
+body.tablet-board .filter-input,
+body.tablet-board .filter-select {
+    min-height: 42px;
+    font-size: 0.9rem;
+}
+
+body.tablet-board .context-menu {
+    width: min(280px, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
+    border-radius: 10px;
+    padding: 6px 0;
+}
+
+body.tablet-board .menu-item {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+}
+
+body.tablet-board .string-controls {
+    gap: 6px;
+    padding: 4px;
+}
+
+body.tablet-board .wax-btn,
+body.tablet-board .arrow-btn,
+body.tablet-board .string-delete-btn {
+    width: 22px;
+    min-width: 22px;
+    height: 22px;
+    min-height: 22px;
+}
+
+body.tablet-board .label-input {
+    min-height: 20px;
+    padding: 3px 6px;
+    font-size: 0.76rem;
+}
+
+body.tablet-board .formatting-toolbar {
+    gap: 8px;
+    padding: 9px;
+}
+
+body.tablet-board .formatting-btn {
+    width: 36px;
+    height: 36px;
+}
+
 
 
 /* --- MOBILE RESPONSIVENESS --- */

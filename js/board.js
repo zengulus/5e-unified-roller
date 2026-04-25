@@ -73,6 +73,8 @@ let boardCollabLastPositionSyncAt = 0;
 const MOBILE_NODE_ACTION_HOLD_MS = 420;
 const MOBILE_DRAG_START_THRESHOLD_PX = 10;
 const BOARD_COLLAB_POSITION_SYNC_INTERVAL_MS = 50;
+const TABLET_BREAKPOINT_MIN_PX = 769;
+const TABLET_BREAKPOINT_MAX_PX = 1180;
 
 const touchState = {
     dragTouchId: null,
@@ -247,9 +249,20 @@ function isMobileInteractionMode() {
     return window.innerWidth <= MOBILE_BREAKPOINT_PX || !!(coarsePointerQuery && coarsePointerQuery.matches);
 }
 
+function isTabletBoardLayout() {
+    const width = window.innerWidth || document.documentElement.clientWidth || 0;
+    const height = window.innerHeight || document.documentElement.clientHeight || 0;
+    const shortestSide = Math.min(width, height);
+    return width >= TABLET_BREAKPOINT_MIN_PX
+        && width <= TABLET_BREAKPOINT_MAX_PX
+        && shortestSide >= 600
+        && !!(coarsePointerQuery && coarsePointerQuery.matches);
+}
+
 function applyMobileModeClass() {
     mobileMode = isMobileInteractionMode();
     document.body.classList.toggle('mobile-board', mobileMode);
+    document.body.classList.toggle('tablet-board', isTabletBoardLayout());
 }
 
 function findTouchByIdentifier(touches, identifier) {
