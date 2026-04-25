@@ -53,51 +53,84 @@
                 inset: 0;
                 width: 100%;
                 height: 100%;
-                background:
-                    radial-gradient(circle at 46px 62px, rgba(224, 229, 232, 0.34) 0 18px, transparent 58px),
-                    radial-gradient(circle at 180px 86px, rgba(149, 158, 166, 0.36) 0 26px, transparent 74px),
-                    radial-gradient(circle at 124px 178px, rgba(236, 239, 240, 0.25) 0 22px, transparent 68px),
-                    linear-gradient(135deg, rgba(31, 36, 43, 0.62), rgba(7, 9, 13, 0.84));
-                background-repeat: repeat;
-                background-size: 260px 220px, 300px 250px, 220px 280px, auto;
-                background-position: var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
+                background: linear-gradient(135deg, rgba(31, 36, 43, 0.58), rgba(7, 9, 13, 0.82));
                 box-shadow: inset 0 0 1.4rem rgba(225, 231, 234, 0.08);
-                filter: saturate(0.72) blur(0.2px);
+                filter: saturate(0.74) blur(0.2px);
                 overflow: hidden;
                 opacity: 0.94;
             }
 
-            .vtt-fog-unified-fill::before,
-            .vtt-fog-unified-fill::after {
-                content: "";
+            .vtt-fog-unified-stream {
                 position: absolute;
-                inset: 0;
+                inset: -44%;
                 pointer-events: none;
-                background-repeat: repeat;
-                mix-blend-mode: screen;
-            }
-
-            .vtt-fog-unified-fill::before {
                 background:
-                    radial-gradient(circle at 12px 18px, rgba(238, 241, 242, 0.28) 0 8px, transparent 18px),
-                    radial-gradient(circle at 54px 34px, rgba(142, 151, 160, 0.28) 0 11px, transparent 25px),
-                    radial-gradient(circle at 34px 70px, rgba(211, 216, 220, 0.18) 0 9px, transparent 23px);
-                background-size: 88px 74px;
-                background-position: var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
-                filter: blur(7px);
-                opacity: 0.76;
-                animation: vtt-fog-drift-a 18s linear infinite;
-            }
-
-            .vtt-fog-unified-fill::after {
-                background:
+                    radial-gradient(circle at 46px 62px, rgba(224, 229, 232, 0.34) 0 18px, transparent 58px),
+                    radial-gradient(circle at 180px 86px, rgba(149, 158, 166, 0.36) 0 26px, transparent 74px),
+                    radial-gradient(circle at 124px 178px, rgba(236, 239, 240, 0.25) 0 22px, transparent 68px),
                     radial-gradient(circle at 24px 22px, rgba(255, 255, 255, 0.2) 0 7px, transparent 20px),
-                    radial-gradient(circle at 68px 58px, rgba(113, 122, 132, 0.24) 0 13px, transparent 30px);
-                background-size: 104px 92px;
-                background-position: var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
-                filter: blur(11px);
-                opacity: 0.62;
-                animation: vtt-fog-drift-b 27s linear infinite;
+                    radial-gradient(circle at 54px 34px, rgba(142, 151, 160, 0.28) 0 11px, transparent 25px);
+                background-repeat: repeat;
+                background-size: 260px 220px, 300px 250px, 220px 280px, 104px 92px, 88px 74px;
+                background-position:
+                    var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                    var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                    var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                    var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                    var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
+                mix-blend-mode: screen;
+                filter: blur(7px) saturate(0.82);
+                opacity: 0.5;
+                will-change: background-position, transform;
+            }
+
+            .vtt-fog-unified-stream.is-primary {
+                animation: vtt-fog-unified-drift-x 46s linear infinite;
+                transform: translateZ(0);
+            }
+
+            .vtt-fog-unified-stream.is-cross {
+                animation: vtt-fog-unified-drift-y 73s linear infinite;
+                transform: rotate(90deg) scale(1.08) translateZ(0);
+                transform-origin: center center;
+            }
+
+            @keyframes vtt-fog-unified-drift-x {
+                from {
+                    background-position:
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
+                }
+                to {
+                    background-position:
+                        calc(var(--vtt-fog-texture-x, 0px) + 260px) var(--vtt-fog-texture-y, 0px),
+                        calc(var(--vtt-fog-texture-x, 0px) + 300px) var(--vtt-fog-texture-y, 0px),
+                        calc(var(--vtt-fog-texture-x, 0px) + 220px) var(--vtt-fog-texture-y, 0px),
+                        calc(var(--vtt-fog-texture-x, 0px) + 104px) var(--vtt-fog-texture-y, 0px),
+                        calc(var(--vtt-fog-texture-x, 0px) + 88px) var(--vtt-fog-texture-y, 0px);
+                }
+            }
+
+            @keyframes vtt-fog-unified-drift-y {
+                from {
+                    background-position:
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px),
+                        var(--vtt-fog-texture-x, 0px) var(--vtt-fog-texture-y, 0px);
+                }
+                to {
+                    background-position:
+                        var(--vtt-fog-texture-x, 0px) calc(var(--vtt-fog-texture-y, 0px) + 220px),
+                        var(--vtt-fog-texture-x, 0px) calc(var(--vtt-fog-texture-y, 0px) + 250px),
+                        var(--vtt-fog-texture-x, 0px) calc(var(--vtt-fog-texture-y, 0px) + 280px),
+                        var(--vtt-fog-texture-x, 0px) calc(var(--vtt-fog-texture-y, 0px) + 92px),
+                        var(--vtt-fog-texture-x, 0px) calc(var(--vtt-fog-texture-y, 0px) + 74px);
+                }
             }
         `;
         document.head.appendChild(style);
@@ -170,6 +203,12 @@
 
         const fill = document.createElementNS(XHTML_NS, 'div');
         fill.setAttribute('class', 'vtt-fog-unified-fill');
+        const primaryStream = document.createElementNS(XHTML_NS, 'div');
+        primaryStream.setAttribute('class', 'vtt-fog-unified-stream is-primary');
+        const crossStream = document.createElementNS(XHTML_NS, 'div');
+        crossStream.setAttribute('class', 'vtt-fog-unified-stream is-cross');
+        fill.appendChild(primaryStream);
+        fill.appendChild(crossStream);
         foreignObject.appendChild(fill);
         svg.appendChild(foreignObject);
         wrapper.appendChild(svg);
