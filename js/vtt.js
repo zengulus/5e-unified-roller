@@ -3829,11 +3829,10 @@
             mapImageEl.style.width = '0px';
             mapImageEl.style.height = '0px';
             mapImageEl.style.display = 'none';
-            renderStage();
             return;
         }
 
-        if (mapLoadState.url === requestedUrl && mapLoadState.loaded) return;
+        if (mapLoadState.url === requestedUrl) return;
 
         mapSize = { width: 0, height: 0 };
         mapLoadState = { url: requestedUrl, loaded: false };
