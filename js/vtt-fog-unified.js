@@ -22,58 +22,43 @@
     };
 
     const buildFogTile = (variant = 0) => {
-        const fills = variant === 0
-            ? {
-                bright: 'rgba(246, 249, 252, 0.26)',
-                mid: 'rgba(220, 228, 236, 0.18)',
-                dim: 'rgba(154, 166, 178, 0.12)',
-                speck: 'rgba(235, 241, 246, 0.22)'
-            }
-            : {
-                bright: 'rgba(240, 245, 249, 0.22)',
-                mid: 'rgba(208, 217, 226, 0.16)',
-                dim: 'rgba(138, 150, 163, 0.11)',
-                speck: 'rgba(226, 233, 240, 0.19)'
-            };
-        const offset = variant === 0 ? 0 : 31;
-        const wrap = (value) => ((value % 256) + 256) % 256;
-        const ellipsePoints = [
-            [0, 30, 28, 10], [48, 32, 34, 12], [102, 24, 22, 9], [166, 38, 36, 13], [226, 28, 30, 11], [256, 30, 28, 10],
-            [22, 76, 20, 8], [78, 88, 42, 14], [142, 78, 30, 11], [206, 92, 36, 12], [252, 78, 18, 8],
-            [4, 132, 28, 10], [58, 146, 38, 13], [118, 134, 28, 10], [178, 150, 42, 15], [236, 138, 26, 10],
-            [30, 202, 32, 12], [92, 222, 44, 15], [156, 206, 34, 12], [216, 226, 30, 11],
-            [0, 246, 34, 12], [68, 252, 28, 10], [142, 242, 40, 14], [224, 252, 34, 12], [256, 246, 34, 12]
-        ];
-        const smallPoints = [
-            [18, 54, 10, 5], [48, 60, 14, 6], [90, 54, 9, 4], [124, 64, 13, 5], [158, 54, 16, 7], [202, 66, 14, 6], [238, 56, 10, 5],
-            [16, 116, 12, 5], [54, 124, 16, 7], [92, 112, 10, 4], [128, 120, 14, 6], [170, 126, 18, 7], [218, 116, 12, 5], [252, 122, 10, 4],
-            [28, 174, 12, 5], [70, 188, 18, 7], [112, 178, 12, 5], [148, 192, 15, 6], [198, 184, 18, 7], [232, 194, 12, 5],
-            [18, 232, 10, 4], [56, 214, 16, 6], [118, 234, 12, 5], [176, 222, 18, 7], [238, 232, 12, 5]
-        ];
-        const specks = Array.from({ length: 76 }, (_, idx) => {
-            const x = wrap((idx * 47 + 19 + offset * 3));
-            const y = wrap((idx * 83 + 37 + offset * 5));
-            const r = 1 + ((idx * 7) % 4);
-            return `<circle cx='${x}' cy='${y}' r='${r}'/>`;
-        }).join('');
-        const ellipses = ellipsePoints.map(([x, y, rx, ry]) =>
-            `<ellipse cx='${wrap(x + offset)}' cy='${wrap(y + Math.round(offset / 2))}' rx='${rx}' ry='${ry}'/>`
-        ).join('');
-        const smallEllipses = smallPoints.map(([x, y, rx, ry]) =>
-            `<ellipse cx='${wrap(x + Math.round(offset / 2))}' cy='${wrap(y + offset)}' rx='${rx}' ry='${ry}'/>`
-        ).join('');
+        const seed = variant === 0 ? 31 : 97;
+        const baseFrequency = variant === 0 ? '0.0625 0.08203125' : '0.078125 0.0546875';
+        const octaveCount = variant === 0 ? 5 : 4;
+        const alphaTable = variant === 0
+            ? '0 0.02 0.08 0.18 0.34 0.56 0.78'
+            : '0 0.015 0.07 0.16 0.30 0.48 0.68';
+        const white = variant === 0 ? '0.96 0.98 1' : '0.88 0.93 0.98';
+        const soft = variant === 0 ? '0.58 0.66 0.74' : '0.50 0.58 0.68';
         const svg = `
             <svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 256 256'>
+                <defs>
+                    <filter id='fogNoise' x='0' y='0' width='256' height='256' filterUnits='userSpaceOnUse'>
+                        <feTurbulence type='fractalNoise' baseFrequency='${baseFrequency}' numOctaves='${octaveCount}' seed='${seed}' stitchTiles='stitch' result='noise'/>
+                        <feColorMatrix in='noise' type='matrix' values='
+                            0 0 0 0 ${white.split(' ')[0]}
+                            0 0 0 0 ${white.split(' ')[1]}
+                            0 0 0 0 ${white.split(' ')[2]}
+                            0.34 0.34 0.34 0 -0.18' result='alphaNoise'/>
+                        <feComponentTransfer in='alphaNoise' result='fogNoise'>
+                            <feFuncA type='table' tableValues='${alphaTable}'/>
+                        </feComponentTransfer>
+                    </filter>
+                    <filter id='softNoise' x='0' y='0' width='256' height='256' filterUnits='userSpaceOnUse'>
+                        <feTurbulence type='fractalNoise' baseFrequency='0.0234375 0.03125' numOctaves='3' seed='${seed + 13}' stitchTiles='stitch' result='noise'/>
+                        <feColorMatrix in='noise' type='matrix' values='
+                            0 0 0 0 ${soft.split(' ')[0]}
+                            0 0 0 0 ${soft.split(' ')[1]}
+                            0 0 0 0 ${soft.split(' ')[2]}
+                            0.34 0.34 0.34 0 -0.04' result='alphaNoise'/>
+                        <feComponentTransfer in='alphaNoise' result='softFogNoise'>
+                            <feFuncA type='table' tableValues='0 0.04 0.10 0.18 0.26 0.34'/>
+                        </feComponentTransfer>
+                    </filter>
+                </defs>
                 <rect width='256' height='256' fill='transparent'/>
-                <g fill='${fills.bright}'>${ellipses}</g>
-                <g fill='${fills.mid}'>${smallEllipses}</g>
-                <g fill='${fills.dim}' opacity='0.9'>
-                    <circle cx='26' cy='34' r='5'/><circle cx='84' cy='18' r='4'/><circle cx='146' cy='34' r='5'/><circle cx='204' cy='24' r='4'/><circle cx='236' cy='42' r='5'/>
-                    <circle cx='24' cy='98' r='5'/><circle cx='70' cy='78' r='4'/><circle cx='126' cy='100' r='5'/><circle cx='182' cy='86' r='4'/><circle cx='234' cy='104' r='5'/>
-                    <circle cx='34' cy='168' r='4'/><circle cx='96' cy='158' r='5'/><circle cx='154' cy='170' r='4'/><circle cx='214' cy='160' r='5'/>
-                    <circle cx='22' cy='230' r='4'/><circle cx='84' cy='210' r='5'/><circle cx='146' cy='232' r='4'/><circle cx='210' cy='220' r='5'/>
-                </g>
-                <g fill='${fills.speck}' opacity='0.72'>${specks}</g>
+                <rect width='256' height='256' filter='url(#softNoise)'/>
+                <rect width='256' height='256' filter='url(#fogNoise)'/>
             </svg>
         `.replace(/\s+/g, ' ');
         return encodeURIComponent(svg);
@@ -143,16 +128,14 @@
 
             .vtt-fog-unified-stream.is-primary {
                 background-image: url("data:image/svg+xml,${fogTilePrimary}");
-                opacity: 0.56;
-                filter: blur(10px) contrast(1.08);
-                animation: vtt-fog-unified-slide-x 28s linear infinite;
+                opacity: 0.62;
+                animation: vtt-fog-unified-slide-x 32s linear infinite;
             }
 
             .vtt-fog-unified-stream.is-cross {
                 background-image: url("data:image/svg+xml,${fogTileCross}");
-                opacity: 0.5;
-                filter: blur(12px) contrast(1.04);
-                animation: vtt-fog-unified-slide-y 41s linear infinite;
+                opacity: 0.54;
+                animation: vtt-fog-unified-slide-y 47s linear infinite;
             }
 
             @keyframes vtt-fog-unified-slide-x {
