@@ -916,8 +916,8 @@
         });
         return (hash >>> 0) / 4294967295;
     };
-    const FOG_EDGE_WIBBLE_POINTS = 4;
-    const FOG_EDGE_WIBBLE_PX = 1.15;
+    const FOG_EDGE_WIBBLE_POINTS = 3;
+    const FOG_EDGE_WIBBLE_PX = 1;
 
     const buildFogBoundarySegmentPath = (scene, side, col, row, phaseOffset = 0) => {
         const cellPx = getSceneCellPx(scene);
@@ -1240,13 +1240,12 @@
         if (!rect) return '';
         const isPreview = String(className || '').includes('preview');
         const overdraw = isPreview ? 0 : FOG_EDGE_OVERDRAW_PX;
-        const edgeSeed = `${mask && mask.id || ''}:${rect.x}:${rect.y}:${rect.w}:${rect.h}`;
         return `
             <div class="vtt-fog-mask${className ? ` ${className}` : ''}"
                 data-world-left="${escapeHtml(String(rect.x - overdraw))}"
                 data-world-top="${escapeHtml(String(rect.y - overdraw))}"
                 data-world-width="${escapeHtml(String(rect.w + overdraw * 2))}"
-                data-world-height="${escapeHtml(String(rect.h + overdraw * 2))}"
+                data-world-height="${escapeHtml(String(rect.h + overdraw * 2))}"></div>
         `;
     };
     const getEvidenceNoteCategoryConfig = (category) => {
@@ -7493,6 +7492,7 @@
         if ((localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE) && isDM()) {
             const initialMask = buildFogMaskFromWorldPoints(scene, worldPoint, worldPoint);
             if (!initialMask) return;
+
             fogPlacementState = {
                 sceneId: scene.id,
                 mode: localToolState.mode === TOOL_MODE_FOG_REMOVE ? 'remove' : 'add',
@@ -7500,12 +7500,13 @@
                 currentWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
                 mask: initialMask
             };
-            selectedEvidenceNoteId = '';
+
             evidenceNotePlacementState = null;
             templatePlacementState = null;
             templateRotateState = null;
             visionConeRotateState = null;
             rulerState = null;
+
             renderToolsMenu();
             renderStage();
             event.preventDefault();
