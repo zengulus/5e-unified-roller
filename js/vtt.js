@@ -10,6 +10,9 @@
     const DRAG_SYNC_INTERVAL_MS = 120;
     const REMOTE_TOKEN_TWEEN_MS = 180;
     const TOKEN_DOUBLE_CLICK_MS = 320;
+    const STAGE_TOOL_DOUBLE_PRESS_PX = 18;
+    const FOG_EDGE_POINT_COUNT = 11;
+    const FOG_EDGE_OVERDRAW_PX = 0;
     const SIDE_OPTIONS = ['player', 'ally', 'enemy', 'neutral'];
     const MOVE_ACCESS_OPTIONS = ['dm', 'player'];
     const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
@@ -149,7 +152,7 @@
     let dmUnlockReturnFocusEl = null;
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
-    let lastStageToolPointerDownAt = 0;
+    let lastStageToolPointerDownState = null;
     let remoteTokenTweens = new Map();
     let remoteTokenTweenFrame = 0;
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
@@ -905,6 +908,37 @@
     };
     const buildFogCellKey = (col, row) => `${Math.round(toNumber(col, 0))},${Math.round(toNumber(row, 0))}`;
     const buildFogCellId = (col, row) => `fog_${Math.round(toNumber(col, 0))}_${Math.round(toNumber(row, 0))}`;
+    const hashStringToUnit = (value = '') => {
+        let hash = 2166136261;
+        String(value || '').split('').forEach((char) => {
+            hash ^= char.charCodeAt(0);
+            hash = Math.imul(hash, 16777619);
+        });
+        return (hash >>> 0) / 4294967295;
+    };
+    const buildFogWibblePoint = (side, step, steps, amplitude, phaseA, phaseB) => {
+        const t = steps <= 0 ? 0 : step / steps;
+        const wobble = Math.sin((t * Math.PI * 2) + phaseA) * amplitude
+            + Math.sin((t * Math.PI * 4.6) + phaseB) * amplitude * 0.55;
+        const along = t * 100;
+        if (side === 'top') return `${along.toFixed(2)}% ${clamp(wobble, -8, 8).toFixed(2)}%`;
+        if (side === 'right') return `${(100 - clamp(wobble, -8, 8)).toFixed(2)}% ${along.toFixed(2)}%`;
+        if (side === 'bottom') return `${(100 - along).toFixed(2)}% ${(100 - clamp(wobble, -8, 8)).toFixed(2)}%`;
+        return `${clamp(wobble, -8, 8).toFixed(2)}% ${(100 - along).toFixed(2)}%`;
+    };
+    const buildFogWibblePolygon = (seed, phaseOffset = 0) => {
+        const seedUnit = hashStringToUnit(seed);
+        const phaseA = seedUnit * Math.PI * 2 + phaseOffset;
+        const phaseB = (seedUnit * 1.73 + 0.31) * Math.PI * 2 - phaseOffset * 0.74;
+        const amplitude = 2.4 + seedUnit * 2.2;
+        const points = [];
+        const steps = FOG_EDGE_POINT_COUNT - 1;
+        for (let step = 0; step < FOG_EDGE_POINT_COUNT; step += 1) points.push(buildFogWibblePoint('top', step, steps, amplitude, phaseA, phaseB));
+        for (let step = 1; step < FOG_EDGE_POINT_COUNT; step += 1) points.push(buildFogWibblePoint('right', step, steps, amplitude, phaseA + 1.4, phaseB + 0.7));
+        for (let step = 1; step < FOG_EDGE_POINT_COUNT; step += 1) points.push(buildFogWibblePoint('bottom', step, steps, amplitude, phaseA + 2.8, phaseB + 1.9));
+        for (let step = 1; step < steps; step += 1) points.push(buildFogWibblePoint('left', step, steps, amplitude, phaseA + 4.2, phaseB + 3.1));
+        return points.join(', ');
+    };
     const parseFogCellKey = (key) => {
         const parts = String(key || '').split(',');
         return {
@@ -1072,12 +1106,19 @@
     const buildFogMaskMarkup = (scene, mask, className = '') => {
         const rect = getFogEntryWorldRect(scene, mask);
         if (!rect) return '';
+        const isPreview = String(className || '').includes('preview');
+        const overdraw = isPreview ? 0 : FOG_EDGE_OVERDRAW_PX;
+        const edgeSeed = `${mask && mask.id || ''}:${rect.x}:${rect.y}:${rect.w}:${rect.h}`;
+        const edgeStyle = isPreview
+            ? ''
+            : `--vtt-fog-edge-a: ${buildFogWibblePolygon(edgeSeed, 0)}; --vtt-fog-edge-b: ${buildFogWibblePolygon(edgeSeed, Math.PI * 0.78)}; --vtt-fog-edge-c: ${buildFogWibblePolygon(edgeSeed, Math.PI * 1.56)};`;
         return `
             <div class="vtt-fog-mask${className ? ` ${className}` : ''}"
-                data-world-left="${escapeHtml(String(rect.x))}"
-                data-world-top="${escapeHtml(String(rect.y))}"
-                data-world-width="${escapeHtml(String(rect.w))}"
-                data-world-height="${escapeHtml(String(rect.h))}"></div>
+                data-world-left="${escapeHtml(String(rect.x - overdraw))}"
+                data-world-top="${escapeHtml(String(rect.y - overdraw))}"
+                data-world-width="${escapeHtml(String(rect.w + overdraw * 2))}"
+                data-world-height="${escapeHtml(String(rect.h + overdraw * 2))}"
+                style="${escapeHtml(edgeStyle)}"></div>
         `;
     };
     const getEvidenceNoteCategoryConfig = (category) => {
@@ -1761,7 +1802,7 @@
     const setToolMode = (mode) => {
         clearTemplatePlacementState();
         localToolState.mode = normalizeToolMode(mode);
-        lastStageToolPointerDownAt = 0;
+        lastStageToolPointerDownState = null;
     };
     const closeToolsMenu = () => {
         if (!toolsMenuOpen) return false;
@@ -7177,8 +7218,20 @@
         const worldPoint = screenToWorld(event.clientX, event.clientY);
         if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
             const now = Date.now();
-            const isDoublePress = now - lastStageToolPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
-            lastStageToolPointerDownAt = now;
+            const previousPress = lastStageToolPointerDownState;
+            const pressDistance = previousPress
+                ? Math.hypot(event.clientX - previousPress.clientX, event.clientY - previousPress.clientY)
+                : Infinity;
+            const isDoublePress = previousPress
+                && previousPress.mode === localToolState.mode
+                && now - previousPress.at <= TOKEN_DOUBLE_CLICK_MS
+                && pressDistance <= STAGE_TOOL_DOUBLE_PRESS_PX;
+            lastStageToolPointerDownState = {
+                at: now,
+                mode: localToolState.mode,
+                clientX: event.clientX,
+                clientY: event.clientY
+            };
             if (isDoublePress) {
                 setToolMode(TOOL_MODE_NAVIGATE);
                 render();
@@ -7186,7 +7239,7 @@
                 return;
             }
         } else {
-            lastStageToolPointerDownAt = 0;
+            lastStageToolPointerDownState = null;
         }
         if (localToolState.mode === TOOL_MODE_PING) {
             queueSharedPing(scene, worldPoint);
@@ -7859,10 +7912,6 @@
             renderStageContextMenu();
             renderToolsMenu();
             renderStage();
-            return;
-        }
-        if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
-            event.preventDefault();
             return;
         }
         if (previewTokenId) previewTokenId = '';

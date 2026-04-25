@@ -967,28 +967,26 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     position: absolute;
     --vtt-fog-texture-x: 0px;
     --vtt-fog-texture-y: 0px;
-    background:
-        radial-gradient(circle at 46px 62px, rgba(224, 229, 232, 0.34) 0 18px, transparent 58px),
-        radial-gradient(circle at 180px 86px, rgba(149, 158, 166, 0.36) 0 26px, transparent 74px),
-        radial-gradient(circle at 124px 178px, rgba(236, 239, 240, 0.25) 0 22px, transparent 68px),
-        linear-gradient(135deg, rgba(31, 36, 43, 0.62), rgba(7, 9, 13, 0.84));
+    --vtt-fog-edge-a: 0% 0%, 100% 0%, 100% 100%, 0% 100%;
+    --vtt-fog-edge-b: var(--vtt-fog-edge-a);
+    --vtt-fog-edge-c: var(--vtt-fog-edge-a);
+    background: rgba(64, 64, 64, 0.75);
     background-repeat: repeat;
-    background-size: 260px 220px, 300px 250px, 220px 280px, auto;
     background-position: var(--vtt-fog-texture-x) var(--vtt-fog-texture-y);
-    box-shadow: inset 0 0 1.4rem rgba(225, 231, 234, 0.08);
-    filter: saturate(0.72) blur(0.2px);
+    box-shadow: none;
+    filter: none;
     overflow: hidden;
-    opacity: 0.94;
+    opacity: 1;
+    clip-path: polygon(var(--vtt-fog-edge-a));
+    animation: vtt-fog-edge-wibble 7.8s ease-in-out infinite;
+    will-change: clip-path;
 }
 
 .vtt-fog-mask::before,
 .vtt-fog-mask::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background-repeat: repeat;
-    mix-blend-mode: screen;
+    content: none;
+    display: none;
+    animation: none;
 }
 
 .vtt-fog-mask::before {
@@ -1021,6 +1019,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     filter: none;
     -webkit-mask-image: none;
     mask-image: none;
+    clip-path: none;
+    animation: none;
 }
 
 .vtt-fog-mask.is-remove-preview {
@@ -1030,6 +1030,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     filter: none;
     -webkit-mask-image: none;
     mask-image: none;
+    clip-path: none;
+    animation: none;
 }
 
 .vtt-fog-mask.is-preview::before,
@@ -1046,6 +1048,21 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
     to {
         transform: translate3d(78px, 38px, 0);
+    }
+}
+
+@keyframes vtt-fog-edge-wibble {
+    0%,
+    100% {
+        clip-path: polygon(var(--vtt-fog-edge-a));
+    }
+
+    48% {
+        clip-path: polygon(var(--vtt-fog-edge-b));
+    }
+
+    74% {
+        clip-path: polygon(var(--vtt-fog-edge-c));
     }
 }
 
