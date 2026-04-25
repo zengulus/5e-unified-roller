@@ -980,6 +980,12 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     position: absolute;
     pointer-events: none;
     overflow: visible;
+    z-index: 1;
+}
+
+.vtt-fog-shape-path {
+    fill: rgba(64, 64, 64, 0.75);
+    stroke: none;
 }
 
 .vtt-fog-edge-path {
@@ -990,6 +996,11 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     stroke-linejoin: round;
     vector-effect: non-scaling-stroke;
     filter: blur(0.15px);
+}
+
+.vtt-fog-mask.is-preview,
+.vtt-fog-mask.is-remove-preview {
+    z-index: 2;
 }
 
 .vtt-fog-mask::before,

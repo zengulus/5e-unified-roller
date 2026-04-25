@@ -916,54 +916,46 @@
         });
         return (hash >>> 0) / 4294967295;
     };
-    const FOG_EDGE_WIBBLE_POINTS = 3;
-    const FOG_EDGE_WIBBLE_PX = 1;
+    const FOG_EDGE_WIBBLE_PX = 3;
+    const FOG_EDGE_CORNER_RADIUS_PX = 10;
 
-    const buildFogBoundarySegmentPath = (scene, side, col, row, phaseOffset = 0) => {
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+    const buildFogPointKey = (x, y) => `${Math.round(toNumber(x, 0))},${Math.round(toNumber(y, 0))}`;
 
-        const x0 = offsetX + col * cellPx;
-        const y0 = offsetY + row * cellPx;
-        const x1 = x0 + cellPx;
-        const y1 = y0 + cellPx;
+    const getFogBoundaryDirectionIndex = (edge) => {
+        const dx = Math.sign(toNumber(edge.ex, 0) - toNumber(edge.sx, 0));
+        const dy = Math.sign(toNumber(edge.ey, 0) - toNumber(edge.sy, 0));
 
-        const seed = `${side}:${col}:${row}`;
-        const seedUnit = hashStringToUnit(seed);
-        const phaseA = seedUnit * Math.PI * 2 + phaseOffset;
-        const phaseB = (seedUnit * 1.91 + 0.17) * Math.PI * 2 - phaseOffset * 0.63;
-
-        const points = [];
-        const steps = Math.max(1, FOG_EDGE_WIBBLE_POINTS - 1);
-
-        for (let step = 0; step < FOG_EDGE_WIBBLE_POINTS; step += 1) {
-            const t = step / steps;
-
-            const wobble =
-                Math.sin(t * Math.PI * 2 + phaseA) * FOG_EDGE_WIBBLE_PX
-                + Math.sin(t * Math.PI * 3.7 + phaseB) * FOG_EDGE_WIBBLE_PX * 0.35;
-
-            if (side === 'top') {
-                points.push({ x: x0 + t * cellPx, y: y0 + wobble });
-            } else if (side === 'right') {
-                points.push({ x: x1 + wobble, y: y0 + t * cellPx });
-            } else if (side === 'bottom') {
-                points.push({ x: x1 - t * cellPx, y: y1 + wobble });
-            } else {
-                points.push({ x: x0 + wobble, y: y1 - t * cellPx });
-            }
-        }
-
-        return points
-            .map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-            .join(' ');
+        if (dx > 0) return 0; // east
+        if (dy > 0) return 1; // south
+        if (dx < 0) return 2; // west
+        return 3;             // north
     };
 
-    const buildFogBoundaryPath = (scene, cellSet, phaseOffset = 0) => {
-        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return '';
+    const pickNextFogBoundaryEdge = (candidates, previousEdge) => {
+        const unused = candidates.filter((edge) => !edge.used);
+        if (!unused.length) return null;
+        if (!previousEdge) return unused[0];
 
-        const parts = [];
+        const previousDir = getFogBoundaryDirectionIndex(previousEdge);
+
+        return unused
+            .map((edge) => {
+                const nextDir = getFogBoundaryDirectionIndex(edge);
+                const turn = (nextDir - previousDir + 4) % 4;
+
+                // Prefer right turn, then straight, then left, then reverse.
+                // This keeps touching/diagonal components from merging too eagerly.
+                const priority = turn === 1 ? 0 : turn === 0 ? 1 : turn === 3 ? 2 : 3;
+
+                return { edge, priority };
+            })
+            .sort((left, right) => left.priority - right.priority)[0].edge;
+    };
+
+    const buildFogBoundaryLoops = (cellSet) => {
+        if (!(cellSet instanceof Set) || !cellSet.size) return [];
+
+        const edges = [];
 
         cellSet.forEach((key) => {
             const cell = parseFogCellKey(key);
@@ -971,23 +963,158 @@
             const row = cell.row;
 
             if (!cellSet.has(buildFogCellKey(col, row - 1))) {
-                parts.push(buildFogBoundarySegmentPath(scene, 'top', col, row, phaseOffset));
+                edges.push({ sx: col,     sy: row,     ex: col + 1, ey: row     });
             }
 
             if (!cellSet.has(buildFogCellKey(col + 1, row))) {
-                parts.push(buildFogBoundarySegmentPath(scene, 'right', col, row, phaseOffset));
+                edges.push({ sx: col + 1, sy: row,     ex: col + 1, ey: row + 1 });
             }
 
             if (!cellSet.has(buildFogCellKey(col, row + 1))) {
-                parts.push(buildFogBoundarySegmentPath(scene, 'bottom', col, row, phaseOffset));
+                edges.push({ sx: col + 1, sy: row + 1, ex: col,     ey: row + 1 });
             }
 
             if (!cellSet.has(buildFogCellKey(col - 1, row))) {
-                parts.push(buildFogBoundarySegmentPath(scene, 'left', col, row, phaseOffset));
+                edges.push({ sx: col,     sy: row + 1, ex: col,     ey: row     });
             }
         });
 
-        return parts.filter(Boolean).join(' ');
+        const outgoing = new Map();
+
+        edges.forEach((edge) => {
+            edge.used = false;
+            const startKey = buildFogPointKey(edge.sx, edge.sy);
+            if (!outgoing.has(startKey)) outgoing.set(startKey, []);
+            outgoing.get(startKey).push(edge);
+        });
+
+        const loops = [];
+
+        edges.forEach((firstEdge) => {
+            if (firstEdge.used) return;
+
+            const loop = [{ x: firstEdge.sx, y: firstEdge.sy }];
+            let edge = firstEdge;
+            let guard = 0;
+
+            while (edge && !edge.used && guard < edges.length + 8) {
+                guard += 1;
+                edge.used = true;
+
+                loop.push({ x: edge.ex, y: edge.ey });
+
+                const nextKey = buildFogPointKey(edge.ex, edge.ey);
+                const candidates = outgoing.get(nextKey) || [];
+                edge = pickNextFogBoundaryEdge(candidates, edge);
+
+                if (edge && buildFogPointKey(edge.sx, edge.sy) === buildFogPointKey(loop[0].x, loop[0].y) && edge.used) {
+                    break;
+                }
+            }
+
+            if (loop.length >= 4) {
+                const last = loop[loop.length - 1];
+                const first = loop[0];
+
+                if (buildFogPointKey(last.x, last.y) === buildFogPointKey(first.x, first.y)) {
+                    loop.pop();
+                }
+
+                if (loop.length >= 3) loops.push(loop);
+            }
+        });
+
+        return loops;
+    };
+
+    const getWibbledFogWorldPoint = (scene, point, phaseOffset = 0) => {
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+
+        const seed = `${point.x}:${point.y}`;
+        const unitA = hashStringToUnit(`${seed}:x`);
+        const unitB = hashStringToUnit(`${seed}:y`);
+
+        const wobbleX =
+            Math.sin(unitA * Math.PI * 2 + phaseOffset) * FOG_EDGE_WIBBLE_PX
+            + Math.sin(unitB * Math.PI * 3.3 - phaseOffset * 0.7) * FOG_EDGE_WIBBLE_PX * 0.35;
+
+        const wobbleY =
+            Math.sin(unitB * Math.PI * 2 + phaseOffset * 0.91) * FOG_EDGE_WIBBLE_PX
+            + Math.sin(unitA * Math.PI * 3.1 - phaseOffset * 0.53) * FOG_EDGE_WIBBLE_PX * 0.35;
+
+        return {
+            x: offsetX + toNumber(point.x, 0) * cellPx + wobbleX,
+            y: offsetY + toNumber(point.y, 0) * cellPx + wobbleY
+        };
+    };
+
+    const getDistanceBetweenPoints = (a, b) => {
+        const dx = toNumber(b && b.x, 0) - toNumber(a && a.x, 0);
+        const dy = toNumber(b && b.y, 0) - toNumber(a && a.y, 0);
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const getPointToward = (from, to, distance) => {
+        const total = getDistanceBetweenPoints(from, to);
+        if (!Number.isFinite(total) || total <= 0.001) return { x: from.x, y: from.y };
+
+        const ratio = clamp(distance / total, 0, 1);
+
+        return {
+            x: from.x + (to.x - from.x) * ratio,
+            y: from.y + (to.y - from.y) * ratio
+        };
+    };
+
+    const buildRoundedFogLoopPath = (scene, loop, phaseOffset = 0) => {
+        if (!scene || !Array.isArray(loop) || loop.length < 3) return '';
+
+        const points = loop.map((point) => getWibbledFogWorldPoint(scene, point, phaseOffset));
+        const cellPx = getSceneCellPx(scene);
+        const baseRadius = Math.min(FOG_EDGE_CORNER_RADIUS_PX, Math.max(1, cellPx * 0.45));
+
+        const corners = points.map((point, idx) => {
+            const previous = points[(idx - 1 + points.length) % points.length];
+            const next = points[(idx + 1) % points.length];
+
+            const previousDistance = getDistanceBetweenPoints(point, previous);
+            const nextDistance = getDistanceBetweenPoints(point, next);
+            const radius = Math.min(baseRadius, previousDistance / 2, nextDistance / 2);
+
+            return {
+                point,
+                entry: getPointToward(point, previous, radius),
+                exit: getPointToward(point, next, radius)
+            };
+        });
+
+        const commands = [
+            `M ${corners[0].exit.x.toFixed(2)} ${corners[0].exit.y.toFixed(2)}`
+        ];
+
+        for (let idx = 1; idx < corners.length; idx += 1) {
+            const corner = corners[idx];
+
+            commands.push(`L ${corner.entry.x.toFixed(2)} ${corner.entry.y.toFixed(2)}`);
+            commands.push(`Q ${corner.point.x.toFixed(2)} ${corner.point.y.toFixed(2)} ${corner.exit.x.toFixed(2)} ${corner.exit.y.toFixed(2)}`);
+        }
+
+        commands.push(`L ${corners[0].entry.x.toFixed(2)} ${corners[0].entry.y.toFixed(2)}`);
+        commands.push(`Q ${corners[0].point.x.toFixed(2)} ${corners[0].point.y.toFixed(2)} ${corners[0].exit.x.toFixed(2)} ${corners[0].exit.y.toFixed(2)}`);
+        commands.push('Z');
+
+        return commands.join(' ');
+    };
+
+    const buildFogBoundaryPath = (scene, cellSet, phaseOffset = 0) => {
+        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return '';
+
+        return buildFogBoundaryLoops(cellSet)
+            .map((loop) => buildRoundedFogLoopPath(scene, loop, phaseOffset))
+            .filter(Boolean)
+            .join(' ');
     };
 
     const buildFogEdgeMarkup = (scene, cellSet) => {
@@ -1002,6 +1129,8 @@
 
         if (!pathA || !pathB || !pathC) return '';
 
+        const animationValues = escapeHtml(`${pathA};${pathB};${pathC};${pathA}`);
+
         return `
             <svg class="vtt-fog-edge-svg"
                 data-world-left="0"
@@ -1011,12 +1140,20 @@
                 viewBox="0 0 ${escapeHtml(String(width))} ${escapeHtml(String(height))}"
                 preserveAspectRatio="none"
                 aria-hidden="true">
-                <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}">
+                <path class="vtt-fog-shape-path" d="${escapeHtml(pathA)}" fill-rule="evenodd">
                     <animate
                         attributeName="d"
                         dur="9.5s"
                         repeatCount="indefinite"
-                        values="${escapeHtml(`${pathA};${pathB};${pathC};${pathA}`)}"
+                        values="${animationValues}"
+                        keyTimes="0;0.48;0.74;1" />
+                </path>
+                <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}" fill-rule="evenodd">
+                    <animate
+                        attributeName="d"
+                        dur="9.5s"
+                        repeatCount="indefinite"
+                        values="${animationValues}"
                         keyTimes="0;0.48;0.74;1" />
                 </path>
             </svg>
@@ -5695,10 +5832,7 @@
             ? collectFogCellSet(scene, scene.fog)
             : new Set();
 
-        const fogMarkup = buildFogRenderRectsFromCellSet(scene, fogCellSet)
-            .map((mask) => buildFogMaskMarkup(scene, mask))
-            .join('');
-
+        const fogMarkup = '';
         const fogEdgeMarkup = buildFogEdgeMarkup(scene, fogCellSet);
 
         const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
