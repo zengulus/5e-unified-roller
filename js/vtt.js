@@ -42,6 +42,7 @@
     const QUICK_ACTION_SEARCH_RESULT_LIMIT = 18;
     const SRD_MONSTER_DATA_URL = 'monsters/dnd_srd_5_2_1__monsters.json';
     const MONSTER_SEARCH_RESULT_LIMIT = 80;
+    const MONSTER_ASSIGN_RESULT_LIMIT = 8;
     const DEFAULT_VTT_CELL_PX = 70;
     const DEFAULT_EVIDENCE_NOTE_CATEGORY = 'evidence';
     const DEFAULT_EVIDENCE_NOTE_COLOR = '#39b66b';
@@ -2726,6 +2727,46 @@
         if (!targetId) return null;
         return getMonsterDirectory().find((monster) => String(monster && monster.id || '') === targetId) || null;
     };
+    const filterMonsterDirectory = (query = '', limit = MONSTER_ASSIGN_RESULT_LIMIT) => {
+        const cleanQuery = normalizeSearchText(query);
+        const monsters = getMonsterDirectory();
+        const matched = cleanQuery
+            ? monsters.filter((monster) => normalizeSearchText([
+                monster && monster.name,
+                monster && monster.type,
+                monster && monster.size,
+                monster && monster.challengeRating
+            ].join(' ')).includes(cleanQuery))
+            : monsters;
+        return matched.slice(0, Math.max(1, limit));
+    };
+    const findMonsterForAssignmentQuery = (query = '', selectedId = '') => {
+        const selected = findMonsterById(selectedId);
+        if (selected) return selected;
+        const cleanQuery = normalizeSearchText(query);
+        if (!cleanQuery) return null;
+        const monsters = getMonsterDirectory();
+        return monsters.find((monster) => normalizeSearchText(monster && monster.name) === cleanQuery)
+            || filterMonsterDirectory(query, 1)[0]
+            || null;
+    };
+    const buildMonsterAssignResultsMarkup = (query = '', selectedId = '') => {
+        if (monsterDirectoryLoading) return '<div class="vtt-empty">Loading SRD monsters...</div>';
+        const monsters = filterMonsterDirectory(query, MONSTER_ASSIGN_RESULT_LIMIT);
+        if (!monsters.length) {
+            return `<div class="vtt-empty">${query ? 'No SRD monsters match that filter.' : 'No SRD monsters loaded yet.'}</div>`;
+        }
+        return monsters.map((monster) => {
+            const monsterId = String(monster && monster.id || '').trim();
+            const isSelected = selectedId && monsterId === selectedId;
+            return `
+                <button class="vtt-token-spawn vtt-monster-assign-result${isSelected ? ' is-selected' : ''}" type="button" data-action="select-token-monster-assignment" data-monster-id="${escapeHtml(monsterId)}">
+                    <span class="vtt-token-spawn-name">${escapeHtml(monster.name || 'Monster')}</span>
+                    <span class="vtt-token-spawn-meta">CR ${escapeHtml(monster.challengeRating || '?')}${monster.type ? ` · ${escapeHtml(monster.type)}` : ''}${monster.size ? ` · ${escapeHtml(monster.size)}` : ''}</span>
+                </button>
+            `;
+        }).join('');
+    };
     const ensureMonsterDirectory = async () => {
         if (monsterDirectory.length) return monsterDirectory;
         if (monsterDirectoryPromise) return monsterDirectoryPromise;
@@ -5391,6 +5432,7 @@
             });
         }
         const selectedMonsterId = monster ? String(monster.id || '').trim() : '';
+        const monsterAssignQuery = monster ? String(monster.name || '').trim() : '';
         return `
             <div class="vtt-inspector-stack">
                 <label class="vtt-field">
@@ -5484,13 +5526,12 @@
                 <div class="vtt-subhead">Assign Monster</div>
                 <label class="vtt-field">
                     <span>SRD Stat Block</span>
-                    <select class="vtt-inspector-select" data-token-monster-select ${monsterDirectoryLoading || !monsters.length ? ' disabled' : ''}>
-                        <option value="">${escapeHtml(monsterDirectoryLoading ? 'Loading SRD monsters...' : 'Choose monster...')}</option>
-                        ${monsters.map((entry) => `
-                            <option value="${escapeHtml(String(entry.id || ''))}"${selectedMonsterId && String(entry.id || '') === selectedMonsterId ? ' selected' : ''}>${escapeHtml(entry.name || 'Monster')}${entry.challengeRating ? ` (CR ${escapeHtml(entry.challengeRating)})` : ''}</option>
-                        `).join('')}
-                    </select>
+                    <input class="vtt-inspector-input" type="search" data-token-monster-search placeholder="Filter monsters..." value="${escapeHtml(monsterAssignQuery)}"${monsterDirectoryLoading || !monsters.length ? ' disabled' : ''}>
+                    <input type="hidden" data-token-monster-id value="${escapeHtml(selectedMonsterId)}">
                 </label>
+                <div class="vtt-monster-assign-results" data-token-monster-results>
+                    ${buildMonsterAssignResultsMarkup(monsterAssignQuery, selectedMonsterId)}
+                </div>
                 <div class="vtt-inspector-grid">
                     <label class="vtt-inspector-check">
                         <input type="checkbox" data-token-monster-option="stats" checked>
@@ -6717,6 +6758,19 @@
             renderNPCRollPopover();
             return;
         }
+        if (action === 'select-token-monster-assignment') {
+            if (!isDM()) return;
+            const monsterId = String(actionEl.dataset.monsterId || '').trim();
+            const monster = findMonsterById(monsterId);
+            const scope = actionEl.closest('.vtt-inspector-stack');
+            const inputEl = scope ? scope.querySelector('[data-token-monster-search]') : null;
+            const hiddenEl = scope ? scope.querySelector('[data-token-monster-id]') : null;
+            const resultsEl = scope ? scope.querySelector('[data-token-monster-results]') : null;
+            if (inputEl instanceof HTMLInputElement && monster) inputEl.value = monster.name || '';
+            if (hiddenEl instanceof HTMLInputElement) hiddenEl.value = monsterId;
+            if (resultsEl instanceof HTMLElement) resultsEl.innerHTML = buildMonsterAssignResultsMarkup(monster ? monster.name : '', monsterId);
+            return;
+        }
         if (action === 'roll-npc-dice') {
             if (!npcRollState) return;
             const parsed = gmParseComplexFormula(npcRollState.formula || '1d20');
@@ -6998,9 +7052,11 @@
             if (!isDM()) return;
             selectedTokenId = id || selectedTokenId;
             const scope = actionEl.closest('.vtt-inspector-stack');
-            const selectEl = scope ? scope.querySelector('[data-token-monster-select]') : null;
-            const monsterId = selectEl instanceof HTMLSelectElement ? String(selectEl.value || '').trim() : '';
-            const monster = findMonsterById(monsterId);
+            const inputEl = scope ? scope.querySelector('[data-token-monster-search]') : null;
+            const hiddenEl = scope ? scope.querySelector('[data-token-monster-id]') : null;
+            const query = inputEl instanceof HTMLInputElement ? String(inputEl.value || '').trim() : '';
+            const monsterId = hiddenEl instanceof HTMLInputElement ? String(hiddenEl.value || '').trim() : '';
+            const monster = findMonsterForAssignmentQuery(query, monsterId);
             if (!monster) return;
             const isChecked = (name) => {
                 const input = scope ? scope.querySelector(`[data-token-monster-option="${name}"]`) : null;
@@ -7417,6 +7473,16 @@
         if (target instanceof HTMLInputElement && target.dataset.toolSizeField) {
             const nextSize = normalizeToolSizeCells(target.value, localToolState.sizeCells);
             localToolState.sizeCells = nextSize;
+            return;
+        }
+        if (target instanceof HTMLInputElement && target.dataset.tokenMonsterSearch !== undefined) {
+            const scope = target.closest('.vtt-inspector-stack');
+            const hiddenEl = scope ? scope.querySelector('[data-token-monster-id]') : null;
+            const resultsEl = scope ? scope.querySelector('[data-token-monster-results]') : null;
+            if (hiddenEl instanceof HTMLInputElement) hiddenEl.value = '';
+            if (resultsEl instanceof HTMLElement) {
+                resultsEl.innerHTML = buildMonsterAssignResultsMarkup(target.value || '', '');
+            }
             return;
         }
         if (event.type === 'input' && target instanceof HTMLInputElement) return;

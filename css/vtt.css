@@ -2460,6 +2460,18 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     overflow: auto;
 }
 
+.vtt-monster-assign-results {
+    display: grid;
+    gap: 0.45rem;
+    max-height: 15rem;
+    overflow: auto;
+}
+
+.vtt-monster-assign-result.is-selected {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.72);
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.14);
+}
+
 .vtt-npc-roll-result {
     display: flex;
     align-items: baseline;
