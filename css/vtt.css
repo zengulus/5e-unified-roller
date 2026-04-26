@@ -976,11 +976,28 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     opacity: 1;
 }
 
+.vtt-fog-texture-clip,
 .vtt-fog-edge-svg {
     position: absolute;
     pointer-events: none;
+}
+
+.vtt-fog-texture-clip {
     overflow: visible;
     z-index: 1;
+    background: rgba(64, 64, 64, 0.75);
+    contain: strict;
+    -webkit-mask-image: var(--vtt-fog-mask-image);
+    mask-image: var(--vtt-fog-mask-image);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+}
+
+.vtt-fog-edge-svg {
+    overflow: visible;
+    z-index: 2;
 }
 
 .vtt-fog-shape-path {
@@ -988,16 +1005,29 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     stroke: none;
 }
 
-.vtt-fog-texture-fill {
-    pointer-events: none;
+.vtt-fog-texture-plane {
+    position: absolute;
+    left: calc(var(--vtt-fog-texture-gutter, 256px) * -1);
+    top: calc(var(--vtt-fog-texture-gutter, 256px) * -1);
+    width: calc(100% + var(--vtt-fog-texture-gutter, 256px) * 2);
+    height: calc(100% + var(--vtt-fog-texture-gutter, 256px) * 2);
+    background-repeat: repeat;
+    background-size: var(--vtt-fog-texture-tile, 256px) var(--vtt-fog-texture-tile, 256px);
+    will-change: transform;
+    transform: translate3d(0, 0, 0);
+    contain: paint;
 }
 
-.vtt-fog-texture-fill-a {
+.vtt-fog-texture-plane-a {
+    background-image: url("../noiseTexture.png");
     opacity: 0.22;
+    animation: vtt-fog-texture-drift-a 32s linear infinite;
 }
 
-.vtt-fog-texture-fill-b {
+.vtt-fog-texture-plane-b {
+    background-image: url("../noiseTexture2.png");
     opacity: 0.16;
+    animation: vtt-fog-texture-drift-b 43s linear infinite;
 }
 
 .vtt-fog-edge-path {
@@ -1081,6 +1111,26 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
     to {
         transform: translate3d(78px, 38px, 0);
+    }
+}
+
+@keyframes vtt-fog-texture-drift-a {
+    from {
+        transform: translate3d(0, 0, 0);
+    }
+
+    to {
+        transform: translate3d(var(--vtt-fog-texture-tile, 256px), var(--vtt-fog-texture-tile, 256px), 0);
+    }
+}
+
+@keyframes vtt-fog-texture-drift-b {
+    from {
+        transform: translate3d(0, 0, 0);
+    }
+
+    to {
+        transform: translate3d(calc(var(--vtt-fog-texture-tile, 256px) * -1), var(--vtt-fog-texture-tile, 256px), 0);
     }
 }
 

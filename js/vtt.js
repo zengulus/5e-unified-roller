@@ -1117,6 +1117,11 @@
             .join(' ');
     };
 
+    const buildFogTextureMaskUrl = (path, width, height) => {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><path d="${path}" fill="white" fill-rule="evenodd"/></svg>`;
+        return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    };
+
     const buildFogEdgeMarkup = (scene, cellSet) => {
         if (!scene || !(cellSet instanceof Set) || !cellSet.size) return '';
 
@@ -1130,12 +1135,18 @@
         if (!pathA || !pathB || !pathC) return '';
 
         const animationValues = escapeHtml(`${pathA};${pathB};${pathC};${pathA}`);
-        const fogIdBase = `vtt-fog-${String(scene.id || 'scene').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-        const clipId = `${fogIdBase}-clip`;
-        const noisePatternAId = `${fogIdBase}-noise-a`;
-        const noisePatternBId = `${fogIdBase}-noise-b`;
+        const textureMaskUrl = buildFogTextureMaskUrl(pathA, width, height);
 
         return `
+            <div class="vtt-fog-texture-clip"
+                data-world-left="0"
+                data-world-top="0"
+                data-world-width="${escapeHtml(String(width))}"
+                data-world-height="${escapeHtml(String(height))}"
+                style="--vtt-fog-mask-image:url(${escapeHtml(textureMaskUrl)});">
+                <div class="vtt-fog-texture-plane vtt-fog-texture-plane-a"></div>
+                <div class="vtt-fog-texture-plane vtt-fog-texture-plane-b"></div>
+            </div>
             <svg class="vtt-fog-edge-svg"
                 data-world-left="0"
                 data-world-top="0"
@@ -1144,43 +1155,6 @@
                 viewBox="0 0 ${escapeHtml(String(width))} ${escapeHtml(String(height))}"
                 preserveAspectRatio="none"
                 aria-hidden="true">
-                <defs>
-                    <pattern id="${escapeHtml(noisePatternAId)}" patternUnits="userSpaceOnUse" width="256" height="256">
-                        <image href="noiseTexture.png" x="0" y="0" width="256" height="256" preserveAspectRatio="none" />
-                        <animateTransform
-                            attributeName="patternTransform"
-                            type="translate"
-                            from="0 0"
-                            to="256 256"
-                            dur="32s"
-                            repeatCount="indefinite" />
-                    </pattern>
-                    <pattern id="${escapeHtml(noisePatternBId)}" patternUnits="userSpaceOnUse" width="256" height="256">
-                        <image href="noiseTexture2.png" x="0" y="0" width="256" height="256" preserveAspectRatio="none" />
-                        <animateTransform
-                            attributeName="patternTransform"
-                            type="translate"
-                            from="0 0"
-                            to="-256 256"
-                            dur="43s"
-                            repeatCount="indefinite" />
-                    </pattern>
-                    <clipPath id="${escapeHtml(clipId)}">
-                        <path d="${escapeHtml(pathA)}" fill-rule="evenodd" clip-rule="evenodd">
-                            <animate
-                                attributeName="d"
-                                dur="9.5s"
-                                repeatCount="indefinite"
-                                values="${animationValues}"
-                                keyTimes="0;0.48;0.74;1" />
-                        </path>
-                    </clipPath>
-                </defs>
-                <g clip-path="url(#${escapeHtml(clipId)})">
-                    <rect class="vtt-fog-shape-path" x="0" y="0" width="${escapeHtml(String(width))}" height="${escapeHtml(String(height))}" />
-                    <rect class="vtt-fog-texture-fill vtt-fog-texture-fill-a" x="0" y="0" width="${escapeHtml(String(width))}" height="${escapeHtml(String(height))}" fill="url(#${escapeHtml(noisePatternAId)})" />
-                    <rect class="vtt-fog-texture-fill vtt-fog-texture-fill-b" x="0" y="0" width="${escapeHtml(String(width))}" height="${escapeHtml(String(height))}" fill="url(#${escapeHtml(noisePatternBId)})" />
-                </g>
                 <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}" fill-rule="evenodd">
                     <animate
                         attributeName="d"
@@ -3533,6 +3507,23 @@
             maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
             maskEl.style.setProperty('--vtt-fog-texture-x', `${-scaleForZoom(worldLeft)}px`);
             maskEl.style.setProperty('--vtt-fog-texture-y', `${-scaleForZoom(worldTop)}px`);
+        });
+
+        fogLayerEl.querySelectorAll('.vtt-fog-texture-clip').forEach((textureEl) => {
+            if (!(textureEl instanceof HTMLElement)) return;
+
+            const worldLeft = toNumber(textureEl.dataset.worldLeft, 0);
+            const worldTop = toNumber(textureEl.dataset.worldTop, 0);
+            const worldWidth = toNumber(textureEl.dataset.worldWidth, worldSize.width);
+            const worldHeight = toNumber(textureEl.dataset.worldHeight, worldSize.height);
+            const tilePx = Math.max(32, scaleForZoom(256));
+
+            textureEl.style.left = `${scaleForZoom(worldLeft)}px`;
+            textureEl.style.top = `${scaleForZoom(worldTop)}px`;
+            textureEl.style.width = `${scaleForZoom(worldWidth)}px`;
+            textureEl.style.height = `${scaleForZoom(worldHeight)}px`;
+            textureEl.style.setProperty('--vtt-fog-texture-tile', `${tilePx}px`);
+            textureEl.style.setProperty('--vtt-fog-texture-gutter', `${tilePx}px`);
         });
 
         fogLayerEl.querySelectorAll('.vtt-fog-edge-svg').forEach((edgeEl) => {
