@@ -2754,6 +2754,8 @@
                 monsterDirectoryLoading = false;
                 monsterDirectoryPromise = null;
                 renderNPCSearchPopover();
+                renderTokenInspector();
+                renderTokenInspectorPopover();
             });
         return monsterDirectoryPromise;
     };
@@ -2854,6 +2856,33 @@
                 passivePerception: statBlock.passivePerception || 10
             }
         };
+    };
+
+    const applyMonsterStatBlockToToken = (token, monster, options = {}) => {
+        if (!token || !monster) return false;
+        const opts = options && typeof options === 'object' ? options : {};
+        const statBlock = normalizeMonsterRecord(monster, monster.id || monster.slug || monster.name);
+        token.sourceType = 'monster';
+        token.sourceId = String(statBlock.id || '').trim();
+        token.monster = statBlock;
+        if (opts.rename) token.label = statBlock.name;
+        if (opts.resize) {
+            const sizeCells = getMonsterSizeCells(statBlock);
+            token.w = sizeCells;
+            token.h = sizeCells;
+        }
+        if (opts.stats !== false) {
+            token.hpCurrent = statBlock.hitPoints;
+            token.hpMax = statBlock.hitPoints;
+            token.ac = statBlock.armorClass;
+            token.passivePerception = statBlock.passivePerception;
+            token.defences = normalizeDefences(statBlock.saves);
+            if (!token.vision || typeof token.vision !== 'object') {
+                token.vision = { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6, passivePerception: 10 };
+            }
+            token.vision.passivePerception = statBlock.passivePerception || 10;
+        }
+        return true;
     };
 
     const buildCustomToken = () => ({
@@ -5355,6 +5384,13 @@
         const moodOptions = MOOD_EMOJI_OPTIONS.includes(moodEmoji) || !moodEmoji
             ? MOOD_EMOJI_OPTIONS
             : [moodEmoji, ...MOOD_EMOJI_OPTIONS];
+        const monsters = getMonsterDirectory();
+        if (!monsters.length && !monsterDirectoryLoading) {
+            ensureMonsterDirectory().catch((err) => {
+                console.warn('Failed loading monster selector data', err);
+            });
+        }
+        const selectedMonsterId = monster ? String(monster.id || '').trim() : '';
         return `
             <div class="vtt-inspector-stack">
                 <label class="vtt-field">
@@ -5445,6 +5481,34 @@
                     <div class="vtt-subhead">Monster</div>
                     <div class="vtt-detail-note">${escapeHtml(monsterMeta || monster.name)}. Right-click the token and choose Make a dice roll for stat block checks, saves, attacks, and damage.</div>
                 ` : ''}
+                <div class="vtt-subhead">Assign Monster</div>
+                <label class="vtt-field">
+                    <span>SRD Stat Block</span>
+                    <select class="vtt-inspector-select" data-token-monster-select ${monsterDirectoryLoading || !monsters.length ? ' disabled' : ''}>
+                        <option value="">${escapeHtml(monsterDirectoryLoading ? 'Loading SRD monsters...' : 'Choose monster...')}</option>
+                        ${monsters.map((entry) => `
+                            <option value="${escapeHtml(String(entry.id || ''))}"${selectedMonsterId && String(entry.id || '') === selectedMonsterId ? ' selected' : ''}>${escapeHtml(entry.name || 'Monster')}${entry.challengeRating ? ` (CR ${escapeHtml(entry.challengeRating)})` : ''}</option>
+                        `).join('')}
+                    </select>
+                </label>
+                <div class="vtt-inspector-grid">
+                    <label class="vtt-inspector-check">
+                        <input type="checkbox" data-token-monster-option="stats" checked>
+                        <span>Apply HP / AC / saves</span>
+                    </label>
+                    <label class="vtt-inspector-check">
+                        <input type="checkbox" data-token-monster-option="rename">
+                        <span>Rename token</span>
+                    </label>
+                    <label class="vtt-inspector-check">
+                        <input type="checkbox" data-token-monster-option="resize">
+                        <span>Resize token</span>
+                    </label>
+                </div>
+                <div class="vtt-chip-row">
+                    <button class="vtt-chip-btn strong" type="button" data-action="assign-token-monster" data-id="${escapeHtml(token.id)}"${monsters.length ? '' : ' disabled'}>Assign Monster</button>
+                    <button class="vtt-chip-btn" type="button" data-action="clear-token-monster" data-id="${escapeHtml(token.id)}"${monster ? '' : ' disabled'}>Clear Monster</button>
+                </div>
                 <label class="vtt-inspector-check">
                     <input type="checkbox" data-token-field="hidden"${token.hidden ? ' checked' : ''}>
                     <span>Hidden In Player Mode</span>
@@ -6927,6 +6991,39 @@
             selectedTokenId = id || selectedTokenId;
             updateSelectedToken((token) => {
                 token.conditions = [];
+            });
+            return;
+        }
+        if (action === 'assign-token-monster') {
+            if (!isDM()) return;
+            selectedTokenId = id || selectedTokenId;
+            const scope = actionEl.closest('.vtt-inspector-stack');
+            const selectEl = scope ? scope.querySelector('[data-token-monster-select]') : null;
+            const monsterId = selectEl instanceof HTMLSelectElement ? String(selectEl.value || '').trim() : '';
+            const monster = findMonsterById(monsterId);
+            if (!monster) return;
+            const isChecked = (name) => {
+                const input = scope ? scope.querySelector(`[data-token-monster-option="${name}"]`) : null;
+                return input instanceof HTMLInputElement ? input.checked : false;
+            };
+            updateSelectedToken((token) => {
+                applyMonsterStatBlockToToken(token, monster, {
+                    stats: isChecked('stats'),
+                    rename: isChecked('rename'),
+                    resize: isChecked('resize')
+                });
+            });
+            return;
+        }
+        if (action === 'clear-token-monster') {
+            if (!isDM()) return;
+            selectedTokenId = id || selectedTokenId;
+            updateSelectedToken((token) => {
+                if (String(token.sourceType || '').trim() === 'monster') {
+                    token.sourceType = '';
+                    token.sourceId = '';
+                }
+                delete token.monster;
             });
             return;
         }
