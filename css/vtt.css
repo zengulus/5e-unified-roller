@@ -1134,21 +1134,6 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     }
 }
 
-@keyframes vtt-fog-edge-wibble {
-    0%,
-    100% {
-        clip-path: polygon(var(--vtt-fog-edge-a));
-    }
-
-    48% {
-        clip-path: polygon(var(--vtt-fog-edge-b));
-    }
-
-    74% {
-        clip-path: polygon(var(--vtt-fog-edge-c));
-    }
-}
-
 @keyframes vtt-fog-drift-b {
     from {
         transform: translate3d(46px, -12px, 0);

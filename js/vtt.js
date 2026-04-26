@@ -1129,12 +1129,9 @@
         const height = Math.max(1, worldSize.height || DEFAULT_WORLD_SIZE.height);
 
         const pathA = buildFogBoundaryPath(scene, cellSet, 0);
-        const pathB = buildFogBoundaryPath(scene, cellSet, Math.PI * 0.72);
-        const pathC = buildFogBoundaryPath(scene, cellSet, Math.PI * 1.43);
 
-        if (!pathA || !pathB || !pathC) return '';
+        if (!pathA) return '';
 
-        const animationValues = escapeHtml(`${pathA};${pathB};${pathC};${pathA}`);
         const textureMaskUrl = buildFogTextureMaskUrl(pathA, width, height);
 
         return `
@@ -1155,14 +1152,7 @@
                 viewBox="0 0 ${escapeHtml(String(width))} ${escapeHtml(String(height))}"
                 preserveAspectRatio="none"
                 aria-hidden="true">
-                <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}" fill-rule="evenodd">
-                    <animate
-                        attributeName="d"
-                        dur="9.5s"
-                        repeatCount="indefinite"
-                        values="${animationValues}"
-                        keyTimes="0;0.48;0.74;1" />
-                </path>
+                <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}" fill-rule="evenodd"></path>
             </svg>
         `;
     };
