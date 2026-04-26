@@ -633,6 +633,22 @@
         return VTT_TOKEN_MOVE_ACCESS.has(clean) ? clean : (fallback === 'player' ? 'player' : 'dm');
     };
 
+    const sanitizeVTTMonsterRollOverrides = (value) => {
+        const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        return Object.entries(source).slice(0, 80).reduce((acc, [rawKey, rawOverride]) => {
+            const key = toTrimmedString(rawKey, '', 160).trim();
+            const override = rawOverride && typeof rawOverride === 'object' && !Array.isArray(rawOverride) ? rawOverride : {};
+            if (!key) return acc;
+            const label = toTrimmedString(override.label, '', 160).trim();
+            const formula = toTrimmedString(override.formula, '', 160).trim();
+            const type = toTrimmedString(override.type, '', 30).trim();
+            const detail = toTrimmedString(override.detail, '', 1000).trim();
+            if (!label && !formula && !type && !detail) return acc;
+            acc[key] = { label, formula, type, detail };
+            return acc;
+        }, {});
+    };
+
     const sanitizeVTTToken = (token, idx = 0) => {
         const source = token && typeof token === 'object' ? token : {};
         const id = toTrimmedString(source.id, `token_${idx + 1}`, 120).trim() || `token_${idx + 1}`;
@@ -666,7 +682,8 @@
             moodLabel: sanitizeVTTTokenMoodLabel(source.moodLabel),
             hidden: !!source.hidden,
             stealthRoll: hasStealthRoll ? Math.max(0, Math.min(99, Math.round(toNumber(rawStealthRoll, 10)))) : null,
-            vision: sanitizeVTTVision(source.vision)
+            vision: sanitizeVTTVision(source.vision),
+            monsterRollOverrides: sanitizeVTTMonsterRollOverrides(source.monsterRollOverrides)
         };
     };
 

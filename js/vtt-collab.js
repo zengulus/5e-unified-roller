@@ -60,6 +60,26 @@ const toIsoString = (value, fallback = '') => {
 
 const deepClone = (value) => JSON.parse(JSON.stringify(value));
 
+const parseJsonObject = (value) => {
+    const source = toTrimmedString(value, '', 100000).trim();
+    if (!source) return {};
+    try {
+        const parsed = JSON.parse(source);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (err) {
+        return {};
+    }
+};
+
+const stringifyJsonObject = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+    try {
+        return JSON.stringify(value);
+    } catch (err) {
+        return '';
+    }
+};
+
 const stableStringify = (value) => {
     if (value === null || value === undefined) return '';
     try {
@@ -400,6 +420,7 @@ const syncYTokenRecord = (record, token) => {
     setYScalar(record, 'stealthRoll', source.stealthRoll ?? null);
     setYScalar(record, 'moodEmoji', source.moodEmoji || '');
     setYScalar(record, 'moodLabel', source.moodLabel || '');
+    setYScalar(record, 'monsterRollOverrides', stringifyJsonObject(source.monsterRollOverrides));
     syncYDefencesMap(record, 'defences', source.defences || {});
     syncYStringArray(ensureYArrayEntry(record, 'conditions'), Array.isArray(source.conditions) ? source.conditions.slice(0, 24) : [], 80);
     syncYVisionMap(record, 'vision', source.vision || {});
@@ -407,7 +428,7 @@ const syncYTokenRecord = (record, token) => {
         'id', 'label', 'side', 'imageUrl', 'x', 'y', 'w', 'h',
         'sourceType', 'sourceId', 'moveAccess', 'hpCurrent', 'hpMax',
         'ac', 'passivePerception', 'hidden', 'stealthRoll',
-        'moodEmoji', 'moodLabel', 'defences', 'conditions', 'vision'
+        'moodEmoji', 'moodLabel', 'monsterRollOverrides', 'defences', 'conditions', 'vision'
     ]));
 };
 
@@ -433,6 +454,7 @@ const serializeYTokenRecord = (record, tokenId) => ({
         : [],
     moodEmoji: toTrimmedString(record.get('moodEmoji'), '', 16),
     moodLabel: toTrimmedString(record.get('moodLabel'), '', 40),
+    monsterRollOverrides: parseJsonObject(record.get('monsterRollOverrides')),
     hidden: !!record.get('hidden'),
     stealthRoll: record.get('stealthRoll') ?? null,
     vision: serializeYVisionMap(record, 'vision')
@@ -760,6 +782,7 @@ const patchYTokenRecord = (record, baseToken = {}, nextToken = {}) => {
     mutated = patchYScalar(record, 'stealthRoll', baseToken.stealthRoll, nextToken.stealthRoll) || mutated;
     mutated = patchYScalar(record, 'moodEmoji', baseToken.moodEmoji || '', nextToken.moodEmoji || '') || mutated;
     mutated = patchYScalar(record, 'moodLabel', baseToken.moodLabel || '', nextToken.moodLabel || '') || mutated;
+    mutated = patchYScalar(record, 'monsterRollOverrides', stringifyJsonObject(baseToken.monsterRollOverrides), stringifyJsonObject(nextToken.monsterRollOverrides)) || mutated;
     mutated = patchYDefencesMap(record, 'defences', baseToken.defences || {}, nextToken.defences || {}) || mutated;
     mutated = patchYStringArray(
         ensureYArrayEntry(record, 'conditions'),
