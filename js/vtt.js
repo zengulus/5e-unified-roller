@@ -2947,6 +2947,21 @@
             hasOverride: !!(label || formula)
         };
     };
+    const updateMonsterRollOverrideForToken = (draft, tokenId, presetKey, override) => {
+        const targetTokenId = String(tokenId || '').trim();
+        const targetPresetKey = String(presetKey || '').trim();
+        if (!draft || !Array.isArray(draft.scenes) || !targetTokenId || !targetPresetKey) return false;
+        for (const scene of draft.scenes) {
+            if (!scene || !Array.isArray(scene.tokens)) continue;
+            const token = scene.tokens.find((entry) => String(entry && entry.id || '').trim() === targetTokenId);
+            if (!token) continue;
+            if (!token.monsterRollOverrides || typeof token.monsterRollOverrides !== 'object') token.monsterRollOverrides = {};
+            if (override && Object.keys(override).length) token.monsterRollOverrides[targetPresetKey] = override;
+            else delete token.monsterRollOverrides[targetPresetKey];
+            return true;
+        }
+        return false;
+    };
 
     const buildCustomToken = () => ({
         id: buildId('token'),
@@ -5417,13 +5432,14 @@
             <div class="vtt-npc-roll-grid">
                 <label class="vtt-field vtt-field-tight">
                     <span>Label</span>
-                    <input type="text" data-npc-roll-field="label" value="${escapeHtml(npcRollState.label || tokenName)}">
+                    <input type="text" data-npc-roll-field="label" value="${escapeHtml(npcRollState.label || tokenName)}" ${monster ? 'readonly' : ''}>
                 </label>
                 <label class="vtt-field vtt-field-tight">
                     <span>Formula</span>
-                    <input type="text" data-npc-roll-field="formula" value="${escapeHtml(npcRollState.formula || '1d20')}">
+                    <input type="text" data-npc-roll-field="formula" value="${escapeHtml(npcRollState.formula || '1d20')}" ${monster ? 'readonly' : ''}>
                 </label>
             </div>
+            ${monster ? '<div class="vtt-detail-note">Use Edit on a stat block roll to rename or change its formula for this token.</div>' : ''}
             <div class="vtt-chip-row">
                 ${['1d20', '1d20 + 3', '2d20kh1', '2d20dl1', '1d4', '1d6', '1d8', '2d6', '1d10', '1d12'].map((formula) => `
                     <button class="vtt-chip-btn" type="button" data-action="set-npc-roll-formula" data-formula="${escapeHtml(formula)}">${escapeHtml(formula)}</button>
@@ -6914,13 +6930,7 @@
             npcRollState.type = preset.type || npcRollState.type || 'check';
             npcRollState.detail = preset.detail || npcRollState.detail || '';
             withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.tokens)) return;
-                const token = scene.tokens.find((entry) => String(entry && entry.id || '').trim() === tokenId);
-                if (!token) return;
-                if (!token.monsterRollOverrides || typeof token.monsterRollOverrides !== 'object') token.monsterRollOverrides = {};
-                if (Object.keys(override).length) token.monsterRollOverrides[presetKey] = override;
-                else delete token.monsterRollOverrides[presetKey];
+                updateMonsterRollOverrideForToken(draft, tokenId, presetKey, override);
             });
             return;
         }
@@ -6938,11 +6948,7 @@
             npcRollState.type = preset.type || npcRollState.type || 'check';
             npcRollState.detail = preset.detail || npcRollState.detail || '';
             withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.tokens)) return;
-                const token = scene.tokens.find((entry) => String(entry && entry.id || '').trim() === tokenId);
-                if (!token || !token.monsterRollOverrides || typeof token.monsterRollOverrides !== 'object') return;
-                delete token.monsterRollOverrides[presetKey];
+                updateMonsterRollOverrideForToken(draft, tokenId, presetKey, null);
             });
             return;
         }
