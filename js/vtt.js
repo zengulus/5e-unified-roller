@@ -2939,13 +2939,20 @@
         if (!override || typeof override !== 'object') return preset;
         const label = String(override.label || '').trim();
         const formula = String(override.formula || '').trim();
+        const type = String(override.type || '').trim();
+        const detail = String(override.detail || '').trim();
         return {
             ...preset,
             baseLabel: preset.baseLabel || preset.label,
             baseFormula: preset.baseFormula || preset.formula,
+            baseType: preset.baseType || preset.type,
+            baseDetail: preset.baseDetail || preset.detail || '',
             label: label || preset.label,
             formula: formula || preset.formula,
-            hasOverride: !!(label || formula)
+            type: type || preset.type,
+            detail: detail || preset.detail || '',
+            override,
+            hasOverride: true
         };
     };
     const updateMonsterRollOverrideForToken = (draft, tokenId, presetKey, override) => {
@@ -5293,7 +5300,10 @@
             formula: `1d20 ${formatSignedBonus(monster.initiative)}`,
             baseFormula: `1d20 ${formatSignedBonus(monster.initiative)}`,
             category: 'Core',
-            type: 'check'
+            type: 'check',
+            baseType: 'check',
+            detail: '',
+            baseDetail: ''
         });
         DEFENCE_KEYS.forEach((key) => {
             const score = monster.abilities && Number.isFinite(Number(monster.abilities[key])) ? Number(monster.abilities[key]) : 10;
@@ -5307,7 +5317,10 @@
                 formula: `1d20 ${formatSignedBonus(abilityMod)}`,
                 baseFormula: `1d20 ${formatSignedBonus(abilityMod)}`,
                 category: 'Checks',
-                type: 'check'
+                type: 'check',
+                baseType: 'check',
+                detail: '',
+                baseDetail: ''
             });
             presets.push({
                 key: `save:${key}`,
@@ -5316,7 +5329,10 @@
                 formula: `1d20 ${formatSignedBonus(saveBonus)}`,
                 baseFormula: `1d20 ${formatSignedBonus(saveBonus)}`,
                 category: 'Saves',
-                type: 'save'
+                type: 'save',
+                baseType: 'save',
+                detail: '',
+                baseDetail: ''
             });
         });
         Object.entries(monster.skills || {}).forEach(([skillName, bonus]) => {
@@ -5328,7 +5344,10 @@
                 formula: `1d20 ${formatSignedBonus(bonus)}`,
                 baseFormula: `1d20 ${formatSignedBonus(bonus)}`,
                 category: 'Skills',
-                type: 'check'
+                type: 'check',
+                baseType: 'check',
+                detail: '',
+                baseDetail: ''
             });
         });
         (Array.isArray(monster.actions) ? monster.actions : []).forEach((action, actionIdx) => {
@@ -5344,7 +5363,9 @@
                     baseFormula: formula,
                     category: 'Actions',
                     type: 'atk',
-                    detail: action.desc || ''
+                    baseType: 'atk',
+                    detail: action.desc || '',
+                    baseDetail: action.desc || ''
                 });
             }
             if (String(action.damageFormula || '').trim()) {
@@ -5358,7 +5379,9 @@
                     baseFormula: formula,
                     category: 'Actions',
                     type: 'dmg',
-                    detail: action.damageType ? `${action.damageType} damage` : (action.desc || '')
+                    baseType: 'dmg',
+                    detail: action.damageType ? `${action.damageType} damage` : (action.desc || ''),
+                    baseDetail: action.damageType ? `${action.damageType} damage` : (action.desc || '')
                 });
             }
         });
@@ -5450,7 +5473,7 @@
                             <input type="text" data-monster-roll-edit-field="formula" value="${escapeHtml(editingPreset.formula)}" placeholder="${escapeHtml(editingPreset.baseFormula || editingPreset.formula)}">
                         </label>
                         <div class="vtt-chip-row">
-                            <button class="vtt-chip-btn strong" type="button" data-action="save-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}">Save Roll</button>
+                            <button class="vtt-chip-btn strong" type="button" data-action="save-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}">Save Override</button>
                             <button class="vtt-chip-btn" type="button" data-action="reset-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}"${editingPreset.hasOverride ? '' : ' disabled'}>Reset</button>
                             <button class="vtt-chip-btn" type="button" data-action="cancel-monster-roll-edit">Cancel</button>
                         </div>
@@ -6956,15 +6979,20 @@
             const nextFormula = formulaEl instanceof HTMLInputElement ? String(formulaEl.value || '').trim().slice(0, 120) : '';
             const baseLabel = String(preset.baseLabel || preset.label || '').trim();
             const baseFormula = String(preset.baseFormula || preset.formula || '').trim();
-            const override = {};
-            if (nextLabel && nextLabel !== baseLabel) override.label = nextLabel;
-            if (nextFormula && nextFormula !== baseFormula) override.formula = nextFormula;
+            const resolvedLabel = nextLabel || baseLabel || preset.label;
+            const resolvedFormula = nextFormula || baseFormula || preset.formula;
+            const override = {
+                label: resolvedLabel,
+                formula: resolvedFormula,
+                type: preset.type || preset.baseType || npcRollState.type || 'check',
+                detail: preset.detail || preset.baseDetail || ''
+            };
             npcRollState.editingPresetKey = '';
             npcRollState.presetKey = presetKey;
-            npcRollState.label = override.label || baseLabel || preset.label;
-            npcRollState.formula = override.formula || baseFormula || preset.formula;
-            npcRollState.type = preset.type || npcRollState.type || 'check';
-            npcRollState.detail = preset.detail || npcRollState.detail || '';
+            npcRollState.label = override.label;
+            npcRollState.formula = override.formula;
+            npcRollState.type = override.type;
+            npcRollState.detail = override.detail;
             withDraft((draft) => {
                 updateMonsterRollOverrideForToken(draft, tokenId, presetKey, override);
             });
