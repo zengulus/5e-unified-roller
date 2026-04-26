@@ -2798,6 +2798,7 @@
                 renderNPCSearchPopover();
                 renderTokenInspector();
                 renderTokenInspectorPopover();
+                renderNPCRollPopover();
             });
         return monsterDirectoryPromise;
     };
@@ -5366,6 +5367,20 @@
             .map((preset) => applyMonsterRollOverride(token, preset))
             .slice(0, 48);
     };
+    const filterMonsterRollPresets = (presets = [], query = '') => {
+        const tokens = normalizeSearchText(query).split(' ').filter(Boolean);
+        if (!tokens.length) return presets;
+        return (Array.isArray(presets) ? presets : []).filter((preset) => {
+            const haystack = normalizeSearchText([
+                preset && preset.label,
+                preset && preset.baseLabel,
+                preset && preset.category,
+                preset && preset.formula,
+                preset && preset.type
+            ].join(' '));
+            return tokens.every((token) => haystack.includes(token));
+        });
+    };
 
     const renderNPCRollPopover = (result = null) => {
         if (!npcRollPopoverEl) return;
@@ -5377,7 +5392,15 @@
         const token = getTokenById(npcRollState.tokenId) || {};
         const tokenName = String(token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
         const monster = getMonsterStatBlockForToken(token);
+        const isMonsterIdentity = String(token && token.sourceType || '').trim().toLowerCase() === 'monster' || !!(token && token.monster);
+        if (isMonsterIdentity && !monster && !monsterDirectoryLoading && !monsterDirectory.length) {
+            ensureMonsterDirectory().catch((err) => {
+                console.warn('Failed loading monster rolls', err);
+            });
+        }
         const monsterPresets = buildMonsterRollPresets(token);
+        const monsterRollQuery = String(npcRollState.monsterRollQuery || '').trim();
+        const visibleMonsterPresets = filterMonsterRollPresets(monsterPresets, monsterRollQuery);
         const editingPresetKey = String(npcRollState.editingPresetKey || '').trim();
         const editingPreset = editingPresetKey
             ? monsterPresets.find((preset) => preset && preset.key === editingPresetKey)
@@ -5400,15 +5423,20 @@
                 </div>
                 <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-npc-roll" aria-label="Close NPC roll">X</button>
             </div>
+            ${isMonsterIdentity && !monsterPresets.length && (monsterDirectoryLoading || !monsterDirectory.length) ? '<div class="vtt-empty">Loading SRD monster rolls...</div>' : ''}
             ${monsterPresets.length ? `
                 <div class="vtt-menu-title">Stat Block Rolls</div>
+                <label class="vtt-field vtt-field-tight">
+                    <span>Filter Rolls</span>
+                    <input type="search" data-monster-roll-filter value="${escapeHtml(monsterRollQuery)}" placeholder="attack, save, damage, scimitar">
+                </label>
                 <div class="vtt-monster-roll-presets">
-                    ${monsterPresets.map((preset) => `
+                    ${visibleMonsterPresets.length ? visibleMonsterPresets.map((preset) => `
                         <div class="vtt-monster-roll-preset-row${preset.key === editingPresetKey ? ' is-editing' : ''}">
                             <button class="vtt-chip-btn" type="button" data-action="set-npc-roll-preset" data-preset-key="${escapeHtml(preset.key)}" data-label="${escapeHtml(preset.label)}" data-formula="${escapeHtml(preset.formula)}" data-roll-type="${escapeHtml(preset.type || 'check')}" data-detail="${escapeHtml(preset.detail || '')}" title="${escapeHtml(`${preset.category}: ${preset.formula}`)}">${escapeHtml(preset.label)}${preset.hasOverride ? ' *' : ''}</button>
                             <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="edit-monster-roll-preset" data-preset-key="${escapeHtml(preset.key)}" aria-label="Edit roll name">Edit</button>
                         </div>
-                    `).join('')}
+                    `).join('') : '<div class="vtt-empty">No stat block rolls match that filter.</div>'}
                 </div>
                 ${editingPreset ? `
                     <div class="vtt-monster-roll-edit">
@@ -5455,6 +5483,12 @@
 
     const openNPCRollPopover = (token, clientX, clientY) => {
         if (!token || !isDM()) return false;
+        const isMonsterIdentity = String(token && token.sourceType || '').trim().toLowerCase() === 'monster' || !!(token && token.monster);
+        if (isMonsterIdentity && !getMonsterStatBlockForToken(token) && !monsterDirectoryLoading && !monsterDirectory.length) {
+            ensureMonsterDirectory().catch((err) => {
+                console.warn('Failed loading monster roll directory', err);
+            });
+        }
         const monsterPresets = buildMonsterRollPresets(token);
         const defaultPreset = monsterPresets[0] || null;
         npcRollState = {
@@ -5466,6 +5500,7 @@
             detail: defaultPreset ? (defaultPreset.detail || '') : '',
             presetKey: defaultPreset ? (defaultPreset.key || '') : '',
             editingPresetKey: '',
+            monsterRollQuery: '',
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
         };
@@ -6880,6 +6915,7 @@
             npcRollState.detail = '';
             npcRollState.presetKey = '';
             npcRollState.editingPresetKey = '';
+            npcRollState.monsterRollQuery = '';
             renderNPCRollPopover();
             return;
         }
@@ -7725,6 +7761,13 @@
             const field = target.dataset.npcRollField;
             if (field === 'label') npcRollState.label = String(target.value || '').slice(0, 120);
             if (field === 'formula') npcRollState.formula = String(target.value || '').slice(0, 120);
+            return;
+        }
+
+        if (target instanceof HTMLInputElement && target.dataset.monsterRollFilter !== undefined) {
+            if (!npcRollState) return;
+            npcRollState.monsterRollQuery = String(target.value || '').slice(0, 120);
+            renderNPCRollPopover();
             return;
         }
 
