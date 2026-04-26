@@ -988,6 +988,18 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     stroke: none;
 }
 
+.vtt-fog-texture-fill {
+    pointer-events: none;
+}
+
+.vtt-fog-texture-fill-a {
+    opacity: 0.22;
+}
+
+.vtt-fog-texture-fill-b {
+    opacity: 0.16;
+}
+
 .vtt-fog-edge-path {
     fill: none;
     stroke: rgba(72, 72, 72, 0.78);

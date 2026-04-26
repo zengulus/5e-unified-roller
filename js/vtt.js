@@ -1130,6 +1130,10 @@
         if (!pathA || !pathB || !pathC) return '';
 
         const animationValues = escapeHtml(`${pathA};${pathB};${pathC};${pathA}`);
+        const fogIdBase = `vtt-fog-${String(scene.id || 'scene').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+        const clipId = `${fogIdBase}-clip`;
+        const noisePatternAId = `${fogIdBase}-noise-a`;
+        const noisePatternBId = `${fogIdBase}-noise-b`;
 
         return `
             <svg class="vtt-fog-edge-svg"
@@ -1140,14 +1144,43 @@
                 viewBox="0 0 ${escapeHtml(String(width))} ${escapeHtml(String(height))}"
                 preserveAspectRatio="none"
                 aria-hidden="true">
-                <path class="vtt-fog-shape-path" d="${escapeHtml(pathA)}" fill-rule="evenodd">
-                    <animate
-                        attributeName="d"
-                        dur="9.5s"
-                        repeatCount="indefinite"
-                        values="${animationValues}"
-                        keyTimes="0;0.48;0.74;1" />
-                </path>
+                <defs>
+                    <pattern id="${escapeHtml(noisePatternAId)}" patternUnits="userSpaceOnUse" width="256" height="256">
+                        <image href="noiseTexture.png" x="0" y="0" width="256" height="256" preserveAspectRatio="none" />
+                        <animateTransform
+                            attributeName="patternTransform"
+                            type="translate"
+                            from="0 0"
+                            to="256 256"
+                            dur="32s"
+                            repeatCount="indefinite" />
+                    </pattern>
+                    <pattern id="${escapeHtml(noisePatternBId)}" patternUnits="userSpaceOnUse" width="256" height="256">
+                        <image href="noiseTexture2.png" x="0" y="0" width="256" height="256" preserveAspectRatio="none" />
+                        <animateTransform
+                            attributeName="patternTransform"
+                            type="translate"
+                            from="0 0"
+                            to="-256 256"
+                            dur="43s"
+                            repeatCount="indefinite" />
+                    </pattern>
+                    <clipPath id="${escapeHtml(clipId)}">
+                        <path d="${escapeHtml(pathA)}" fill-rule="evenodd" clip-rule="evenodd">
+                            <animate
+                                attributeName="d"
+                                dur="9.5s"
+                                repeatCount="indefinite"
+                                values="${animationValues}"
+                                keyTimes="0;0.48;0.74;1" />
+                        </path>
+                    </clipPath>
+                </defs>
+                <g clip-path="url(#${escapeHtml(clipId)})">
+                    <rect class="vtt-fog-shape-path" x="0" y="0" width="${escapeHtml(String(width))}" height="${escapeHtml(String(height))}" />
+                    <rect class="vtt-fog-texture-fill vtt-fog-texture-fill-a" x="0" y="0" width="${escapeHtml(String(width))}" height="${escapeHtml(String(height))}" fill="url(#${escapeHtml(noisePatternAId)})" />
+                    <rect class="vtt-fog-texture-fill vtt-fog-texture-fill-b" x="0" y="0" width="${escapeHtml(String(width))}" height="${escapeHtml(String(height))}" fill="url(#${escapeHtml(noisePatternBId)})" />
+                </g>
                 <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}" fill-rule="evenodd">
                     <animate
                         attributeName="d"
