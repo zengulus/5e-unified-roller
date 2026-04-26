@@ -2455,6 +2455,11 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     gap: 0.5rem;
 }
 
+.vtt-monster-roll-presets {
+    max-height: 9rem;
+    overflow: auto;
+}
+
 .vtt-npc-roll-result {
     display: flex;
     align-items: baseline;

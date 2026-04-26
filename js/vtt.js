@@ -40,6 +40,8 @@
     const SCENE_VIEW_LOCAL = 'local';
     const QUICK_ACTION_SEARCH_DICE = [20, 12, 10, 8, 6, 4, 100];
     const QUICK_ACTION_SEARCH_RESULT_LIMIT = 18;
+    const SRD_MONSTER_DATA_URL = 'monsters/dnd_srd_5_2_1__monsters.json';
+    const MONSTER_SEARCH_RESULT_LIMIT = 80;
     const DEFAULT_VTT_CELL_PX = 70;
     const DEFAULT_EVIDENCE_NOTE_CATEGORY = 'evidence';
     const DEFAULT_EVIDENCE_NOTE_COLOR = '#39b66b';
@@ -121,6 +123,9 @@
     let npcSearchQuery = '';
     let npcSearchLoading = false;
     let npcSearchRefreshPromise = null;
+    let monsterDirectory = [];
+    let monsterDirectoryLoading = false;
+    let monsterDirectoryPromise = null;
     let previewTokenId = '';
     let localView = { x: 40, y: 40, zoom: 1 };
     let worldSize = { ...DEFAULT_WORLD_SIZE };
@@ -2459,6 +2464,7 @@
                     console.warn('Failed loading VTT NPC dataset', err);
                 }
             }
+            await ensureMonsterDirectory();
             if (store && typeof store.refreshNPCDirectoryForVTT === 'function') {
                 try {
                     await store.refreshNPCDirectoryForVTT();
@@ -2618,6 +2624,140 @@
         return { hpCurrent: numeric, hpMax: numeric };
     };
 
+    const abilityModFromScore = (score) => Math.floor((Math.round(toNumber(score, 10)) - 10) / 2);
+    const formatSignedBonus = (value) => {
+        const clean = Math.round(toNumber(value, 0));
+        return clean >= 0 ? `+${clean}` : String(clean);
+    };
+    const normalizeMonsterAction = (action) => {
+        const source = action && typeof action === 'object' ? action : {};
+        const name = String(source.name || '').trim();
+        const desc = String(source.desc || '').trim();
+        if (!name && !desc) return null;
+        const attackMatch = desc.match(/Attack Roll:\s*([+-]\s*\d+)/i) || desc.match(/(?:Melee|Ranged)\s+Attack[^:]*:\s*([+-]\s*\d+)/i);
+        const saveMatch = desc.match(/([A-Za-z]+)\s+Saving Throw:\s*DC\s*(\d+)/i);
+        const hitDamageMatch = desc.match(/Hit:\s*\d+\s*\(([^)]+)\)\s*([A-Za-z]+)?\s*damage/i);
+        const failureDamageMatch = desc.match(/Failure:\s*\d+\s*\(([^)]+)\)\s*([A-Za-z]+)?\s*damage/i);
+        const damageFormula = String(source.damageFormula || '').trim() || (String(source.damage_dice || '').trim()
+            ? `${source.damage_dice}${Number.isFinite(Number(source.damage_bonus)) && Number(source.damage_bonus) ? ` ${Number(source.damage_bonus) >= 0 ? '+' : '-'} ${Math.abs(Number(source.damage_bonus))}` : ''}`
+            : (hitDamageMatch ? hitDamageMatch[1].trim() : (failureDamageMatch ? failureDamageMatch[1].trim() : '')));
+        return {
+            name: name || 'Action',
+            desc,
+            attackBonus: attackMatch ? Math.round(toNumber(attackMatch[1].replace(/\s+/g, ''), 0)) : (hasValue(source.attackBonus) ? Math.round(toNumber(source.attackBonus, 0)) : null),
+            saveAbility: saveMatch ? saveMatch[1].slice(0, 3).toLowerCase() : String(source.saveAbility || '').trim(),
+            saveDc: saveMatch ? Math.round(toNumber(saveMatch[2], 0)) : (hasValue(source.saveDc) ? Math.round(toNumber(source.saveDc, 0)) : null),
+            damageFormula,
+            damageType: hitDamageMatch && hitDamageMatch[2] ? hitDamageMatch[2] : (failureDamageMatch && failureDamageMatch[2] ? failureDamageMatch[2] : '')
+        };
+    };
+    const normalizeMonsterRecord = (monster, id = '') => {
+        const source = monster && typeof monster === 'object' ? monster : {};
+        const slug = String(source.slug || id || source.name || '').trim();
+        const name = String(source.name || slug || 'Monster').trim() || 'Monster';
+        const sourceAbilities = source.abilities && typeof source.abilities === 'object' ? source.abilities : {};
+        const abilities = {
+            str: Math.round(toNumber(hasValue(source.strength) ? source.strength : sourceAbilities.str, 10)),
+            dex: Math.round(toNumber(hasValue(source.dexterity) ? source.dexterity : sourceAbilities.dex, 10)),
+            con: Math.round(toNumber(hasValue(source.constitution) ? source.constitution : sourceAbilities.con, 10)),
+            int: Math.round(toNumber(hasValue(source.intelligence) ? source.intelligence : sourceAbilities.int, 10)),
+            wis: Math.round(toNumber(hasValue(source.wisdom) ? source.wisdom : sourceAbilities.wis, 10)),
+            cha: Math.round(toNumber(hasValue(source.charisma) ? source.charisma : sourceAbilities.cha, 10))
+        };
+        const sourceSaves = source.saves && typeof source.saves === 'object' ? source.saves : {};
+        const saves = {};
+        DEFENCE_KEYS.forEach((key) => {
+            const fullName = sheetStatNames[key] ? sheetStatNames[key].toLowerCase() : '';
+            const raw = fullName && hasValue(source[`${fullName}_save`]) ? source[`${fullName}_save`] : sourceSaves[key];
+            if (hasValue(raw)) saves[key] = Math.round(toNumber(raw, 0));
+        });
+        const sourceSkills = source.skills && typeof source.skills === 'object' ? source.skills : {};
+        const skills = {};
+        Object.keys(sheetSkillsMap).forEach((skillName) => {
+            const sourceKey = skillName.replace(/\s+/g, '_');
+            const raw = hasValue(source[sourceKey]) ? source[sourceKey] : sourceSkills[skillName];
+            if (hasValue(raw)) skills[skillName] = Math.round(toNumber(raw, 0));
+        });
+        const actions = [
+            ...(Array.isArray(source.actions) ? source.actions : []),
+            ...(Array.isArray(source.bonus_actions) ? source.bonus_actions : []),
+            ...(Array.isArray(source.reactions) ? source.reactions : []),
+            ...(Array.isArray(source.legendary_actions) ? source.legendary_actions : [])
+        ].map(normalizeMonsterAction).filter(Boolean);
+        const rawHitPoints = hasValue(source.hit_points) ? source.hit_points : source.hitPoints;
+        const rawArmorClass = hasValue(source.armor_class) ? source.armor_class : source.armorClass;
+        const hitPoints = Number.isFinite(Number(rawHitPoints)) ? Math.round(Number(rawHitPoints)) : null;
+        const armorClass = Number.isFinite(Number(rawArmorClass)) ? Math.round(Number(rawArmorClass)) : null;
+        const passiveMatch = String(source.senses || '').match(/Passive Perception\s*(\d+)/i);
+        const perception = Number.isFinite(Number(source.perception)) ? Math.round(Number(source.perception)) : null;
+        const passivePerception = passiveMatch
+            ? Math.round(toNumber(passiveMatch[1], 10))
+            : (hasValue(source.passivePerception) ? Math.round(toNumber(source.passivePerception, 10)) : (perception !== null ? 10 + perception : null));
+        return {
+            id: slug || buildId('monster'),
+            name,
+            slug,
+            size: String(source.size || '').trim(),
+            type: String(source.type || '').trim(),
+            challengeRating: String(source.challenge_rating || source.challengeRating || '').trim(),
+            armorClass,
+            hitPoints,
+            hitDice: String(source.hit_dice || source.hitDice || '').trim(),
+            initiative: hasValue(source.initiative) ? Math.round(toNumber(source.initiative, abilityModFromScore(abilities.dex))) : abilityModFromScore(abilities.dex),
+            abilities,
+            saves,
+            skills,
+            passivePerception,
+            senses: String(source.senses || '').trim(),
+            languages: String(source.languages || '').trim(),
+            actions
+        };
+    };
+    const getMonsterSizeCells = (monster) => {
+        const size = String(monster && monster.size || '').trim().toLowerCase();
+        if (size === 'huge') return 3;
+        if (size === 'gargantuan') return 4;
+        if (size === 'large') return 2;
+        return 1;
+    };
+    const getMonsterDirectory = () => monsterDirectory;
+    const findMonsterById = (monsterId) => {
+        const targetId = String(monsterId || '').trim();
+        if (!targetId) return null;
+        return getMonsterDirectory().find((monster) => String(monster && monster.id || '') === targetId) || null;
+    };
+    const ensureMonsterDirectory = async () => {
+        if (monsterDirectory.length) return monsterDirectory;
+        if (monsterDirectoryPromise) return monsterDirectoryPromise;
+        monsterDirectoryLoading = true;
+        renderNPCSearchPopover();
+        monsterDirectoryPromise = fetch(SRD_MONSTER_DATA_URL)
+            .then((response) => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .then((payload) => {
+                const records = payload && typeof payload === 'object'
+                    ? Object.entries(payload).filter(([key, value]) => key !== '_info' && value && typeof value === 'object')
+                    : [];
+                monsterDirectory = records
+                    .map(([key, value]) => normalizeMonsterRecord(value, key))
+                    .sort((left, right) => left.name.localeCompare(right.name));
+                return monsterDirectory;
+            })
+            .catch((err) => {
+                console.warn('Failed loading SRD monster directory', err);
+                monsterDirectory = [];
+                return monsterDirectory;
+            })
+            .finally(() => {
+                monsterDirectoryLoading = false;
+                monsterDirectoryPromise = null;
+                renderNPCSearchPopover();
+            });
+        return monsterDirectoryPromise;
+    };
+
     const buildTokenFromPlayer = (player) => {
         const hp = parsePlayerHp(player && player.hp);
         return {
@@ -2682,6 +2822,40 @@
         };
     };
 
+    const buildTokenFromMonster = (monster) => {
+        const statBlock = normalizeMonsterRecord(monster, monster && monster.id);
+        const sizeCells = getMonsterSizeCells(statBlock);
+        return {
+            id: buildId('token'),
+            label: statBlock.name,
+            side: 'enemy',
+            imageUrl: '',
+            x: 0,
+            y: 0,
+            w: sizeCells,
+            h: sizeCells,
+            sourceType: 'monster',
+            sourceId: String(statBlock.id || '').trim(),
+            moveAccess: 'dm',
+            hpCurrent: statBlock.hitPoints,
+            hpMax: statBlock.hitPoints,
+            ac: statBlock.armorClass,
+            passivePerception: statBlock.passivePerception,
+            defences: normalizeDefences(statBlock.saves),
+            monster: statBlock,
+            conditions: [],
+            hidden: false,
+            stealthRoll: null,
+            vision: {
+                enabled: true,
+                facingDeg: 0,
+                arcDeg: 90,
+                baseRangeCells: 6,
+                passivePerception: statBlock.passivePerception || 10
+            }
+        };
+    };
+
     const buildCustomToken = () => ({
         id: buildId('token'),
         label: 'New Token',
@@ -2742,6 +2916,9 @@
         if (kind === 'npc') {
             return getNPCs().find((entry) => String(entry && entry.id || '') === sourceId) || null;
         }
+        if (kind === 'monster') {
+            return findMonsterById(sourceId);
+        }
         if (kind === 'guildless') {
             return { name: 'Guildless' };
         }
@@ -2757,6 +2934,7 @@
         if (source && source.name) return String(source.name).trim() || 'Token';
         if (kind === 'player') return 'Player';
         if (kind === 'npc') return 'NPC';
+        if (kind === 'monster') return 'Monster';
         return 'Custom Token';
     };
 
@@ -2768,6 +2946,10 @@
         if (kind === 'npc') {
             const npc = findSpawnSource('npc', id);
             return npc ? buildTokenFromNPC(npc) : null;
+        }
+        if (kind === 'monster') {
+            const monster = findSpawnSource('monster', id);
+            return monster ? buildTokenFromMonster(monster) : null;
         }
         if (kind === 'guildless') {
             return buildGuildlessToken();
@@ -2836,7 +3018,7 @@
     const spawnTokenFromDescriptor = (kind, id = '', worldPoint = null) => {
         const nextToken = buildTokenFromSpawnDescriptor(kind, id);
         if (!nextToken) return false;
-        if (kind === 'npc') closeNPCSearch({ clearQuery: true });
+        if (kind === 'npc' || kind === 'monster') closeNPCSearch({ clearQuery: true });
         else closeNPCSearch();
         withDraft((draft) => {
             const scene = getActiveScene(draft);
@@ -4390,18 +4572,46 @@
             const guild = String(npc && npc.guild || '').toLowerCase();
             return name.includes(query) || guild.includes(query);
         });
-        const loadingMessage = npcSearchLoading
-            ? '<div class="vtt-empty">Refreshing shared NPC roster...</div>'
+        const monsters = getMonsterDirectory().filter((monster) => {
+            if (!query) return true;
+            const haystack = [
+                monster && monster.name,
+                monster && monster.type,
+                monster && monster.size,
+                monster && monster.challengeRating
+            ].map((entry) => String(entry || '').toLowerCase()).join(' ');
+            return haystack.includes(query);
+        }).slice(0, MONSTER_SEARCH_RESULT_LIMIT);
+        const loadingMessage = npcSearchLoading || monsterDirectoryLoading
+            ? '<div class="vtt-empty">Refreshing NPC and SRD monster lists...</div>'
             : '';
 
-        npcSearchListEl.innerHTML = (loadingMessage + (npcs.length
-                ? npcs.map((npc) => `
+        const npcMarkup = npcs.length
+                ? `
+                    <div class="vtt-menu-title">Campaign NPCs</div>
+                    ${npcs.map((npc) => `
                     <button class="vtt-token-spawn" type="button" data-action="spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
                         <span class="vtt-token-spawn-meta">${escapeHtml(npcSearchState && npcSearchState.worldPoint ? 'Spawn here' : 'Spawn token')}${npc.guild ? ` · ${escapeHtml(npc.guild)}` : ''}</span>
                     </button>
-                `).join('')
-                : `<div class="vtt-empty">${query ? 'No NPCs match that search.' : 'No NPCs in the shared store yet.'}</div>`));
+                `).join('')}
+                `
+                : '';
+        const monsterMarkup = monsters.length
+                ? `
+                    <div class="vtt-menu-title">SRD Monsters</div>
+                    ${monsters.map((monster) => `
+                    <button class="vtt-token-spawn" type="button" data-action="spawn-monster" data-id="${escapeHtml(String(monster.id || ''))}">
+                        <span class="vtt-token-spawn-name">${escapeHtml(monster.name || 'Monster')}</span>
+                        <span class="vtt-token-spawn-meta">${escapeHtml(npcSearchState && npcSearchState.worldPoint ? 'Spawn here' : 'Spawn token')} · CR ${escapeHtml(monster.challengeRating || '?')}${monster.type ? ` · ${escapeHtml(monster.type)}` : ''}</span>
+                    </button>
+                `).join('')}
+                `
+                : '';
+        const emptyMessage = !npcMarkup && !monsterMarkup && !loadingMessage
+            ? `<div class="vtt-empty">${query ? 'No NPCs or SRD monsters match that search.' : 'No NPCs in the shared store yet. SRD monsters load from the local monsters folder.'}</div>`
+            : '';
+        npcSearchListEl.innerHTML = `${loadingMessage}${npcMarkup}${monsterMarkup}${emptyMessage}`;
         positionNPCSearchPopover();
     };
 
@@ -4939,6 +5149,58 @@
         }).then((response) => !!response.ok);
     };
 
+    const getMonsterStatBlockForToken = (token) => {
+        if (!token) return null;
+        if (token.monster && typeof token.monster === 'object') {
+            return normalizeMonsterRecord(token.monster, token.monster.id || token.sourceId || token.label);
+        }
+        if (String(token.sourceType || '').trim() === 'monster') return findMonsterById(token.sourceId);
+        return null;
+    };
+
+    const buildMonsterRollPresets = (token) => {
+        const monster = getMonsterStatBlockForToken(token);
+        if (!monster) return [];
+        const presets = [];
+        presets.push({
+            label: 'Initiative',
+            formula: `1d20 ${formatSignedBonus(monster.initiative)}`,
+            category: 'Core'
+        });
+        DEFENCE_KEYS.forEach((key) => {
+            const score = monster.abilities && Number.isFinite(Number(monster.abilities[key])) ? Number(monster.abilities[key]) : 10;
+            const abilityMod = abilityModFromScore(score);
+            const saveBonus = monster.saves && hasValue(monster.saves[key]) ? monster.saves[key] : abilityMod;
+            const label = sheetStatNames[key] || key.toUpperCase();
+            presets.push({ label: `${label} Check`, formula: `1d20 ${formatSignedBonus(abilityMod)}`, category: 'Checks' });
+            presets.push({ label: `${label} Save`, formula: `1d20 ${formatSignedBonus(saveBonus)}`, category: 'Saves' });
+        });
+        Object.entries(monster.skills || {}).forEach(([skillName, bonus]) => {
+            presets.push({
+                label: toTitleCaseWords(skillName),
+                formula: `1d20 ${formatSignedBonus(bonus)}`,
+                category: 'Skills'
+            });
+        });
+        (Array.isArray(monster.actions) ? monster.actions : []).forEach((action) => {
+            if (hasValue(action.attackBonus)) {
+                presets.push({
+                    label: `${action.name} Attack`,
+                    formula: `1d20 ${formatSignedBonus(action.attackBonus)}`,
+                    category: 'Actions'
+                });
+            }
+            if (String(action.damageFormula || '').trim()) {
+                presets.push({
+                    label: `${action.name} Damage`,
+                    formula: String(action.damageFormula || '').trim(),
+                    category: 'Actions'
+                });
+            }
+        });
+        return presets.filter((preset) => preset && preset.label && preset.formula).slice(0, 48);
+    };
+
     const renderNPCRollPopover = (result = null) => {
         if (!npcRollPopoverEl) return;
         if (!npcRollState) {
@@ -4948,15 +5210,34 @@
         }
         const token = getTokenById(npcRollState.tokenId) || {};
         const tokenName = String(token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
+        const monster = getMonsterStatBlockForToken(token);
+        const monsterPresets = buildMonsterRollPresets(token);
+        const monsterSummary = monster
+            ? [
+                monster.size,
+                monster.type,
+                monster.challengeRating ? `CR ${monster.challengeRating}` : '',
+                hasValue(monster.armorClass) ? `AC ${monster.armorClass}` : '',
+                hasValue(monster.hitPoints) ? `HP ${monster.hitPoints}` : ''
+            ].filter(Boolean).join(' · ')
+            : '';
         npcRollPopoverEl.hidden = false;
         npcRollPopoverEl.innerHTML = `
             <div class="vtt-popover-head">
                 <div>
-                    <strong>Roll For NPC</strong>
-                    <span>${escapeHtml(tokenName)}</span>
+                    <strong>${monster ? 'Roll For Monster' : 'Roll For NPC'}</strong>
+                    <span>${escapeHtml(monsterSummary || tokenName)}</span>
                 </div>
                 <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-npc-roll" aria-label="Close NPC roll">X</button>
             </div>
+            ${monsterPresets.length ? `
+                <div class="vtt-menu-title">Stat Block Rolls</div>
+                <div class="vtt-chip-row vtt-monster-roll-presets">
+                    ${monsterPresets.map((preset) => `
+                        <button class="vtt-chip-btn" type="button" data-action="set-npc-roll-preset" data-label="${escapeHtml(preset.label)}" data-formula="${escapeHtml(preset.formula)}" title="${escapeHtml(`${preset.category}: ${preset.formula}`)}">${escapeHtml(preset.label)}</button>
+                    `).join('')}
+                </div>
+            ` : ''}
             <div class="vtt-npc-roll-grid">
                 <label class="vtt-field vtt-field-tight">
                     <span>Label</span>
@@ -4982,11 +5263,13 @@
 
     const openNPCRollPopover = (token, clientX, clientY) => {
         if (!token || !isDM()) return false;
+        const monsterPresets = buildMonsterRollPresets(token);
+        const defaultPreset = monsterPresets[0] || null;
         npcRollState = {
             tokenId: token.id,
             tokenName: token.label || 'NPC',
-            label: token.label || 'NPC',
-            formula: '1d20',
+            label: defaultPreset ? defaultPreset.label : (token.label || 'NPC'),
+            formula: defaultPreset ? defaultPreset.formula : '1d20',
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
         };
@@ -5060,6 +5343,15 @@
         const supportsSightCone = !!(token && (token.side === 'enemy' || token.side === 'neutral'));
         const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
         const moodLabel = normalizeMoodLabel(token && token.moodLabel);
+        const monster = getMonsterStatBlockForToken(token);
+        const monsterMeta = monster
+            ? [
+                monster.size,
+                monster.type,
+                monster.challengeRating ? `CR ${monster.challengeRating}` : '',
+                monster.hitDice ? `HD ${monster.hitDice}` : ''
+            ].filter(Boolean).join(' · ')
+            : '';
         const moodOptions = MOOD_EMOJI_OPTIONS.includes(moodEmoji) || !moodEmoji
             ? MOOD_EMOJI_OPTIONS
             : [moodEmoji, ...MOOD_EMOJI_OPTIONS];
@@ -5149,6 +5441,10 @@
                     <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Poisoned">Poisoned</button>
                     <button class="vtt-chip-btn" data-action="token-clear-conditions" data-id="${escapeHtml(token.id)}">Clear Cond</button>
                 </div>
+                ${monster ? `
+                    <div class="vtt-subhead">Monster</div>
+                    <div class="vtt-detail-note">${escapeHtml(monsterMeta || monster.name)}. Right-click the token and choose Make a dice roll for stat block checks, saves, attacks, and damage.</div>
+                ` : ''}
                 <label class="vtt-inspector-check">
                     <input type="checkbox" data-token-field="hidden"${token.hidden ? ' checked' : ''}>
                     <span>Hidden In Player Mode</span>
@@ -6350,6 +6646,13 @@
             renderNPCRollPopover();
             return;
         }
+        if (action === 'set-npc-roll-preset') {
+            if (!npcRollState) return;
+            npcRollState.label = String(actionEl.dataset.label || npcRollState.label || 'NPC Roll').trim().slice(0, 120);
+            npcRollState.formula = String(actionEl.dataset.formula || npcRollState.formula || '1d20').trim().slice(0, 120);
+            renderNPCRollPopover();
+            return;
+        }
         if (action === 'roll-npc-dice') {
             if (!npcRollState) return;
             const parsed = gmParseComplexFormula(npcRollState.formula || '1d20');
@@ -6359,7 +6662,7 @@
             }
             const label = String(npcRollState.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
             renderNPCRollPopover(parsed);
-            postGMDiscordRoll(label, 'NPC Roll', parsed.total, parsed.text).catch((err) => {
+            postGMDiscordRoll(label, label, parsed.total, parsed.text).catch((err) => {
                 console.warn('VTT NPC roll Discord post failed', err);
             });
             return;
@@ -6892,6 +7195,11 @@
 
         if (action === 'spawn-npc') {
             spawnTokenFromDescriptor('npc', id, getContextSpawnWorldPoint());
+            return;
+        }
+
+        if (action === 'spawn-monster') {
+            spawnTokenFromDescriptor('monster', id, getContextSpawnWorldPoint());
             return;
         }
 
