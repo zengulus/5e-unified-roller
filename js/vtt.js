@@ -2630,6 +2630,7 @@
         const clean = Math.round(toNumber(value, 0));
         return clean >= 0 ? `+${clean}` : String(clean);
     };
+    const normalizeMonsterRollKeyPart = (value = '') => normalizeSearchText(value).replace(/\s+/g, '-') || 'roll';
     const normalizeMonsterAction = (action) => {
         const source = action && typeof action === 'object' ? action : {};
         const name = String(source.name || '').trim();
@@ -2924,6 +2925,27 @@
             token.vision.passivePerception = statBlock.passivePerception || 10;
         }
         return true;
+    };
+
+    const getMonsterRollOverrides = (token) => (
+        token && token.monsterRollOverrides && typeof token.monsterRollOverrides === 'object'
+            ? token.monsterRollOverrides
+            : {}
+    );
+    const applyMonsterRollOverride = (token, preset) => {
+        if (!preset || !preset.key) return preset;
+        const override = getMonsterRollOverrides(token)[preset.key];
+        if (!override || typeof override !== 'object') return preset;
+        const label = String(override.label || '').trim();
+        const formula = String(override.formula || '').trim();
+        return {
+            ...preset,
+            baseLabel: preset.baseLabel || preset.label,
+            baseFormula: preset.baseFormula || preset.formula,
+            label: label || preset.label,
+            formula: formula || preset.formula,
+            hasOverride: !!(label || formula)
+        };
     };
 
     const buildCustomToken = () => ({
@@ -5201,22 +5223,38 @@
         return { total, text: parts.join(' ').trim() };
     };
 
-    const postGMDiscordRoll = (name, reason, total, formula) => {
+    const getGMDiscordSettings = () => {
         const gmData = readJSONStorage(GM_STORAGE_KEY, {});
-        if (!gmData || !gmData.discordActive || !String(gmData.webhook || '').trim()) return Promise.resolve(false);
+        return {
+            active: !!(gmData && gmData.discordActive),
+            webhook: String(gmData && gmData.webhook || '').trim()
+        };
+    };
+
+    const postGMDiscordRoll = (name, reason, total, formula, options = {}) => {
+        const settings = getGMDiscordSettings();
+        if (!settings.active || !settings.webhook) return Promise.resolve(false);
+        const opts = options && typeof options === 'object' ? options : {};
+        const color = Number.isFinite(Number(opts.color))
+            ? Number(opts.color)
+            : (String(opts.type || '').trim() === 'atk' ? 0xe74c3c : (String(opts.type || '').trim() === 'dmg' ? 0xf39c12 : 0x4ecdc4));
+        const detail = String(opts.detail || '').trim();
         const payload = {
             embeds: [{
                 author: { name },
                 title: reason,
-                description: `**${total}**\n${formula}`,
-                color: 0x4ecdc4
+                description: `**${total}**\nDice: ${formula}${detail ? `\n${detail}` : ''}`,
+                color
             }]
         };
-        return fetch(String(gmData.webhook || '').trim(), {
+        return fetch(settings.webhook, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        }).then((response) => !!response.ok);
+        }).then((response) => {
+            if (!response.ok) throw new Error(`Discord webhook failed (${response.status})`);
+            return true;
+        });
     };
 
     const getMonsterStatBlockForToken = (token) => {
@@ -5233,42 +5271,85 @@
         if (!monster) return [];
         const presets = [];
         presets.push({
+            key: 'core:initiative',
             label: 'Initiative',
+            baseLabel: 'Initiative',
             formula: `1d20 ${formatSignedBonus(monster.initiative)}`,
-            category: 'Core'
+            baseFormula: `1d20 ${formatSignedBonus(monster.initiative)}`,
+            category: 'Core',
+            type: 'check'
         });
         DEFENCE_KEYS.forEach((key) => {
             const score = monster.abilities && Number.isFinite(Number(monster.abilities[key])) ? Number(monster.abilities[key]) : 10;
             const abilityMod = abilityModFromScore(score);
             const saveBonus = monster.saves && hasValue(monster.saves[key]) ? monster.saves[key] : abilityMod;
             const label = sheetStatNames[key] || key.toUpperCase();
-            presets.push({ label: `${label} Check`, formula: `1d20 ${formatSignedBonus(abilityMod)}`, category: 'Checks' });
-            presets.push({ label: `${label} Save`, formula: `1d20 ${formatSignedBonus(saveBonus)}`, category: 'Saves' });
-        });
-        Object.entries(monster.skills || {}).forEach(([skillName, bonus]) => {
             presets.push({
-                label: toTitleCaseWords(skillName),
-                formula: `1d20 ${formatSignedBonus(bonus)}`,
-                category: 'Skills'
+                key: `check:${key}`,
+                label: `${label} Check`,
+                baseLabel: `${label} Check`,
+                formula: `1d20 ${formatSignedBonus(abilityMod)}`,
+                baseFormula: `1d20 ${formatSignedBonus(abilityMod)}`,
+                category: 'Checks',
+                type: 'check'
+            });
+            presets.push({
+                key: `save:${key}`,
+                label: `${label} Save`,
+                baseLabel: `${label} Save`,
+                formula: `1d20 ${formatSignedBonus(saveBonus)}`,
+                baseFormula: `1d20 ${formatSignedBonus(saveBonus)}`,
+                category: 'Saves',
+                type: 'save'
             });
         });
-        (Array.isArray(monster.actions) ? monster.actions : []).forEach((action) => {
+        Object.entries(monster.skills || {}).forEach(([skillName, bonus]) => {
+            const label = toTitleCaseWords(skillName);
+            presets.push({
+                key: `skill:${normalizeMonsterRollKeyPart(skillName)}`,
+                label,
+                baseLabel: label,
+                formula: `1d20 ${formatSignedBonus(bonus)}`,
+                baseFormula: `1d20 ${formatSignedBonus(bonus)}`,
+                category: 'Skills',
+                type: 'check'
+            });
+        });
+        (Array.isArray(monster.actions) ? monster.actions : []).forEach((action, actionIdx) => {
+            const actionKey = `action:${actionIdx}:${normalizeMonsterRollKeyPart(action.name)}`;
             if (hasValue(action.attackBonus)) {
+                const label = `${action.name} Attack`;
+                const formula = `1d20 ${formatSignedBonus(action.attackBonus)}`;
                 presets.push({
-                    label: `${action.name} Attack`,
-                    formula: `1d20 ${formatSignedBonus(action.attackBonus)}`,
-                    category: 'Actions'
+                    key: `${actionKey}:attack`,
+                    label,
+                    baseLabel: label,
+                    formula,
+                    baseFormula: formula,
+                    category: 'Actions',
+                    type: 'atk',
+                    detail: action.desc || ''
                 });
             }
             if (String(action.damageFormula || '').trim()) {
+                const label = `${action.name} Damage`;
+                const formula = String(action.damageFormula || '').trim();
                 presets.push({
-                    label: `${action.name} Damage`,
-                    formula: String(action.damageFormula || '').trim(),
-                    category: 'Actions'
+                    key: `${actionKey}:damage`,
+                    label,
+                    baseLabel: label,
+                    formula,
+                    baseFormula: formula,
+                    category: 'Actions',
+                    type: 'dmg',
+                    detail: action.damageType ? `${action.damageType} damage` : (action.desc || '')
                 });
             }
         });
-        return presets.filter((preset) => preset && preset.label && preset.formula).slice(0, 48);
+        return presets
+            .filter((preset) => preset && preset.key && preset.label && preset.formula)
+            .map((preset) => applyMonsterRollOverride(token, preset))
+            .slice(0, 48);
     };
 
     const renderNPCRollPopover = (result = null) => {
@@ -5282,6 +5363,10 @@
         const tokenName = String(token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
         const monster = getMonsterStatBlockForToken(token);
         const monsterPresets = buildMonsterRollPresets(token);
+        const editingPresetKey = String(npcRollState.editingPresetKey || '').trim();
+        const editingPreset = editingPresetKey
+            ? monsterPresets.find((preset) => preset && preset.key === editingPresetKey)
+            : null;
         const monsterSummary = monster
             ? [
                 monster.size,
@@ -5302,11 +5387,32 @@
             </div>
             ${monsterPresets.length ? `
                 <div class="vtt-menu-title">Stat Block Rolls</div>
-                <div class="vtt-chip-row vtt-monster-roll-presets">
+                <div class="vtt-monster-roll-presets">
                     ${monsterPresets.map((preset) => `
-                        <button class="vtt-chip-btn" type="button" data-action="set-npc-roll-preset" data-label="${escapeHtml(preset.label)}" data-formula="${escapeHtml(preset.formula)}" title="${escapeHtml(`${preset.category}: ${preset.formula}`)}">${escapeHtml(preset.label)}</button>
+                        <div class="vtt-monster-roll-preset-row${preset.key === editingPresetKey ? ' is-editing' : ''}">
+                            <button class="vtt-chip-btn" type="button" data-action="set-npc-roll-preset" data-preset-key="${escapeHtml(preset.key)}" data-label="${escapeHtml(preset.label)}" data-formula="${escapeHtml(preset.formula)}" data-roll-type="${escapeHtml(preset.type || 'check')}" data-detail="${escapeHtml(preset.detail || '')}" title="${escapeHtml(`${preset.category}: ${preset.formula}`)}">${escapeHtml(preset.label)}${preset.hasOverride ? ' *' : ''}</button>
+                            <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="edit-monster-roll-preset" data-preset-key="${escapeHtml(preset.key)}" aria-label="Edit roll name">Edit</button>
+                        </div>
                     `).join('')}
                 </div>
+                ${editingPreset ? `
+                    <div class="vtt-monster-roll-edit">
+                        <div class="vtt-menu-title">Edit Roll</div>
+                        <label class="vtt-field vtt-field-tight">
+                            <span>Name</span>
+                            <input type="text" data-monster-roll-edit-field="label" value="${escapeHtml(editingPreset.label)}" placeholder="${escapeHtml(editingPreset.baseLabel || editingPreset.label)}">
+                        </label>
+                        <label class="vtt-field vtt-field-tight">
+                            <span>Formula</span>
+                            <input type="text" data-monster-roll-edit-field="formula" value="${escapeHtml(editingPreset.formula)}" placeholder="${escapeHtml(editingPreset.baseFormula || editingPreset.formula)}">
+                        </label>
+                        <div class="vtt-chip-row">
+                            <button class="vtt-chip-btn strong" type="button" data-action="save-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}">Save Roll</button>
+                            <button class="vtt-chip-btn" type="button" data-action="reset-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}"${editingPreset.hasOverride ? '' : ' disabled'}>Reset</button>
+                            <button class="vtt-chip-btn" type="button" data-action="cancel-monster-roll-edit">Cancel</button>
+                        </div>
+                    </div>
+                ` : ''}
             ` : ''}
             <div class="vtt-npc-roll-grid">
                 <label class="vtt-field vtt-field-tight">
@@ -5340,6 +5446,10 @@
             tokenName: token.label || 'NPC',
             label: defaultPreset ? defaultPreset.label : (token.label || 'NPC'),
             formula: defaultPreset ? defaultPreset.formula : '1d20',
+            type: defaultPreset ? (defaultPreset.type || 'check') : 'check',
+            detail: defaultPreset ? (defaultPreset.detail || '') : '',
+            presetKey: defaultPreset ? (defaultPreset.key || '') : '',
+            editingPresetKey: '',
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
         };
@@ -5350,6 +5460,8 @@
 
     const isNPCRollTarget = (token) => {
         if (!token) return false;
+        if (getMonsterStatBlockForToken(token)) return true;
+        if (String(token.sourceType || '').trim().toLowerCase() === 'monster') return true;
         if (String(token.sourceType || '').trim().toLowerCase() === 'npc') return true;
         const side = String(token.side || '').trim().toLowerCase();
         return side === 'enemy' || side === 'neutral';
@@ -6748,6 +6860,10 @@
         if (action === 'set-npc-roll-formula') {
             if (!npcRollState) return;
             npcRollState.formula = String(actionEl.dataset.formula || '').trim() || '1d20';
+            npcRollState.type = 'check';
+            npcRollState.detail = '';
+            npcRollState.presetKey = '';
+            npcRollState.editingPresetKey = '';
             renderNPCRollPopover();
             return;
         }
@@ -6755,7 +6871,79 @@
             if (!npcRollState) return;
             npcRollState.label = String(actionEl.dataset.label || npcRollState.label || 'NPC Roll').trim().slice(0, 120);
             npcRollState.formula = String(actionEl.dataset.formula || npcRollState.formula || '1d20').trim().slice(0, 120);
+            npcRollState.type = String(actionEl.dataset.rollType || npcRollState.type || 'check').trim().slice(0, 20);
+            npcRollState.detail = String(actionEl.dataset.detail || '').trim().slice(0, 1000);
+            npcRollState.presetKey = String(actionEl.dataset.presetKey || '').trim();
+            npcRollState.editingPresetKey = '';
             renderNPCRollPopover();
+            return;
+        }
+        if (action === 'edit-monster-roll-preset') {
+            if (!npcRollState) return;
+            npcRollState.editingPresetKey = String(actionEl.dataset.presetKey || '').trim();
+            renderNPCRollPopover();
+            return;
+        }
+        if (action === 'cancel-monster-roll-edit') {
+            if (!npcRollState) return;
+            npcRollState.editingPresetKey = '';
+            renderNPCRollPopover();
+            return;
+        }
+        if (action === 'save-monster-roll-override') {
+            if (!npcRollState || !isDM()) return;
+            const presetKey = String(actionEl.dataset.presetKey || '').trim();
+            const tokenId = String(npcRollState.tokenId || '').trim();
+            const sourceToken = getTokenById(tokenId);
+            const preset = buildMonsterRollPresets(sourceToken).find((entry) => entry && entry.key === presetKey);
+            if (!preset) return;
+            const scope = actionEl.closest('.vtt-monster-roll-edit');
+            const labelEl = scope ? scope.querySelector('[data-monster-roll-edit-field="label"]') : null;
+            const formulaEl = scope ? scope.querySelector('[data-monster-roll-edit-field="formula"]') : null;
+            const nextLabel = labelEl instanceof HTMLInputElement ? String(labelEl.value || '').trim().slice(0, 120) : '';
+            const nextFormula = formulaEl instanceof HTMLInputElement ? String(formulaEl.value || '').trim().slice(0, 120) : '';
+            const baseLabel = String(preset.baseLabel || preset.label || '').trim();
+            const baseFormula = String(preset.baseFormula || preset.formula || '').trim();
+            const override = {};
+            if (nextLabel && nextLabel !== baseLabel) override.label = nextLabel;
+            if (nextFormula && nextFormula !== baseFormula) override.formula = nextFormula;
+            npcRollState.editingPresetKey = '';
+            npcRollState.presetKey = presetKey;
+            npcRollState.label = override.label || baseLabel || preset.label;
+            npcRollState.formula = override.formula || baseFormula || preset.formula;
+            npcRollState.type = preset.type || npcRollState.type || 'check';
+            npcRollState.detail = preset.detail || npcRollState.detail || '';
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.tokens)) return;
+                const token = scene.tokens.find((entry) => String(entry && entry.id || '').trim() === tokenId);
+                if (!token) return;
+                if (!token.monsterRollOverrides || typeof token.monsterRollOverrides !== 'object') token.monsterRollOverrides = {};
+                if (Object.keys(override).length) token.monsterRollOverrides[presetKey] = override;
+                else delete token.monsterRollOverrides[presetKey];
+            });
+            return;
+        }
+        if (action === 'reset-monster-roll-override') {
+            if (!npcRollState || !isDM()) return;
+            const presetKey = String(actionEl.dataset.presetKey || '').trim();
+            const tokenId = String(npcRollState.tokenId || '').trim();
+            const sourceToken = getTokenById(tokenId);
+            const preset = buildMonsterRollPresets(sourceToken).find((entry) => entry && entry.key === presetKey);
+            if (!preset) return;
+            npcRollState.editingPresetKey = '';
+            npcRollState.presetKey = presetKey;
+            npcRollState.label = preset.baseLabel || preset.label;
+            npcRollState.formula = preset.baseFormula || preset.formula;
+            npcRollState.type = preset.type || npcRollState.type || 'check';
+            npcRollState.detail = preset.detail || npcRollState.detail || '';
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.tokens)) return;
+                const token = scene.tokens.find((entry) => String(entry && entry.id || '').trim() === tokenId);
+                if (!token || !token.monsterRollOverrides || typeof token.monsterRollOverrides !== 'object') return;
+                delete token.monsterRollOverrides[presetKey];
+            });
             return;
         }
         if (action === 'select-token-monster-assignment') {
@@ -6779,8 +6967,15 @@
                 return;
             }
             const label = String(npcRollState.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
+            const token = getTokenById(npcRollState.tokenId);
+            const tokenName = String(token && token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
             renderNPCRollPopover(parsed);
-            postGMDiscordRoll(label, label, parsed.total, parsed.text).catch((err) => {
+            postGMDiscordRoll(tokenName, label, parsed.total, parsed.text, {
+                type: npcRollState.type || 'check',
+                detail: npcRollState.detail || ''
+            }).then((sent) => {
+                if (!sent) console.warn('VTT monster/NPC roll Discord post skipped: enable Discord integration in the GM dashboard and save a webhook URL.');
+            }).catch((err) => {
                 console.warn('VTT NPC roll Discord post failed', err);
             });
             return;

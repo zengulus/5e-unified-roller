@@ -2456,8 +2456,31 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
 }
 
 .vtt-monster-roll-presets {
+    display: grid;
+    gap: 0.4rem;
     max-height: 9rem;
     overflow: auto;
+}
+
+.vtt-monster-roll-preset-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.vtt-monster-roll-preset-row.is-editing .vtt-chip-btn {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.72);
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.14);
+}
+
+.vtt-monster-roll-edit {
+    display: grid;
+    gap: 0.55rem;
+    padding: 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .vtt-monster-assign-results {
