@@ -57,10 +57,22 @@
         'normalizedRequisitionsTable',
         'normalizedEncountersTable'
     ];
+    const CONNECT_IMPORT_BUST_ID = 'connect-login-required-20260428a';
+    const CONNECT_IMPORT_BUST_KEY = 'rtf_connect_import_bust_v1';
+    const CONNECT_LOGIN_REQUIRED_ERROR = 'This connect.json is missing the shared login email and password. Check with the DM that you have the latest file.';
 
     function getStore() {
         if (!window.RTF_STORE || typeof window.RTF_STORE !== 'object') return null;
         return window.RTF_STORE;
+    }
+
+    function readConnectLogin(raw) {
+        const source = raw && typeof raw === 'object' ? raw : null;
+        if (!source) return { email: '', password: '' };
+        const rawLogin = source.login && typeof source.login === 'object' ? source.login : {};
+        const loginEmail = String(source.loginEmail || source.email || rawLogin.email || '').trim();
+        const loginPassword = String(source.loginPassword || source.password || rawLogin.password || '').trim();
+        return { email: loginEmail, password: loginPassword };
     }
 
     function normalizeConnectPayload(raw) {
@@ -70,9 +82,7 @@
         const anonKey = String(source.anonKey || source.key || '').trim();
         const campaignId = String(source.campaignId || source.campaign || '').trim().toLowerCase();
         const backendMode = String(source.backendMode || source.syncBackend || '').trim() || 'normalized';
-        const rawLogin = source.login && typeof source.login === 'object' ? source.login : {};
-        const loginEmail = String(source.loginEmail || source.email || rawLogin.email || '').trim();
-        const loginPassword = String(source.loginPassword || source.password || rawLogin.password || '').trim();
+        const login = readConnectLogin(source);
         if (!supabaseUrl || !anonKey || !campaignId) return null;
 
         const payload = {
@@ -84,9 +94,9 @@
             collabRelayUrl: String(source.collabRelayUrl || source.collabServerUrl || source.relayUrl || '').trim(),
             backendMode
         };
-        if (loginEmail && loginPassword) {
-            payload.loginEmail = loginEmail;
-            payload.loginPassword = loginPassword;
+        if (login.email && login.password) {
+            payload.loginEmail = login.email;
+            payload.loginPassword = login.password;
         }
 
         CONNECT_OPTIONAL_TABLE_KEYS.forEach((key) => {
@@ -112,10 +122,14 @@
         if (!store || typeof store.setSyncConfig !== 'function' || typeof store.connectSync !== 'function') {
             return { ok: false, error: 'Sync store is not available on this page.' };
         }
+        const opts = options && typeof options === 'object' ? options : {};
+        if (opts.requireLogin) {
+            const login = readConnectLogin(raw);
+            if (!login.email || !login.password) return { ok: false, error: CONNECT_LOGIN_REQUIRED_ERROR };
+        }
         const payload = normalizeConnectPayload(raw);
         if (!payload) return { ok: false, error: 'Invalid connect.json format.' };
 
-        const opts = options && typeof options === 'object' ? options : {};
         const currentConfig = (typeof store.getSyncConfig === 'function') ? store.getSyncConfig() : {};
         const requestedName = String(
             opts.profileName
@@ -137,6 +151,7 @@
             const status = (typeof store.getSyncStatus === 'function') ? store.getSyncStatus() : null;
             return { ok: false, error: (status && status.lastError) || 'Connect failed.' };
         }
+        if (opts.markBustComplete) markConnectImportBustComplete();
         return { ok: true };
     }
 
@@ -151,7 +166,7 @@
             try {
                 const text = await file.text();
                 const parsed = JSON.parse(text);
-                const result = await applyConnectProfile(parsed);
+                const result = await applyConnectProfile(parsed, { requireLogin: true, markBustComplete: true });
                 if (!result.ok) {
                     alert(result.error || 'Failed to import connect.json.');
                     return;
@@ -280,10 +295,108 @@
 
         bar.append(
             mkBtn('🔑 Import connect.json', importConnectFileFromSettings),
-            mkBtn('🧷 Use bundled connect.json', useBundledConnectFromSettings),
             mkBtn('📄 Export connect.json', exportConnectFileFromSettings)
         );
         return bar;
+    }
+
+    function hasCompletedConnectImportBust() {
+        try {
+            return localStorage.getItem(CONNECT_IMPORT_BUST_KEY) === CONNECT_IMPORT_BUST_ID;
+        } catch (err) {
+            return false;
+        }
+    }
+
+    function markConnectImportBustComplete() {
+        try {
+            localStorage.setItem(CONNECT_IMPORT_BUST_KEY, CONNECT_IMPORT_BUST_ID);
+        } catch (err) { }
+    }
+
+    function forceDisconnectForConnectImportBust() {
+        const store = getStore();
+        if (!store) return;
+        if (typeof store.clearSyncConfig === 'function') {
+            store.clearSyncConfig({ disconnect: true });
+            return;
+        }
+        if (typeof store.setSyncConfig === 'function') {
+            store.setSyncConfig({ enabled: false, autoConnect: false }, { reconnect: true });
+        }
+    }
+
+    function showConnectImportBustGate() {
+        if (hasCompletedConnectImportBust() || document.getElementById('connect-import-bust-gate')) return;
+        forceDisconnectForConnectImportBust();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'connect-import-bust-gate';
+        overlay.className = 'connect-import-bust-gate';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-labelledby', 'connect-import-bust-title');
+
+        const panel = document.createElement('div');
+        panel.className = 'connect-import-bust-panel';
+
+        const title = document.createElement('h2');
+        title.id = 'connect-import-bust-title';
+        title.textContent = 'New connect.json required';
+
+        const detail = document.createElement('p');
+        detail.textContent = 'The campaign connection details were rotated. Import the latest connect.json from the DM before using these tools.';
+
+        const warning = document.createElement('p');
+        warning.className = 'connect-import-bust-warning';
+        warning.textContent = 'If your file does not include a shared login email and password, ask the DM for the latest file.';
+
+        const status = document.createElement('div');
+        status.className = 'connect-import-bust-status';
+        status.textContent = 'Waiting for import.';
+
+        const importBtn = document.createElement('button');
+        importBtn.type = 'button';
+        importBtn.className = 'hero-btn connect-import-bust-btn';
+        importBtn.textContent = 'Import latest connect.json';
+        importBtn.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'application/json,.json';
+            input.onchange = async (event) => {
+                const target = event && event.target ? event.target : null;
+                const file = target && target.files && target.files[0] ? target.files[0] : null;
+                if (!file) return;
+                importBtn.disabled = true;
+                status.textContent = 'Checking connect.json...';
+                status.classList.remove('is-error');
+                try {
+                    const parsed = JSON.parse(await file.text());
+                    const result = await applyConnectProfile(parsed, { requireLogin: true, markBustComplete: true });
+                    if (!result.ok) {
+                        status.textContent = result.error || 'Failed to import connect.json.';
+                        status.classList.add('is-error');
+                        importBtn.disabled = false;
+                        return;
+                    }
+                    status.textContent = 'Connected. Reloading with the new details...';
+                    document.body.classList.remove('connect-import-bust-locked');
+                    overlay.remove();
+                    window.location.reload();
+                } catch (err) {
+                    status.textContent = 'Invalid connect.json file. Ask the DM for the latest file and try again.';
+                    status.classList.add('is-error');
+                    importBtn.disabled = false;
+                }
+            };
+            input.click();
+        });
+
+        panel.append(title, detail, warning, importBtn, status);
+        overlay.appendChild(panel);
+        document.body.classList.add('connect-import-bust-locked');
+        document.body.appendChild(overlay);
+        importBtn.focus();
     }
 
     function hasConfiguredSync(config) {
@@ -1241,5 +1354,6 @@
 
     header.classList.add('has-player-nav');
     setupHeroMenu();
+    showConnectImportBustGate();
     header.dataset.playerNavReady = '1';
 })();
