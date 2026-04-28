@@ -2270,6 +2270,31 @@ async function pushSyncNow() {
     }
 }
 
+async function publishCanonicalSyncState() {
+    if (!window.RTF_STORE || typeof window.RTF_STORE.publishCanonicalState !== 'function') {
+        alert('Canonical publish is unavailable in this build.');
+        return;
+    }
+    const proceed = confirm(
+        'Save this browser as the canonical Supabase campaign state?\n\n'
+        + 'This intentionally overwrites newer shared campaign rows with the state currently loaded in this browser. '
+        + 'Board/VTT live rooms use their own recovery tools.'
+    );
+    if (!proceed) return;
+
+    setQuickStatus('publishing this browser as canonical...');
+    const result = await window.RTF_STORE.publishCanonicalState({ explicit: true });
+    if (!result || !result.ok) {
+        const status = window.RTF_STORE.getSyncStatus ? window.RTF_STORE.getSyncStatus() : null;
+        alert((result && result.error) || (status && status.lastError) || 'Canonical publish failed.');
+        setQuickStatus('canonical publish failed.');
+        return;
+    }
+
+    setQuickStatus(`canonical state saved to Supabase at rev ${result.revision || 0}.`);
+    alert(`This browser is now canonical in Supabase (rev ${result.revision || 0}).`);
+}
+
 async function anonymousSignIn() {
     if (!window.RTF_STORE) return;
     const profile = (document.getElementById('sync-profile').value || '').trim();

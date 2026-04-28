@@ -152,7 +152,9 @@ Then click:
 - `Save Config`
 - `Connect`
 
-Use `Pull Latest` and `Push Now` for manual control. Non-Yjs campaign pages show `Editing` while local edits are pending, then auto-sync after 3 seconds of inactivity. Board/VTT Yjs collaboration still uses its room-specific snapshot timing.
+Use `Pull Latest` and `Push Now` for manual control. Non-Yjs campaign pages show `Editing` while local edits are pending, then auto-sync after 8 seconds of inactivity. Board/VTT collaboration uses Yjs for live traffic; Supabase room writes are slower checkpoints for restoring state between sessions, with final flushes on hide/unload/manual save.
+
+DM/GM mode also includes **Save This State as Canonical**. Use it only when this browser should overwrite the shared campaign state in Supabase, such as after resolving stale local data by inspection. Board/VTT live rooms are separate checkpoint rows; use **Board Recovery** to promote a browser mirror or restore room snapshots.
 
 ## 6. `connect.json` Workflow (Recommended For Players)
 

@@ -4,6 +4,7 @@
     const LEGACY_BOARD_KEY = 'invBoardData';
     const DIRTY_SCOPES_KEY = 'ravnica_sync_dirty_scopes_v1';
     const SCOPE_BASELINES_KEY = 'ravnica_sync_scope_baselines_v1';
+    const LAST_PULLED_REMOTE_KEY = 'ravnica_sync_last_pulled_remote_v1';
     const VTT_NPC_REFRESH_META_KEY = 'rtf_vtt_npc_refresh_meta_v1';
 
     const SYNC_CONFIG_KEY = 'ravnica_sync_config_v1';
@@ -314,13 +315,16 @@
         normalizedLocationsTable: 'rtf_campaign_locations',
         normalizedRequisitionsTable: 'rtf_campaign_requisitions',
         normalizedEncountersTable: 'rtf_campaign_encounters',
-        syncDelayMs: 1000,
-        reconcileIntervalMs: 60000,
-        presenceHeartbeatMs: 3000,
-        lockTtlMs: 20000
+        syncDelayMs: 30000,
+        reconcileIntervalMs: 180000,
+        presenceHeartbeatMs: 15000,
+        lockTtlMs: 45000
     };
     const AUTO_SYNC_BOOT_DELAY_MS = 180;
-    const NON_YJS_AUTO_SAVE_DELAY_MS = 3000;
+    const NON_YJS_AUTO_SAVE_DELAY_MS = 8000;
+    const NON_YJS_AUTO_SAVE_DELAY_LABEL = '8 seconds';
+    const FOREGROUND_PULL_MIN_INTERVAL_MS = 30000;
+    const NORMALIZED_REALTIME_PULL_DELAY_MS = 2000;
 
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
@@ -1974,6 +1978,58 @@
             return new Map();
         }
     };
+    const buildLastPulledRemoteScopeKey = (config) => {
+        const clean = sanitizeSyncConfig(config);
+        if (!clean.supabaseUrl || !clean.campaignId) return '';
+        const mode = clean.backendMode || SYNC_BACKEND_LEGACY;
+        const tableToken = mode === SYNC_BACKEND_NORMALIZED
+            ? [
+                clean.normalizedCoreTable,
+                clean.normalizedHQTable,
+                clean.normalizedCaseStateTable,
+                clean.normalizedCaseEventsTable,
+                clean.normalizedScopeVersionsTable,
+                clean.normalizedPlayersTable,
+                clean.normalizedNPCsTable,
+                clean.normalizedLocationsTable,
+                clean.normalizedRequisitionsTable,
+                clean.normalizedEncountersTable
+            ].join(',')
+            : clean.tableName;
+        return [
+            clean.supabaseUrl.replace(/\/+$/, ''),
+            clean.schema,
+            mode,
+            clean.campaignId,
+            tableToken
+        ].join('|');
+    };
+    const sanitizeLastPulledRemoteRecord = (value) => {
+        if (!value || typeof value !== 'object') return null;
+        return {
+            revision: toNonNegativeInt(value.revision, 0),
+            pulledAt: toTimestamp(value.pulledAt, 0),
+            remoteUpdatedAt: toTimestamp(value.remoteUpdatedAt, 0),
+            remoteUpdatedAtRaw: typeof value.remoteUpdatedAtRaw === 'string' ? value.remoteUpdatedAtRaw : '',
+            remoteUpdatedBy: typeof value.remoteUpdatedBy === 'string' ? value.remoteUpdatedBy : '',
+            remoteUpdatedByName: typeof value.remoteUpdatedByName === 'string' ? value.remoteUpdatedByName : '',
+            backendMode: typeof value.backendMode === 'string' ? value.backendMode : ''
+        };
+    };
+    const parseStoredLastPulledRemote = (config) => {
+        try {
+            const scopeKey = buildLastPulledRemoteScopeKey(config);
+            if (!scopeKey) return null;
+            const raw = localStorage.getItem(LAST_PULLED_REMOTE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            return sanitizeLastPulledRemoteRecord(parsed[scopeKey]);
+        } catch (err) {
+            console.warn('RTF_STORE: Failed to parse last pulled remote cache', err);
+            return null;
+        }
+    };
 
     const readJsonStorage = (key, fallback = null) => {
         try {
@@ -2541,10 +2597,10 @@
             normalizedLocationsTable: sanitizeIdentifier(source.normalizedLocationsTable, DEFAULT_SYNC_CONFIG.normalizedLocationsTable),
             normalizedRequisitionsTable: sanitizeIdentifier(source.normalizedRequisitionsTable, DEFAULT_SYNC_CONFIG.normalizedRequisitionsTable),
             normalizedEncountersTable: sanitizeIdentifier(source.normalizedEncountersTable, DEFAULT_SYNC_CONFIG.normalizedEncountersTable),
-            syncDelayMs: Math.max(1000, toNonNegativeInt(source.syncDelayMs, DEFAULT_SYNC_CONFIG.syncDelayMs) || DEFAULT_SYNC_CONFIG.syncDelayMs),
-            reconcileIntervalMs: Math.max(60000, toNonNegativeInt(source.reconcileIntervalMs, DEFAULT_SYNC_CONFIG.reconcileIntervalMs) || DEFAULT_SYNC_CONFIG.reconcileIntervalMs),
-            presenceHeartbeatMs: Math.max(3000, toNonNegativeInt(source.presenceHeartbeatMs, DEFAULT_SYNC_CONFIG.presenceHeartbeatMs) || DEFAULT_SYNC_CONFIG.presenceHeartbeatMs),
-            lockTtlMs: Math.max(5000, toNonNegativeInt(source.lockTtlMs, DEFAULT_SYNC_CONFIG.lockTtlMs) || DEFAULT_SYNC_CONFIG.lockTtlMs)
+            syncDelayMs: Math.max(8000, toNonNegativeInt(source.syncDelayMs, DEFAULT_SYNC_CONFIG.syncDelayMs) || DEFAULT_SYNC_CONFIG.syncDelayMs),
+            reconcileIntervalMs: Math.max(120000, toNonNegativeInt(source.reconcileIntervalMs, DEFAULT_SYNC_CONFIG.reconcileIntervalMs) || DEFAULT_SYNC_CONFIG.reconcileIntervalMs),
+            presenceHeartbeatMs: Math.max(10000, toNonNegativeInt(source.presenceHeartbeatMs, DEFAULT_SYNC_CONFIG.presenceHeartbeatMs) || DEFAULT_SYNC_CONFIG.presenceHeartbeatMs),
+            lockTtlMs: Math.max(15000, toNonNegativeInt(source.lockTtlMs, DEFAULT_SYNC_CONFIG.lockTtlMs) || DEFAULT_SYNC_CONFIG.lockTtlMs)
         };
     };
 
@@ -2595,6 +2651,7 @@
         constructor() {
             this.state = deepClone(DEFAULT_STATE);
             const coercedSyncConfig = coerceAutoConnectBackendMode(getMergedSyncConfig());
+            const storedLastPulledRemote = parseStoredLastPulledRemote(coercedSyncConfig.config);
 
             this.sync = {
                 config: coercedSyncConfig.config,
@@ -2611,9 +2668,10 @@
                 normalizedPullTimer: null,
                 normalizedPendingScopes: new Set(),
                 normalizedPendingScopeMeta: new Map(),
-                lastRemoteSeenAt: 0,
+                lastRemoteSeenAt: storedLastPulledRemote ? toTimestamp(storedLastPulledRemote.remoteUpdatedAt, 0) : 0,
                 lastPushAt: 0,
-                lastPullAt: 0,
+                lastPullAt: storedLastPulledRemote ? toTimestamp(storedLastPulledRemote.pulledAt, 0) : 0,
+                lastPulledRemote: storedLastPulledRemote,
                 userId: '',
                 authCheckedAt: 0,
                 authPromise: null,
@@ -2622,7 +2680,7 @@
                 localDirtyScopes: new Set(parseStoredDirtyScopes()),
                 scopeBaselines: parseStoredScopeBaselines(),
                 lastSyncedState: sanitizeState(this.state),
-                lastKnownRemoteRevision: 0,
+                lastKnownRemoteRevision: storedLastPulledRemote ? toNonNegativeInt(storedLastPulledRemote.revision, 0) : 0,
                 pendingConflict: null,
                 localSoftLocks: new Map(),
                 remoteSoftLocks: new Map(),
@@ -2657,10 +2715,11 @@
                 userId: '',
                 pendingPush: false,
                 lastPushAt: null,
-                lastPullAt: null,
+                lastPullAt: storedLastPulledRemote ? toTimestamp(storedLastPulledRemote.pulledAt, 0) : null,
                 lastError: '',
                 localRevision: 0,
-                remoteRevision: 0,
+                remoteRevision: storedLastPulledRemote ? toNonNegativeInt(storedLastPulledRemote.revision, 0) : 0,
+                lastPulledRemoteRevision: storedLastPulledRemote ? toNonNegativeInt(storedLastPulledRemote.revision, 0) : 0,
                 revisionMode: 'optimistic',
                 dirtyScopes: 0,
                 presencePeers: 0,
@@ -2775,8 +2834,7 @@
         scheduleForegroundPull(reason = 'foreground') {
             if (!this.hasLiveSyncConnection()) return;
             const now = Date.now();
-            const minInterval = 2000;
-            if (now - toTimestamp(this.sync.lastForegroundPullAt, 0) < minInterval) return;
+            if (now - toTimestamp(this.sync.lastForegroundPullAt, 0) < FOREGROUND_PULL_MIN_INTERVAL_MS) return;
             this.sync.lastForegroundPullAt = now;
             this.pullFromCloud({
                 force: false,
@@ -2809,6 +2867,48 @@
             } catch (err) {
                 console.warn('RTF_STORE: Failed to persist scope baselines cache', err);
             }
+        }
+
+        persistLastPulledRemote(remoteRow, options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const revision = toNonNegativeInt(
+                opts.revision !== undefined ? opts.revision : (remoteRow && remoteRow.revision),
+                0
+            );
+            const remoteUpdatedAt = toTimestamp(
+                opts.remoteUpdatedAt !== undefined ? opts.remoteUpdatedAt : (remoteRow && remoteRow.updatedAt),
+                0
+            );
+            const pulledAt = toTimestamp(opts.pulledAt, Date.now());
+            if (!revision && !remoteUpdatedAt) return null;
+
+            const record = {
+                revision,
+                pulledAt,
+                remoteUpdatedAt,
+                remoteUpdatedAtRaw: typeof (remoteRow && remoteRow.updatedAtRaw) === 'string' ? remoteRow.updatedAtRaw : '',
+                remoteUpdatedBy: toTrimmedString(remoteRow && remoteRow.updatedBy, '', 120),
+                remoteUpdatedByName: toTrimmedString(remoteRow && remoteRow.updatedByName, '', 120),
+                backendMode: this.sync.config && this.sync.config.backendMode ? this.sync.config.backendMode : ''
+            };
+            const scopeKey = buildLastPulledRemoteScopeKey(this.sync.config);
+            if (!scopeKey) return record;
+
+            try {
+                const raw = localStorage.getItem(LAST_PULLED_REMOTE_KEY);
+                const parsed = raw ? JSON.parse(raw) : {};
+                const payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+                payload[scopeKey] = record;
+                localStorage.setItem(LAST_PULLED_REMOTE_KEY, JSON.stringify(payload));
+            } catch (err) {
+                console.warn('RTF_STORE: Failed to persist last pulled remote cache', err);
+            }
+
+            this.sync.lastPulledRemote = record;
+            this.sync.lastPullAt = pulledAt;
+            this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, revision);
+            if (remoteUpdatedAt > this.sync.lastRemoteSeenAt) this.sync.lastRemoteSeenAt = remoteUpdatedAt;
+            return record;
         }
 
         getScopeBaseline(scopeToken) {
@@ -3642,7 +3742,10 @@
                     this.clearLocalDirtyScopes(seededScopes.length ? seededScopes : 'campaign');
                 }
                 this.sync.lastSyncedState = sanitizeState(this.state);
-                this.sync.lastKnownRemoteRevision = toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0);
+                this.sync.lastKnownRemoteRevision = Math.max(
+                    toNonNegativeInt(this.sync.lastKnownRemoteRevision, 0),
+                    toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0)
+                );
                 if (this.isNormalizedReadMode()
                     && (!this.sync.localDirtyScopes || !this.sync.localDirtyScopes.size)
                     && (!this.sync.scopeBaselines || !this.sync.scopeBaselines.size)) {
@@ -3850,7 +3953,7 @@
                             mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                             connected: this.hasLiveSyncConnection(),
                             message: this.sync.userId
-                                ? 'Editing. Autosave will run after 3 seconds of inactivity.'
+                                ? `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL} of inactivity.`
                                 : this.syncStatus.message
                         });
                     }
@@ -3991,6 +4094,7 @@
             this.sync.lastRemoteSeenAt = 0;
             this.sync.lastPushAt = 0;
             this.sync.lastPullAt = 0;
+            this.sync.lastPulledRemote = null;
             this.sync.pendingConflict = null;
             this.sync.localSoftLocks = new Map();
             this.sync.remoteSoftLocks = new Map();
@@ -4004,6 +4108,7 @@
                 CLOCKS_STORAGE_KEY,
                 DIRTY_SCOPES_KEY,
                 SCOPE_BASELINES_KEY,
+                LAST_PULLED_REMOTE_KEY,
                 HEAT_SYNC_KEY,
                 HQ_LOCAL_STORAGE_KEY,
                 AUTO_CONNECT_CANCEL_KEY
@@ -4054,6 +4159,13 @@
             const next = coerceAutoConnectBackendMode(sanitized).config;
 
             this.sync.config = next;
+            this.sync.lastPulledRemote = parseStoredLastPulledRemote(next);
+            this.sync.lastPullAt = this.sync.lastPulledRemote ? toTimestamp(this.sync.lastPulledRemote.pulledAt, 0) : 0;
+            this.sync.lastRemoteSeenAt = this.sync.lastPulledRemote ? toTimestamp(this.sync.lastPulledRemote.remoteUpdatedAt, 0) : 0;
+            this.sync.lastKnownRemoteRevision = Math.max(
+                toNonNegativeInt(this.state && this.state.meta && this.state.meta.syncRevision, 0),
+                this.sync.lastPulledRemote ? toNonNegativeInt(this.sync.lastPulledRemote.revision, 0) : 0
+            );
             try {
                 localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(next));
             } catch (err) {
@@ -4064,7 +4176,12 @@
                 enabled: next.enabled,
                 campaignId: next.campaignId,
                 profileName: next.profileName,
-                backendMode: next.backendMode
+                backendMode: next.backendMode,
+                lastPullAt: this.sync.lastPullAt || null,
+                remoteRevision: this.sync.lastKnownRemoteRevision,
+                lastPulledRemoteRevision: this.sync.lastPulledRemote
+                    ? toNonNegativeInt(this.sync.lastPulledRemote.revision, 0)
+                    : 0
             });
             if (this.hasLiveSyncConnection()) this.startReconcileLoop();
 
@@ -4102,6 +4219,9 @@
 
             this.sync.config = sanitizeSyncConfig(DEFAULT_SYNC_CONFIG);
             this.sync.pendingConflict = null;
+            this.sync.lastPulledRemote = null;
+            this.sync.lastPullAt = 0;
+            this.sync.lastKnownRemoteRevision = toNonNegativeInt(this.state && this.state.meta && this.state.meta.syncRevision, 0);
             this.updateSyncStatus({
                 mode: 'disabled',
                 enabled: false,
@@ -4109,6 +4229,8 @@
                 campaignId: '',
                 profileName: '',
                 backendMode: this.sync.config.backendMode,
+                lastPullAt: null,
+                lastPulledRemoteRevision: 0,
                 message: 'Cloud sync is disabled.'
             });
 
@@ -4155,6 +4277,7 @@
                 connected: this.hasLiveSyncConnection(),
                 localRevision: toNonNegativeInt(this.state && this.state.meta ? this.state.meta.syncRevision : 0, 0),
                 remoteRevision: toNonNegativeInt(this.sync.lastKnownRemoteRevision, 0),
+                lastPulledRemoteRevision: toNonNegativeInt(this.sync.lastPulledRemote && this.sync.lastPulledRemote.revision, 0),
                 dirtyScopes: this.sync.localDirtyScopes ? this.sync.localDirtyScopes.size : 0,
                 presencePeers: this.sync.remotePeers ? this.sync.remotePeers.size : 0,
                 activeRemoteLocks: this.sync.remoteSoftLocks ? this.sync.remoteSoftLocks.size : 0,
@@ -4480,7 +4603,7 @@
                 }).catch(() => {
                     this.pullFromCloud({ force: false, silent: true }).catch(() => { });
                 });
-            }, 350);
+            }, NORMALIZED_REALTIME_PULL_DELAY_MS);
         }
 
         async fetchNormalizedSingle(tableName) {
@@ -5723,6 +5846,16 @@
                     revision: conflict.remoteRevision,
                     force: true
                 });
+                if (applied) {
+                    this.persistLastPulledRemote({
+                        state: conflict.remoteState,
+                        revision: conflict.remoteRevision,
+                        updatedAt: conflict.remoteUpdatedAt,
+                        updatedAtRaw: conflict.remoteUpdatedAtRaw,
+                        updatedBy: conflict.remoteUpdatedBy,
+                        updatedByName: conflict.remoteUpdatedByName
+                    });
+                }
                 this.clearLocalDirtyScopes();
                 this.clearPendingConflict({ message: 'Accepted remote state.' });
                 return { ok: true, action, applied };
@@ -5756,6 +5889,68 @@
             }
 
             return { ok: false, reason: 'unknown-action' };
+        }
+
+        async publishCanonicalState(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const silent = !!opts.silent;
+            const access = await this.ensureCloudAccess({
+                explicit: opts.explicit === true,
+                silent,
+                requirePageSync: opts.requirePageSync === true
+            });
+            if (!access.ok) {
+                return { ok: false, reason: access.reason || 'not-connected', error: access.error || '' };
+            }
+            if (this.sync.pushInFlight) {
+                this.updateSyncStatus({ pendingPush: true });
+                return { ok: false, reason: 'busy', error: 'A cloud push is already running.' };
+            }
+
+            this.cancelCloudPush();
+
+            const fetched = await this.fetchCloudRow({ silent: true });
+            if (!fetched.ok) return fetched;
+
+            const remoteRow = fetched.row || null;
+            const remoteRevision = remoteRow ? toNonNegativeInt(remoteRow.revision, 0) : 0;
+            if (remoteRow && remoteRow.state) {
+                this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, remoteRevision);
+                this.sync.lastCloudStateSig = JSON.stringify(stripLocalOnlyFieldsForCloud(remoteRow.state));
+                this.sync.lastSyncedState = sanitizeState(remoteRow.state);
+            }
+
+            const scopes = [SYNC_SCOPE_GLOBAL];
+            this.markLocalDirtyScopes(scopes, Date.now());
+            const pushed = await this.pushToCloud({
+                reason: 'canonical-publish',
+                silent,
+                explicit: opts.explicit === true,
+                requirePageSync: opts.requirePageSync === true,
+                force: true,
+                baseRevision: remoteRevision,
+                scopes,
+                attempt: 0
+            });
+
+            if (pushed && pushed.ok) {
+                this.clearLocalDirtyScopes();
+                this.clearPendingConflict({ keepStatus: true });
+                this.updateSyncStatus({
+                    mode: 'ready',
+                    connected: this.hasLiveSyncConnection(),
+                    pendingPush: false,
+                    message: 'This browser state is now canonical in Supabase.',
+                    lastError: ''
+                });
+                return {
+                    ok: true,
+                    revision: toNonNegativeInt(pushed.revision, this.sync.lastKnownRemoteRevision),
+                    previousRevision: remoteRevision
+                };
+            }
+
+            return pushed || { ok: false, reason: 'error', error: 'Canonical publish failed.' };
         }
 
         async loadSupabaseLibrary() {
@@ -7846,7 +8041,9 @@
                 clearPendingConflict: false,
                 schedulePush: !!dirtyScopes.length
             });
-            this.sync.lastPullAt = Date.now();
+            const pulledAt = Date.now();
+            this.persistLastPulledRemote(remoteRow, { pulledAt });
+            this.sync.lastPullAt = pulledAt;
             this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, toNonNegativeInt(remoteRow.revision, 0));
             if (applied) {
                 this.updateSyncStatus({
@@ -7871,7 +8068,7 @@
                     connected: this.hasLiveSyncConnection(),
                     mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                     message: this.sync.userId
-                        ? 'Editing. Autosave will run after 3 seconds of inactivity.'
+                        ? `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL} of inactivity.`
                         : this.syncStatus.message
                 });
                 return;
@@ -7981,8 +8178,8 @@
                 pendingPush: true,
                 mode: 'editing',
                 message: isYjsCollabPage()
-                    ? 'Saving board collaboration snapshot.'
-                    : 'Editing. Autosave will run after 3 seconds of inactivity.'
+                    ? 'Live collaboration is active. Supabase checkpoint will save after a pause.'
+                    : `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL} of inactivity.`
             });
         }
 
@@ -8952,6 +9149,11 @@
 
             const remoteUpdatedAt = toTimestamp(row.updatedAt, 0);
             const remoteRevision = toNonNegativeInt(row.revision, 0);
+            const markPulled = () => this.persistLastPulledRemote(row, {
+                revision: remoteRevision,
+                remoteUpdatedAt,
+                pulledAt: Date.now()
+            });
             const localRevision = toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0);
             const localUpdatedAt = toTimestamp(this.state.meta.updated, 0);
             const hasLocalDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
@@ -8989,6 +9191,7 @@
                     }
 
                     if (shouldApplyResolution) {
+                        markPulled();
                         this.sync.lastPullAt = Date.now();
                         return {
                             ok: true,
@@ -9011,6 +9214,7 @@
                         scopeMeta: row.scopeMeta || null
                     });
                     if (appliedStale) {
+                        markPulled();
                         this.sync.lastPullAt = Date.now();
                         this.updateSyncStatus({
                             lastPullAt: this.sync.lastPullAt,
@@ -9029,6 +9233,7 @@
                     return { ok: false, reason: 'conflict', conflict: this.getPendingConflict() };
                 }
                 this.adoptMergedConflictState(conflict, 'auto-merge-pull');
+                markPulled();
                 this.sync.lastPullAt = Date.now();
                 return { ok: true, reason: 'merged', applied: false, merged: true };
             }
@@ -9038,6 +9243,7 @@
                 if (hasLocalDirty && (localRevision > remoteRevision || localUpdatedAt > remoteUpdatedAt)) {
                     this.scheduleCloudPush('catch-up');
                 }
+                markPulled();
                 this.sync.lastPullAt = Date.now();
                 this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, remoteRevision);
                 this.updateSyncStatus({
@@ -9059,6 +9265,7 @@
             });
 
             if (applied) {
+                markPulled();
                 this.sync.lastPullAt = Date.now();
                 this.updateSyncStatus({
                     lastPullAt: this.sync.lastPullAt,

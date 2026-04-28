@@ -15,9 +15,9 @@ const DEFAULT_CASE_NAME = 'UNNAMED CASE';
 const DEFAULT_CAMPAIGN_NAME = 'CAMPAIGN META BOARD';
 const CURSOR_PRECISION = 10;
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 8000;
-const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 30000;
-const HISTORY_CAPTURE_MIN_INTERVAL_MS = 12000;
+const CLOUD_FLUSH_DELAY_MS = 30000;
+const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
+const HISTORY_CAPTURE_MIN_INTERVAL_MS = 300000;
 const BOARD_ADMIN_EVENT_APPLY_SNAPSHOT = 'admin-apply-snapshot';
 const BOARD_ADMIN_EVENT_BUST = 'admin-bust';
 const BOARD_SYNC_EVENT_REQUEST_SNAPSHOT = 'board-snapshot-request';
@@ -1435,6 +1435,7 @@ class BoardCollabSession {
             ...opts
         };
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
+        const delayMs = (opts.forceCompatibilityMirror || opts.forceHistory) ? 0 : CLOUD_FLUSH_DELAY_MS;
         this.pendingFlushTimer = setTimeout(() => {
             const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
                 ? { ...this.pendingFlushOptions }
@@ -1444,7 +1445,7 @@ class BoardCollabSession {
             this.flushSnapshotNow(pendingOpts).catch((err) => {
                 console.warn('RTF_BOARD_COLLAB: Scheduled flush failed', err);
             });
-        }, CLOUD_FLUSH_DELAY_MS);
+        }, delayMs);
     }
 
     shouldMirrorCompatibilityCloud(force = false) {

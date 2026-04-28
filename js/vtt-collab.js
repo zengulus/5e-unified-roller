@@ -11,9 +11,9 @@ import * as decoding from './vendor/lib0/decoding.js';
 import { createCollabRelayChannel } from './collab-relay-client.js';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 8000;
+const CLOUD_FLUSH_DELAY_MS = 30000;
 const SYNC_RECONCILE_INTERVAL_MS = 15000;
-const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 30000;
+const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
@@ -2166,6 +2166,7 @@ class VTTCollabSession {
             ...opts
         };
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
+        const delayMs = opts.forceCompatibilityMirror ? 0 : CLOUD_FLUSH_DELAY_MS;
         this.pendingFlushTimer = setTimeout(() => {
             const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
                 ? { ...this.pendingFlushOptions }
@@ -2175,7 +2176,7 @@ class VTTCollabSession {
             this.flushSnapshotNow(pendingOpts).catch((err) => {
                 console.warn('RTF_VTT_COLLAB: Delayed cloud flush failed', err);
             });
-        }, CLOUD_FLUSH_DELAY_MS);
+        }, delayMs);
     }
 
     shouldMirrorCompatibilityCloud(force = false) {
@@ -2408,6 +2409,7 @@ class VTTCollabSession {
 
     handleVisibilityChange() {
         if (document.hidden) {
+            if (this.isDirty) this.scheduleCloudFlush({ forceCompatibilityMirror: true });
             return;
         } else if (!this.connected) {
             this.scheduleReconnect('Rejoining live VTT...');
