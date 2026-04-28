@@ -315,7 +315,7 @@
     const getTokenImageRenderUrl = (token) => {
         if (!token) return '';
         const retryKey = tokenImageRetryKeys.get(String(token.id || '').trim()) || '';
-        return getUsableMediaUrl(appendTokenImageRetryKey(token.imageUrl, retryKey));
+        return getUsableMediaUrl(appendTokenImageRetryKey(getCanonicalTokenImageUrl(token), retryKey));
     };
     const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
     const randomIntInclusive = (min, max) => {
@@ -2495,6 +2495,19 @@
         return null;
     };
 
+    const getRosterPlayerImageUrlForToken = (token) => {
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        if (!rosterPlayer) return null;
+        return toSharedTokenImageUrl(rosterPlayer.imageUrl);
+    };
+
+    const getCanonicalTokenImageUrl = (token) => {
+        if (!token) return '';
+        const rosterImageUrl = getRosterPlayerImageUrlForToken(token);
+        if (rosterImageUrl !== null) return rosterImageUrl;
+        return String(token.imageUrl || '').trim();
+    };
+
     const syncTokenRosterIdentity = (token, player) => {
         if (!token || !player) return false;
         const nextLabel = String(player.name || 'Player').trim() || 'Player';
@@ -3234,7 +3247,7 @@
         name: token.label,
         linkedTokenId: token.id,
         side: token.side,
-        imageUrl: token.imageUrl || '',
+        imageUrl: getCanonicalTokenImageUrl(token),
         sourceType: token.sourceType || entry.sourceType || '',
         sourceId: token.sourceId || entry.sourceId || '',
         hpCurrent: token.hpCurrent,
@@ -3252,7 +3265,7 @@
         name: token.label,
         linkedTokenId: token.id,
         side: token.side,
-        imageUrl: token.imageUrl || '',
+        imageUrl: getCanonicalTokenImageUrl(token),
         sourceType: token.sourceType || '',
         sourceId: token.sourceId || '',
         total: 0,
@@ -3404,7 +3417,7 @@
             ...entry,
             linkedTokenId: token.id,
             side: token.side || entry.side || 'neutral',
-            imageUrl: token.imageUrl || entry.imageUrl || '',
+            imageUrl: getCanonicalTokenImageUrl(token) || entry.imageUrl || '',
             sourceType: token.sourceType || entry.sourceType || '',
             sourceId: token.sourceId || entry.sourceId || '',
             hidden: !!token.hidden
@@ -3688,7 +3701,7 @@
         if (!visibleClocks.some((clock) => clock.id === selectedClockId)) {
             selectedClockId = '';
         }
-        if (!tokens.some((token) => token.id === previewTokenId && token.imageUrl)) {
+        if (!tokens.some((token) => token.id === previewTokenId && getCanonicalTokenImageUrl(token))) {
             previewTokenId = '';
         }
         if (!isDM()) {
@@ -4786,7 +4799,7 @@
         const token = stageContextMenuState.tokenId ? getTokenById(stageContextMenuState.tokenId) : null;
         const note = stageContextMenuState.noteId ? getEvidenceNoteById(stageContextMenuState.noteId) : null;
         const canRoll = !!(token || !isDM());
-        const canPreview = !!(token && token.imageUrl);
+        const canPreview = !!getCanonicalTokenImageUrl(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
         stageContextMenuEl.hidden = false;
@@ -5594,7 +5607,7 @@
         const rosterPlayer = getRosterPlayerForRecord(token);
         const isRosterManagedPlayer = !!rosterPlayer;
         const imageUrlValue = isRosterManagedPlayer
-            ? String(rosterPlayer.imageUrl || token.imageUrl || '').trim()
+            ? String(rosterPlayer.imageUrl || '').trim()
             : String(token.imageUrl || '').trim();
         const supportsSightCone = !!(token && (token.side === 'enemy' || token.side === 'neutral'));
         const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
@@ -7088,7 +7101,7 @@
             const tokenId = stageContextMenuState ? String(stageContextMenuState.tokenId || '').trim() : '';
             closeStageContextMenu();
             const token = tokenId ? getTokenById(tokenId) : null;
-            previewTokenId = token && token.imageUrl && previewTokenId !== token.id ? token.id : '';
+            previewTokenId = token && getCanonicalTokenImageUrl(token) && previewTokenId !== token.id ? token.id : '';
             render();
             return;
         }
@@ -7351,7 +7364,7 @@
         if (action === 'token-retry-image') {
             selectedTokenId = id || selectedTokenId;
             const token = getTokenById(selectedTokenId);
-            const imageUrl = toImageUrl(actionEl.dataset.imageUrl || (token ? token.imageUrl : ''));
+            const imageUrl = toImageUrl(actionEl.dataset.imageUrl || getCanonicalTokenImageUrl(token));
             if (imageUrl && window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberSuccess === 'function') {
                 window.RTF_MEDIA_CACHE.rememberSuccess(imageUrl);
             }
@@ -8112,7 +8125,7 @@
                     name: packet.name,
                     linkedTokenId: linkedToken ? linkedToken.id : '',
                     side: linkedToken ? linkedToken.side : 'player',
-                    imageUrl: linkedToken ? linkedToken.imageUrl || '' : '',
+                    imageUrl: linkedToken ? getCanonicalTokenImageUrl(linkedToken) : '',
                     sourceType: packet.sourceType,
                     sourceId: packet.sourceId,
                     total: 0,
