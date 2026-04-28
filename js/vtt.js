@@ -172,6 +172,7 @@
     let templateExpiryTimer = 0;
     let pingExpiryTimer = 0;
     const tokenImageRetryKeys = new Map();
+    const playerImageUrlsAtLoad = new Map();
 
     const body = document.body;
     const stageEl = document.getElementById('vtt-stage');
@@ -314,7 +315,8 @@
     };
     const getTokenImageRenderUrl = (token) => {
         if (!token) return '';
-        const retryKey = tokenImageRetryKeys.get(String(token.id || '').trim()) || '';
+        const isRosterManagedPlayerToken = String(token && token.sourceType || '').trim() === 'player';
+        const retryKey = isRosterManagedPlayerToken ? '' : (tokenImageRetryKeys.get(String(token.id || '').trim()) || '');
         return getUsableMediaUrl(appendTokenImageRetryKey(getCanonicalTokenImageUrl(token), retryKey));
     };
     const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
@@ -2447,6 +2449,15 @@
         return getPlayers().find((player) => String(player && player.id || '') === targetId) || null;
     };
 
+    const capturePlayerImagesAtLoad = () => {
+        playerImageUrlsAtLoad.clear();
+        getPlayers().forEach((player) => {
+            const playerId = String(player && player.id || '').trim();
+            if (!playerId) return;
+            playerImageUrlsAtLoad.set(playerId, toSharedTokenImageUrl(player && player.imageUrl));
+        });
+    };
+
     const getNPCs = () => {
         const store = getStore();
         return store && typeof store.getNPCs === 'function' ? store.getNPCs() : [];
@@ -2496,9 +2507,10 @@
     };
 
     const getRosterPlayerImageUrlForToken = (token) => {
-        const rosterPlayer = getRosterPlayerForRecord(token);
-        if (!rosterPlayer) return null;
-        return toSharedTokenImageUrl(rosterPlayer.imageUrl);
+        if (String(token && token.sourceType || '').trim() !== 'player') return null;
+        const playerId = String(token && token.sourceId || '').trim();
+        if (!playerId || !playerImageUrlsAtLoad.has(playerId)) return '';
+        return playerImageUrlsAtLoad.get(playerId) || '';
     };
 
     const getCanonicalTokenImageUrl = (token) => {
@@ -2508,17 +2520,21 @@
         return String(token.imageUrl || '').trim();
     };
 
+    const getTokenMetadataImageUrl = (token) => {
+        if (String(token && token.sourceType || '').trim() === 'player') return '';
+        return String(token && token.imageUrl || '').trim();
+    };
+
     const syncTokenRosterIdentity = (token, player) => {
         if (!token || !player) return false;
         const nextLabel = String(player.name || 'Player').trim() || 'Player';
-        const nextImageUrl = toSharedTokenImageUrl(player.imageUrl);
         let mutated = false;
         if (token.label !== nextLabel) {
             token.label = nextLabel;
             mutated = true;
         }
-        if ((token.imageUrl || '') !== nextImageUrl) {
-            token.imageUrl = nextImageUrl;
+        if (token.imageUrl) {
+            token.imageUrl = '';
             mutated = true;
         }
         return mutated;
@@ -2527,14 +2543,13 @@
     const syncEntryRosterIdentity = (entry, player) => {
         if (!entry || !player) return false;
         const nextName = String(player.name || 'Player').trim() || 'Player';
-        const nextImageUrl = toSharedTokenImageUrl(player.imageUrl);
         let mutated = false;
         if (entry.name !== nextName) {
             entry.name = nextName;
             mutated = true;
         }
-        if ((entry.imageUrl || '') !== nextImageUrl) {
-            entry.imageUrl = nextImageUrl;
+        if (entry.imageUrl) {
+            entry.imageUrl = '';
             mutated = true;
         }
         if (entry.sourceType !== 'player') {
@@ -2822,7 +2837,7 @@
             id: buildId('token'),
             label: String(player && player.name || 'Player').trim() || 'Player',
             side: 'player',
-            imageUrl: toSharedTokenImageUrl(player && player.imageUrl),
+            imageUrl: '',
             x: 0,
             y: 0,
             w: 1,
@@ -3247,7 +3262,7 @@
         name: token.label,
         linkedTokenId: token.id,
         side: token.side,
-        imageUrl: getCanonicalTokenImageUrl(token),
+        imageUrl: getTokenMetadataImageUrl(token),
         sourceType: token.sourceType || entry.sourceType || '',
         sourceId: token.sourceId || entry.sourceId || '',
         hpCurrent: token.hpCurrent,
@@ -3265,7 +3280,7 @@
         name: token.label,
         linkedTokenId: token.id,
         side: token.side,
-        imageUrl: getCanonicalTokenImageUrl(token),
+        imageUrl: getTokenMetadataImageUrl(token),
         sourceType: token.sourceType || '',
         sourceId: token.sourceId || '',
         total: 0,
@@ -3417,7 +3432,7 @@
             ...entry,
             linkedTokenId: token.id,
             side: token.side || entry.side || 'neutral',
-            imageUrl: getCanonicalTokenImageUrl(token) || entry.imageUrl || '',
+            imageUrl: getTokenMetadataImageUrl(token) || (String(token.sourceType || '').trim() === 'player' ? '' : entry.imageUrl || ''),
             sourceType: token.sourceType || entry.sourceType || '',
             sourceId: token.sourceId || entry.sourceId || '',
             hidden: !!token.hidden
@@ -5700,7 +5715,7 @@
                     </label>
                 </div>
                 <div class="vtt-chip-row">
-                    <button class="vtt-chip-btn" data-action="token-retry-image" data-id="${escapeHtml(token.id)}" data-image-url="${escapeHtml(imageUrlValue)}"${imageUrlValue ? '' : ' disabled'}>Retry Image</button>
+                    <button class="vtt-chip-btn" data-action="token-retry-image" data-id="${escapeHtml(token.id)}" data-image-url="${escapeHtml(imageUrlValue)}"${imageUrlValue && !isRosterManagedPlayer ? '' : ' disabled'}>Retry Image</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="1">1x1</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="2">2x2</button>
                 </div>
@@ -7364,6 +7379,7 @@
         if (action === 'token-retry-image') {
             selectedTokenId = id || selectedTokenId;
             const token = getTokenById(selectedTokenId);
+            if (String(token && token.sourceType || '').trim() === 'player') return;
             const imageUrl = toImageUrl(actionEl.dataset.imageUrl || getCanonicalTokenImageUrl(token));
             if (imageUrl && window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberSuccess === 'function') {
                 window.RTF_MEDIA_CACHE.rememberSuccess(imageUrl);
@@ -8125,7 +8141,7 @@
                     name: packet.name,
                     linkedTokenId: linkedToken ? linkedToken.id : '',
                     side: linkedToken ? linkedToken.side : 'player',
-                    imageUrl: linkedToken ? getCanonicalTokenImageUrl(linkedToken) : '',
+                    imageUrl: linkedToken ? getTokenMetadataImageUrl(linkedToken) : '',
                     sourceType: packet.sourceType,
                     sourceId: packet.sourceId,
                     total: 0,
@@ -9126,6 +9142,7 @@
         bindEvents();
         loadRolePreference();
         loadUIPreferences();
+        capturePlayerImagesAtLoad();
         const initialSnapshot =
             readSharedVTTSnapshot({ syncRosterPresentation: false })
             || deepClone(store.getVTTState(getActiveCaseId()));
