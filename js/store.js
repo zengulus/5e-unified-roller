@@ -322,7 +322,8 @@
     };
     const AUTO_SYNC_BOOT_DELAY_MS = 180;
     const NON_YJS_AUTO_SAVE_DELAY_MS = 8000;
-    const NON_YJS_AUTO_SAVE_DELAY_LABEL = '8 seconds';
+    const NON_YJS_AUTO_SAVE_DELAY_LABEL = '8 seconds idle or 30 seconds active';
+    const NON_YJS_AUTO_SAVE_MAX_WAIT_MS = 30000;
     const FOREGROUND_PULL_MIN_INTERVAL_MS = 30000;
     const NORMALIZED_REALTIME_PULL_DELAY_MS = 2000;
 
@@ -2660,6 +2661,7 @@
                 clientKey: '',
                 instanceId: 'client_' + Math.random().toString(36).slice(2, 10),
                 pushTimer: null,
+                pushFirstDirtyAt: 0,
                 reconcileTimer: null,
                 presenceTimer: null,
                 presenceTrackingInFlight: false,
@@ -3953,7 +3955,7 @@
                             mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                             connected: this.hasLiveSyncConnection(),
                             message: this.sync.userId
-                                ? `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL} of inactivity.`
+                                ? `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`
                                 : this.syncStatus.message
                         });
                     }
@@ -4336,12 +4338,14 @@
             if (!this.sync.localDirtyScopes) this.sync.localDirtyScopes = new Set();
             if (scopes === null || scopes === undefined) {
                 this.sync.localDirtyScopes.clear();
+                this.sync.pushFirstDirtyAt = 0;
                 this.persistDirtyScopes();
                 return;
             }
             normalizeScopeList(scopes).forEach((scope) => {
                 this.sync.localDirtyScopes.delete(scope);
             });
+            if (!this.sync.localDirtyScopes.size) this.sync.pushFirstDirtyAt = 0;
             this.persistDirtyScopes();
         }
 
@@ -8068,16 +8072,23 @@
                     connected: this.hasLiveSyncConnection(),
                     mode: this.sync.config.enabled ? 'idle' : this.syncStatus.mode,
                     message: this.sync.userId
-                        ? `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL} of inactivity.`
+                        ? `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`
                         : this.syncStatus.message
                 });
                 return;
             }
 
+            const now = Date.now();
+            if (!this.sync.pushFirstDirtyAt || !(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size)) {
+                this.sync.pushFirstDirtyAt = now;
+            }
             if (this.sync.pushTimer) clearTimeout(this.sync.pushTimer);
-            const pushDelayMs = isYjsCollabPage()
+            const baseDelayMs = isYjsCollabPage()
                 ? this.sync.config.syncDelayMs
                 : NON_YJS_AUTO_SAVE_DELAY_MS;
+            const firstDirtyAt = toTimestamp(this.sync.pushFirstDirtyAt, now);
+            const maxWaitMs = isYjsCollabPage() ? baseDelayMs : NON_YJS_AUTO_SAVE_MAX_WAIT_MS;
+            const pushDelayMs = Math.max(0, Math.min(baseDelayMs, maxWaitMs - (now - firstDirtyAt)));
             this.sync.pushTimer = setTimeout(() => {
                 this.sync.pushTimer = null;
 
@@ -8086,7 +8097,22 @@
                     silent: true,
                     requirePageSync: !this.hasLiveSyncConnection()
                 }).then((result) => {
-                    if (!result || result.ok !== false) return;
+                    if (!result || result.ok !== false) {
+                        const stillDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
+                        this.updateSyncStatus({
+                            mode: stillDirty ? 'editing' : 'ready',
+                            connected: this.hasLiveSyncConnection(),
+                            pendingPush: stillDirty,
+                            message: stillDirty
+                                ? `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`
+                                : 'Cloud sync updated.',
+                            lastError: ''
+                        });
+                        if (stillDirty && !this.sync.pushInFlight && !this.sync.pushTimer) {
+                            this.scheduleCloudPush('post-push-dirty');
+                        }
+                        return;
+                    }
 
                     const stillDirty = !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size);
                     const reasonText = String(result.reason || 'error');
@@ -8179,7 +8205,7 @@
                 mode: 'editing',
                 message: isYjsCollabPage()
                     ? 'Live collaboration is active. Supabase checkpoint will save after a pause.'
-                    : `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL} of inactivity.`
+                    : `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`
             });
         }
 
@@ -8187,6 +8213,9 @@
             if (this.sync.pushTimer) {
                 clearTimeout(this.sync.pushTimer);
                 this.sync.pushTimer = null;
+            }
+            if (!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size)) {
+                this.sync.pushFirstDirtyAt = 0;
             }
             this.updateSyncStatus({ pendingPush: false });
         }
