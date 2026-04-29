@@ -302,10 +302,17 @@
 
     function hasCompletedConnectImportBust() {
         try {
-            return localStorage.getItem(CONNECT_IMPORT_BUST_KEY) === CONNECT_IMPORT_BUST_ID;
+            if (localStorage.getItem(CONNECT_IMPORT_BUST_KEY) === CONNECT_IMPORT_BUST_ID) return true;
         } catch (err) {
-            return false;
+            // Fall through to the saved config check below.
         }
+        const store = getStore();
+        const config = store && typeof store.getSyncConfig === 'function'
+            ? store.getSyncConfig()
+            : null;
+        const loginEmail = String(config && config.loginEmail || '').trim();
+        const loginPassword = String(config && config.loginPassword || '');
+        return hasConfiguredSync(config) && !!loginEmail && !!loginPassword;
     }
 
     function markConnectImportBustComplete() {
