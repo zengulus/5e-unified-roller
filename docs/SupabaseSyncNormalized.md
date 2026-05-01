@@ -1,5 +1,7 @@
 # Supabase Sync: Hybrid Normalized Model
 
+> Legacy note: the app now forces the row-normalized v2 backend by default. Use `docs/SupabaseSyncRowsV2.sql` for new deployments. This document remains for the older payload-row backend and emergency legacy testing.
+
 This is an optional high-concurrency schema for teams that want better simultaneous editing than the current single-row `rtf_campaign_state` model.
 
 Current normalized client behavior is hybrid:

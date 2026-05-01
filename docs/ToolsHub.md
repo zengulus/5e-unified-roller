@@ -9,7 +9,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - **Campaign Pulse** – Workflow actions (`Start Next Case`, `Mark Resolved + Advance`, `Open Active Scope Board`) plus KPI cards for scope health and campaign pressure.
 - **Meta Surface Links** – Quick actions for `campaign-timeline.html` and `campaign-board.html`, alongside case-scoped timeline/board links.
 - **Cloud Connect Panel** – Player-facing import for `connect.json` plus a bundled-default shortcut so clients can join without manual key entry.
-- **Cloud Sync Panel (Secret Mode)** – Manual Supabase URL/key/campaign controls, export of `connect.json`, and admin pull/push actions. This panel is intentionally behind Alt+Shift secret mode.
+- **Cloud Sync Panel (Secret Mode)** – Manual Supabase URL/key/campaign controls, export of `connect.json`, and admin pull/push actions. Sync now forces the row-normalized v2 backend; `connect.json` does not need a backend mode. This panel is intentionally behind Alt+Shift secret mode.
 - **Board Recovery Panel (Secret Mode)** – Inspect the live Campaign/Case board room, restore recent snapshots, promote this browser's mirrored board to live, bust a corrupted room, clear stale browser board caches before reseeding, and run `Sync Linked Timeline Events` to rebuild clue-linked timeline event notes/deeplinks from persisted board nodes.
 - **Customise Seed Panel (Secret Mode)** – Hidden fork helper that loads default/store guild + NPC + location data and exports fork-ready `data-guilds*.js`, `data-npcs*.js`, and `data-locations*.js` files.
 - **Card Grid** – Responsive cards link to every HTML tool (player sheet, dashboards, HQ, timeline, etc.). Icons and short blurbs help the table pick the right door quickly.
@@ -20,7 +20,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - Always import campaign data here first—the Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Case Timeline, Encounters, and HQ pages all read from the same store, so one import primes the entire campaign stack.
 - Treat campaign scope as the default selector, then use `campaign-timeline.html`/`campaign-board.html` for campaign-level tracking and `timeline.html`/`board.html` for case-level execution.
 - Set the active case (derived from scope sequence, or via optional override) before opening case-scoped tools so edits land in the intended investigation.
-- For multiplayer web deployments, set up Supabase once and use the Cloud Sync panel for realtime-ish shared campaign updates.
+- For multiplayer web deployments, run `docs/SupabaseSyncRowsV2.sql` in Supabase once, then use the Cloud Sync panel for realtime-ish shared campaign updates.
 - If a shared board goes bad, use the secret Board Recovery panel before manually poking Supabase rows. Restore a recent snapshot when possible; use `Bust Live Room` only when you want the next clean browser to reseed the room.
 - If you’re forking this repo, use the secret Customise panel to export fresh preload scripts for guilds/NPCs/locations, then drop them into `js/data-guilds.js`, `js/data-npcs.js`, and `js/data-locations.js`.
 - Use the accent picker before a session so all other pages inherit the same neon colorway.

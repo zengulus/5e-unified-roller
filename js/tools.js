@@ -1650,7 +1650,6 @@ function normalizeConnectPayload(raw) {
     const loginEmail = String(raw.loginEmail || raw.email || rawLogin.email || '').trim();
     const loginPassword = String(raw.loginPassword || raw.password || rawLogin.password || '').trim();
     const autoConnect = parseBooleanInput(raw.autoConnect, true);
-    const backendMode = String(raw.backendMode || raw.syncBackend || '').trim() || 'normalized';
     if (!supabaseUrl || !anonKey || !campaignId) return null;
     const payload = {
         supabaseUrl,
@@ -1659,8 +1658,7 @@ function normalizeConnectPayload(raw) {
         profileName,
         collabRelayUrl: String(raw.collabRelayUrl || raw.collabServerUrl || raw.relayUrl || '').trim(),
         enabled: true,
-        autoConnect,
-        backendMode
+        autoConnect
     };
     if (loginEmail && loginPassword) {
         payload.loginEmail = loginEmail;
@@ -1671,17 +1669,9 @@ function normalizeConnectPayload(raw) {
         ['tableName', raw.tableName || raw.stateTable || ''],
         ['boardRoomsTable', raw.boardRoomsTable || raw.boardRoomTable || ''],
         ['boardHistoryTable', raw.boardHistoryTable || raw.boardRoomHistoryTable || ''],
-        ['normalizedCoreTable', raw.normalizedCoreTable || raw.coreTable || ''],
-        ['normalizedHQTable', raw.normalizedHQTable || raw.hqTable || ''],
-        ['normalizedCaseStateTable', raw.normalizedCaseStateTable || raw.caseStateTable || ''],
-        ['normalizedCaseBoardsTable', raw.normalizedCaseBoardsTable || raw.caseBoardsTable || ''],
-        ['normalizedCaseEventsTable', raw.normalizedCaseEventsTable || raw.caseEventsTable || ''],
-        ['normalizedScopeVersionsTable', raw.normalizedScopeVersionsTable || raw.scopeVersionsTable || ''],
-        ['normalizedPlayersTable', raw.normalizedPlayersTable || raw.playersTable || ''],
-        ['normalizedNPCsTable', raw.normalizedNPCsTable || raw.npcsTable || ''],
-        ['normalizedLocationsTable', raw.normalizedLocationsTable || raw.locationsTable || ''],
-        ['normalizedRequisitionsTable', raw.normalizedRequisitionsTable || raw.requisitionsTable || ''],
-        ['normalizedEncountersTable', raw.normalizedEncountersTable || raw.encountersTable || '']
+        ['rowsV2Prefix', raw.rowsV2Prefix || raw.rowPrefix || ''],
+        ['rowsV2SyncVersionsTable', raw.rowsV2SyncVersionsTable || raw.syncVersionsTable || ''],
+        ['rowsV2SyncTombstonesTable', raw.rowsV2SyncTombstonesTable || raw.syncTombstonesTable || '']
     ];
     optionalMap.forEach(([key, value]) => {
         const next = String(value || '').trim();
@@ -1851,7 +1841,6 @@ function setSyncStatusText(status) {
     const autoConnect = config ? (config.autoConnect !== false ? 'on' : 'off') : '—';
     const parts = [
         `Mode: ${status.mode || 'unknown'}`,
-        `Backend: ${status.backendMode || 'legacy'}`,
         `Auto-Connect: ${autoConnect}`,
         `Connected: ${status.connected ? 'yes' : 'no'}`,
         `Campaign: ${status.campaignId || '—'}`,
@@ -2353,7 +2342,6 @@ function exportConnectFile() {
         campaignId: config.campaignId || '',
         profileName: '',
         collabRelayUrl: config.collabRelayUrl || '',
-        backendMode: config.backendMode || 'legacy',
         autoConnect: config.autoConnect !== false
     };
     const form = getSyncFormValues();
@@ -2374,17 +2362,9 @@ function exportConnectFile() {
         'tableName',
         'boardRoomsTable',
         'boardHistoryTable',
-        'normalizedCoreTable',
-        'normalizedHQTable',
-        'normalizedCaseStateTable',
-        'normalizedCaseBoardsTable',
-        'normalizedCaseEventsTable',
-        'normalizedScopeVersionsTable',
-        'normalizedPlayersTable',
-        'normalizedNPCsTable',
-        'normalizedLocationsTable',
-        'normalizedRequisitionsTable',
-        'normalizedEncountersTable'
+        'rowsV2Prefix',
+        'rowsV2SyncVersionsTable',
+        'rowsV2SyncTombstonesTable'
     ];
     optionalTableKeys.forEach((key) => {
         const value = config[key];

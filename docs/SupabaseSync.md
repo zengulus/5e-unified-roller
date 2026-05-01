@@ -13,7 +13,12 @@ Room checkpoint storage is now hybrid-compatible:
 - newer rows can store a compact Yjs checkpoint envelope in the same `jsonb` column
 - the client reads both formats and rewrites rooms forward to the compact format on the next save
 
-For higher-concurrency deployments, see the hybrid normalized model:
+The current default sync backend is the forced row-normalized v2 model:
+- run `docs/SupabaseSyncRowsV2.sql`
+- clients subscribe only to `rtf_v2_sync_versions`
+- old `connect.json` files are accepted, but backend mode is ignored unless a code-only legacy override is enabled
+
+For the older hybrid payload-row model, see:
 - `docs/SupabaseSyncNormalized.md`
 - `docs/SupabaseSyncNormalized.sql`
 

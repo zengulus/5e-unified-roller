@@ -108,7 +108,6 @@ Put the Render websocket URL into Tools Hub or `connect.json`:
   "anonKey": "YOUR_SUPABASE_ANON_KEY",
   "campaignId": "your-campaign",
   "profileName": "",
-  "backendMode": "normalized",
   "collabRelayUrl": "wss://your-render-service.onrender.com"
 }
 ```
@@ -157,7 +156,6 @@ Add the relay URL to your sync config or `connect.json`:
   "supabaseUrl": "https://YOUR_PROJECT.supabase.co",
   "anonKey": "YOUR_SUPABASE_ANON_KEY",
   "campaignId": "your-campaign",
-  "backendMode": "normalized",
   "collabRelayUrl": "wss://your-render-service.onrender.com"
 }
 ```

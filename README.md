@@ -8,7 +8,7 @@ Optional Supabase cloud sync is available for the shared `RTF_STORE` stack. See 
 
 ## Components
 
-Each tool runs offline. The campaign stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Mission Timeline, Ledger, Encounters, HQ) shares the `RTF_STORE` object. Lead Queue, Prep/Procedure, and Clocks keep page-owned state keys; Lead Queue and Prep/Procedure cross-link into the campaign stack while Clocks remains standalone.
+Each tool runs offline. The campaign stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Mission Timeline, Ledger, Encounters, HQ) shares the `RTF_STORE` object. On load, the shared campaign save is normalized into IndexedDB row stores, and Supabase sync uses the forced row-normalized v2 backend from `docs/SupabaseSyncRowsV2.sql`. Lead Queue, Prep/Procedure, and Clocks keep page-owned state keys; Lead Queue and Prep/Procedure cross-link into the campaign stack while Clocks remains standalone.
 
 | Tool | File | Description |
 |------|------|-------------|

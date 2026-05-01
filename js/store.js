@@ -239,6 +239,47 @@
     const SYNC_BACKEND_LEGACY = 'legacy';
     const SYNC_BACKEND_LEGACY_MIRROR = 'legacy_mirror';
     const SYNC_BACKEND_NORMALIZED = 'normalized';
+    const SYNC_BACKEND_ROWS_V2 = 'normalized_rows_v2';
+    const LOCAL_ROWS_DB_NAME = 'rtf_campaign_rows_v2';
+    const LOCAL_ROWS_DB_VERSION = 1;
+    const LOCAL_ROWS_META_KEY = 'rtf_campaign_rows_v2_meta';
+    const LOCAL_ROWS_BACKUP_KEY = 'ravnica_unified_v1_backup_before_idb';
+    const LOCAL_ROWS_STORES = Object.freeze([
+        'campaigns',
+        'campaignFields',
+        'campaignRep',
+        'campaignScopes',
+        'campaignScopeCases',
+        'cases',
+        'caseEvents',
+        'caseLeads',
+        'players',
+        'playerProjects',
+        'npcs',
+        'npcTags',
+        'npcRelationships',
+        'locations',
+        'locationTags',
+        'locationLinks',
+        'requisitions',
+        'requisitionHistory',
+        'encounters',
+        'encounterParticipants',
+        'hqFloors',
+        'hqRooms',
+        'boardNodes',
+        'boardEdges',
+        'vttScenes',
+        'vttTokens',
+        'vttTemplates',
+        'vttFog',
+        'vttInitiative',
+        'syncVersions',
+        'syncTombstones',
+        'dirtyRows',
+        'cursors',
+        'meta'
+    ]);
 
     const DEFAULT_STATE = {
         meta: { version: 1, created: Date.now(), updated: 0, syncRevision: 0, scopeUpdated: {} },
@@ -299,7 +340,7 @@
         loginEmail: '',
         loginPassword: '',
         collabRelayUrl: '',
-        backendMode: SYNC_BACKEND_LEGACY,
+        backendMode: SYNC_BACKEND_ROWS_V2,
         schema: 'public',
         tableName: 'rtf_campaign_state',
         boardRoomsTable: 'rtf_board_rooms',
@@ -315,6 +356,9 @@
         normalizedLocationsTable: 'rtf_campaign_locations',
         normalizedRequisitionsTable: 'rtf_campaign_requisitions',
         normalizedEncountersTable: 'rtf_campaign_encounters',
+        rowsV2Prefix: 'rtf_v2',
+        rowsV2SyncVersionsTable: 'rtf_v2_sync_versions',
+        rowsV2SyncTombstonesTable: 'rtf_v2_sync_tombstones',
         syncDelayMs: 30000,
         reconcileIntervalMs: 180000,
         presenceHeartbeatMs: 15000,
@@ -1945,7 +1989,7 @@
             if (!Array.isArray(parsed)) return [];
             const cleaned = parsed.filter((entry) => typeof entry === 'string' && /^[a-z0-9_.-]+$/i.test(entry.trim()));
             if (!cleaned.length) return [];
-            const filtered = filterCloudSyncScopes(cleaned);
+            const filtered = global.RTF_ALLOW_LEGACY_SYNC_BACKEND ? filterCloudSyncScopes(cleaned) : normalizeScopeList(cleaned);
             return filtered.length ? filtered : [];
         } catch (err) {
             console.warn('RTF_STORE: Failed to parse dirty scopes cache', err);
@@ -1983,7 +2027,13 @@
         const clean = sanitizeSyncConfig(config);
         if (!clean.supabaseUrl || !clean.campaignId) return '';
         const mode = clean.backendMode || SYNC_BACKEND_LEGACY;
-        const tableToken = mode === SYNC_BACKEND_NORMALIZED
+        const tableToken = mode === SYNC_BACKEND_ROWS_V2
+            ? [
+                clean.rowsV2Prefix,
+                clean.rowsV2SyncVersionsTable,
+                clean.rowsV2SyncTombstonesTable
+            ].join(',')
+            : (mode === SYNC_BACKEND_NORMALIZED
             ? [
                 clean.normalizedCoreTable,
                 clean.normalizedHQTable,
@@ -1996,7 +2046,7 @@
                 clean.normalizedRequisitionsTable,
                 clean.normalizedEncountersTable
             ].join(',')
-            : clean.tableName;
+            : clean.tableName);
         return [
             clean.supabaseUrl.replace(/\/+$/, ''),
             clean.schema,
@@ -2114,6 +2164,860 @@
             }
         });
         return overlap;
+    };
+
+    const ROWS_V2_CLOUD_STORES = Object.freeze([
+        'campaigns',
+        'campaignFields',
+        'campaignRep',
+        'campaignScopes',
+        'campaignScopeCases',
+        'cases',
+        'caseEvents',
+        'caseLeads',
+        'players',
+        'playerProjects',
+        'npcs',
+        'npcTags',
+        'npcRelationships',
+        'locations',
+        'locationTags',
+        'locationLinks',
+        'requisitions',
+        'requisitionHistory',
+        'encounters',
+        'encounterParticipants',
+        'hqFloors',
+        'hqRooms',
+        'boardNodes',
+        'boardEdges',
+        'vttScenes',
+        'vttTokens',
+        'vttTemplates',
+        'vttFog',
+        'vttInitiative'
+    ]);
+
+    const ROWS_V2_STORE_TABLE_SUFFIX = Object.freeze({
+        campaigns: 'campaigns',
+        campaignFields: 'campaign_fields',
+        campaignRep: 'campaign_rep',
+        campaignScopes: 'campaign_scopes',
+        campaignScopeCases: 'campaign_scope_cases',
+        cases: 'cases',
+        caseEvents: 'case_events',
+        caseLeads: 'case_leads',
+        players: 'players',
+        playerProjects: 'player_projects',
+        npcs: 'npcs',
+        npcTags: 'npc_tags',
+        npcRelationships: 'npc_relationships',
+        locations: 'locations',
+        locationTags: 'location_tags',
+        locationLinks: 'location_links',
+        requisitions: 'requisitions',
+        requisitionHistory: 'requisition_history',
+        encounters: 'encounters',
+        encounterParticipants: 'encounter_participants',
+        hqFloors: 'hq_floors',
+        hqRooms: 'hq_rooms',
+        boardNodes: 'board_nodes',
+        boardEdges: 'board_edges',
+        vttScenes: 'vtt_scenes',
+        vttTokens: 'vtt_tokens',
+        vttTemplates: 'vtt_templates',
+        vttFog: 'vtt_fog',
+        vttInitiative: 'vtt_initiative'
+    });
+
+    const buildRowsV2Tables = (config = {}) => {
+        const prefix = sanitizeIdentifier(config.rowsV2Prefix, DEFAULT_SYNC_CONFIG.rowsV2Prefix);
+        const tables = {
+            syncVersions: sanitizeIdentifier(config.rowsV2SyncVersionsTable, `${prefix}_sync_versions`),
+            syncTombstones: sanitizeIdentifier(config.rowsV2SyncTombstonesTable, `${prefix}_sync_tombstones`)
+        };
+        ROWS_V2_CLOUD_STORES.forEach((storeName) => {
+            tables[storeName] = `${prefix}_${ROWS_V2_STORE_TABLE_SUFFIX[storeName]}`;
+        });
+        return tables;
+    };
+
+    const createRowsV2Bucket = () => {
+        const rows = {};
+        LOCAL_ROWS_STORES.forEach((storeName) => {
+            rows[storeName] = [];
+        });
+        return rows;
+    };
+
+    const rowsV2TimestampIso = (value = Date.now()) => {
+        const parsed = toTimestamp(value, Date.now());
+        try {
+            return new Date(parsed).toISOString();
+        } catch (err) {
+            return new Date().toISOString();
+        }
+    };
+
+    const rowsV2Key = (campaignId, id) => `${sanitizeCampaignId(campaignId || 'local')}::${String(id || '').trim()}`;
+    const rowsV2CleanIdPart = (value, fallback = 'row') => {
+        const raw = String(value || '').trim().toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '')
+            .slice(0, 80);
+        return raw || fallback;
+    };
+    const rowsV2JoinId = (...parts) => parts.map((part, idx) => rowsV2CleanIdPart(part, idx ? 'item' : 'row')).join('.');
+    const rowsV2CloneExtra = (value) => {
+        if (!value || typeof value !== 'object') return {};
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (err) {
+            return {};
+        }
+    };
+    const makeRowsV2Row = (campaignId, id, scope, extra = {}, options = {}) => {
+        const cleanId = String(id || '').trim() || rowsV2JoinId('row', Math.random().toString(36).slice(2, 8));
+        const cleanScope = normalizeScopeToken(scope || cleanId.replace(/[^a-z0-9_.-]+/g, '.'));
+        const updatedAt = rowsV2TimestampIso(options.updated_at || options.updatedAt || Date.now());
+        const row = {
+            key: rowsV2Key(campaignId, cleanId),
+            campaign_id: sanitizeCampaignId(campaignId || 'local'),
+            id: cleanId,
+            parent_id: toTrimmedString(options.parent_id || options.parentId, '', 160),
+            scope: cleanScope,
+            sort_order: toNonNegativeInt(options.sort_order !== undefined ? options.sort_order : options.sortOrder, 0),
+            kind: toTrimmedString(options.kind, '', 80),
+            name: toTrimmedString(options.name, '', 240),
+            title: toTrimmedString(options.title, '', 240),
+            type: toTrimmedString(options.type, '', 80),
+            status: toTrimmedString(options.status, '', 80),
+            source_id: toTrimmedString(options.source_id || options.sourceId, '', 160),
+            target_id: toTrimmedString(options.target_id || options.targetId, '', 160),
+            value_text: toTrimmedString(options.value_text !== undefined ? options.value_text : options.valueText, '', 4000),
+            value_number: Number.isFinite(Number(options.value_number !== undefined ? options.value_number : options.valueNumber))
+                ? Number(options.value_number !== undefined ? options.value_number : options.valueNumber)
+                : null,
+            x: Number.isFinite(Number(options.x)) ? Number(options.x) : null,
+            y: Number.isFinite(Number(options.y)) ? Number(options.y) : null,
+            width: Number.isFinite(Number(options.width)) ? Number(options.width) : null,
+            height: Number.isFinite(Number(options.height)) ? Number(options.height) : null,
+            extra: rowsV2CloneExtra(extra),
+            revision: toNonNegativeInt(options.revision, 0),
+            updated_at: updatedAt,
+            updated_by: toTrimmedString(options.updated_by || options.updatedBy, '', 120),
+            updated_by_user: options.updated_by_user || options.updatedByUser || null,
+            updated_by_name: toTrimmedString(options.updated_by_name || options.updatedByName, '', 120),
+            deleted_at: options.deleted_at || options.deletedAt || null
+        };
+        return row;
+    };
+
+    const stripRowsV2LocalKey = (row) => {
+        const { key: _key, ...rest } = row && typeof row === 'object' ? row : {};
+        return rest;
+    };
+
+    const addRowsV2Row = (bucket, storeName, row) => {
+        if (!bucket || !bucket[storeName] || !row) return;
+        bucket[storeName].push(row);
+    };
+
+    const decomposeStateToRowsV2 = (state, campaignId = 'local', meta = {}) => {
+        const clean = sanitizeState(state);
+        const rows = createRowsV2Bucket();
+        const rowMeta = {
+            revision: toNonNegativeInt(meta.revision, toNonNegativeInt(clean.meta && clean.meta.syncRevision, 0)),
+            updatedAt: meta.updatedAt || toTimestamp(clean.meta && clean.meta.updated, Date.now()),
+            updatedBy: meta.updatedBy || '',
+            updatedByUser: meta.updatedByUser || null,
+            updatedByName: meta.updatedByName || ''
+        };
+        const make = (id, scope, extra, options = {}) => makeRowsV2Row(campaignId, id, scope, extra, {
+            ...rowMeta,
+            ...options
+        });
+        const addField = (id, scope, extra, options = {}) => {
+            addRowsV2Row(rows, 'campaignFields', make(rowsV2JoinId('campaign-field', id), scope, extra, {
+                kind: 'campaign-field',
+                ...options
+            }));
+        };
+
+        addRowsV2Row(rows, 'campaigns', make('campaign', 'campaign', {
+            meta: clean.meta
+        }, {
+            kind: 'campaign',
+            name: campaignId
+        }));
+        addField('heat', 'campaign.heat', { value: clean.campaign.heat }, { valueNumber: clean.campaign.heat });
+        addField('cognitive-risk', 'campaign.cognitiveRisk', { value: clean.campaign.cognitiveRisk }, { valueNumber: clean.campaign.cognitiveRisk });
+        addField('case', 'campaign.case', clean.campaign.case, { title: clean.campaign.case && clean.campaign.case.title });
+        addField('ledger', 'campaign.ledger', sanitizeLedgerState(clean.campaign.ledger), { kind: 'ledger' });
+        addField('context', 'campaign.context', clean.campaignContext, { kind: 'campaign-context' });
+        addField('meta', 'campaign.meta', sanitizeCampaignMeta(clean.campaignMeta), { kind: 'campaign-meta' });
+        addField('hq-meta', 'hq', {
+            grid: clean.hq && clean.hq.grid,
+            snapToGrid: clean.hq && clean.hq.snapToGrid,
+            activeFloorId: clean.hq && clean.hq.activeFloorId
+        }, { kind: 'hq-meta' });
+
+        Object.entries(sanitizeRep(clean.campaign.rep)).forEach(([guild, value], idx) => {
+            const guildId = rowsV2CleanIdPart(guild, `guild-${idx + 1}`);
+            addRowsV2Row(rows, 'campaignRep', make(rowsV2JoinId('campaign-rep', guildId), `campaign.rep.${guildId}`, {
+                guild,
+                value
+            }, {
+                kind: 'campaign-rep',
+                name: guild,
+                valueNumber: value,
+                sortOrder: idx
+            }));
+        });
+
+        const scopes = Array.isArray(clean.campaignContext && clean.campaignContext.scopes) ? clean.campaignContext.scopes : [];
+        scopes.forEach((scopeEntry, idx) => {
+            const scopeId = sanitizeScopeId(scopeEntry && scopeEntry.id, DEFAULT_CAMPAIGN_SCOPE_ID);
+            addRowsV2Row(rows, 'campaignScopes', make(rowsV2JoinId('campaign-scope', scopeId), `campaign.context.scopes.${scopeId}`, scopeEntry, {
+                kind: 'campaign-scope',
+                name: scopeEntry.name,
+                status: scopeId === clean.campaignContext.activeScopeId ? 'active' : '',
+                sortOrder: idx
+            }));
+            (Array.isArray(scopeEntry.caseOrder) ? scopeEntry.caseOrder : []).forEach((caseId, caseIdx) => {
+                const cleanCaseId = sanitizeCaseId(caseId, 'case_primary');
+                addRowsV2Row(rows, 'campaignScopeCases', make(rowsV2JoinId('campaign-scope-case', scopeId, cleanCaseId), `campaign.context.scopes.${scopeId}.cases.${cleanCaseId}`, {
+                    scopeId,
+                    caseId: cleanCaseId,
+                    status: sanitizeCampaignScopeStatus(scopeEntry.caseStatus && scopeEntry.caseStatus[cleanCaseId], 'planned'),
+                    active: scopeEntry.activeCaseId === cleanCaseId
+                }, {
+                    parentId: scopeId,
+                    kind: 'campaign-scope-case',
+                    status: sanitizeCampaignScopeStatus(scopeEntry.caseStatus && scopeEntry.caseStatus[cleanCaseId], 'planned'),
+                    targetId: cleanCaseId,
+                    sortOrder: caseIdx
+                }));
+            });
+        });
+
+        const addEntityRows = (storeName, list, scopePrefix, idPrefix, fieldBuilder = () => ({})) => {
+            (Array.isArray(list) ? list : []).forEach((entry, idx) => {
+                const source = entry && typeof entry === 'object' ? entry : {};
+                const id = normalizeEntityScopeId(source.id) || buildEntityId(idPrefix, idx);
+                const fields = fieldBuilder(source, idx);
+                addRowsV2Row(rows, storeName, make(rowsV2JoinId(idPrefix, id), `${scopePrefix}.${id}`, { ...source, id }, {
+                    kind: storeName,
+                    sortOrder: idx,
+                    ...fields
+                }));
+            });
+        };
+
+        addEntityRows('players', clean.campaign.players, 'campaign.players', 'player', (player) => ({
+            name: player.name,
+            sourceId: player.sheetKey,
+            valueNumber: toNumber(player.dp, 0)
+        }));
+        (clean.campaign.players || []).forEach((player, idx) => {
+            const playerId = normalizeEntityScopeId(player && player.id) || buildEntityId('player', idx);
+            if (!player.projectName && !player.projectReward && !toNonNegativeInt(player.projectClock, 0)) return;
+            addRowsV2Row(rows, 'playerProjects', make(rowsV2JoinId('player-project', playerId, 'primary'), `campaign.players.${playerId}.projects.primary`, {
+                playerId,
+                name: player.projectName,
+                reward: player.projectReward,
+                clock: player.projectClock
+            }, {
+                parentId: playerId,
+                kind: 'player-project',
+                name: player.projectName,
+                valueNumber: player.projectClock,
+                sortOrder: 0
+            }));
+        });
+        addEntityRows('npcs', clean.campaign.npcs, 'campaign.npcs', 'npc', (npc) => ({
+            name: npc.name,
+            type: npc.guild,
+            status: npc.status || npc.disposition || ''
+        }));
+        addEntityRows('locations', clean.campaign.locations, 'campaign.locations', 'loc', (loc) => ({
+            name: loc.name,
+            type: loc.district || loc.guild || ''
+        }));
+        addEntityRows('requisitions', clean.campaign.requisitions, 'campaign.requisitions', 'req', (req) => ({
+            title: req.item || req.name || req.title,
+            status: req.status,
+            type: req.priority
+        }));
+        addEntityRows('encounters', clean.campaign.encounters, 'campaign.encounters', 'enc', (encounter) => ({
+            title: encounter.name || encounter.title,
+            type: encounter.tier,
+            status: encounter.status
+        }));
+        addEntityRows('caseEvents', sanitizeEventList(clean.campaignMeta && clean.campaignMeta.events), 'campaign.meta.events', 'campaign-event', (event) => ({
+            title: event.title,
+            type: event.kind,
+            status: event.resolved ? 'resolved' : 'open',
+            sortOrder: event.sortOrder
+        }));
+
+        const addBoardRows = (board, parentId, scopePrefix) => {
+            const cleanBoard = sanitizeBoard(board);
+            addRowsV2Row(rows, 'boardNodes', make(rowsV2JoinId('board-meta', parentId), `${scopePrefix}.meta`, {
+                name: cleanBoard.name,
+                updatedAt: cleanBoard.updatedAt || 0
+            }, {
+                parentId,
+                kind: 'board-meta',
+                name: cleanBoard.name
+            }));
+            (Array.isArray(cleanBoard.nodes) ? cleanBoard.nodes : []).forEach((node, idx) => {
+                const source = node && typeof node === 'object' ? node : {};
+                const id = normalizeEntityScopeId(source.id) || buildEntityId('node', idx);
+                addRowsV2Row(rows, 'boardNodes', make(rowsV2JoinId('board-node', parentId, id), `${scopePrefix}.nodes.${id}`, { ...source, id }, {
+                    parentId,
+                    kind: 'board-node',
+                    title: source.title || source.label || source.name || '',
+                    type: source.type || '',
+                    x: source.x,
+                    y: source.y,
+                    width: source.width,
+                    height: source.height,
+                    sortOrder: idx
+                }));
+            });
+            (Array.isArray(cleanBoard.connections) ? cleanBoard.connections : []).forEach((edge, idx) => {
+                const source = edge && typeof edge === 'object' ? edge : {};
+                const id = normalizeEntityScopeId(source.id) || rowsV2CleanIdPart(`${source.from || source.a || 'from'}-${source.to || source.b || 'to'}-${idx}`, `edge-${idx + 1}`);
+                addRowsV2Row(rows, 'boardEdges', make(rowsV2JoinId('board-edge', parentId, id), `${scopePrefix}.edges.${id}`, { ...source, id }, {
+                    parentId,
+                    kind: 'board-edge',
+                    sourceId: source.from || source.a || source.source || '',
+                    targetId: source.to || source.b || source.target || '',
+                    sortOrder: idx
+                }));
+            });
+        };
+
+        addBoardRows(clean.campaignMeta && clean.campaignMeta.board, 'campaign-meta', 'campaign.meta.board');
+
+        (clean.cases.items || []).forEach((caseEntry, caseIdx) => {
+            const caseId = sanitizeCaseId(caseEntry && caseEntry.id, `case_${caseIdx + 1}`);
+            addRowsV2Row(rows, 'cases', make(rowsV2JoinId('case', caseId), `cases.${caseId}`, {
+                id: caseId,
+                name: sanitizeCaseName(caseEntry && caseEntry.name, DEFAULT_CASE_NAME)
+            }, {
+                kind: 'case',
+                name: sanitizeCaseName(caseEntry && caseEntry.name, DEFAULT_CASE_NAME),
+                status: caseId === clean.cases.activeCaseId ? 'active' : '',
+                sortOrder: caseIdx
+            }));
+            sanitizeEventList(caseEntry && caseEntry.events).forEach((event, eventIdx) => {
+                const eventId = normalizeEntityScopeId(event.id) || buildEntityId('event', eventIdx);
+                addRowsV2Row(rows, 'caseEvents', make(rowsV2JoinId('case-event', caseId, eventId), `cases.${caseId}.events.${eventId}`, {
+                    ...event,
+                    id: eventId,
+                    caseId
+                }, {
+                    parentId: caseId,
+                    kind: 'case-event',
+                    title: event.title,
+                    type: event.kind,
+                    status: event.resolved ? 'resolved' : 'open',
+                    sortOrder: event.sortOrder
+                }));
+            });
+            sanitizeLeadList(caseEntry && caseEntry.leads).forEach((lead, leadIdx) => {
+                const leadId = normalizeEntityScopeId(lead.id) || buildEntityId('lead', leadIdx);
+                addRowsV2Row(rows, 'caseLeads', make(rowsV2JoinId('case-lead', caseId, leadId), `cases.${caseId}.leads.${leadId}`, {
+                    ...lead,
+                    id: leadId,
+                    caseId
+                }, {
+                    parentId: caseId,
+                    kind: 'case-lead',
+                    title: lead.title,
+                    type: lead.type,
+                    status: lead.status,
+                    targetId: lead.targetId,
+                    sortOrder: leadIdx
+                }));
+            });
+            addBoardRows(caseEntry && caseEntry.board, caseId, `cases.${caseId}.board`);
+
+            const vtt = sanitizeVTTState(caseEntry && caseEntry.vtt);
+            addRowsV2Row(rows, 'vttInitiative', make(rowsV2JoinId('vtt-meta', caseId), `cases.${caseId}.vtt`, {
+                updatedAt: vtt.updatedAt,
+                activeSceneId: vtt.activeSceneId,
+                initiative: {
+                    round: vtt.initiative.round,
+                    activeEntryId: vtt.initiative.activeEntryId
+                }
+            }, {
+                parentId: caseId,
+                kind: 'vtt-meta',
+                sourceId: vtt.activeSceneId,
+                valueNumber: vtt.initiative.round
+            }));
+            (Array.isArray(vtt.scenes) ? vtt.scenes : []).forEach((scene, sceneIdx) => {
+                const sceneId = normalizeEntityScopeId(scene.id) || buildEntityId('scene', sceneIdx);
+                const sceneRowId = rowsV2JoinId('vtt-scene', caseId, sceneId);
+                const { tokens: _tokens, templates: _templates, fog: _fog, ...sceneWithoutChildren } = scene;
+                addRowsV2Row(rows, 'vttScenes', make(sceneRowId, `cases.${caseId}.vtt.scenes.${sceneId}`, {
+                    ...sceneWithoutChildren,
+                    id: sceneId
+                }, {
+                    parentId: caseId,
+                    kind: 'vtt-scene',
+                    name: scene.name,
+                    sourceId: sceneId,
+                    sortOrder: sceneIdx
+                }));
+                (Array.isArray(scene.tokens) ? scene.tokens : []).forEach((token, tokenIdx) => {
+                    const tokenId = normalizeEntityScopeId(token.id) || buildEntityId('token', tokenIdx);
+                    addRowsV2Row(rows, 'vttTokens', make(rowsV2JoinId('vtt-token', caseId, sceneId, tokenId), `cases.${caseId}.vtt.scenes.${sceneId}.tokens.${tokenId}`, {
+                        ...token,
+                        id: tokenId,
+                        sceneId
+                    }, {
+                        parentId: sceneRowId,
+                        kind: 'vtt-token',
+                        name: token.name,
+                        type: token.sourceType || token.side || '',
+                        sourceId: token.sourceId || '',
+                        x: token.x,
+                        y: token.y,
+                        sortOrder: tokenIdx
+                    }));
+                });
+                (Array.isArray(scene.templates) ? scene.templates : []).forEach((template, templateIdx) => {
+                    const templateId = normalizeEntityScopeId(template.id) || buildEntityId('template', templateIdx);
+                    addRowsV2Row(rows, 'vttTemplates', make(rowsV2JoinId('vtt-template', caseId, sceneId, templateId), `cases.${caseId}.vtt.scenes.${sceneId}.templates.${templateId}`, {
+                        ...template,
+                        id: templateId,
+                        sceneId
+                    }, {
+                        parentId: sceneRowId,
+                        kind: 'vtt-template',
+                        type: template.shape || template.type || '',
+                        x: template.x,
+                        y: template.y,
+                        sortOrder: templateIdx
+                    }));
+                });
+                (Array.isArray(scene.fog) ? scene.fog : []).forEach((fog, fogIdx) => {
+                    const fogId = normalizeEntityScopeId(fog.id) || buildEntityId('fog', fogIdx);
+                    addRowsV2Row(rows, 'vttFog', make(rowsV2JoinId('vtt-fog', caseId, sceneId, fogId), `cases.${caseId}.vtt.scenes.${sceneId}.fog.${fogId}`, {
+                        ...fog,
+                        id: fogId,
+                        sceneId
+                    }, {
+                        parentId: sceneRowId,
+                        kind: 'vtt-fog',
+                        sortOrder: fogIdx
+                    }));
+                });
+            });
+            (Array.isArray(vtt.initiative.entries) ? vtt.initiative.entries : []).forEach((entry, entryIdx) => {
+                const entryScopeId = buildVTTInitiativeEntryScopeId(entry) || buildEntityId('entry', entryIdx);
+                addRowsV2Row(rows, 'vttInitiative', make(rowsV2JoinId('vtt-initiative', caseId, entryScopeId), `cases.${caseId}.vtt.initiative.entries.${entryScopeId}`, {
+                    ...entry,
+                    scopeId: entryScopeId,
+                    caseId
+                }, {
+                    parentId: caseId,
+                    kind: 'vtt-initiative-entry',
+                    name: entry.name,
+                    sourceId: entry.sourceId,
+                    type: entry.sourceType,
+                    sortOrder: entryIdx
+                }));
+            });
+        });
+
+        const hq = sanitizeHQ(clean.hq);
+        (Array.isArray(hq.floors) ? hq.floors : []).forEach((floor, floorIdx) => {
+            const floorId = normalizeEntityScopeId(floor.id) || buildEntityId('floor', floorIdx);
+            const { rooms: _rooms, ...floorWithoutRooms } = floor;
+            addRowsV2Row(rows, 'hqFloors', make(rowsV2JoinId('hq-floor', floorId), `hq.floors.${floorId}`, {
+                ...floorWithoutRooms,
+                id: floorId
+            }, {
+                kind: 'hq-floor',
+                name: floor.name,
+                sortOrder: floorIdx
+            }));
+            (Array.isArray(floor.rooms) ? floor.rooms : []).forEach((room, roomIdx) => {
+                const roomId = normalizeEntityScopeId(room.id) || buildEntityId('room', roomIdx);
+                addRowsV2Row(rows, 'hqRooms', make(rowsV2JoinId('hq-room', floorId, roomId), `hq.floors.${floorId}.rooms.${roomId}`, {
+                    ...room,
+                    id: roomId,
+                    floorId
+                }, {
+                    parentId: floorId,
+                    kind: 'hq-room',
+                    name: room.name,
+                    x: room.x,
+                    y: room.y,
+                    width: room.w || room.width,
+                    height: room.h || room.height,
+                    sortOrder: roomIdx
+                }));
+            });
+        });
+
+        return rows;
+    };
+
+    const sortRowsV2 = (rows) => (Array.isArray(rows) ? rows : [])
+        .filter((row) => row && typeof row === 'object' && !row.deleted_at)
+        .slice()
+        .sort((a, b) => {
+            const order = toNonNegativeInt(a.sort_order, 0) - toNonNegativeInt(b.sort_order, 0);
+            if (order) return order;
+            return String(a.id || '').localeCompare(String(b.id || ''));
+        });
+
+    const composeStateFromRowsV2 = (rowsByStore) => {
+        const rows = rowsByStore && typeof rowsByStore === 'object' ? rowsByStore : {};
+        const base = sanitizeState(null);
+        const campaignRow = sortRowsV2(rows.campaigns)[0];
+        if (campaignRow && campaignRow.extra && campaignRow.extra.meta) {
+            base.meta = {
+                ...base.meta,
+                ...rowsV2CloneExtra(campaignRow.extra.meta)
+            };
+        }
+
+        sortRowsV2(rows.campaignFields).forEach((row) => {
+            const id = String(row.id || '');
+            const extra = row.extra && typeof row.extra === 'object' ? row.extra : {};
+            if (id.endsWith('.heat')) base.campaign.heat = toNumber(row.value_number, toNumber(extra.value, 0));
+            else if (id.endsWith('.cognitive-risk')) base.campaign.cognitiveRisk = toNumber(row.value_number, toNumber(extra.value, 0));
+            else if (id.endsWith('.case')) base.campaign.case = sanitizeCase(extra);
+            else if (id.endsWith('.ledger')) base.campaign.ledger = sanitizeLedgerState(extra);
+            else if (id.endsWith('.context')) base.campaignContext = sanitizeCampaignContext(extra, base.cases);
+            else if (id.endsWith('.meta')) base.campaignMeta = sanitizeCampaignMeta(extra);
+            else if (id.endsWith('.hq-meta')) {
+                base.hq.grid = extra.grid && typeof extra.grid === 'object' ? extra.grid : base.hq.grid;
+                base.hq.snapToGrid = extra.snapToGrid !== false;
+                base.hq.activeFloorId = toTrimmedString(extra.activeFloorId, base.hq.activeFloorId, 80);
+            }
+        });
+
+        const repRows = sortRowsV2(rows.campaignRep);
+        if (repRows.length) {
+            const rep = {};
+            repRows.forEach((row) => {
+                const guild = toTrimmedString(row.extra && row.extra.guild ? row.extra.guild : row.name, '', 120);
+                if (!guild) return;
+                rep[guild] = toNumber(row.value_number, toNumber(row.extra && row.extra.value, 0));
+            });
+            base.campaign.rep = sanitizeRep(rep);
+        }
+
+        const entityList = (storeName, sanitizer = null) => sortRowsV2(rows[storeName])
+            .map((row, idx) => {
+                const extra = rowsV2CloneExtra(row.extra);
+                if (!extra.id) extra.id = String(row.id || '').split('.').pop();
+                return sanitizer ? sanitizer(extra, idx) : extra;
+            });
+        base.campaign.players = entityList('players', sanitizePlayer);
+        base.campaign.npcs = entityList('npcs');
+        base.campaign.locations = entityList('locations');
+        base.campaign.requisitions = entityList('requisitions');
+        base.campaign.encounters = entityList('encounters');
+
+        const caseMap = new Map();
+        sortRowsV2(rows.cases).forEach((row) => {
+            const extra = row.extra && typeof row.extra === 'object' ? row.extra : {};
+            const caseId = sanitizeCaseId(extra.id || String(row.id || '').split('.').pop(), 'case_primary');
+            caseMap.set(caseId, {
+                id: caseId,
+                name: sanitizeCaseName(extra.name || row.name, DEFAULT_CASE_NAME),
+                board: sanitizeBoard({ name: sanitizeCaseName(extra.name || row.name, DEFAULT_CASE_NAME) }),
+                events: [],
+                leads: [],
+                vtt: sanitizeVTTState(null)
+            });
+            if (row.status === 'active') base.cases.activeCaseId = caseId;
+        });
+        if (!caseMap.size) {
+            caseMap.set('case_primary', {
+                id: 'case_primary',
+                name: DEFAULT_CASE_NAME,
+                board: sanitizeBoard(null),
+                events: [],
+                leads: [],
+                vtt: sanitizeVTTState(null)
+            });
+        }
+
+        const ensureCase = (caseId) => {
+            const cleanCaseId = sanitizeCaseId(caseId, 'case_primary');
+            if (!caseMap.has(cleanCaseId)) {
+                caseMap.set(cleanCaseId, {
+                    id: cleanCaseId,
+                    name: DEFAULT_CASE_NAME,
+                    board: sanitizeBoard(null),
+                    events: [],
+                    leads: [],
+                    vtt: sanitizeVTTState(null)
+                });
+            }
+            return caseMap.get(cleanCaseId);
+        };
+
+        sortRowsV2(rows.caseEvents).forEach((row, idx) => {
+            const event = sanitizeEvent(row.extra, idx);
+            if (normalizeScopeToken(row.scope).startsWith('campaign.meta.events')) {
+                base.campaignMeta.events.push(event);
+                return;
+            }
+            const caseId = sanitizeCaseId(event.caseId || row.parent_id, 'case_primary');
+            ensureCase(caseId).events.push({ ...event, caseId });
+        });
+        sortRowsV2(rows.caseLeads).forEach((row, idx) => {
+            const lead = sanitizeLead(row.extra, idx);
+            const caseId = sanitizeCaseId(row.extra && row.extra.caseId || row.parent_id, 'case_primary');
+            ensureCase(caseId).leads.push(lead);
+        });
+
+        const boardMetaByParent = new Map();
+        const boardNodesByParent = new Map();
+        const boardEdgesByParent = new Map();
+        sortRowsV2(rows.boardNodes).forEach((row) => {
+            const parent = row.parent_id || 'case_primary';
+            if (row.kind === 'board-meta') {
+                boardMetaByParent.set(parent, row.extra || {});
+                return;
+            }
+            if (!boardNodesByParent.has(parent)) boardNodesByParent.set(parent, []);
+            boardNodesByParent.get(parent).push(rowsV2CloneExtra(row.extra));
+        });
+        sortRowsV2(rows.boardEdges).forEach((row) => {
+            const parent = row.parent_id || 'case_primary';
+            if (!boardEdgesByParent.has(parent)) boardEdgesByParent.set(parent, []);
+            boardEdgesByParent.get(parent).push(rowsV2CloneExtra(row.extra));
+        });
+        const applyBoard = (parent, target) => {
+            const meta = boardMetaByParent.get(parent) || {};
+            target.board = sanitizeBoard({
+                name: meta.name || target.name || DEFAULT_BOARD_STATE.name,
+                updatedAt: meta.updatedAt || 0,
+                nodes: boardNodesByParent.get(parent) || [],
+                connections: boardEdgesByParent.get(parent) || []
+            });
+        };
+
+        const campaignMetaBoardTarget = { name: 'Campaign Meta Board', board: base.campaignMeta.board };
+        applyBoard('campaign-meta', campaignMetaBoardTarget);
+        base.campaignMeta.board = campaignMetaBoardTarget.board;
+        caseMap.forEach((entry, caseId) => applyBoard(caseId, entry));
+
+        const vttMetaByCase = new Map();
+        const vttScenesByCase = new Map();
+        const vttTokensByScene = new Map();
+        const vttTemplatesByScene = new Map();
+        const vttFogByScene = new Map();
+        const vttInitiativeByCase = new Map();
+        sortRowsV2(rows.vttInitiative).forEach((row) => {
+            const caseId = sanitizeCaseId(row.parent_id, 'case_primary');
+            if (row.kind === 'vtt-meta') {
+                vttMetaByCase.set(caseId, row.extra || {});
+                return;
+            }
+            if (!vttInitiativeByCase.has(caseId)) vttInitiativeByCase.set(caseId, []);
+            vttInitiativeByCase.get(caseId).push(rowsV2CloneExtra(row.extra));
+        });
+        sortRowsV2(rows.vttScenes).forEach((row) => {
+            const caseId = sanitizeCaseId(row.parent_id, 'case_primary');
+            if (!vttScenesByCase.has(caseId)) vttScenesByCase.set(caseId, []);
+            vttScenesByCase.get(caseId).push(row);
+        });
+        const collectByParent = (sourceRows, targetMap) => {
+            sortRowsV2(sourceRows).forEach((row) => {
+                const parent = row.parent_id || '';
+                if (!targetMap.has(parent)) targetMap.set(parent, []);
+                targetMap.get(parent).push(rowsV2CloneExtra(row.extra));
+            });
+        };
+        collectByParent(rows.vttTokens, vttTokensByScene);
+        collectByParent(rows.vttTemplates, vttTemplatesByScene);
+        collectByParent(rows.vttFog, vttFogByScene);
+        caseMap.forEach((entry, caseId) => {
+            const meta = vttMetaByCase.get(caseId) || {};
+            const scenes = (vttScenesByCase.get(caseId) || []).map((row, idx) => {
+                const scene = rowsV2CloneExtra(row.extra);
+                const sceneId = normalizeEntityScopeId(scene.id) || buildEntityId('scene', idx);
+                scene.id = sceneId;
+                scene.tokens = vttTokensByScene.get(row.id) || scene.tokens || [];
+                scene.templates = vttTemplatesByScene.get(row.id) || scene.templates || [];
+                scene.fog = vttFogByScene.get(row.id) || scene.fog || [];
+                return scene;
+            });
+            entry.vtt = sanitizeVTTState({
+                updatedAt: meta.updatedAt || 0,
+                activeSceneId: meta.activeSceneId || (scenes[0] && scenes[0].id) || 'scene_1',
+                scenes,
+                initiative: {
+                    round: meta.initiative && meta.initiative.round,
+                    activeEntryId: meta.initiative && meta.initiative.activeEntryId,
+                    entries: vttInitiativeByCase.get(caseId) || []
+                }
+            });
+        });
+
+        const roomsByFloor = new Map();
+        sortRowsV2(rows.hqRooms).forEach((row) => {
+            const floorId = normalizeEntityScopeId(row.parent_id);
+            if (!roomsByFloor.has(floorId)) roomsByFloor.set(floorId, []);
+            roomsByFloor.get(floorId).push(rowsV2CloneExtra(row.extra));
+        });
+        const floorRows = sortRowsV2(rows.hqFloors);
+        if (floorRows.length) {
+            base.hq.floors = floorRows.map((row, idx) => {
+                const floor = rowsV2CloneExtra(row.extra);
+                const floorId = normalizeEntityScopeId(floor.id) || buildEntityId('floor', idx);
+                floor.id = floorId;
+                floor.rooms = roomsByFloor.get(floorId) || [];
+                return floor;
+            });
+        }
+
+        const orderedCases = sortRowsV2(rows.cases).map((row) => {
+            const extra = row.extra && typeof row.extra === 'object' ? row.extra : {};
+            return sanitizeCaseId(extra.id || String(row.id || '').split('.').pop(), 'case_primary');
+        });
+        const finalCases = [];
+        const seenCases = new Set();
+        orderedCases.forEach((caseId) => {
+            if (!caseMap.has(caseId) || seenCases.has(caseId)) return;
+            finalCases.push(caseMap.get(caseId));
+            seenCases.add(caseId);
+        });
+        caseMap.forEach((entry, caseId) => {
+            if (seenCases.has(caseId)) return;
+            finalCases.push(entry);
+        });
+        base.cases = sanitizeCases({
+            activeCaseId: caseMap.has(base.cases.activeCaseId) ? base.cases.activeCaseId : (finalCases[0] && finalCases[0].id) || 'case_primary',
+            items: finalCases
+        }, base.campaign, base.board);
+        const activeCase = base.cases.items.find((entry) => entry.id === base.cases.activeCaseId) || base.cases.items[0];
+        base.board = activeCase ? activeCase.board : sanitizeBoard(null);
+        base.campaign.events = activeCase ? sanitizeEventList(activeCase.events) : [];
+        return sanitizeState(base);
+    };
+
+    const rowsV2ScopeMatches = (rowScope, dirtyScopes) => {
+        const scope = normalizeScopeToken(rowScope);
+        const list = normalizeScopeList(dirtyScopes);
+        if (list.includes(SYNC_SCOPE_GLOBAL)) return true;
+        return list.some((dirtyScope) => scopesOverlap(scope, dirtyScope));
+    };
+
+    const scopeToRowWritesV2 = (scopes, rowsByStore) => {
+        const scopeList = normalizeScopeList(scopes);
+        const writeAll = scopeList.includes(SYNC_SCOPE_GLOBAL);
+        const bucket = createRowsV2Bucket();
+        ROWS_V2_CLOUD_STORES.forEach((storeName) => {
+            const rows = Array.isArray(rowsByStore && rowsByStore[storeName]) ? rowsByStore[storeName] : [];
+            bucket[storeName] = writeAll
+                ? rows.slice()
+                : rows.filter((row) => rowsV2ScopeMatches(row.scope, scopeList));
+        });
+        return bucket;
+    };
+
+    const scopeToDeltaReadsV2 = (scopeRows) => {
+        const map = new Map();
+        (Array.isArray(scopeRows) ? scopeRows : []).forEach((row) => {
+            const scope = normalizeScopeToken(row && row.scope);
+            const tableName = toTrimmedString(row && row.table_name, '', 120);
+            if (!scope || !tableName) return;
+            if (!map.has(tableName)) map.set(tableName, new Set());
+            map.get(tableName).add(scope);
+        });
+        return map;
+    };
+
+    const openRowsV2Db = () => new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined' || !indexedDB || typeof indexedDB.open !== 'function') {
+            reject(new Error('IndexedDB is unavailable.'));
+            return;
+        }
+        const request = indexedDB.open(LOCAL_ROWS_DB_NAME, LOCAL_ROWS_DB_VERSION);
+        request.onupgradeneeded = () => {
+            const db = request.result;
+            LOCAL_ROWS_STORES.forEach((storeName) => {
+                if (db.objectStoreNames.contains(storeName)) return;
+                const store = db.createObjectStore(storeName, { keyPath: 'key' });
+                store.createIndex('byCampaign', 'campaign_id', { unique: false });
+                store.createIndex('byScope', 'scope', { unique: false });
+                store.createIndex('byCampaignScope', ['campaign_id', 'scope'], { unique: false });
+                store.createIndex('byParent', 'parent_id', { unique: false });
+                store.createIndex('byUpdated', 'updated_at', { unique: false });
+            });
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('Failed to open IndexedDB.'));
+    });
+
+    const rowsV2Request = (request) => new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('IndexedDB request failed.'));
+    });
+
+    const rowsV2TransactionDone = (tx) => new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted.'));
+        tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed.'));
+    });
+
+    const readRowsV2LocalRows = async (campaignId) => {
+        const db = await openRowsV2Db();
+        try {
+            const rows = createRowsV2Bucket();
+            for (const storeName of LOCAL_ROWS_STORES) {
+                const tx = db.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const all = await rowsV2Request(store.getAll());
+                rows[storeName] = (Array.isArray(all) ? all : []).filter((row) => row && row.campaign_id === campaignId);
+                await rowsV2TransactionDone(tx);
+            }
+            return rows;
+        } finally {
+            db.close();
+        }
+    };
+
+    const writeRowsV2LocalRows = async (campaignId, rowsByStore, options = {}) => {
+        const db = await openRowsV2Db();
+        const replaceAll = options.replaceAll !== false;
+        const storeNames = Array.isArray(options.storeNames) && options.storeNames.length
+            ? options.storeNames
+            : LOCAL_ROWS_STORES;
+        try {
+            const tx = db.transaction(storeNames, 'readwrite');
+            storeNames.forEach((storeName) => {
+                const store = tx.objectStore(storeName);
+                if (replaceAll) {
+                    store.clear();
+                }
+                (Array.isArray(rowsByStore && rowsByStore[storeName]) ? rowsByStore[storeName] : []).forEach((row) => {
+                    store.put({
+                        ...row,
+                        key: rowsV2Key(campaignId, row.id),
+                        campaign_id: campaignId
+                    });
+                });
+            });
+            await rowsV2TransactionDone(tx);
+        } finally {
+            db.close();
+        }
     };
 
     const getCaseById = (state, caseId) => {
@@ -2562,7 +3466,9 @@
     };
 
     const sanitizeSyncBackendMode = (value) => {
+        if (!global.RTF_ALLOW_LEGACY_SYNC_BACKEND) return SYNC_BACKEND_ROWS_V2;
         const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+        if (raw === SYNC_BACKEND_ROWS_V2 || raw === 'rows_v2' || raw === 'row-normalized' || raw === 'row-normalized-v2') return SYNC_BACKEND_ROWS_V2;
         if (raw === SYNC_BACKEND_NORMALIZED || raw === 'norm' || raw === 'normalized-only') return SYNC_BACKEND_NORMALIZED;
         if (raw === SYNC_BACKEND_LEGACY_MIRROR || raw === 'legacy+mirror' || raw === 'legacy-mirror' || raw === 'mirror' || raw === 'dualwrite') {
             return SYNC_BACKEND_LEGACY_MIRROR;
@@ -2598,6 +3504,9 @@
             normalizedLocationsTable: sanitizeIdentifier(source.normalizedLocationsTable, DEFAULT_SYNC_CONFIG.normalizedLocationsTable),
             normalizedRequisitionsTable: sanitizeIdentifier(source.normalizedRequisitionsTable, DEFAULT_SYNC_CONFIG.normalizedRequisitionsTable),
             normalizedEncountersTable: sanitizeIdentifier(source.normalizedEncountersTable, DEFAULT_SYNC_CONFIG.normalizedEncountersTable),
+            rowsV2Prefix: sanitizeIdentifier(source.rowsV2Prefix, DEFAULT_SYNC_CONFIG.rowsV2Prefix),
+            rowsV2SyncVersionsTable: sanitizeIdentifier(source.rowsV2SyncVersionsTable, DEFAULT_SYNC_CONFIG.rowsV2SyncVersionsTable),
+            rowsV2SyncTombstonesTable: sanitizeIdentifier(source.rowsV2SyncTombstonesTable, DEFAULT_SYNC_CONFIG.rowsV2SyncTombstonesTable),
             syncDelayMs: Math.max(8000, toNonNegativeInt(source.syncDelayMs, DEFAULT_SYNC_CONFIG.syncDelayMs) || DEFAULT_SYNC_CONFIG.syncDelayMs),
             reconcileIntervalMs: Math.max(120000, toNonNegativeInt(source.reconcileIntervalMs, DEFAULT_SYNC_CONFIG.reconcileIntervalMs) || DEFAULT_SYNC_CONFIG.reconcileIntervalMs),
             presenceHeartbeatMs: Math.max(10000, toNonNegativeInt(source.presenceHeartbeatMs, DEFAULT_SYNC_CONFIG.presenceHeartbeatMs) || DEFAULT_SYNC_CONFIG.presenceHeartbeatMs),
@@ -2636,6 +3545,10 @@
 
     const coerceAutoConnectBackendMode = (config) => {
         const clean = sanitizeSyncConfig(config);
+        if (!global.RTF_ALLOW_LEGACY_SYNC_BACKEND) {
+            const next = { ...clean, backendMode: SYNC_BACKEND_ROWS_V2 };
+            return { config: next, changed: clean.backendMode !== SYNC_BACKEND_ROWS_V2 };
+        }
         if (!clean.enabled || !clean.autoConnect) {
             return { config: clean, changed: false };
         }
@@ -2692,7 +3605,9 @@
                 autoSyncBootTimer: null,
                 roomHydrationInflight: new Map(),
                 roomHydrationSeenAt: new Map(),
-                queryCache: new Map()
+                queryCache: new Map(),
+                rowsV2LocalReady: null,
+                rowsV2LocalError: ''
             };
 
             if (coercedSyncConfig.changed) {
@@ -2910,6 +3825,21 @@
             this.sync.lastPullAt = pulledAt;
             this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, revision);
             if (remoteUpdatedAt > this.sync.lastRemoteSeenAt) this.sync.lastRemoteSeenAt = remoteUpdatedAt;
+            if (this.isRowsV2Mode()) {
+                const campaignId = this.getRowsV2CampaignId();
+                const cursorRows = createRowsV2Bucket();
+                cursorRows.cursors.push(makeRowsV2Row(campaignId, 'cursor.remote', 'sync.cursor.remote', record, {
+                    kind: 'cursor',
+                    valueNumber: revision,
+                    updatedAt: pulledAt
+                }));
+                writeRowsV2LocalRows(campaignId, cursorRows, {
+                    replaceAll: false,
+                    storeNames: ['cursors']
+                }).catch((err) => {
+                    console.warn('RTF_STORE: Failed to persist rows v2 cursor', err);
+                });
+            }
             return record;
         }
 
@@ -3756,6 +4686,13 @@
                         updatedAt: toTimestamp(this.state.meta && this.state.meta.updated, 0)
                     });
                 }
+                if (this.isRowsV2Mode()) {
+                    this.sync.rowsV2LocalReady = this.bootstrapRowsV2Local().catch((err) => {
+                        const message = err && err.message ? err.message : String(err);
+                        this.sync.rowsV2LocalError = message;
+                        console.warn('RTF_STORE: Rows v2 local bootstrap failed', err);
+                    });
+                }
             } catch (e) {
                 console.error("RTF_STORE: Load failed", e);
                 this.sync.hadStoredStateAtBoot = false;
@@ -3764,6 +4701,103 @@
                 this.sync.lastSyncedState = sanitizeState(this.state);
                 this.sync.lastKnownRemoteRevision = 0;
             }
+        }
+
+        async bootstrapRowsV2Local() {
+            const campaignId = this.getRowsV2CampaignId();
+            const marker = readJsonStorage(LOCAL_ROWS_META_KEY, null);
+            const hasMarker = !!(marker && marker.version === LOCAL_ROWS_DB_VERSION && marker.campaignId === campaignId);
+            const existingRows = hasMarker ? await readRowsV2LocalRows(campaignId) : null;
+            const existingCount = existingRows
+                ? ROWS_V2_CLOUD_STORES.reduce((sum, storeName) => sum + (Array.isArray(existingRows[storeName]) ? existingRows[storeName].length : 0), 0)
+                : 0;
+
+            if (hasMarker && existingCount) {
+                const composed = composeStateFromRowsV2(existingRows);
+                this.state = sanitizeState(composed);
+                this.ensureCampaignEntityIds(false);
+                this.syncActiveCaseLegacyState();
+                this.sync.lastSyncedState = sanitizeState(this.state);
+                try {
+                    localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                } catch (err) {
+                    console.warn('RTF_STORE: Failed mirroring rows v2 state to localStorage', err);
+                }
+                this.broadcastStoreUpdate('storage', { scopes: [SYNC_SCOPE_GLOBAL], reason: 'rows-v2-local-hydrate' });
+                return { ok: true, reason: 'hydrated', rows: existingCount };
+            }
+
+            const raw = (() => {
+                try {
+                    return localStorage.getItem(STORE_KEY);
+                } catch (err) {
+                    return '';
+                }
+            })();
+            if (raw) {
+                try {
+                    if (!localStorage.getItem(LOCAL_ROWS_BACKUP_KEY)) {
+                        localStorage.setItem(LOCAL_ROWS_BACKUP_KEY, raw);
+                    }
+                } catch (err) {
+                    console.warn('RTF_STORE: Failed writing rows v2 migration backup', err);
+                }
+            }
+
+            const rows = decomposeStateToRowsV2(this.state, campaignId, {
+                revision: toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0),
+                updatedAt: toTimestamp(this.state.meta && this.state.meta.updated, Date.now()),
+                updatedBy: this.sync.instanceId,
+                updatedByUser: this.sync.userId || null,
+                updatedByName: this.sync.config.profileName || null
+            });
+            await writeRowsV2LocalRows(campaignId, rows, { replaceAll: true });
+            const migratedAt = new Date().toISOString();
+            const markerPayload = {
+                version: LOCAL_ROWS_DB_VERSION,
+                campaignId,
+                migratedAt,
+                source: raw ? 'localStorage' : 'default-state'
+            };
+            try {
+                localStorage.setItem(LOCAL_ROWS_META_KEY, JSON.stringify(markerPayload));
+            } catch (err) {
+                console.warn('RTF_STORE: Failed writing rows v2 local marker', err);
+            }
+            return { ok: true, reason: 'migrated', migratedAt };
+        }
+
+        persistRowsV2LocalSnapshot(scopes = SYNC_SCOPE_GLOBAL) {
+            if (!this.isRowsV2Mode()) return Promise.resolve({ ok: true, reason: 'disabled' });
+            const campaignId = this.getRowsV2CampaignId();
+            const rows = decomposeStateToRowsV2(this.state, campaignId, {
+                revision: toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0),
+                updatedAt: toTimestamp(this.state.meta && this.state.meta.updated, Date.now()),
+                updatedBy: this.sync.instanceId,
+                updatedByUser: this.sync.userId || null,
+                updatedByName: this.sync.config.profileName || null
+            });
+            return writeRowsV2LocalRows(campaignId, rows, {
+                replaceAll: true,
+                storeNames: LOCAL_ROWS_STORES
+            }).then(() => {
+                try {
+                    localStorage.setItem(LOCAL_ROWS_META_KEY, JSON.stringify({
+                        version: LOCAL_ROWS_DB_VERSION,
+                        campaignId,
+                        migratedAt: new Date().toISOString(),
+                        source: 'save'
+                    }));
+                } catch (err) {
+                    console.warn('RTF_STORE: Failed refreshing rows v2 local marker', err);
+                }
+                return { ok: true };
+            }).catch((err) => {
+                const message = err && err.message ? err.message : String(err);
+                this.sync.rowsV2LocalError = message;
+                console.warn('RTF_STORE: Failed writing rows v2 local rows', err);
+                return { ok: false, error: message };
+            });
         }
 
         ingestPreloadedData() {
@@ -3945,6 +4979,7 @@
                 const cloudScopes = this.markLocalDirtyScopes(scopes, now);
                 if (cloudScopes.length) this.touchSoftLockScopes(cloudScopes);
                 localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                this.persistRowsV2LocalSnapshot(scopes).catch(() => { });
 
                 if (!skipCloud && !this.isApplyingRemote && cloudScopes.length) {
                     if (this.canAutoPushCloud('local-save')) {
@@ -4128,6 +5163,7 @@
                 console.error('RTF_STORE: Failed resetting campaign data', err);
                 return false;
             }
+            this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL).catch(() => { });
 
             this.updateSyncStatus({
                 mode: 'disabled',
@@ -4304,7 +5340,7 @@
                 const current = Array.from(this.sync.localDirtyScopes.values());
                 return current.length ? current : [SYNC_SCOPE_GLOBAL];
             }
-            const filtered = filterCloudSyncScopes(scopes);
+            const filtered = this.isRowsV2Mode() ? normalizeScopeList(scopes) : filterCloudSyncScopes(scopes);
             return filtered.length ? filtered : [];
         }
 
@@ -4325,7 +5361,7 @@
 
         markLocalDirtyScopes(scopes, timestamp = Date.now()) {
             if (!this.sync.localDirtyScopes) this.sync.localDirtyScopes = new Set();
-            const list = filterCloudSyncScopes(scopes);
+            const list = this.isRowsV2Mode() ? normalizeScopeList(scopes) : filterCloudSyncScopes(scopes);
             this.recordScopeUpdated(scopes, timestamp);
             list.forEach((scope) => {
                 this.sync.localDirtyScopes.add(scope);
@@ -4507,8 +5543,36 @@
             return this.sync.config.backendMode === SYNC_BACKEND_NORMALIZED;
         }
 
+        isRowsV2Mode() {
+            return this.sync.config.backendMode === SYNC_BACKEND_ROWS_V2;
+        }
+
         isNormalizedMirrorMode() {
             return this.sync.config.backendMode === SYNC_BACKEND_LEGACY_MIRROR;
+        }
+
+        getRowsV2CampaignId() {
+            return sanitizeCampaignId(this.sync && this.sync.config ? this.sync.config.campaignId : '') || 'local';
+        }
+
+        getRowsV2Tables() {
+            return buildRowsV2Tables(this.sync && this.sync.config ? this.sync.config : DEFAULT_SYNC_CONFIG);
+        }
+
+        decomposeStateToRows(state = this.state, campaignId = this.getRowsV2CampaignId(), meta = {}) {
+            return decomposeStateToRowsV2(state, campaignId, meta);
+        }
+
+        composeStateFromRows(rowsByStore) {
+            return composeStateFromRowsV2(rowsByStore);
+        }
+
+        scopeToRowWrites(scopeOrList, rowsByStore) {
+            return scopeToRowWritesV2(scopeOrList, rowsByStore);
+        }
+
+        scopeToDeltaReads(scopeRows) {
+            return scopeToDeltaReadsV2(scopeRows);
         }
 
         getNormalizedTables() {
@@ -4529,6 +5593,10 @@
         }
 
         getRealtimeTableTargets() {
+            if (this.isRowsV2Mode()) {
+                const tableName = this.sync.config.rowsV2SyncVersionsTable;
+                return tableName ? [tableName] : [];
+            }
             if (this.isNormalizedReadMode()) {
                 const tableName = this.sync.config.normalizedScopeVersionsTable;
                 return tableName ? [tableName] : [];
@@ -4607,6 +5675,31 @@
                 }).catch(() => {
                     this.pullFromCloud({ force: false, silent: true }).catch(() => { });
                 });
+            }, NORMALIZED_REALTIME_PULL_DELAY_MS);
+        }
+
+        scheduleRowsV2RealtimePull(row = null) {
+            if (!this.isRowsV2Mode()) return;
+            if (!(this.sync.normalizedPendingScopeMeta instanceof Map)) {
+                this.sync.normalizedPendingScopeMeta = new Map();
+            }
+            const scope = normalizeScopeToken(row && row.scope);
+            if (scope && scope !== SYNC_SCOPE_GLOBAL) {
+                this.sync.normalizedPendingScopeMeta.set(scope, row);
+            }
+            this.clearNormalizedRealtimePull({ clearScopes: false, clearMeta: false });
+            this.sync.normalizedPullTimer = setTimeout(() => {
+                this.sync.normalizedPullTimer = null;
+                if (!this.hasLiveSyncConnection()) return;
+                const rows = this.sync.normalizedPendingScopeMeta instanceof Map
+                    ? Array.from(this.sync.normalizedPendingScopeMeta.values())
+                    : [];
+                if (this.sync.normalizedPendingScopeMeta instanceof Map) this.sync.normalizedPendingScopeMeta.clear();
+                this.pullFromCloud({
+                    force: false,
+                    silent: true,
+                    scopeVersionRows: rows
+                }).catch(() => { });
             }, NORMALIZED_REALTIME_PULL_DELAY_MS);
         }
 
@@ -5189,6 +6282,500 @@
             };
         }
 
+        async fetchRowsV2ScopeVersionRowsSince(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const silent = !!opts.silent;
+            const tables = this.getRowsV2Tables();
+            const sinceRevision = Math.max(0, toNonNegativeInt(opts.sinceRevision, toNonNegativeInt(this.sync.lastKnownRemoteRevision, 0)));
+            const sinceUpdatedAt = toTimestamp(opts.sinceUpdatedAt, toTimestamp(this.sync.lastRemoteSeenAt, 0));
+            let query = this.sync.client
+                .from(tables.syncVersions)
+                .select('scope,table_name,row_id,exists,revision,updated_at,updated_by,updated_by_name')
+                .eq('campaign_id', this.sync.config.campaignId);
+
+            if (sinceRevision > 0) {
+                query = query.gt('revision', sinceRevision);
+            } else if (sinceUpdatedAt > 0) {
+                query = query.gt('updated_at', new Date(sinceUpdatedAt).toISOString());
+            } else if (!opts.allowFullScan) {
+                return { ok: true, reason: 'unknown-baseline', data: null };
+            }
+
+            query = query.order('revision', { ascending: true }).order('updated_at', { ascending: true });
+            const result = await query;
+            if (result.error) {
+                const message = result.error.message || 'Rows v2 version read failed.';
+                if (!silent) {
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        message: 'Cloud read failed.',
+                        lastError: message
+                    });
+                }
+                return { ok: false, reason: 'error', error: message };
+            }
+            return { ok: true, reason: 'rows', data: Array.isArray(result.data) ? result.data : [] };
+        }
+
+        async fetchRowsV2TableRows(storeName, scopes = null) {
+            const tables = this.getRowsV2Tables();
+            const tableName = tables[storeName];
+            if (!tableName) return { ok: true, data: [] };
+            const selectCols = 'campaign_id,id,parent_id,scope,sort_order,kind,name,title,type,status,source_id,target_id,value_text,value_number,x,y,width,height,extra,revision,updated_at,updated_by,updated_by_user,updated_by_name,deleted_at';
+            let query = this.sync.client
+                .from(tableName)
+                .select(selectCols)
+                .eq('campaign_id', this.sync.config.campaignId)
+                .is('deleted_at', null);
+            const scopeList = Array.isArray(scopes) ? normalizeScopeList(scopes).filter((scope) => scope !== SYNC_SCOPE_GLOBAL) : [];
+            if (scopeList.length) query = query.in('scope', scopeList);
+            query = query.order('sort_order', { ascending: true }).order('id', { ascending: true });
+            const result = await query;
+            if (result.error) {
+                return {
+                    ok: false,
+                    error: result.error.message || `Rows v2 read failed for ${tableName}.`
+                };
+            }
+            return { ok: true, data: Array.isArray(result.data) ? result.data : [] };
+        }
+
+        async fetchRowsV2Tombstones(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const tables = this.getRowsV2Tables();
+            let query = this.sync.client
+                .from(tables.syncTombstones)
+                .select('campaign_id,table_name,row_id,scope,revision,deleted_at,updated_by,updated_by_name')
+                .eq('campaign_id', this.sync.config.campaignId);
+            const scopeList = Array.isArray(opts.scopes) ? normalizeScopeList(opts.scopes).filter((scope) => scope !== SYNC_SCOPE_GLOBAL) : [];
+            if (scopeList.length) {
+                query = query.in('scope', scopeList);
+            } else {
+                const sinceRevision = toNonNegativeInt(opts.sinceRevision, 0);
+                const sinceUpdatedAt = toTimestamp(opts.sinceUpdatedAt, 0);
+                if (sinceRevision > 0) query = query.gt('revision', sinceRevision);
+                else if (sinceUpdatedAt > 0) query = query.gt('deleted_at', new Date(sinceUpdatedAt).toISOString());
+                else if (!opts.allowFullScan) return { ok: true, data: [] };
+            }
+            const result = await query.order('revision', { ascending: true }).order('deleted_at', { ascending: true });
+            if (result.error) {
+                return {
+                    ok: false,
+                    error: result.error.message || 'Rows v2 tombstone read failed.'
+                };
+            }
+            return { ok: true, data: Array.isArray(result.data) ? result.data : [] };
+        }
+
+        async fetchRowsV2AllRows() {
+            const rows = createRowsV2Bucket();
+            const tasks = await Promise.all(ROWS_V2_CLOUD_STORES.map(async (storeName) => {
+                const result = await this.fetchRowsV2TableRows(storeName);
+                return { storeName, result };
+            }));
+            const failing = tasks.find((entry) => !entry.result.ok);
+            if (failing) return { ok: false, error: failing.result.error || 'Rows v2 full read failed.' };
+            tasks.forEach((entry) => {
+                rows[entry.storeName] = entry.result.data.map(stripRowsV2LocalKey);
+            });
+            return { ok: true, rows };
+        }
+
+        mergeRowsV2DeltaIntoBase(baseRows, deltaRows, tombstones = []) {
+            const rows = createRowsV2Bucket();
+            LOCAL_ROWS_STORES.forEach((storeName) => {
+                const source = Array.isArray(baseRows && baseRows[storeName]) ? baseRows[storeName] : [];
+                rows[storeName] = source.map((row) => ({ ...row }));
+            });
+            ROWS_V2_CLOUD_STORES.forEach((storeName) => {
+                const byId = new Map();
+                (Array.isArray(rows[storeName]) ? rows[storeName] : []).forEach((row) => byId.set(row.id, row));
+                (Array.isArray(deltaRows && deltaRows[storeName]) ? deltaRows[storeName] : []).forEach((row) => {
+                    if (!row || !row.id) return;
+                    if (row.deleted_at) byId.delete(row.id);
+                    else byId.set(row.id, stripRowsV2LocalKey(row));
+                });
+                rows[storeName] = Array.from(byId.values());
+            });
+            (Array.isArray(tombstones) ? tombstones : []).forEach((stone) => {
+                const tableName = toTrimmedString(stone && stone.table_name, '', 120);
+                const rowId = toTrimmedString(stone && stone.row_id, '', 240);
+                const scope = normalizeScopeToken(stone && stone.scope);
+                const storeName = ROWS_V2_CLOUD_STORES.find((candidate) => this.getRowsV2Tables()[candidate] === tableName);
+                if (!storeName || !rows[storeName]) return;
+                rows[storeName] = rows[storeName].filter((row) => {
+                    if (rowId && row.id === rowId) return false;
+                    if (scope && normalizeScopeToken(row.scope) === scope) return false;
+                    return true;
+                });
+            });
+            return rows;
+        }
+
+        buildRowsV2RemoteRow(rowsByStore, versionRows = [], fallback = {}) {
+            const state = composeStateFromRowsV2(rowsByStore);
+            const metaRows = [];
+            ROWS_V2_CLOUD_STORES.forEach((storeName) => {
+                (Array.isArray(rowsByStore && rowsByStore[storeName]) ? rowsByStore[storeName] : []).forEach((row) => metaRows.push(row));
+            });
+            (Array.isArray(versionRows) ? versionRows : []).forEach((row) => metaRows.push(row));
+            let revision = toNonNegativeInt(fallback.revision, 0);
+            let updatedAt = toTimestamp(fallback.updatedAt, 0);
+            let updatedAtRaw = '';
+            let updatedBy = '';
+            let updatedByName = '';
+            const scopeMeta = new Map();
+            metaRows.forEach((row) => {
+                const rowRevision = toNonNegativeInt(row && row.revision, 0);
+                const rowUpdatedAt = toTimestamp(row && row.updated_at, 0);
+                if (rowRevision > revision) revision = rowRevision;
+                if (rowUpdatedAt >= updatedAt) {
+                    updatedAt = rowUpdatedAt;
+                    updatedAtRaw = toIsoString(row && row.updated_at, '') || '';
+                    updatedBy = toTrimmedString(row && row.updated_by, '', 120);
+                    updatedByName = toTrimmedString(row && row.updated_by_name, '', 120);
+                }
+                const scope = normalizeScopeToken(row && row.scope);
+                if (scope && scope !== SYNC_SCOPE_GLOBAL) {
+                    scopeMeta.set(scope, {
+                        revision: rowRevision,
+                        updatedAt: rowUpdatedAt,
+                        exists: row.exists !== false && !row.deleted_at,
+                        signature: ''
+                    });
+                }
+            });
+            state.meta.syncRevision = Math.max(toNonNegativeInt(state.meta && state.meta.syncRevision, 0), revision);
+            state.meta.updated = updatedAt || toTimestamp(state.meta && state.meta.updated, Date.now());
+            return {
+                state: sanitizeState(state),
+                revision: toNonNegativeInt(state.meta.syncRevision, revision),
+                updatedAt: toTimestamp(state.meta.updated, updatedAt),
+                updatedAtRaw,
+                updatedBy,
+                updatedByName,
+                scopeMeta
+            };
+        }
+
+        async fetchCloudRowRowsV2(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const silent = !!opts.silent;
+            const sinceRevision = toNonNegativeInt(opts.sinceRevision, toNonNegativeInt(this.sync.lastKnownRemoteRevision, 0));
+            const sinceUpdatedAt = toTimestamp(opts.sinceUpdatedAt, toTimestamp(this.sync.lastRemoteSeenAt, 0));
+            const allowFullScan = opts.allowFullScan !== false;
+
+            if (!sinceRevision && !sinceUpdatedAt) {
+                const full = await this.fetchRowsV2AllRows();
+                if (!full.ok) {
+                    if (!silent) this.updateSyncStatus({ mode: 'error', message: 'Cloud read failed.', lastError: full.error || 'Rows v2 read failed.' });
+                    return { ok: false, reason: 'error', error: full.error || 'Rows v2 read failed.' };
+                }
+                const count = ROWS_V2_CLOUD_STORES.reduce((sum, storeName) => sum + (full.rows[storeName] || []).length, 0);
+                if (!count) return { ok: true, reason: 'empty', row: null };
+                return { ok: true, reason: 'row', row: this.buildRowsV2RemoteRow(full.rows) };
+            }
+
+            const versionRowsResult = Array.isArray(opts.scopeVersionRows)
+                ? { ok: true, data: opts.scopeVersionRows }
+                : await this.fetchRowsV2ScopeVersionRowsSince({ silent, sinceRevision, sinceUpdatedAt, allowFullScan });
+            if (!versionRowsResult.ok) return versionRowsResult;
+            if (!versionRowsResult.data) {
+                const full = await this.fetchRowsV2AllRows();
+                if (!full.ok) return { ok: false, reason: 'error', error: full.error || 'Rows v2 read failed.' };
+                return { ok: true, reason: 'row', row: this.buildRowsV2RemoteRow(full.rows) };
+            }
+            const versionRows = Array.isArray(versionRowsResult.data) ? versionRowsResult.data : [];
+            if (!versionRows.length) {
+                return {
+                    ok: true,
+                    reason: 'up-to-date',
+                    row: {
+                        state: sanitizeState(this.sync.lastSyncedState || this.state),
+                        revision: sinceRevision,
+                        updatedAt: sinceUpdatedAt,
+                        updatedAtRaw: sinceUpdatedAt ? new Date(sinceUpdatedAt).toISOString() : '',
+                        updatedBy: '',
+                        updatedByName: '',
+                        scopeMeta: new Map()
+                    }
+                };
+            }
+
+            const reads = this.scopeToDeltaReads(versionRows);
+            const deltaRows = createRowsV2Bucket();
+            const tables = this.getRowsV2Tables();
+            const tasks = [];
+            reads.forEach((scopeSet, tableName) => {
+                const storeName = ROWS_V2_CLOUD_STORES.find((candidate) => tables[candidate] === tableName);
+                if (!storeName) return;
+                tasks.push(this.fetchRowsV2TableRows(storeName, Array.from(scopeSet.values())).then((result) => ({ storeName, result })));
+            });
+            const fetched = await Promise.all(tasks);
+            const failing = fetched.find((entry) => !entry.result.ok);
+            if (failing) return { ok: false, reason: 'error', error: failing.result.error || 'Rows v2 targeted read failed.' };
+            fetched.forEach((entry) => {
+                deltaRows[entry.storeName] = entry.result.data.map(stripRowsV2LocalKey);
+            });
+            const tombstones = await this.fetchRowsV2Tombstones({
+                scopes: versionRows.filter((row) => row.exists === false).map((row) => row.scope),
+                sinceRevision,
+                sinceUpdatedAt
+            });
+            if (!tombstones.ok) return { ok: false, reason: 'error', error: tombstones.error || 'Rows v2 tombstone read failed.' };
+            const baseRows = decomposeStateToRowsV2(this.sync.lastSyncedState || this.state, this.getRowsV2CampaignId());
+            const mergedRows = this.mergeRowsV2DeltaIntoBase(baseRows, deltaRows, tombstones.data);
+            return {
+                ok: true,
+                reason: 'delta',
+                row: this.buildRowsV2RemoteRow(mergedRows, versionRows, { revision: sinceRevision, updatedAt: sinceUpdatedAt }),
+                changedScopes: versionRows.map((row) => row.scope)
+            };
+        }
+
+        rowsV2StoreForScope(scopeToken) {
+            const scope = normalizeScopeToken(scopeToken);
+            if (scope === 'campaign' || scope.startsWith('campaign.heat') || scope.startsWith('campaign.cognitive') || scope.startsWith('campaign.case') || scope.startsWith('campaign.ledger') || scope.startsWith('campaign.meta') || scope.startsWith('campaign.context')) return 'campaignFields';
+            if (scope.startsWith('campaign.rep')) return 'campaignRep';
+            if (scope.startsWith('campaign.players') && scope.includes('.projects.')) return 'playerProjects';
+            if (scope.startsWith('campaign.players')) return 'players';
+            if (scope.startsWith('campaign.npcs')) return 'npcs';
+            if (scope.startsWith('campaign.locations')) return 'locations';
+            if (scope.startsWith('campaign.requisitions')) return 'requisitions';
+            if (scope.startsWith('campaign.encounters')) return 'encounters';
+            if (scope.startsWith('campaign.meta.events')) return 'caseEvents';
+            if (/^cases\.[a-z0-9_-]+\.events/.test(scope)) return 'caseEvents';
+            if (/^cases\.[a-z0-9_-]+\.leads/.test(scope)) return 'caseLeads';
+            if (/^cases\.[a-z0-9_-]+\.board\.nodes/.test(scope)) return 'boardNodes';
+            if (/^cases\.[a-z0-9_-]+\.board\.edges/.test(scope)) return 'boardEdges';
+            if (/^cases\.[a-z0-9_-]+\.vtt\.scenes\.[a-z0-9_-]+\.tokens/.test(scope)) return 'vttTokens';
+            if (/^cases\.[a-z0-9_-]+\.vtt\.scenes\.[a-z0-9_-]+\.templates/.test(scope)) return 'vttTemplates';
+            if (/^cases\.[a-z0-9_-]+\.vtt\.scenes\.[a-z0-9_-]+\.fog/.test(scope)) return 'vttFog';
+            if (/^cases\.[a-z0-9_-]+\.vtt\.scenes/.test(scope)) return 'vttScenes';
+            if (/^cases\.[a-z0-9_-]+\.vtt\.initiative/.test(scope) || /^cases\.[a-z0-9_-]+\.vtt$/.test(scope)) return 'vttInitiative';
+            if (/^cases\.[a-z0-9_-]+$/.test(scope) || scope === SYNC_SCOPE_CASES_META) return 'cases';
+            if (scope.startsWith('hq.floors') && scope.includes('.rooms.')) return 'hqRooms';
+            if (scope.startsWith('hq.floors')) return 'hqFloors';
+            if (scope === 'hq') return 'campaignFields';
+            return 'campaignFields';
+        }
+
+        async writeRowsV2ScopeVersions(versionRows) {
+            if (!versionRows.length) return { ok: true };
+            const tables = this.getRowsV2Tables();
+            const result = await this.sync.client
+                .from(tables.syncVersions)
+                .upsert(versionRows, { onConflict: 'campaign_id,scope' });
+            if (result.error) {
+                return { ok: false, error: result.error.message || 'Rows v2 scope-version write failed.' };
+            }
+            return { ok: true };
+        }
+
+        async writeRowsV2StateByScopes(state, scopes, meta = {}) {
+            const campaignId = this.sync.config.campaignId;
+            const tables = this.getRowsV2Tables();
+            const revision = toNonNegativeInt(meta.revision, toNonNegativeInt(state && state.meta && state.meta.syncRevision, 0));
+            const updatedAt = rowsV2TimestampIso(meta.updatedAt || Date.now());
+            const allRows = decomposeStateToRowsV2(state, campaignId, {
+                revision,
+                updatedAt,
+                updatedBy: meta.updatedBy || this.sync.instanceId,
+                updatedByUser: meta.updatedByUser || this.sync.userId || null,
+                updatedByName: meta.updatedByName || this.sync.config.profileName || null
+            });
+            const scopeList = normalizeScopeList(scopes);
+            const writeAll = scopeList.includes(SYNC_SCOPE_GLOBAL);
+            const rowsToWrite = writeAll ? allRows : scopeToRowWritesV2(scopeList, allRows);
+            const versionRows = [];
+            const writtenScopes = new Set();
+
+            for (const storeName of ROWS_V2_CLOUD_STORES) {
+                const tableName = tables[storeName];
+                const rows = (Array.isArray(rowsToWrite[storeName]) ? rowsToWrite[storeName] : []).map((row) => ({
+                    ...stripRowsV2LocalKey(row),
+                    campaign_id: campaignId,
+                    revision,
+                    updated_at: updatedAt,
+                    updated_by: meta.updatedBy || this.sync.instanceId,
+                    updated_by_user: meta.updatedByUser || this.sync.userId || null,
+                    updated_by_name: meta.updatedByName || this.sync.config.profileName || null,
+                    deleted_at: null
+                }));
+
+                if (writeAll) {
+                    const del = await this.sync.client.from(tableName).delete().eq('campaign_id', campaignId);
+                    if (del.error) return { ok: false, error: del.error.message || `Rows v2 clear failed for ${tableName}.` };
+                }
+                if (rows.length) {
+                    const upsert = await this.sync.client.from(tableName).upsert(rows, { onConflict: 'campaign_id,id' });
+                    if (upsert.error) return { ok: false, error: upsert.error.message || `Rows v2 write failed for ${tableName}.` };
+                    rows.forEach((row) => {
+                        const scope = normalizeScopeToken(row.scope);
+                        if (!scope || writtenScopes.has(scope)) return;
+                        writtenScopes.add(scope);
+                        versionRows.push({
+                            campaign_id: campaignId,
+                            scope,
+                            table_name: tableName,
+                            row_id: row.id,
+                            exists: true,
+                            revision,
+                            updated_at: updatedAt,
+                            updated_by: meta.updatedBy || this.sync.instanceId,
+                            updated_by_user: meta.updatedByUser || this.sync.userId || null,
+                            updated_by_name: meta.updatedByName || this.sync.config.profileName || null
+                        });
+                    });
+                }
+            }
+
+            const tombstones = [];
+            if (!writeAll) {
+                for (const scope of scopeList) {
+                    if (!scope || scope === SYNC_SCOPE_GLOBAL || writtenScopes.has(scope)) continue;
+                    const hasMatchingRow = ROWS_V2_CLOUD_STORES.some((storeName) => (
+                        Array.isArray(allRows[storeName]) && allRows[storeName].some((row) => normalizeScopeToken(row.scope) === scope)
+                    ));
+                    if (hasMatchingRow) continue;
+                    const storeName = this.rowsV2StoreForScope(scope);
+                    const tableName = tables[storeName];
+                    if (!tableName) continue;
+                    const rowId = rowsV2JoinId('deleted', scope);
+                    const del = await this.sync.client
+                        .from(tableName)
+                        .delete()
+                        .eq('campaign_id', campaignId)
+                        .eq('scope', scope);
+                    if (del.error) return { ok: false, error: del.error.message || `Rows v2 delete failed for ${tableName}.` };
+                    tombstones.push({
+                        campaign_id: campaignId,
+                        table_name: tableName,
+                        row_id: rowId,
+                        scope,
+                        revision,
+                        deleted_at: updatedAt,
+                        updated_by: meta.updatedBy || this.sync.instanceId,
+                        updated_by_user: meta.updatedByUser || this.sync.userId || null,
+                        updated_by_name: meta.updatedByName || this.sync.config.profileName || null
+                    });
+                    versionRows.push({
+                        campaign_id: campaignId,
+                        scope,
+                        table_name: tableName,
+                        row_id: rowId,
+                        exists: false,
+                        revision,
+                        updated_at: updatedAt,
+                        updated_by: meta.updatedBy || this.sync.instanceId,
+                        updated_by_user: meta.updatedByUser || this.sync.userId || null,
+                        updated_by_name: meta.updatedByName || this.sync.config.profileName || null
+                    });
+                }
+            }
+            if (tombstones.length) {
+                const tombstoneResult = await this.sync.client
+                    .from(tables.syncTombstones)
+                    .upsert(tombstones, { onConflict: 'campaign_id,table_name,row_id' });
+                if (tombstoneResult.error) return { ok: false, error: tombstoneResult.error.message || 'Rows v2 tombstone write failed.' };
+            }
+            const versionWrite = await this.writeRowsV2ScopeVersions(versionRows);
+            if (!versionWrite.ok) return versionWrite;
+            return { ok: true, writtenScopes: Array.from(writtenScopes.values()) };
+        }
+
+        async pushToCloudRowsV2(options = {}, precomputedDirtyScopes = null) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const silent = !!opts.silent;
+            const force = !!opts.force;
+            let dirtyScopes = precomputedDirtyScopes || this.getDirtyScopesSnapshot(opts.scopes);
+            if (!this.sync.client) return { ok: false, reason: 'not-connected' };
+            if (this.sync.pushInFlight) {
+                this.sync.pushQueued = true;
+                this.updateSyncStatus({ pendingPush: true });
+                return { ok: false, reason: 'queued' };
+            }
+            this.sync.pushInFlight = true;
+            this.cancelCloudPush();
+            try {
+                const baseRevision = toNonNegativeInt(opts.baseRevision !== undefined ? opts.baseRevision : (this.state.meta && this.state.meta.syncRevision), 0);
+                const fetched = await this.fetchCloudRowRowsV2({
+                    silent: true,
+                    sinceRevision: baseRevision,
+                    allowFullScan: true
+                });
+                if (!fetched.ok) return fetched;
+                const remoteRow = fetched.row;
+                const remoteRevision = remoteRow ? toNonNegativeInt(remoteRow.revision, 0) : 0;
+                if (remoteRow && remoteRevision > baseRevision && !force) {
+                    const conflict = this.buildConflictRecord(remoteRow, dirtyScopes);
+                    if (conflict.overlappingScopes.length) {
+                        this.setPendingConflict(conflict);
+                        return { ok: false, reason: 'conflict', conflict: this.getPendingConflict() };
+                    }
+                    this.state = sanitizeState(conflict.mergedState);
+                    this.syncActiveCaseLegacyState();
+                    this.ensureCampaignEntityIds(false);
+                    this.markLocalDirtyScopes(dirtyScopes, Date.now());
+                }
+
+                const nextRevision = Math.max(baseRevision, remoteRevision) + 1;
+                const updatedAt = Date.now();
+                const payloadState = sanitizeState(this.state);
+                payloadState.meta.updated = updatedAt;
+                payloadState.meta.syncRevision = nextRevision;
+                payloadState.meta.scopeUpdated = sanitizeScopeUpdatedMap(this.state.meta && this.state.meta.scopeUpdated);
+                this.state.meta.updated = updatedAt;
+                this.state.meta.syncRevision = nextRevision;
+                this.sync.lastKnownRemoteRevision = nextRevision;
+
+                const write = await this.writeRowsV2StateByScopes(payloadState, dirtyScopes, {
+                    revision: nextRevision,
+                    updatedAt,
+                    updatedBy: this.sync.instanceId,
+                    updatedByUser: this.sync.userId || null,
+                    updatedByName: this.sync.config.profileName || null
+                });
+                if (!write.ok) {
+                    const message = write.error || 'Rows v2 cloud push failed.';
+                    if (!silent) this.updateSyncStatus({ mode: 'error', connected: this.hasLiveSyncConnection(), pendingPush: false, message: 'Cloud push failed.', lastError: message });
+                    return { ok: false, reason: 'error', error: message };
+                }
+                try {
+                    localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                } catch (err) {
+                    console.warn('RTF_STORE: Failed updating local rows v2 timestamp', err);
+                }
+                this.persistRowsV2LocalSnapshot(dirtyScopes).catch(() => { });
+                this.clearLocalDirtyScopes(dirtyScopes);
+                this.syncScopeBaselinesFromLocalState(dirtyScopes, { revision: nextRevision, updatedAt });
+                this.sync.lastPushAt = Date.now();
+                this.sync.lastCloudStateSig = JSON.stringify(payloadState);
+                this.sync.lastSyncedState = sanitizeState(this.state);
+                this.clearPendingConflict({ keepStatus: true });
+                if (updatedAt > this.sync.lastRemoteSeenAt) this.sync.lastRemoteSeenAt = updatedAt;
+                this.updateSyncStatus({
+                    mode: 'ready',
+                    connected: this.hasLiveSyncConnection(),
+                    pendingPush: false,
+                    lastPushAt: this.sync.lastPushAt,
+                    message: 'Cloud sync updated.',
+                    lastError: ''
+                });
+                return { ok: true, revision: nextRevision };
+            } catch (err) {
+                const message = err && err.message ? err.message : String(err);
+                if (!silent) this.updateSyncStatus({ mode: 'error', connected: this.hasLiveSyncConnection(), pendingPush: false, message: 'Cloud push failed.', lastError: message });
+                return { ok: false, reason: 'error', error: message };
+            } finally {
+                this.sync.pushInFlight = false;
+                if (this.sync.pushQueued) {
+                    this.sync.pushQueued = false;
+                    this.scheduleCloudPush('queued');
+                }
+            }
+        }
+
         applyNormalizedScopedSnapshot(baseState, scopes, snapshot, versionMap = new Map()) {
             const remoteBase = sanitizeState(baseState);
             const sourceState = sanitizeState(remoteBase);
@@ -5530,6 +7117,10 @@
                 return { ok: false, reason: 'not-connected' };
             }
 
+            if (this.isRowsV2Mode()) {
+                return this.fetchCloudRowRowsV2({ ...opts, allowFullScan: true });
+            }
+
             if (this.isNormalizedReadMode()) {
                 return this.fetchCloudRowNormalized(opts);
             }
@@ -5712,6 +7303,7 @@
             } catch (writeErr) {
                 console.warn('RTF_STORE: Failed writing merged local state', writeErr);
             }
+            this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL).catch(() => { });
 
             this.syncScopeBaselinesFromRemoteRow(remoteRow, null, { skipDirtyScopes: true });
             if (opts.clearPendingConflict !== false
@@ -7913,6 +9505,24 @@
         }
 
         handleRealtimePayload(payload) {
+            if (this.isRowsV2Mode()) {
+                const row = payload && (payload.new || payload.old) ? (payload.new || payload.old) : null;
+                if (!row) return;
+                const updatedBy = row.updated_by || '';
+                if (updatedBy && updatedBy === this.sync.instanceId) return;
+                const revision = toNonNegativeInt(row.revision, 0);
+                if (revision > this.sync.lastKnownRemoteRevision) {
+                    this.sync.lastKnownRemoteRevision = revision;
+                    this.updateSyncStatus({
+                        connected: this.hasLiveSyncConnection(),
+                        message: this.sync.pendingConflict
+                            ? this.syncStatus.message
+                            : 'Shared row update detected. Catching up.'
+                    });
+                }
+                this.scheduleRowsV2RealtimePull(row);
+                return;
+            }
             if (this.isNormalizedReadMode()) {
                 const row = payload && (payload.new || payload.old) ? (payload.new || payload.old) : null;
                 if (!row) return;
@@ -9162,9 +10772,11 @@
                     : { ok: false, reason: access.reason || 'not-connected', error: access.error || '' };
             }
 
-            const fetched = (this.isNormalizedReadMode() && !force)
-                ? await this.fetchCloudRowNormalizedDelta({ silent })
-                : await this.fetchCloudRow({ silent });
+            const fetched = (this.isRowsV2Mode() && !force)
+                ? await this.fetchCloudRowRowsV2({ silent, allowFullScan: true, scopeVersionRows: opts.scopeVersionRows })
+                : ((this.isNormalizedReadMode() && !force)
+                    ? await this.fetchCloudRowNormalizedDelta({ silent })
+                    : await this.fetchCloudRow({ silent }));
             if (!fetched.ok) {
                 return fetched;
             }
@@ -9190,7 +10802,7 @@
                 || (remoteRevision === localRevision && remoteUpdatedAt > localUpdatedAt);
             const dirtyScopes = hasLocalDirty ? this.getDirtyScopesSnapshot() : [];
             if (!force && hasLocalDirty && localIsOlder) {
-                if (this.isNormalizedReadMode()) {
+                if (this.isRowsV2Mode() || this.isNormalizedReadMode()) {
                     const resolution = this.buildNormalizedDirtyScopeResolution(row, dirtyScopes);
                     const shouldApplyResolution = !!resolution.remoteChangedScopes.length || !!resolution.remoteResolvedScopes.length;
                     const conflict = this.buildConflictRecord(row, dirtyScopes, {
@@ -9321,6 +10933,10 @@
             });
             if (!access.ok) {
                 return { ok: false, reason: access.reason || 'not-connected', error: access.error || '' };
+            }
+
+            if (this.isRowsV2Mode()) {
+                return this.pushToCloudRowsV2(opts, dirtyScopes);
             }
 
             if (this.isNormalizedReadMode()) {
@@ -9569,12 +11185,13 @@
             } catch (err) {
                 console.error('RTF_STORE: Failed writing remote state locally', err);
             }
+            this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL).catch(() => { });
 
             this.isApplyingRemote = false;
             this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, toNonNegativeInt(this.state.meta.syncRevision, 0));
             this.sync.lastSyncedState = sanitizeState(this.state);
             if (meta.clearDirty !== false) this.clearLocalDirtyScopes();
-            if (meta.scopeMeta || this.isNormalizedReadMode()) {
+            if (meta.scopeMeta || this.isNormalizedReadMode() || this.isRowsV2Mode()) {
                 this.syncScopeBaselinesFromRemoteRow({
                     state: sanitizeState(remoteState),
                     revision: remoteRevision,
