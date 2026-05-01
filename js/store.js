@@ -370,6 +370,8 @@
     const NON_YJS_AUTO_SAVE_MAX_WAIT_MS = 30000;
     const FOREGROUND_PULL_MIN_INTERVAL_MS = 30000;
     const NORMALIZED_REALTIME_PULL_DELAY_MS = 2000;
+    const ROWS_V2_RENDER_CHECKPOINT_IDLE_MS = 180000;
+    const ROWS_V2_RENDER_CHECKPOINT_DELAY_LABEL = '3 minutes idle';
 
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
@@ -5575,6 +5577,21 @@
             return scopeToDeltaReadsV2(scopeRows);
         }
 
+        isRowsV2RenderCheckpointScope(scopeToken) {
+            const scope = normalizeScopeToken(scopeToken);
+            if (scope === 'campaign.meta.board' || scope.startsWith('campaign.meta.board.')) return true;
+            if (/^cases\.[a-z0-9_-]+\.board(?:$|\.)/.test(scope)) return true;
+            if (/^cases\.[a-z0-9_-]+\.vtt(?:$|\.)/.test(scope)) return true;
+            return false;
+        }
+
+        hasOnlyRowsV2RenderCheckpointDirtyScopes(scopes = null) {
+            if (!this.isRowsV2Mode()) return false;
+            const list = normalizeScopeList(scopes || this.getDirtyScopesSnapshot());
+            const actionable = list.filter((scope) => scope && scope !== SYNC_SCOPE_GLOBAL);
+            return !!actionable.length && actionable.every((scope) => this.isRowsV2RenderCheckpointScope(scope));
+        }
+
         getNormalizedTables() {
             const cfg = this.sync.config;
             return {
@@ -9689,16 +9706,24 @@
             }
 
             const now = Date.now();
+            const dirtyScopes = this.getDirtyScopesSnapshot();
+            const renderCheckpointOnly = this.hasOnlyRowsV2RenderCheckpointDirtyScopes(dirtyScopes);
             if (!this.sync.pushFirstDirtyAt || !(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size)) {
                 this.sync.pushFirstDirtyAt = now;
             }
             if (this.sync.pushTimer) clearTimeout(this.sync.pushTimer);
-            const baseDelayMs = isYjsCollabPage()
+            const baseDelayMs = renderCheckpointOnly
+                ? ROWS_V2_RENDER_CHECKPOINT_IDLE_MS
+                : (isYjsCollabPage()
                 ? this.sync.config.syncDelayMs
-                : NON_YJS_AUTO_SAVE_DELAY_MS;
+                : NON_YJS_AUTO_SAVE_DELAY_MS);
             const firstDirtyAt = toTimestamp(this.sync.pushFirstDirtyAt, now);
-            const maxWaitMs = isYjsCollabPage() ? baseDelayMs : NON_YJS_AUTO_SAVE_MAX_WAIT_MS;
-            const pushDelayMs = Math.max(0, Math.min(baseDelayMs, maxWaitMs - (now - firstDirtyAt)));
+            const maxWaitMs = renderCheckpointOnly
+                ? baseDelayMs
+                : (isYjsCollabPage() ? baseDelayMs : NON_YJS_AUTO_SAVE_MAX_WAIT_MS);
+            const pushDelayMs = renderCheckpointOnly
+                ? baseDelayMs
+                : Math.max(0, Math.min(baseDelayMs, maxWaitMs - (now - firstDirtyAt)));
             this.sync.pushTimer = setTimeout(() => {
                 this.sync.pushTimer = null;
 
@@ -9813,9 +9838,11 @@
             this.updateSyncStatus({
                 pendingPush: true,
                 mode: 'editing',
-                message: isYjsCollabPage()
+                message: renderCheckpointOnly
+                    ? `Live Board/VTT activity is staying on Render. Supabase row checkpoint waits for ${ROWS_V2_RENDER_CHECKPOINT_DELAY_LABEL}.`
+                    : (isYjsCollabPage()
                     ? 'Live collaboration is active. Supabase checkpoint will save after a pause.'
-                    : `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`
+                    : `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`)
             });
         }
 
