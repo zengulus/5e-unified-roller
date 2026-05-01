@@ -174,7 +174,9 @@ end
 $$;
 
 -- Starter legacy backfill. The client-side "Save This State as Canonical" path
--- writes the complete row set, including board/VTT/HQ child rows.
+-- writes the campaign row set. Board/VTT live state is room-backed by Yjs/Render
+-- and should be restored through room snapshots/recovery instead of normal
+-- campaign row sync.
 do $$
 begin
   if to_regclass('public.rtf_campaign_state') is null then
@@ -376,7 +378,7 @@ begin
     revision = greatest(public.rtf_v2_cases.revision, excluded.revision),
     updated_at = greatest(public.rtf_v2_cases.updated_at, excluded.updated_at);
 
-  raise notice 'Rows v2 starter backfill complete. Use the app canonical push once to fill board, VTT, HQ rooms, requisitions, encounters, and child rows exactly.';
+  raise notice 'Rows v2 starter backfill complete. Use the app canonical push once to fill campaign/HQ/requisition/encounter child rows exactly. Board/VTT live rooms stay Yjs/Render-backed.';
 end
 $$;
 

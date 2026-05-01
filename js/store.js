@@ -370,9 +370,6 @@
     const NON_YJS_AUTO_SAVE_MAX_WAIT_MS = 30000;
     const FOREGROUND_PULL_MIN_INTERVAL_MS = 30000;
     const NORMALIZED_REALTIME_PULL_DELAY_MS = 2000;
-    const ROWS_V2_RENDER_CHECKPOINT_IDLE_MS = 180000;
-    const ROWS_V2_RENDER_CHECKPOINT_DELAY_LABEL = '3 minutes idle';
-
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
     const REQUISITION_PRIORITIES = new Set(['Routine', 'Tactical', 'Emergency']);
     const ENCOUNTER_TIERS = new Set(['Routine', 'Standard', 'Elite', 'Boss']);
@@ -1637,8 +1634,8 @@
     };
     const isRoomBackedScope = (scopeToken) => {
         const scope = normalizeScopeToken(scopeToken);
-        if (scope === 'campaign.meta.board') return true;
-        if (/^cases\.[a-z0-9_-]+\.board$/.test(scope)) return true;
+        if (scope === 'campaign.meta.board' || scope.startsWith('campaign.meta.board.')) return true;
+        if (/^cases\.[a-z0-9_-]+\.board(?:$|\.)/.test(scope)) return true;
         if (/^cases\.[a-z0-9_-]+\.vtt(?:$|\.)/.test(scope)) return true;
         return false;
     };
@@ -1991,7 +1988,7 @@
             if (!Array.isArray(parsed)) return [];
             const cleaned = parsed.filter((entry) => typeof entry === 'string' && /^[a-z0-9_.-]+$/i.test(entry.trim()));
             if (!cleaned.length) return [];
-            const filtered = global.RTF_ALLOW_LEGACY_SYNC_BACKEND ? filterCloudSyncScopes(cleaned) : normalizeScopeList(cleaned);
+            const filtered = filterCloudSyncScopes(cleaned);
             return filtered.length ? filtered : [];
         } catch (err) {
             console.warn('RTF_STORE: Failed to parse dirty scopes cache', err);
@@ -2199,6 +2196,19 @@
         'vttFog',
         'vttInitiative'
     ]);
+    const ROWS_V2_ROOM_BACKED_STORES = Object.freeze([
+        'boardNodes',
+        'boardEdges',
+        'vttScenes',
+        'vttTokens',
+        'vttTemplates',
+        'vttFog',
+        'vttInitiative'
+    ]);
+    const ROWS_V2_ROOM_BACKED_STORE_SET = new Set(ROWS_V2_ROOM_BACKED_STORES);
+    const ROWS_V2_CAMPAIGN_CLOUD_STORES = Object.freeze(
+        ROWS_V2_CLOUD_STORES.filter((storeName) => !ROWS_V2_ROOM_BACKED_STORE_SET.has(storeName))
+    );
 
     const ROWS_V2_STORE_TABLE_SUFFIX = Object.freeze({
         campaigns: 'campaigns',
@@ -2911,6 +2921,31 @@
         base.board = activeCase ? activeCase.board : sanitizeBoard(null);
         base.campaign.events = activeCase ? sanitizeEventList(activeCase.events) : [];
         return sanitizeState(base);
+    };
+
+    const preserveRoomBackedState = (targetState, sourceState) => {
+        const target = sanitizeState(targetState);
+        const source = sanitizeState(sourceState);
+        target.campaignMeta.board = sanitizeBoard(source.campaignMeta && source.campaignMeta.board);
+
+        const sourceCases = new Map();
+        (source.cases && Array.isArray(source.cases.items) ? source.cases.items : []).forEach((entry) => {
+            const caseId = sanitizeCaseId(entry && entry.id, '');
+            if (caseId) sourceCases.set(caseId, entry);
+        });
+        target.cases.items = (target.cases && Array.isArray(target.cases.items) ? target.cases.items : []).map((entry) => {
+            const caseId = sanitizeCaseId(entry && entry.id, '');
+            const sourceEntry = caseId ? sourceCases.get(caseId) : null;
+            if (!sourceEntry) return entry;
+            return {
+                ...entry,
+                board: sanitizeBoard(sourceEntry.board),
+                vtt: sanitizeVTTState(sourceEntry.vtt)
+            };
+        });
+        const activeCase = target.cases.items.find((entry) => entry.id === target.cases.activeCaseId) || target.cases.items[0];
+        target.board = activeCase ? sanitizeBoard(activeCase.board) : sanitizeBoard(source.board);
+        return sanitizeState(target);
     };
 
     const rowsV2ScopeMatches = (rowScope, dirtyScopes) => {
@@ -5342,7 +5377,7 @@
                 const current = Array.from(this.sync.localDirtyScopes.values());
                 return current.length ? current : [SYNC_SCOPE_GLOBAL];
             }
-            const filtered = this.isRowsV2Mode() ? normalizeScopeList(scopes) : filterCloudSyncScopes(scopes);
+            const filtered = filterCloudSyncScopes(scopes);
             return filtered.length ? filtered : [];
         }
 
@@ -5363,7 +5398,7 @@
 
         markLocalDirtyScopes(scopes, timestamp = Date.now()) {
             if (!this.sync.localDirtyScopes) this.sync.localDirtyScopes = new Set();
-            const list = this.isRowsV2Mode() ? normalizeScopeList(scopes) : filterCloudSyncScopes(scopes);
+            const list = filterCloudSyncScopes(scopes);
             this.recordScopeUpdated(scopes, timestamp);
             list.forEach((scope) => {
                 this.sync.localDirtyScopes.add(scope);
@@ -5577,21 +5612,6 @@
             return scopeToDeltaReadsV2(scopeRows);
         }
 
-        isRowsV2RenderCheckpointScope(scopeToken) {
-            const scope = normalizeScopeToken(scopeToken);
-            if (scope === 'campaign.meta.board' || scope.startsWith('campaign.meta.board.')) return true;
-            if (/^cases\.[a-z0-9_-]+\.board(?:$|\.)/.test(scope)) return true;
-            if (/^cases\.[a-z0-9_-]+\.vtt(?:$|\.)/.test(scope)) return true;
-            return false;
-        }
-
-        hasOnlyRowsV2RenderCheckpointDirtyScopes(scopes = null) {
-            if (!this.isRowsV2Mode()) return false;
-            const list = normalizeScopeList(scopes || this.getDirtyScopesSnapshot());
-            const actionable = list.filter((scope) => scope && scope !== SYNC_SCOPE_GLOBAL);
-            return !!actionable.length && actionable.every((scope) => this.isRowsV2RenderCheckpointScope(scope));
-        }
-
         getNormalizedTables() {
             const cfg = this.sync.config;
             return {
@@ -5702,6 +5722,7 @@
             }
             const scope = normalizeScopeToken(row && row.scope);
             if (scope && scope !== SYNC_SCOPE_GLOBAL) {
+                if (isRoomBackedScope(scope)) return;
                 this.sync.normalizedPendingScopeMeta.set(scope, row);
             }
             this.clearNormalizedRealtimePull({ clearScopes: false, clearMeta: false });
@@ -6331,7 +6352,13 @@
                 }
                 return { ok: false, reason: 'error', error: message };
             }
-            return { ok: true, reason: 'rows', data: Array.isArray(result.data) ? result.data : [] };
+            return {
+                ok: true,
+                reason: 'rows',
+                data: Array.isArray(result.data)
+                    ? result.data.filter((row) => !isRoomBackedScope(row && row.scope))
+                    : []
+            };
         }
 
         async fetchRowsV2TableRows(storeName, scopes = null) {
@@ -6364,7 +6391,9 @@
                 .from(tables.syncTombstones)
                 .select('campaign_id,table_name,row_id,scope,revision,deleted_at,updated_by,updated_by_name')
                 .eq('campaign_id', this.sync.config.campaignId);
-            const scopeList = Array.isArray(opts.scopes) ? normalizeScopeList(opts.scopes).filter((scope) => scope !== SYNC_SCOPE_GLOBAL) : [];
+            const scopeList = Array.isArray(opts.scopes)
+                ? filterCloudSyncScopes(opts.scopes).filter((scope) => scope !== SYNC_SCOPE_GLOBAL)
+                : [];
             if (scopeList.length) {
                 query = query.in('scope', scopeList);
             } else {
@@ -6386,7 +6415,7 @@
 
         async fetchRowsV2AllRows() {
             const rows = createRowsV2Bucket();
-            const tasks = await Promise.all(ROWS_V2_CLOUD_STORES.map(async (storeName) => {
+            const tasks = await Promise.all(ROWS_V2_CAMPAIGN_CLOUD_STORES.map(async (storeName) => {
                 const result = await this.fetchRowsV2TableRows(storeName);
                 return { storeName, result };
             }));
@@ -6404,7 +6433,7 @@
                 const source = Array.isArray(baseRows && baseRows[storeName]) ? baseRows[storeName] : [];
                 rows[storeName] = source.map((row) => ({ ...row }));
             });
-            ROWS_V2_CLOUD_STORES.forEach((storeName) => {
+            ROWS_V2_CAMPAIGN_CLOUD_STORES.forEach((storeName) => {
                 const byId = new Map();
                 (Array.isArray(rows[storeName]) ? rows[storeName] : []).forEach((row) => byId.set(row.id, row));
                 (Array.isArray(deltaRows && deltaRows[storeName]) ? deltaRows[storeName] : []).forEach((row) => {
@@ -6418,7 +6447,7 @@
                 const tableName = toTrimmedString(stone && stone.table_name, '', 120);
                 const rowId = toTrimmedString(stone && stone.row_id, '', 240);
                 const scope = normalizeScopeToken(stone && stone.scope);
-                const storeName = ROWS_V2_CLOUD_STORES.find((candidate) => this.getRowsV2Tables()[candidate] === tableName);
+                const storeName = ROWS_V2_CAMPAIGN_CLOUD_STORES.find((candidate) => this.getRowsV2Tables()[candidate] === tableName);
                 if (!storeName || !rows[storeName]) return;
                 rows[storeName] = rows[storeName].filter((row) => {
                     if (rowId && row.id === rowId) return false;
@@ -6430,9 +6459,9 @@
         }
 
         buildRowsV2RemoteRow(rowsByStore, versionRows = [], fallback = {}) {
-            const state = composeStateFromRowsV2(rowsByStore);
+            const state = preserveRoomBackedState(composeStateFromRowsV2(rowsByStore), fallback.state || this.state);
             const metaRows = [];
-            ROWS_V2_CLOUD_STORES.forEach((storeName) => {
+            ROWS_V2_CAMPAIGN_CLOUD_STORES.forEach((storeName) => {
                 (Array.isArray(rowsByStore && rowsByStore[storeName]) ? rowsByStore[storeName] : []).forEach((row) => metaRows.push(row));
             });
             (Array.isArray(versionRows) ? versionRows : []).forEach((row) => metaRows.push(row));
@@ -6488,7 +6517,7 @@
                     if (!silent) this.updateSyncStatus({ mode: 'error', message: 'Cloud read failed.', lastError: full.error || 'Rows v2 read failed.' });
                     return { ok: false, reason: 'error', error: full.error || 'Rows v2 read failed.' };
                 }
-                const count = ROWS_V2_CLOUD_STORES.reduce((sum, storeName) => sum + (full.rows[storeName] || []).length, 0);
+                const count = ROWS_V2_CAMPAIGN_CLOUD_STORES.reduce((sum, storeName) => sum + (full.rows[storeName] || []).length, 0);
                 if (!count) return { ok: true, reason: 'empty', row: null };
                 return { ok: true, reason: 'row', row: this.buildRowsV2RemoteRow(full.rows) };
             }
@@ -6524,7 +6553,7 @@
             const tables = this.getRowsV2Tables();
             const tasks = [];
             reads.forEach((scopeSet, tableName) => {
-                const storeName = ROWS_V2_CLOUD_STORES.find((candidate) => tables[candidate] === tableName);
+                const storeName = ROWS_V2_CAMPAIGN_CLOUD_STORES.find((candidate) => tables[candidate] === tableName);
                 if (!storeName) return;
                 tasks.push(this.fetchRowsV2TableRows(storeName, Array.from(scopeSet.values())).then((result) => ({ storeName, result })));
             });
@@ -6601,13 +6630,14 @@
                 updatedByUser: meta.updatedByUser || this.sync.userId || null,
                 updatedByName: meta.updatedByName || this.sync.config.profileName || null
             });
-            const scopeList = normalizeScopeList(scopes);
-            const writeAll = scopeList.includes(SYNC_SCOPE_GLOBAL);
+            const requestedScopes = normalizeScopeList(scopes);
+            const writeAll = requestedScopes.includes(SYNC_SCOPE_GLOBAL);
+            const scopeList = writeAll ? requestedScopes : filterCloudSyncScopes(requestedScopes);
             const rowsToWrite = writeAll ? allRows : scopeToRowWritesV2(scopeList, allRows);
             const versionRows = [];
             const writtenScopes = new Set();
 
-            for (const storeName of ROWS_V2_CLOUD_STORES) {
+            for (const storeName of ROWS_V2_CAMPAIGN_CLOUD_STORES) {
                 const tableName = tables[storeName];
                 const rows = (Array.isArray(rowsToWrite[storeName]) ? rowsToWrite[storeName] : []).map((row) => ({
                     ...stripRowsV2LocalKey(row),
@@ -6651,11 +6681,12 @@
             if (!writeAll) {
                 for (const scope of scopeList) {
                     if (!scope || scope === SYNC_SCOPE_GLOBAL || writtenScopes.has(scope)) continue;
-                    const hasMatchingRow = ROWS_V2_CLOUD_STORES.some((storeName) => (
+                    const hasMatchingRow = ROWS_V2_CAMPAIGN_CLOUD_STORES.some((storeName) => (
                         Array.isArray(allRows[storeName]) && allRows[storeName].some((row) => normalizeScopeToken(row.scope) === scope)
                     ));
                     if (hasMatchingRow) continue;
                     const storeName = this.rowsV2StoreForScope(scope);
+                    if (ROWS_V2_ROOM_BACKED_STORE_SET.has(storeName)) continue;
                     const tableName = tables[storeName];
                     if (!tableName) continue;
                     const rowId = rowsV2JoinId('deleted', scope);
@@ -9706,24 +9737,16 @@
             }
 
             const now = Date.now();
-            const dirtyScopes = this.getDirtyScopesSnapshot();
-            const renderCheckpointOnly = this.hasOnlyRowsV2RenderCheckpointDirtyScopes(dirtyScopes);
             if (!this.sync.pushFirstDirtyAt || !(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size)) {
                 this.sync.pushFirstDirtyAt = now;
             }
             if (this.sync.pushTimer) clearTimeout(this.sync.pushTimer);
-            const baseDelayMs = renderCheckpointOnly
-                ? ROWS_V2_RENDER_CHECKPOINT_IDLE_MS
-                : (isYjsCollabPage()
+            const baseDelayMs = isYjsCollabPage()
                 ? this.sync.config.syncDelayMs
-                : NON_YJS_AUTO_SAVE_DELAY_MS);
+                : NON_YJS_AUTO_SAVE_DELAY_MS;
             const firstDirtyAt = toTimestamp(this.sync.pushFirstDirtyAt, now);
-            const maxWaitMs = renderCheckpointOnly
-                ? baseDelayMs
-                : (isYjsCollabPage() ? baseDelayMs : NON_YJS_AUTO_SAVE_MAX_WAIT_MS);
-            const pushDelayMs = renderCheckpointOnly
-                ? baseDelayMs
-                : Math.max(0, Math.min(baseDelayMs, maxWaitMs - (now - firstDirtyAt)));
+            const maxWaitMs = isYjsCollabPage() ? baseDelayMs : NON_YJS_AUTO_SAVE_MAX_WAIT_MS;
+            const pushDelayMs = Math.max(0, Math.min(baseDelayMs, maxWaitMs - (now - firstDirtyAt)));
             this.sync.pushTimer = setTimeout(() => {
                 this.sync.pushTimer = null;
 
@@ -9838,11 +9861,9 @@
             this.updateSyncStatus({
                 pendingPush: true,
                 mode: 'editing',
-                message: renderCheckpointOnly
-                    ? `Live Board/VTT activity is staying on Render. Supabase row checkpoint waits for ${ROWS_V2_RENDER_CHECKPOINT_DELAY_LABEL}.`
-                    : (isYjsCollabPage()
+                message: isYjsCollabPage()
                     ? 'Live collaboration is active. Supabase checkpoint will save after a pause.'
-                    : `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`)
+                    : `Editing. Autosave will run after ${NON_YJS_AUTO_SAVE_DELAY_LABEL}.`
             });
         }
 
