@@ -4695,24 +4695,12 @@
         if (session && typeof session.forceAuthoritativeSnapshot === 'function') {
             result = await session.forceAuthoritativeSnapshot(snapshot, { reason: 'dm-authoritative' });
             vttState = deepClone(session.getSnapshot ? session.getSnapshot() : snapshot);
-        } else if (typeof store.saveVTTRoomSnapshot === 'function') {
-            const stamp = Date.now();
-            result = await store.saveVTTRoomSnapshot({
-                roomId,
-                caseId: activeCaseId,
-                payload: snapshot,
-                revision: stamp * 1000,
-                updatedAt: new Date(stamp).toISOString(),
-                updatedBy: store.sync && store.sync.instanceId,
-                updatedByUser: store.sync && store.sync.userId || null,
-                updatedByName: store.sync && store.sync.config && store.sync.config.profileName || null
-            });
-            if (result && result.ok && typeof store.updateVTTState === 'function') {
-                vttState = deepClone(store.updateVTTState(snapshot, activeCaseId, {
-                    updatedAt: stamp,
-                    skipCloud: false
-                }));
-            }
+        } else {
+            result = {
+                ok: false,
+                reason: 'room-unavailable',
+                error: 'Live VTT room is not available, so the DM snapshot was not saved to Supabase.'
+            };
         }
 
         if (!result || !result.ok) {
