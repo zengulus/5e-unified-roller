@@ -15,14 +15,11 @@ const DEFAULT_CASE_NAME = 'UNNAMED CASE';
 const DEFAULT_CAMPAIGN_NAME = 'CAMPAIGN META BOARD';
 const CURSOR_PRECISION = 10;
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 30000;
+const CLOUD_FLUSH_DELAY_MS = 60000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const HISTORY_CAPTURE_MIN_INTERVAL_MS = 300000;
 const BOARD_ADMIN_EVENT_APPLY_SNAPSHOT = 'admin-apply-snapshot';
 const BOARD_ADMIN_EVENT_BUST = 'admin-bust';
-const BOARD_SYNC_EVENT_REQUEST_SNAPSHOT = 'board-snapshot-request';
-const BOARD_SYNC_EVENT_SNAPSHOT = 'board-snapshot';
-const BOARD_SYNC_EVENT_POSITION_CHANGES = 'board-node-positions';
 const PEER_COLORS = [
     '#ff8a65',
     '#4db6ac',
@@ -660,6 +657,7 @@ class BoardCollabSession {
         this.lastCompatibilityCloudSyncAt = 0;
         this.lastHistoryCapturedAt = 0;
         this.initialCloudFlushRequired = false;
+        this.isDirty = false;
         this.requestedPeerSnapshot = false;
         this.receivedPeerSnapshot = false;
         this.roomResetRequired = false;
@@ -676,7 +674,6 @@ class BoardCollabSession {
         this.originPosition = { kind: 'board-collab-local-position' };
         this.originRemoteSync = { kind: 'board-collab-remote-sync' };
         this.originRemoteRestore = { kind: 'board-collab-remote-restore' };
-        this.originSharedStore = { kind: 'board-collab-shared-store' };
         this.originManualFlush = { kind: 'board-collab-manual-flush' };
 
         this.lastSnapshot = buildDefaultSnapshot(this.scope, this.caseId);
@@ -828,73 +825,9 @@ class BoardCollabSession {
                 applySnapshotToDoc(this.doc, canonicalSeed, this.scope, this.caseId, this.originBootstrap, seedStamp);
             }
 
-            const seeded = await this.store.saveBoardRoomSnapshot({
-                roomId: this.roomId,
-                scope: this.scope,
-                caseId: this.caseId,
-                payload: canonicalSeed,
-                checkpointPayload: exportBoardCheckpointFromDoc(this.doc, this.scope, this.caseId),
-                revision: seedStamp,
-                updatedAt: new Date(seedStamp).toISOString(),
-                updatedBy: this.instanceId,
-                updatedByUser: this.userId || null,
-                updatedByName: this.profileName || null,
-                createOnly: true
-            });
-
-            if (seeded.ok && typeof this.store.appendBoardRoomHistorySnapshot === 'function') {
-                const seedHistory = await this.store.appendBoardRoomHistorySnapshot({
-                    roomId: this.roomId,
-                    scope: this.scope,
-                    caseId: this.caseId,
-                    payload: canonicalSeed,
-                    checkpointPayload: exportBoardCheckpointFromDoc(this.doc, this.scope, this.caseId),
-                    revision: seeded.revision || seedStamp,
-                    capturedAt: seeded.updatedAt || new Date(seedStamp).toISOString(),
-                    reason: 'seed'
-                });
-                if (seedHistory && seedHistory.ok) {
-                    this.lastHistoryCapturedAt = Date.now();
-                    this.lastHistorySignature = canonicalSeedSig;
-                }
-            }
             this.persistSnapshotToSharedState(canonicalSeed, canonicalSeedSig);
-            if (seeded.ok) roomSnapshotSource = this.instanceId;
-
-            if (!seeded.ok && seeded.reason !== 'exists') {
-                console.warn('RTF_BOARD_COLLAB: Failed seeding board room', seeded.error || seeded.reason);
-            }
-
-            if (seeded.ok) {
-                this.lastSavedRevision = Math.max(0, seeded.revision || seedStamp);
-                roomSnapshotSource = this.instanceId;
-            } else {
-                const canonicalRoom = await this.store.loadBoardRoomSnapshot({
-                    roomId: this.roomId,
-                    scope: this.scope,
-                    caseId: this.caseId
-                });
-
-                if (canonicalRoom.ok && canonicalRoom.snapshot) {
-                    const roomUpdatedAt = Date.parse(canonicalRoom.snapshot.updatedAt || '') || canonicalRoom.snapshot.revision || seedStamp;
-                    const roomPayload = sanitizeBoardSnapshot(canonicalRoom.snapshot.payload, {
-                        scope: this.scope,
-                        caseId: this.caseId
-                    }, canonicalSeed);
-                    this.lastSavedRevision = Math.max(0, canonicalRoom.snapshot.revision || 0);
-                    roomSnapshotSource = toTrimmedString(canonicalRoom.snapshot.updatedBy, '', 120).trim();
-                    if (buildSnapshotSignature(roomPayload) !== buildSnapshotSignature(serializeDocSnapshot(this.doc, this.scope, this.caseId))) {
-                        applySnapshotToDoc(
-                            this.doc,
-                            roomPayload,
-                            this.scope,
-                            this.caseId,
-                            this.originRemoteRestore,
-                            roomUpdatedAt
-                        );
-                    }
-                }
-            }
+            this.initialCloudFlushRequired = hasBoardContent(canonicalSeed);
+            if (this.initialCloudFlushRequired) this.isDirty = true;
         } else if (!hasBoardContent(localDocPayload)) {
             applySnapshotToDoc(this.doc, seedPayload, this.scope, this.caseId, this.originBootstrap, Date.now());
         }
@@ -1012,16 +945,6 @@ class BoardCollabSession {
         channel.on('broadcast', { event: BOARD_ADMIN_EVENT_BUST }, ({ payload }) => {
             this.handleAdminBustMessage(payload);
         });
-        channel.on('broadcast', { event: BOARD_SYNC_EVENT_REQUEST_SNAPSHOT }, ({ payload }) => {
-            this.handleSnapshotRequestMessage(payload);
-        });
-        channel.on('broadcast', { event: BOARD_SYNC_EVENT_SNAPSHOT }, ({ payload }) => {
-            this.handleSnapshotMessage(payload);
-        });
-        channel.on('broadcast', { event: BOARD_SYNC_EVENT_POSITION_CHANGES }, ({ payload }) => {
-            this.handlePositionMessage(payload);
-        });
-
         const onPresence = () => {
             const state = typeof channel.presenceState === 'function' ? channel.presenceState() : {};
             this.handlePresenceState(state);
@@ -1211,98 +1134,6 @@ class BoardCollabSession {
         });
     }
 
-    requestPeerSnapshotIfNeeded(force = false) {
-        if (this.destroyed || !this.connected) return;
-        if (!force && (this.requestedPeerSnapshot || !this.remotePresence.size)) return;
-        this.requestedPeerSnapshot = true;
-        this.sendBroadcast(BOARD_SYNC_EVENT_REQUEST_SNAPSHOT, {
-            roomId: this.roomId,
-            scope: this.scope,
-            caseId: this.caseId,
-            requestedBy: this.instanceId,
-            requestedAt: Date.now()
-        });
-    }
-
-    handleSnapshotRequestMessage(payload) {
-        if (this.destroyed || !this.connected || !payload || typeof payload !== 'object') return;
-        const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
-        if (requestedBy && requestedBy === this.instanceId) return;
-        const snapshot = this.getSnapshot();
-        const signature = buildSnapshotSignature(snapshot);
-        if (!signature) return;
-        const revision = Math.max(1, this.lastSavedRevision || 0);
-        this.applyRevisionState(revision, this.instanceId);
-        const stamp = Math.max(Date.now(), snapshot.updatedAt || 0);
-        this.sendBroadcast(BOARD_SYNC_EVENT_SNAPSHOT, {
-            roomId: this.roomId,
-            scope: this.scope,
-            caseId: this.caseId,
-            requestedBy,
-            sentBy: this.instanceId,
-            revision,
-            updatedAt: new Date(stamp).toISOString(),
-            signature,
-            payload: snapshot
-        });
-    }
-
-    handleSnapshotMessage(payload) {
-        if (this.destroyed || !payload || typeof payload !== 'object') return;
-        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
-        if (!sentBy || sentBy === this.instanceId) return;
-        const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
-        if (requestedBy && requestedBy !== this.instanceId) return;
-        if (compareRevisionMeta(payload.revision, sentBy, this.lastSavedRevision, this.lastSnapshotSource) < 0) return;
-        const nextPayload = sanitizeBoardSnapshot(payload.payload, {
-            scope: this.scope,
-            caseId: this.caseId
-        }, this.pendingSnapshot || this.lastSnapshot);
-        const nextSig = buildSnapshotSignature(nextPayload);
-        if (!nextSig) return;
-        const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot);
-        this.receivedPeerSnapshot = true;
-        if (nextSig === currentSig) {
-            this.applyRevisionState(payload.revision, sentBy);
-            return;
-        }
-        const stamp = Date.parse(payload.updatedAt || '') || toFiniteNumber(payload.revision, Date.now()) || Date.now();
-        applySnapshotToDoc(
-            this.doc,
-            nextPayload,
-            this.scope,
-            this.caseId,
-            this.originRemoteRestore,
-            stamp
-        );
-        this.applyRevisionState(payload.revision, sentBy);
-    }
-
-    handlePositionMessage(payload) {
-        if (this.destroyed || !payload || typeof payload !== 'object') return;
-        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
-        if (sentBy && sentBy === this.instanceId) return;
-        if (compareRevisionMeta(payload.revision, sentBy, this.lastSavedRevision, this.lastSnapshotSource) < 0) return;
-        const changes = Array.isArray(payload.changes)
-            ? payload.changes
-                .map((entry) => {
-                    if (!entry || typeof entry !== 'object') return null;
-                    const id = toTrimmedString(entry.id, '', 120).trim();
-                    if (!id) return null;
-                    const x = Math.round(toFiniteNumber(entry.x, NaN));
-                    const y = Math.round(toFiniteNumber(entry.y, NaN));
-                    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-                    return { id, x, y };
-                })
-                .filter(Boolean)
-            : [];
-        if (!changes.length) return;
-        const stamp = Date.parse(payload.updatedAt || '') || toFiniteNumber(payload.revision, Date.now()) || Date.now();
-        const changed = applyPositionChangesToDoc(this.doc, changes, this.originRemoteSync, stamp);
-        this.applyRevisionState(payload.revision, sentBy);
-        if (!changed) return;
-    }
-
     handlePresenceState(state) {
         const raw = state && typeof state === 'object' ? state : {};
         const peers = new Map();
@@ -1337,9 +1168,7 @@ class BoardCollabSession {
                     : 'Live board connected. Only you are here.')
                 : this.status.detail
         });
-        if (peers.size && !this.receivedPeerSnapshot) {
-            this.requestPeerSnapshotIfNeeded();
-        }
+        if (this.isDirty) this.scheduleCloudFlush();
         this.renderRemoteState();
     }
 
@@ -1380,23 +1209,19 @@ class BoardCollabSession {
         });
         const diff = diffBoardSnapshots(this.lastSnapshot, next);
         const origin = transaction ? transaction.origin : null;
+        const isBootstrap = origin === this.originBootstrap;
         this.lastSnapshot = next;
         this.pendingSnapshot = next;
+        if (!isBootstrap) this.isDirty = true;
 
         if (this.ready) {
             this.scheduleMirror();
-            const shouldQueueCloudFlush = !this.roomResetRequired && (
-                !origin
-                || origin === this.originLocalSnapshot
-                || origin === this.originSharedStore
-                || origin === this.originManualFlush
-            );
-            if (shouldQueueCloudFlush) {
+            if (!isBootstrap && !this.roomResetRequired) {
                 this.scheduleCloudFlush();
             }
         }
 
-        const shouldDispatchSnapshot = origin !== this.originBootstrap
+        const shouldDispatchSnapshot = !isBootstrap
             && origin !== this.originLocalSnapshot
             && origin !== this.originPosition
             && origin !== this.originManualFlush;
@@ -1430,13 +1255,25 @@ class BoardCollabSession {
     scheduleCloudFlush(options = {}) {
         if (this.roomResetRequired || !this.ready || this.destroyed || typeof this.store.saveBoardRoomSnapshot !== 'function') return;
         const opts = options && typeof options === 'object' ? options : {};
+        if (!this.canCheckpointRoom()) {
+            if (this.pendingFlushTimer) {
+                clearTimeout(this.pendingFlushTimer);
+                this.pendingFlushTimer = null;
+            }
+            this.pendingFlushOptions = {
+                ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
+                ...opts
+            };
+            return;
+        }
         this.pendingFlushOptions = {
             ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
             ...opts
         };
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
-        const delayMs = (opts.forceCompatibilityMirror || opts.forceHistory) ? 0 : CLOUD_FLUSH_DELAY_MS;
+        const delayMs = opts.forceNow ? 0 : CLOUD_FLUSH_DELAY_MS;
         this.pendingFlushTimer = setTimeout(() => {
+            if (!this.canCheckpointRoom()) return;
             const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
                 ? { ...this.pendingFlushOptions }
                 : {};
@@ -1446,6 +1283,26 @@ class BoardCollabSession {
                 console.warn('RTF_BOARD_COLLAB: Scheduled flush failed', err);
             });
         }, delayMs);
+    }
+
+    canCheckpointRoom() {
+        if (!this.connected) return true;
+        return this.remotePresence.size === 0;
+    }
+
+    getCloudSaveParticipantIds() {
+        const ids = new Set();
+        const ownId = toTrimmedString(this.instanceId, '', 120).trim();
+        if (ownId) ids.add(ownId);
+        this.remotePresence.forEach((peer) => {
+            const peerId = toTrimmedString(peer && peer.instanceId, '', 120).trim();
+            if (peerId) ids.add(peerId);
+        });
+        return Array.from(ids).sort((left, right) => left.localeCompare(right));
+    }
+
+    isCloudSaveLeader() {
+        return this.canCheckpointRoom();
     }
 
     shouldMirrorCompatibilityCloud(force = false) {
@@ -1492,6 +1349,9 @@ class BoardCollabSession {
         if (!this.pendingSnapshot || typeof this.store.saveBoardRoomSnapshot !== 'function') {
             return { ok: false, reason: 'no-snapshot' };
         }
+        if (!this.canCheckpointRoom()) {
+            return { ok: false, reason: 'not-last-participant' };
+        }
 
         const snapshotToSave = sanitizeBoardSnapshot(this.pendingSnapshot, {
             scope: this.scope,
@@ -1522,32 +1382,15 @@ class BoardCollabSession {
         }).then((result) => {
             if (result && result.ok) {
                 this.applyRevisionState(result.revision || nextRevision, this.instanceId);
+                this.isDirty = false;
                 this.persistSnapshotToSharedState(snapshotToSave, snapshotSig, {
                     syncCloud: this.shouldMirrorCompatibilityCloud(!!opts.forceCompatibilityMirror)
                 });
             }
             if (result && result.reason === 'stale' && result.snapshot) {
-                const remoteSnapshot = sanitizeBoardSnapshot(result.snapshot.payload, {
-                    scope: this.scope,
-                    caseId: this.caseId
-                }, this.pendingSnapshot || this.lastSnapshot);
-                const remoteSig = buildSnapshotSignature(remoteSnapshot);
-                const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot);
                 this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
-                this.persistSnapshotToSharedState(remoteSnapshot, remoteSig, {
-                    syncCloud: false
-                });
-                if (remoteSig && remoteSig !== currentSig) {
-                    const stamp = Date.parse(result.snapshot.updatedAt || '') || toFiniteNumber(result.snapshot.revision, Date.now()) || Date.now();
-                    applySnapshotToDoc(
-                        this.doc,
-                        remoteSnapshot,
-                        this.scope,
-                        this.caseId,
-                        this.originRemoteRestore,
-                        stamp
-                    );
-                }
+                this.isDirty = true;
+                this.scheduleCloudFlush();
             }
             if (!result || !result.ok || !shouldCaptureHistory) return result;
             return this.store.appendBoardRoomHistorySnapshot({
@@ -1634,61 +1477,12 @@ class BoardCollabSession {
         return Promise.resolve({ ok: true });
     }
 
-    applySharedStoreSnapshot(payload, options = {}) {
-        const opts = options && typeof options === 'object' ? options : {};
-        const next = sanitizeBoardSnapshot(payload, {
-            scope: this.scope,
-            caseId: this.caseId
-        }, this.pendingSnapshot || this.lastSnapshot);
-        const nextSig = buildSnapshotSignature(next);
-        if (nextSig) this.lastSharedStoreSignature = nextSig;
-        if (nextSig && nextSig === buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot)) {
-            return false;
-        }
-        const stamp = Math.max(Date.now(), next.updatedAt || 0);
-        applySnapshotToDoc(this.doc, next, this.scope, this.caseId, this.originSharedStore, stamp);
-        if (opts.flushNow) {
-            this.scheduleCloudFlush({
-                forceHistory: !!opts.forceHistory,
-                historyReason: opts.historyReason || 'shared-store',
-                forceCompatibilityMirror: true
-            });
-        }
-        return true;
-    }
-
     updateNodePositions(changes, options = {}) {
         const list = Array.isArray(changes) ? changes : [];
         if (!list.length) return;
         const stamp = Date.now();
         if (!applyPositionChangesToDoc(this.doc, list, this.originPosition, stamp)) return;
         const opts = options && typeof options === 'object' ? options : {};
-        const normalizedChanges = list
-            .map((entry) => {
-                if (!entry || typeof entry !== 'object') return null;
-                const id = toTrimmedString(entry.id, '', 120).trim();
-                if (!id) return null;
-                const x = Math.round(toFiniteNumber(entry.x, NaN));
-                const y = Math.round(toFiniteNumber(entry.y, NaN));
-                if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-                return { id, x, y };
-            })
-            .filter(Boolean);
-        if (normalizedChanges.length) {
-            const revision = Math.max(1, this.lastSavedRevision + 1);
-            this.applyRevisionState(revision, this.instanceId);
-            this.sendBroadcast(BOARD_SYNC_EVENT_POSITION_CHANGES, {
-                roomId: this.roomId,
-                scope: this.scope,
-                caseId: this.caseId,
-                revision,
-                updatedAt: new Date(stamp).toISOString(),
-                sentBy: this.instanceId,
-                sentByUser: this.userId || null,
-                sentByName: this.profileName || '',
-                changes: normalizedChanges
-            }).catch(() => { });
-        }
         if (opts.flushNow) this.scheduleCloudFlush({ forceCompatibilityMirror: true });
     }
 
@@ -1890,11 +1684,15 @@ class BoardCollabSession {
 
     handleVisibilityChange() {
         if (!document.hidden) return;
-        this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+        if (this.isDirty && this.canCheckpointRoom()) {
+            this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+        }
     }
 
     handleBeforeUnload() {
-        this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
+        if (this.isDirty && this.canCheckpointRoom()) {
+            this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+        }
     }
 
     async destroy() {
@@ -1904,12 +1702,6 @@ class BoardCollabSession {
         window.removeEventListener('beforeunload', this.handleBeforeUnload);
         if (this.pendingMirrorTimer) clearTimeout(this.pendingMirrorTimer);
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
-
-        try {
-            await this.flushSnapshotNow({ forceCompatibilityMirror: true });
-        } catch (err) {
-            console.warn('RTF_BOARD_COLLAB: Final flush failed', err);
-        }
 
         try {
             this.awareness.setLocalState(null);

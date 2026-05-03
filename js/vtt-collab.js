@@ -17,9 +17,6 @@ const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const VTT_ADMIN_EVENT_APPLY_SNAPSHOT = 'vtt-admin-apply-snapshot';
 const VTT_ADMIN_EVENT_BUST = 'vtt-admin-bust';
-const VTT_SYNC_EVENT_REQUEST_SNAPSHOT = 'vtt-snapshot-request';
-const VTT_SYNC_EVENT_SNAPSHOT = 'vtt-snapshot';
-const VTT_SYNC_EVENT_POSITION_CHANGES = 'vtt-token-positions';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
 const DEFAULT_CASE_ID = 'case_primary';
@@ -1501,7 +1498,6 @@ class VTTCollabSession {
         this.originPosition = { kind: 'vtt-collab-local-position' };
         this.originRemoteSync = { kind: 'vtt-collab-remote-sync' };
         this.originRemoteRestore = { kind: 'vtt-collab-remote-restore' };
-        this.originSharedStore = { kind: 'vtt-collab-shared-store' };
         this.originManualFlush = { kind: 'vtt-collab-manual-flush' };
 
         this.handleDocUpdate = this.handleDocUpdate.bind(this);
@@ -1882,18 +1878,6 @@ class VTTCollabSession {
             if (channel !== this.channel) return;
             this.handleSyncRequestMessage(payload);
         });
-        channel.on('broadcast', { event: VTT_SYNC_EVENT_REQUEST_SNAPSHOT }, ({ payload }) => {
-            if (channel !== this.channel) return;
-            this.handleSnapshotRequestMessage(payload);
-        });
-        channel.on('broadcast', { event: VTT_SYNC_EVENT_SNAPSHOT }, ({ payload }) => {
-            if (channel !== this.channel) return;
-            this.handleSnapshotMessage(payload);
-        });
-        channel.on('broadcast', { event: VTT_SYNC_EVENT_POSITION_CHANGES }, ({ payload }) => {
-            if (channel !== this.channel) return;
-            this.handlePositionMessage(payload);
-        });
         channel.on('broadcast', { event: VTT_ADMIN_EVENT_APPLY_SNAPSHOT }, ({ payload }) => {
             if (channel !== this.channel) return;
             this.handleAdminSnapshotMessage(payload);
@@ -2043,149 +2027,6 @@ class VTTCollabSession {
         const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
         if (requestedBy && requestedBy === this.instanceId) return;
         this.sendSyncStep1();
-    }
-
-    buildLiveSnapshotPayload(reason = 'live-snapshot', options = {}) {
-        const opts = options && typeof options === 'object' ? options : {};
-        const snapshot = this.getSnapshot();
-        const signature = buildSnapshotSignature(snapshot, this.coerceSnapshot.bind(this));
-        if (!signature) return null;
-        const snapshotStamp = Math.max(
-            getSnapshotUpdatedAt(snapshot, this.coerceSnapshot.bind(this)),
-            getDocUpdatedAt(this.doc)
-        );
-        const stamp = Math.max(0, snapshotStamp || Date.now());
-        const revision = opts.bumpRevision
-            ? this.nextLocalRevision()
-            : Math.max(1, toNonNegativeInt(this.lastSavedRevision, 0), snapshotStamp || 0);
-        return {
-            roomId: this.roomId,
-            caseId: this.caseId,
-            requestedBy: toTrimmedString(opts.requestedBy, '', 120).trim(),
-            sentBy: this.instanceId,
-            sentByUser: this.userId || null,
-            sentByName: this.profileName || '',
-            revision,
-            updatedAt: new Date(stamp).toISOString(),
-            reason: toTrimmedString(reason, 'live-snapshot', 80).trim() || 'live-snapshot',
-            signature,
-            payload: snapshot
-        };
-    }
-
-    async broadcastLiveSnapshot(reason = 'live-snapshot', options = {}) {
-        if (this.destroyed || !this.connected) return false;
-        const payload = this.buildLiveSnapshotPayload(reason, options);
-        if (!payload) return false;
-        return this.sendBroadcast(VTT_SYNC_EVENT_SNAPSHOT, payload);
-    }
-
-    requestPeerSnapshotIfNeeded(force = false) {
-        if (this.destroyed || !this.connected || !this.remotePresence.size) return;
-        if (!force && (this.requestedPeerSnapshot || this.receivedPeerSnapshot)) return;
-        this.requestedPeerSnapshot = true;
-        this.sendBroadcast(VTT_SYNC_EVENT_REQUEST_SNAPSHOT, {
-            roomId: this.roomId,
-            caseId: this.caseId,
-            requestedBy: this.instanceId,
-            requestedAt: Date.now()
-        });
-    }
-
-    handleSnapshotRequestMessage(payload) {
-        if (this.destroyed || !this.connected || !payload || typeof payload !== 'object') return;
-        const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
-        if (!requestedBy || requestedBy === this.instanceId) return;
-        const roomId = toTrimmedString(payload.roomId, '', 160).trim();
-        const caseId = toTrimmedString(payload.caseId, '', 120).trim();
-        if (roomId && roomId !== this.roomId) return;
-        if (caseId && caseId !== this.caseId) return;
-        this.broadcastLiveSnapshot('peer-request', {
-            requestedBy,
-            bumpRevision: false
-        }).catch((err) => {
-            console.warn('RTF_VTT_COLLAB: Peer snapshot response failed', err);
-        });
-    }
-
-    handleSnapshotMessage(payload) {
-        if (this.destroyed || !payload || typeof payload !== 'object') return;
-        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
-        if (sentBy && sentBy === this.instanceId) return;
-        const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
-        if (requestedBy && requestedBy !== this.instanceId) return;
-        const roomId = toTrimmedString(payload.roomId, '', 160).trim();
-        const caseId = toTrimmedString(payload.caseId, '', 120).trim();
-        if (roomId && roomId !== this.roomId) return;
-        if (caseId && caseId !== this.caseId) return;
-
-        const nextPayload = this.coerceSnapshot(payload.payload);
-        const nextSig = buildSnapshotSignature(nextPayload, this.coerceSnapshot.bind(this));
-        if (!nextSig) return;
-        const currentSnapshot = this.pendingSnapshot || this.lastSnapshot;
-        const currentSig = buildSnapshotSignature(currentSnapshot, this.coerceSnapshot.bind(this));
-        const incomingStamp = Date.parse(payload.updatedAt || '')
-            || getSnapshotUpdatedAt(nextPayload, this.coerceSnapshot.bind(this))
-            || toNonNegativeInt(payload.revision, 0);
-        const currentStamp = Math.max(
-            getSnapshotUpdatedAt(currentSnapshot, this.coerceSnapshot.bind(this)),
-            getDocUpdatedAt(this.doc)
-        );
-        if (!requestedBy && incomingStamp && currentStamp && incomingStamp < currentStamp) return;
-
-        this.receivedPeerSnapshot = true;
-        this.requestedPeerSnapshot = false;
-        if (nextSig === currentSig) return;
-        applySnapshotToDoc(
-            this.doc,
-            nextPayload,
-            this.coerceSnapshot.bind(this),
-            this.originRemoteSync,
-            incomingStamp || Date.now()
-        );
-    }
-
-    async broadcastPositionChanges(changes = [], reason = 'token-position') {
-        if (this.destroyed || !this.connected) return false;
-        const cleanChanges = (Array.isArray(changes) ? changes : [])
-            .map((entry) => sanitizePositionChange(entry))
-            .filter(Boolean);
-        if (!cleanChanges.length) return false;
-        const stamp = Date.now();
-        const revision = this.nextLocalRevision();
-        return this.sendBroadcast(VTT_SYNC_EVENT_POSITION_CHANGES, {
-            roomId: this.roomId,
-            caseId: this.caseId,
-            sentBy: this.instanceId,
-            sentByUser: this.userId || null,
-            sentByName: this.profileName || '',
-            revision,
-            updatedAt: new Date(stamp).toISOString(),
-            reason: toTrimmedString(reason, 'token-position', 80).trim() || 'token-position',
-            changes: cleanChanges
-        });
-    }
-
-    handlePositionMessage(payload) {
-        if (this.destroyed || !payload || typeof payload !== 'object') return;
-        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
-        if (sentBy && sentBy === this.instanceId) return;
-        const roomId = toTrimmedString(payload.roomId, '', 160).trim();
-        const caseId = toTrimmedString(payload.caseId, '', 120).trim();
-        if (roomId && roomId !== this.roomId) return;
-        if (caseId && caseId !== this.caseId) return;
-
-        const stamp = Date.parse(payload.updatedAt || '') || toNonNegativeInt(payload.revision, Date.now()) || Date.now();
-        const applied = applyTokenPositionChangesToDoc(
-            this.doc,
-            payload.changes,
-            this.originRemoteSync,
-            stamp
-        );
-        if (applied.length) {
-            this.receivedPeerSnapshot = true;
-            this.requestedPeerSnapshot = false;
-        }
     }
 
     handleAdminSnapshotMessage(payload) {
@@ -2380,6 +2221,18 @@ class VTTCollabSession {
             };
             return;
         }
+        if (!this.canCheckpointRoom(opts)) {
+            if (this.pendingFlushTimer) {
+                clearTimeout(this.pendingFlushTimer);
+                this.pendingFlushTimer = null;
+            }
+            this.pendingReadyFlush = !!this.isDirty;
+            this.pendingFlushOptions = {
+                ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
+                ...opts
+            };
+            return;
+        }
         if (!this.isCloudSaveLeader()) {
             if (this.pendingFlushTimer) {
                 clearTimeout(this.pendingFlushTimer);
@@ -2400,19 +2253,46 @@ class VTTCollabSession {
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
         const delayMs = opts.forceNow ? 0 : CLOUD_FLUSH_DELAY_MS;
         this.pendingFlushTimer = setTimeout(() => {
+            const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
+                ? { ...this.pendingFlushOptions }
+                : {};
+            if (!this.canCheckpointRoom(pendingOpts)) {
+                this.pendingReadyFlush = !!this.isDirty;
+                return;
+            }
             if (!this.isCloudSaveLeader()) {
                 this.pendingReadyFlush = !!this.isDirty;
                 return;
             }
-            const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
-                ? { ...this.pendingFlushOptions }
-                : {};
             this.pendingFlushTimer = null;
             this.pendingFlushOptions = null;
             this.flushSnapshotNow(pendingOpts).catch((err) => {
                 console.warn('RTF_VTT_COLLAB: Delayed cloud flush failed', err);
             });
         }, delayMs);
+    }
+
+    canCheckpointRoom(options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
+        if (opts.forceOverwrite) return true;
+        if (typeof this.options.canSaveRoom !== 'function') return true;
+        try {
+            return !!this.options.canSaveRoom();
+        } catch (err) {
+            return false;
+        }
+    }
+
+    handleSavePermissionChanged() {
+        if (this.pendingFlushTimer) {
+            clearTimeout(this.pendingFlushTimer);
+            this.pendingFlushTimer = null;
+        }
+        if (this.isDirty || this.pendingReadyFlush) {
+            this.scheduleCloudFlush({
+                ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {})
+            });
+        }
     }
 
     shouldMirrorCompatibilityCloud(force = false) {
@@ -2469,6 +2349,10 @@ class VTTCollabSession {
         if (!this.store || !this.pendingSnapshot || typeof this.store.saveVTTRoomSnapshot !== 'function') {
             return { ok: false, reason: 'no-snapshot' };
         }
+        if (!this.canCheckpointRoom(opts)) {
+            this.pendingReadyFlush = !!this.isDirty;
+            return { ok: false, reason: 'not-authorized' };
+        }
 
         const snapshotToSave = this.getSnapshot();
         const snapshotSig = buildSnapshotSignature(snapshotToSave, this.coerceSnapshot.bind(this));
@@ -2509,15 +2393,12 @@ class VTTCollabSession {
                 const remoteSig = buildSnapshotSignature(remoteSnapshot, this.coerceSnapshot.bind(this));
                 const currentSig = buildSnapshotSignature(this.getSnapshot(), this.coerceSnapshot.bind(this));
                 this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
-                if (remoteSig) this.lastCloudSnapshotSignature = remoteSig;
-                this.persistSnapshotToSharedState(remoteSnapshot, remoteSig, {
-                    syncCloud: false
-                });
                 if (remoteSig !== currentSig) {
                     this.flushQueuedWhilePending = true;
                     this.pendingReadyFlush = true;
                     this.isDirty = true;
                 } else {
+                    if (remoteSig) this.lastCloudSnapshotSignature = remoteSig;
                     this.pendingReadyFlush = false;
                     this.isDirty = false;
                 }
@@ -2611,52 +2492,15 @@ class VTTCollabSession {
         return Promise.resolve({ ok: true });
     }
 
-    applySharedStoreSnapshot(payload, options = {}) {
-        const opts = options && typeof options === 'object' ? options : {};
-        const source = toTrimmedString(opts.source, '', 40).trim().toLowerCase();
-        const next = this.coerceSnapshot(payload);
-        const nextSig = buildSnapshotSignature(next, this.coerceSnapshot.bind(this));
-        const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this));
-        if (nextSig === currentSig) {
-            return false;
-        }
-        const scopeUpdatedAt = Math.max(0, toNonNegativeInt(opts.scopeUpdatedAt, 0));
-        const currentStamp = getDocUpdatedAt(this.doc);
-        const currentSnapshotUpdatedAt = Math.max(
-            getSnapshotUpdatedAt(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this)),
-            currentStamp
-        );
-        const nextSnapshotUpdatedAt = getSnapshotUpdatedAt(next, this.coerceSnapshot.bind(this));
-        const isExternalSource = source === 'remote' || source === 'storage' || source === 'realtime';
-        if (!opts.force && isExternalSource && this.connected) {
-            return false;
-        }
-        if (!opts.force && currentSnapshotUpdatedAt && !nextSnapshotUpdatedAt && isExternalSource) {
-            return false;
-        }
-        const incomingStamp = nextSnapshotUpdatedAt || (!currentSnapshotUpdatedAt ? scopeUpdatedAt : 0);
-        if (!opts.force && incomingStamp && currentSnapshotUpdatedAt && incomingStamp < currentSnapshotUpdatedAt) {
-            return false;
-        }
-        if (nextSig) this.lastSharedStoreSignature = nextSig;
-        const applyOrigin = opts.origin === 'remote-restore'
-            ? this.originRemoteRestore
-            : this.originSharedStore;
-        applySnapshotToDoc(
-            this.doc,
-            next,
-            this.coerceSnapshot.bind(this),
-            applyOrigin,
-            Math.max(Date.now(), nextSnapshotUpdatedAt || scopeUpdatedAt || this.getSharedStoreUpdatedAt())
-        );
-        if (opts.flushNow) {
-            this.scheduleCloudFlush({ forceCompatibilityMirror: true });
-        }
-        return true;
-    }
-
     async forceAuthoritativeSnapshot(payload, options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
+        if (!this.canCheckpointRoom()) {
+            return {
+                ok: false,
+                reason: 'not-authorized',
+                error: 'Only the DM can force the VTT room snapshot.'
+            };
+        }
         const next = this.coerceSnapshot(payload || this.getSnapshot());
         const stamp = Date.now();
         const revision = this.nextLocalRevision();
@@ -2748,7 +2592,9 @@ class VTTCollabSession {
 
     handleVisibilityChange() {
         if (document.hidden) {
-            if (this.isDirty) this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+            if (this.isDirty && this.canCheckpointRoom()) {
+                this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+            }
             return;
         } else if (!this.connected) {
             this.scheduleReconnect('Rejoining live VTT...');
@@ -2758,9 +2604,15 @@ class VTTCollabSession {
         }
     }
 
-    handleBeforeUnload() {
-        if (!this.isDirty) return;
+    handleBeforeUnload(event) {
+        if (!this.isDirty || !this.canCheckpointRoom()) return;
         this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+        if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+            event.returnValue = 'You have unsaved live VTT room changes. Hard save the DM room before closing.';
+            return event.returnValue;
+        }
+        return undefined;
     }
 
     async destroy() {

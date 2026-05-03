@@ -3634,26 +3634,6 @@
         return snapshot;
     };
 
-    const isRelevantVTTStoreScope = (scope, caseId) => {
-        const cleanScope = String(scope || '').trim();
-        const cleanCaseId = String(caseId || '').trim();
-        if (!cleanScope || !cleanCaseId) return false;
-        return cleanScope === `cases.${cleanCaseId}.vtt`
-            || cleanScope.startsWith(`cases.${cleanCaseId}.vtt.`);
-    };
-
-    const shouldBridgeStoreUpdateToVTTCollab = (detail, caseId) => {
-        const meta = detail && typeof detail === 'object' ? detail : {};
-        const source = String(meta.source || '').trim().toLowerCase();
-        if (source === 'vtt-collab' || source === 'board-collab') return false;
-        const scopes = Array.isArray(meta.scopes) ? meta.scopes : [];
-        const isLocalSource = source === 'local' || !source;
-        if (scopes.length) {
-            return isLocalSource && scopes.some((scope) => isRelevantVTTStoreScope(scope, caseId));
-        }
-        return isLocalSource;
-    };
-
     const ensureRosterLinkedPlayerPresentationPersisted = (snapshot, options = {}) => {
         if (!snapshot) return { snapshot, mutated: false };
         const opts = options && typeof options === 'object' ? options : {};
@@ -4163,6 +4143,9 @@
         clearTemplatePlacementState();
         if (body) body.dataset.vttRole = localRole;
         render();
+        if (vttCollabSession && typeof vttCollabSession.handleSavePermissionChanged === 'function') {
+            vttCollabSession.handleSavePermissionChanged();
+        }
     };
 
     const isDMUnlockModalOpen = () => !!(dmUnlockModalEl && !dmUnlockModalEl.hidden);
@@ -4546,6 +4529,7 @@
                     roomId: getVTTCollabRoomId(),
                     caseId: getActiveCaseId(),
                     preferCloudRoomSnapshot: !isDM(),
+                    canSaveRoom: () => isDM(),
                     getSeedPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
                     getCurrentPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
                     applySnapshot: (payload) => applyVTTCollabSnapshot(payload),
@@ -7036,7 +7020,11 @@
     const syncDraggedState = (force = false) => {
         const store = getStore();
         if (!store || !vttState) return;
-        const canSyncLivePosition = isVTTCollabReady() && typeof vttCollabSession.updateTokenPositions === 'function';
+        const canSyncLivePosition = isVTTCollabReady()
+            && (
+                typeof vttCollabSession.syncSnapshot === 'function'
+                || typeof vttCollabSession.updateTokenPositions === 'function'
+            );
         if (!force && !canSyncLivePosition) return;
         const now = Date.now();
         if (!force && lastDragSyncAt && now - lastDragSyncAt < DRAG_SYNC_INTERVAL_MS) return;
@@ -7050,17 +7038,35 @@
         }
 
         if (canSyncLivePosition) {
-            Promise.resolve(vttCollabSession.updateTokenPositions([{
-                sceneId: scene.id,
-                tokenId: localToken.id,
-                x: localToken.x,
-                y: localToken.y
-            }], force ? { flushNow: true } : {})).catch((err) => {
-                console.warn('VTT collaboration drag sync failed', err);
-            });
-            if (typeof vttCollabSession.getSnapshot === 'function') {
-                vttState = deepClone(vttCollabSession.getSnapshot());
-                syncRosterLinkedPlayerPresentation(vttState);
+            const sessionSnapshot = typeof vttCollabSession.getSnapshot === 'function'
+                ? deepClone(vttCollabSession.getSnapshot())
+                : readSharedVTTSnapshot();
+            const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : deepClone(vttState);
+            const nextScene = nextSnapshot && Array.isArray(nextSnapshot.scenes)
+                ? nextSnapshot.scenes.find((entry) => entry && entry.id === scene.id)
+                : null;
+            const nextToken = nextScene && Array.isArray(nextScene.tokens)
+                ? nextScene.tokens.find((entry) => entry && entry.id === localToken.id)
+                : null;
+            if (nextToken && typeof vttCollabSession.syncSnapshot === 'function') {
+                nextToken.x = localToken.x;
+                nextToken.y = localToken.y;
+                Promise.resolve(vttCollabSession.syncSnapshot(nextSnapshot, {
+                    baseSnapshot: sessionSnapshot,
+                    flushNow: !!force,
+                    reason: force ? 'token-drop' : 'token-drag'
+                })).catch((err) => {
+                    console.warn('VTT collaboration drag sync failed', err);
+                });
+            } else if (typeof vttCollabSession.updateTokenPositions === 'function') {
+                Promise.resolve(vttCollabSession.updateTokenPositions([{
+                    sceneId: scene.id,
+                    tokenId: localToken.id,
+                    x: localToken.x,
+                    y: localToken.y
+                }], force ? { flushNow: true } : {})).catch((err) => {
+                    console.warn('VTT collaboration drag sync failed', err);
+                });
             }
             lastDragSyncAt = now;
             return;
@@ -8431,34 +8437,7 @@
             return;
         }
         if (isVTTCollabReady()) {
-            if (shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId)
-                && typeof vttCollabSession.applySharedStoreSnapshot === 'function') {
-                const storeSnapshot = readSharedVTTSnapshot({
-                    syncRosterPresentation: false,
-                    useStoreOnly: true
-                }) || deepClone(store.getVTTState(activeCaseId));
-                const bridged = vttCollabSession.applySharedStoreSnapshot(storeSnapshot, {
-                    source: detail.source || '',
-                    scopeUpdatedAt: typeof store.getVTTStateUpdatedAt === 'function'
-                        ? store.getVTTStateUpdatedAt(activeCaseId)
-                        : 0,
-                    reason: 'shared-store'
-                });
-                if (bridged) return;
-            }
-            if (dragState) {
-                if (syncRosterLinkedPlayerPresentation(vttState)) {
-                    normalizeSelections();
-                    render();
-                }
-                return;
-            }
-            const synced = ensureRosterLinkedPlayerPresentationPersisted(
-                vttState || readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)),
-                { reason: 'roster-player-presentation-sync' }
-            );
-            if (synced.mutated) {
-                vttState = synced.snapshot;
+            if (vttState && syncRosterLinkedPlayerPresentation(vttState)) {
                 normalizeSelections();
                 render();
             }

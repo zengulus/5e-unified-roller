@@ -5141,23 +5141,20 @@ function persistBoardPayload(payload, options = {}) {
         updatedAt: Math.max(Date.now(), parseInt(source.updatedAt, 10) || 0)
     });
     const opts = options && typeof options === 'object' ? options : {};
-    const wroteSharedStore = writeStoreBoardPayload(clean, {
-        skipCloud: isBoardCollabReady()
-    });
     if (isBoardCollabReady() && typeof boardCollabSession.syncSnapshot === 'function') {
         boardCollabSession.syncSnapshot(clean, {
             flushNow: !!opts.flushNow,
             forceHistory: !!opts.forceHistory,
             historyReason: opts.historyReason || '',
-            sharedStatePersisted: wroteSharedStore
+            sharedStatePersisted: false
         }).catch((err) => {
             console.warn('Board collaboration sync failed', err);
         });
-        if (!wroteSharedStore) {
-            localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(clean));
-        }
         return clean;
     }
+    const wroteSharedStore = writeStoreBoardPayload(clean, {
+        skipCloud: false
+    });
     if (!wroteSharedStore) {
         localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(clean));
     }
