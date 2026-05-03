@@ -8431,12 +8431,7 @@
             return;
         }
         if (isVTTCollabReady()) {
-            const isExternalSource = ['remote', 'storage', 'realtime'].includes(String(detail.source || '').trim().toLowerCase());
-            const scopedUpdate = Array.isArray(detail.scopes) ? detail.scopes : [];
-            const externalScopeMatchesActiveVTT = !scopedUpdate.length
-                || scopedUpdate.some((scope) => isRelevantVTTStoreScope(scope, activeCaseId));
-            const shouldBridgeExternalStoreSnapshot = isExternalSource && externalScopeMatchesActiveVTT;
-            if ((shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId) || shouldBridgeExternalStoreSnapshot)
+            if (shouldBridgeStoreUpdateToVTTCollab(detail, activeCaseId)
                 && typeof vttCollabSession.applySharedStoreSnapshot === 'function') {
                 const storeSnapshot = readSharedVTTSnapshot({
                     syncRosterPresentation: false,
@@ -8447,10 +8442,7 @@
                     scopeUpdatedAt: typeof store.getVTTStateUpdatedAt === 'function'
                         ? store.getVTTStateUpdatedAt(activeCaseId)
                         : 0,
-                    reason: detail.source === 'storage' || detail.source === 'remote'
-                        ? 'external-store'
-                        : 'shared-store',
-                    origin: shouldBridgeExternalStoreSnapshot ? 'remote-restore' : ''
+                    reason: 'shared-store'
                 });
                 if (bridged) return;
             }

@@ -11,7 +11,7 @@ import * as decoding from './vendor/lib0/decoding.js';
 import { createCollabRelayChannel } from './collab-relay-client.js';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 30000;
+const CLOUD_FLUSH_DELAY_MS = 60000;
 const SYNC_RECONCILE_INTERVAL_MS = 15000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
@@ -1477,6 +1477,7 @@ class VTTCollabSession {
         this.periodicSaveTimer = null;
         this.flushQueuedWhilePending = false;
         this.isDirty = false;
+        this.lastLiveActivityAt = 0;
         this.reconnectAttempts = 0;
         this.requestedPeerSnapshot = false;
         this.receivedPeerSnapshot = false;
@@ -2281,7 +2282,9 @@ class VTTCollabSession {
         this.remotePresence = peers;
         if (this.connected && peers.size && peers.size !== previousPeerCount) {
             this.sendSyncStep1();
-            this.requestPeerSnapshotIfNeeded();
+        }
+        if (this.isDirty) {
+            this.scheduleCloudFlush();
         }
         this.updateStatus({
             peerCount: peers.size,
@@ -2291,9 +2294,6 @@ class VTTCollabSession {
                     : 'Live VTT connected. Only you are here.')
                 : this.status.detail
         });
-        if (this.connected && peers.size && !this.receivedPeerSnapshot) {
-            this.requestPeerSnapshotIfNeeded();
-        }
     }
 
     async refreshPresenceTracking(options = {}) {
@@ -2325,44 +2325,23 @@ class VTTCollabSession {
         const next = serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
         const diff = diffVTTSnapshots(this.lastSnapshot, next, this.coerceSnapshot.bind(this));
         const origin = transaction ? transaction.origin : null;
+        const isBootstrap = origin === this.originBootstrap;
         this.lastSnapshot = next;
         this.pendingSnapshot = next;
-        if (origin !== this.originRemoteSync && origin !== this.originBootstrap) {
+        if (!isBootstrap) {
             this.isDirty = true;
+            this.lastLiveActivityAt = Date.now();
         }
 
         if (this.ready) {
             this.scheduleMirror();
-            const shouldQueueCloudFlush = !origin
-                || origin === this.originLocalSnapshot
-                || origin === this.originRemoteRestore
-                || origin === this.originSharedStore
-                || origin === this.originManualFlush;
-            if (shouldQueueCloudFlush) {
+            if (!isBootstrap) {
                 this.scheduleCloudFlush();
             }
             this.refreshPresenceTracking().catch(() => { });
         }
 
-        const shouldBroadcastLiveChange = this.ready
-            && this.connected
-            && origin !== this.originRemoteSync
-            && origin !== this.originRemoteRestore
-            && origin !== this.originBootstrap
-            && (diff.structural || diff.positions.length);
-        if (shouldBroadcastLiveChange) {
-            if (!diff.structural && diff.positions.length) {
-                this.broadcastPositionChanges(diff.positions, 'local-position').catch((err) => {
-                    console.warn('RTF_VTT_COLLAB: Live position broadcast failed', err);
-                });
-            } else {
-                this.broadcastLiveSnapshot('local-snapshot', { bumpRevision: true }).catch((err) => {
-                    console.warn('RTF_VTT_COLLAB: Live snapshot broadcast failed', err);
-                });
-            }
-        }
-
-        const shouldDispatchSnapshot = origin !== this.originBootstrap
+        const shouldDispatchSnapshot = !isBootstrap
             && origin !== this.originLocalSnapshot
             && origin !== this.originPosition
             && origin !== this.originManualFlush;
@@ -2401,14 +2380,30 @@ class VTTCollabSession {
             };
             return;
         }
+        if (!this.isCloudSaveLeader()) {
+            if (this.pendingFlushTimer) {
+                clearTimeout(this.pendingFlushTimer);
+                this.pendingFlushTimer = null;
+            }
+            this.pendingReadyFlush = !!this.isDirty;
+            this.pendingFlushOptions = {
+                ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
+                ...opts
+            };
+            return;
+        }
         this.pendingReadyFlush = false;
         this.pendingFlushOptions = {
             ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {}),
             ...opts
         };
         if (this.pendingFlushTimer) clearTimeout(this.pendingFlushTimer);
-        const delayMs = opts.forceCompatibilityMirror ? 0 : CLOUD_FLUSH_DELAY_MS;
+        const delayMs = opts.forceNow ? 0 : CLOUD_FLUSH_DELAY_MS;
         this.pendingFlushTimer = setTimeout(() => {
+            if (!this.isCloudSaveLeader()) {
+                this.pendingReadyFlush = !!this.isDirty;
+                return;
+            }
             const pendingOpts = this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object'
                 ? { ...this.pendingFlushOptions }
                 : {};
@@ -2425,6 +2420,25 @@ class VTTCollabSession {
         const now = Date.now();
         return !this.lastCompatibilityCloudSyncAt
             || (now - this.lastCompatibilityCloudSyncAt) >= COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS;
+    }
+
+    getCloudSaveParticipantIds() {
+        const ids = new Set();
+        const ownId = toTrimmedString(this.instanceId, '', 120).trim();
+        if (ownId) ids.add(ownId);
+        this.remotePresence.forEach((peer) => {
+            const peerId = toTrimmedString(peer && peer.instanceId, '', 120).trim();
+            if (peerId) ids.add(peerId);
+        });
+        return Array.from(ids).sort((left, right) => left.localeCompare(right));
+    }
+
+    isCloudSaveLeader() {
+        if (!this.connected) return true;
+        const ownId = toTrimmedString(this.instanceId, '', 120).trim();
+        if (!ownId) return true;
+        const participants = this.getCloudSaveParticipantIds();
+        return !participants.length || participants[0] === ownId;
     }
 
     persistSnapshotToSharedState(snapshot, signature = '', options = {}) {
@@ -2613,6 +2627,9 @@ class VTTCollabSession {
         );
         const nextSnapshotUpdatedAt = getSnapshotUpdatedAt(next, this.coerceSnapshot.bind(this));
         const isExternalSource = source === 'remote' || source === 'storage' || source === 'realtime';
+        if (!opts.force && isExternalSource && this.connected) {
+            return false;
+        }
         if (!opts.force && currentSnapshotUpdatedAt && !nextSnapshotUpdatedAt && isExternalSource) {
             return false;
         }
@@ -2739,7 +2756,7 @@ class VTTCollabSession {
 
     handleBeforeUnload() {
         if (!this.isDirty) return;
-        this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch(() => { });
+        this.scheduleCloudFlush({ forceCompatibilityMirror: true });
     }
 
     async destroy() {
@@ -2752,14 +2769,6 @@ class VTTCollabSession {
         if (this.pendingReconnectTimer) clearTimeout(this.pendingReconnectTimer);
         this.stopPeriodicSync();
         this.stopPeriodicSave();
-
-        if (this.isDirty) {
-            try {
-                await this.flushSnapshotNow({ forceCompatibilityMirror: true });
-            } catch (err) {
-                console.warn('RTF_VTT_COLLAB: Final flush failed', err);
-            }
-        }
 
         this.connected = false;
         this.ready = false;
