@@ -17,6 +17,9 @@ const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const VTT_ADMIN_EVENT_APPLY_SNAPSHOT = 'vtt-admin-apply-snapshot';
 const VTT_ADMIN_EVENT_BUST = 'vtt-admin-bust';
+const VTT_SYNC_EVENT_REQUEST_SNAPSHOT = 'vtt-snapshot-request';
+const VTT_SYNC_EVENT_SNAPSHOT = 'vtt-snapshot';
+const VTT_SYNC_EVENT_POSITION_CHANGES = 'vtt-token-positions';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
 const DEFAULT_CASE_ID = 'case_primary';
@@ -1475,6 +1478,8 @@ class VTTCollabSession {
         this.flushQueuedWhilePending = false;
         this.isDirty = false;
         this.reconnectAttempts = 0;
+        this.requestedPeerSnapshot = false;
+        this.receivedPeerSnapshot = false;
         this.pendingSnapshot = null;
         this.lastSnapshot = this.coerceSnapshot(
             typeof this.options.getSeedPayload === 'function'
@@ -1876,6 +1881,18 @@ class VTTCollabSession {
             if (channel !== this.channel) return;
             this.handleSyncRequestMessage(payload);
         });
+        channel.on('broadcast', { event: VTT_SYNC_EVENT_REQUEST_SNAPSHOT }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleSnapshotRequestMessage(payload);
+        });
+        channel.on('broadcast', { event: VTT_SYNC_EVENT_SNAPSHOT }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleSnapshotMessage(payload);
+        });
+        channel.on('broadcast', { event: VTT_SYNC_EVENT_POSITION_CHANGES }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handlePositionMessage(payload);
+        });
         channel.on('broadcast', { event: VTT_ADMIN_EVENT_APPLY_SNAPSHOT }, ({ payload }) => {
             if (channel !== this.channel) return;
             this.handleAdminSnapshotMessage(payload);
@@ -2027,6 +2044,149 @@ class VTTCollabSession {
         this.sendSyncStep1();
     }
 
+    buildLiveSnapshotPayload(reason = 'live-snapshot', options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
+        const snapshot = this.getSnapshot();
+        const signature = buildSnapshotSignature(snapshot, this.coerceSnapshot.bind(this));
+        if (!signature) return null;
+        const snapshotStamp = Math.max(
+            getSnapshotUpdatedAt(snapshot, this.coerceSnapshot.bind(this)),
+            getDocUpdatedAt(this.doc)
+        );
+        const stamp = Math.max(0, snapshotStamp || Date.now());
+        const revision = opts.bumpRevision
+            ? this.nextLocalRevision()
+            : Math.max(1, toNonNegativeInt(this.lastSavedRevision, 0), snapshotStamp || 0);
+        return {
+            roomId: this.roomId,
+            caseId: this.caseId,
+            requestedBy: toTrimmedString(opts.requestedBy, '', 120).trim(),
+            sentBy: this.instanceId,
+            sentByUser: this.userId || null,
+            sentByName: this.profileName || '',
+            revision,
+            updatedAt: new Date(stamp).toISOString(),
+            reason: toTrimmedString(reason, 'live-snapshot', 80).trim() || 'live-snapshot',
+            signature,
+            payload: snapshot
+        };
+    }
+
+    async broadcastLiveSnapshot(reason = 'live-snapshot', options = {}) {
+        if (this.destroyed || !this.connected) return false;
+        const payload = this.buildLiveSnapshotPayload(reason, options);
+        if (!payload) return false;
+        return this.sendBroadcast(VTT_SYNC_EVENT_SNAPSHOT, payload);
+    }
+
+    requestPeerSnapshotIfNeeded(force = false) {
+        if (this.destroyed || !this.connected || !this.remotePresence.size) return;
+        if (!force && (this.requestedPeerSnapshot || this.receivedPeerSnapshot)) return;
+        this.requestedPeerSnapshot = true;
+        this.sendBroadcast(VTT_SYNC_EVENT_REQUEST_SNAPSHOT, {
+            roomId: this.roomId,
+            caseId: this.caseId,
+            requestedBy: this.instanceId,
+            requestedAt: Date.now()
+        });
+    }
+
+    handleSnapshotRequestMessage(payload) {
+        if (this.destroyed || !this.connected || !payload || typeof payload !== 'object') return;
+        const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
+        if (!requestedBy || requestedBy === this.instanceId) return;
+        const roomId = toTrimmedString(payload.roomId, '', 160).trim();
+        const caseId = toTrimmedString(payload.caseId, '', 120).trim();
+        if (roomId && roomId !== this.roomId) return;
+        if (caseId && caseId !== this.caseId) return;
+        this.broadcastLiveSnapshot('peer-request', {
+            requestedBy,
+            bumpRevision: false
+        }).catch((err) => {
+            console.warn('RTF_VTT_COLLAB: Peer snapshot response failed', err);
+        });
+    }
+
+    handleSnapshotMessage(payload) {
+        if (this.destroyed || !payload || typeof payload !== 'object') return;
+        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
+        if (sentBy && sentBy === this.instanceId) return;
+        const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
+        if (requestedBy && requestedBy !== this.instanceId) return;
+        const roomId = toTrimmedString(payload.roomId, '', 160).trim();
+        const caseId = toTrimmedString(payload.caseId, '', 120).trim();
+        if (roomId && roomId !== this.roomId) return;
+        if (caseId && caseId !== this.caseId) return;
+
+        const nextPayload = this.coerceSnapshot(payload.payload);
+        const nextSig = buildSnapshotSignature(nextPayload, this.coerceSnapshot.bind(this));
+        if (!nextSig) return;
+        const currentSnapshot = this.pendingSnapshot || this.lastSnapshot;
+        const currentSig = buildSnapshotSignature(currentSnapshot, this.coerceSnapshot.bind(this));
+        const incomingStamp = Date.parse(payload.updatedAt || '')
+            || getSnapshotUpdatedAt(nextPayload, this.coerceSnapshot.bind(this))
+            || toNonNegativeInt(payload.revision, 0);
+        const currentStamp = Math.max(
+            getSnapshotUpdatedAt(currentSnapshot, this.coerceSnapshot.bind(this)),
+            getDocUpdatedAt(this.doc)
+        );
+        if (!requestedBy && incomingStamp && currentStamp && incomingStamp < currentStamp) return;
+
+        this.receivedPeerSnapshot = true;
+        this.requestedPeerSnapshot = false;
+        if (nextSig === currentSig) return;
+        applySnapshotToDoc(
+            this.doc,
+            nextPayload,
+            this.coerceSnapshot.bind(this),
+            this.originRemoteSync,
+            incomingStamp || Date.now()
+        );
+    }
+
+    async broadcastPositionChanges(changes = [], reason = 'token-position') {
+        if (this.destroyed || !this.connected) return false;
+        const cleanChanges = (Array.isArray(changes) ? changes : [])
+            .map((entry) => sanitizePositionChange(entry))
+            .filter(Boolean);
+        if (!cleanChanges.length) return false;
+        const stamp = Date.now();
+        const revision = this.nextLocalRevision();
+        return this.sendBroadcast(VTT_SYNC_EVENT_POSITION_CHANGES, {
+            roomId: this.roomId,
+            caseId: this.caseId,
+            sentBy: this.instanceId,
+            sentByUser: this.userId || null,
+            sentByName: this.profileName || '',
+            revision,
+            updatedAt: new Date(stamp).toISOString(),
+            reason: toTrimmedString(reason, 'token-position', 80).trim() || 'token-position',
+            changes: cleanChanges
+        });
+    }
+
+    handlePositionMessage(payload) {
+        if (this.destroyed || !payload || typeof payload !== 'object') return;
+        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
+        if (sentBy && sentBy === this.instanceId) return;
+        const roomId = toTrimmedString(payload.roomId, '', 160).trim();
+        const caseId = toTrimmedString(payload.caseId, '', 120).trim();
+        if (roomId && roomId !== this.roomId) return;
+        if (caseId && caseId !== this.caseId) return;
+
+        const stamp = Date.parse(payload.updatedAt || '') || toNonNegativeInt(payload.revision, Date.now()) || Date.now();
+        const applied = applyTokenPositionChangesToDoc(
+            this.doc,
+            payload.changes,
+            this.originRemoteSync,
+            stamp
+        );
+        if (applied.length) {
+            this.receivedPeerSnapshot = true;
+            this.requestedPeerSnapshot = false;
+        }
+    }
+
     handleAdminSnapshotMessage(payload) {
         if (this.destroyed || !payload || typeof payload !== 'object') return;
         const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
@@ -2121,6 +2281,7 @@ class VTTCollabSession {
         this.remotePresence = peers;
         if (this.connected && peers.size && peers.size !== previousPeerCount) {
             this.sendSyncStep1();
+            this.requestPeerSnapshotIfNeeded();
         }
         this.updateStatus({
             peerCount: peers.size,
@@ -2130,6 +2291,9 @@ class VTTCollabSession {
                     : 'Live VTT connected. Only you are here.')
                 : this.status.detail
         });
+        if (this.connected && peers.size && !this.receivedPeerSnapshot) {
+            this.requestPeerSnapshotIfNeeded();
+        }
     }
 
     async refreshPresenceTracking(options = {}) {
@@ -2178,6 +2342,24 @@ class VTTCollabSession {
                 this.scheduleCloudFlush();
             }
             this.refreshPresenceTracking().catch(() => { });
+        }
+
+        const shouldBroadcastLiveChange = this.ready
+            && this.connected
+            && origin !== this.originRemoteSync
+            && origin !== this.originRemoteRestore
+            && origin !== this.originBootstrap
+            && (diff.structural || diff.positions.length);
+        if (shouldBroadcastLiveChange) {
+            if (!diff.structural && diff.positions.length) {
+                this.broadcastPositionChanges(diff.positions, 'local-position').catch((err) => {
+                    console.warn('RTF_VTT_COLLAB: Live position broadcast failed', err);
+                });
+            } else {
+                this.broadcastLiveSnapshot('local-snapshot', { bumpRevision: true }).catch((err) => {
+                    console.warn('RTF_VTT_COLLAB: Live snapshot broadcast failed', err);
+                });
+            }
         }
 
         const shouldDispatchSnapshot = origin !== this.originBootstrap
@@ -2524,13 +2706,21 @@ class VTTCollabSession {
     }
 
     updateTokenPositions(changes, options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
         const applied = applyTokenPositionChangesToDoc(this.doc, changes, this.originPosition, Date.now());
         if (!applied.length) {
+            if (opts.flushNow) {
+                this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+                this.requestPeerReconcile('token-drop');
+                return Promise.resolve({ ok: true, reason: 'scheduled' });
+            }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
-        this.scheduleCloudFlush();
-        if (options && options.flushNow) {
+        if (opts.flushNow) {
+            this.scheduleCloudFlush({ forceCompatibilityMirror: true });
             this.requestPeerReconcile('token-drop');
+        } else {
+            this.scheduleCloudFlush();
         }
         return Promise.resolve({ ok: true, changes: applied });
     }

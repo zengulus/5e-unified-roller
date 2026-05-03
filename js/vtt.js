@@ -2426,6 +2426,18 @@
         uiState.localSceneId = cleanMode === SCENE_VIEW_LOCAL ? cleanSceneId : '';
         persistUIPreferences();
     };
+    const maybeFollowRemoteActivityForDM = (sceneIds = new Set(), state = vttState) => {
+        if (!isDM() || !isUsingLocalSceneView(state, localRole)) return false;
+        if (dragState || spawnDragState || fogPlacementState || evidenceNotePlacementState || templatePlacementState || templateRotateState || visionConeRotateState || rulerState) return false;
+        const sharedSceneId = getSharedSceneId(state);
+        if (!sharedSceneId || !sceneIds.has(sharedSceneId)) return false;
+        const viewedSceneId = getViewedSceneId(state, localRole);
+        if (viewedSceneId === sharedSceneId) return false;
+        setSceneViewPreference(SCENE_VIEW_SHARED);
+        previewTokenId = '';
+        fitViewOnNextMapLoad = true;
+        return true;
+    };
     const canEditInitiative = () => isDM();
 
     const getTokenById = (tokenId, state = vttState) => {
@@ -4412,6 +4424,7 @@
         queueRemoteTweensFromSnapshots(vttState, clean);
         pendingRemoteVTTSnapshot = null;
         vttState = deepClone(synced.snapshot);
+        maybeFollowRemoteActivityForDM(new Set([getSharedSceneId(vttState)]), vttState);
         normalizeSelections();
         render();
     };
@@ -4426,6 +4439,7 @@
         const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
         vttState = deepClone(synced.snapshot);
         pendingRemoteVTTSnapshot = null;
+        maybeFollowRemoteActivityForDM(new Set([getSharedSceneId(vttState)]), vttState);
         normalizeSelections();
         render();
         return true;
@@ -4450,8 +4464,16 @@
             queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
             const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
             vttState = deepClone(synced.snapshot);
+            const remoteSceneIds = new Set(
+                (Array.isArray(changes) ? changes : [])
+                    .map((change) => String(change && change.sceneId || '').trim())
+                    .filter(Boolean)
+            );
+            if (!remoteSceneIds.size) remoteSceneIds.add(getSharedSceneId(vttState));
+            const followedRemoteScene = maybeFollowRemoteActivityForDM(remoteSceneIds, vttState);
             normalizeSelections();
-            renderStage();
+            if (followedRemoteScene) render();
+            else renderStage();
             positionTokenInspectorPopover();
             positionInitiativeDetail();
             return;
@@ -4483,8 +4505,10 @@
         queuedTweens.forEach((tween) => {
             queueRemoteTokenTween(tween.sceneId, tween.tokenId, tween.fromX, tween.fromY, tween.toX, tween.toY);
         });
+        const followedRemoteScene = maybeFollowRemoteActivityForDM(new Set(queuedTweens.map((tween) => tween.sceneId)), vttState);
         normalizeSelections();
-        renderStage();
+        if (followedRemoteScene) render();
+        else renderStage();
         positionTokenInspectorPopover();
         positionInitiativeDetail();
     };
@@ -7012,8 +7036,10 @@
     const syncDraggedState = (force = false) => {
         const store = getStore();
         if (!store || !vttState) return;
-        if (!force) return;
+        const canSyncLivePosition = isVTTCollabReady() && typeof vttCollabSession.updateTokenPositions === 'function';
+        if (!force && !canSyncLivePosition) return;
         const now = Date.now();
+        if (!force && lastDragSyncAt && now - lastDragSyncAt < DRAG_SYNC_INTERVAL_MS) return;
         const localToken = dragState ? getTokenById(dragState.tokenId, vttState) : null;
         const scene = getActiveScene(vttState);
 
@@ -7023,13 +7049,13 @@
             return;
         }
 
-        if (isVTTCollabReady() && typeof vttCollabSession.updateTokenPositions === 'function') {
+        if (canSyncLivePosition) {
             Promise.resolve(vttCollabSession.updateTokenPositions([{
                 sceneId: scene.id,
                 tokenId: localToken.id,
                 x: localToken.x,
                 y: localToken.y
-            }], { flushNow: true })).catch((err) => {
+            }], force ? { flushNow: true } : {})).catch((err) => {
                 console.warn('VTT collaboration drag sync failed', err);
             });
             if (typeof vttCollabSession.getSnapshot === 'function') {
