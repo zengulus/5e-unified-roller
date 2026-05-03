@@ -81,6 +81,9 @@ Then set:
 - Health check path: `/healthz`
 - Plan: `free`
 - Environment variable: `ALLOWED_ORIGINS=https://<your-github-pages-origin>`
+- Optional environment variable: `MAX_MESSAGE_BYTES=8388608`
+
+`MAX_MESSAGE_BYTES` defaults to 8 MiB in current relay builds. Keep it at 8 MiB or higher for VTT rooms; the first GM seed can be much larger than a token drag update.
 
 After deploy, Render will give you a URL like:
 

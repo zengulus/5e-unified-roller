@@ -18,6 +18,7 @@ const HEARTBEAT_TIMEOUT_MS = 8000;
 const RECONNECT_BASE_DELAY_MS = 700;
 const RECONNECT_MAX_DELAY_MS = 12000;
 const RECONNECT_MAX_ATTEMPTS = 12;
+const STABLE_OPEN_RESET_MS = 30000;
 
 class RelayChannel {
     constructor(options = {}) {
@@ -49,6 +50,7 @@ class RelayChannel {
         this.heartbeatWarnedUnsupported = false;
         this.lastPongAt = 0;
         this.lastPingTs = 0;
+        this.stableOpenTimer = null;
     }
 
     on(kind, filter, callback) {
@@ -108,7 +110,6 @@ class RelayChannel {
 
         ws.addEventListener('open', () => {
             if (this.ws !== ws || this.closed) return;
-            this.reconnectAttempts = 0;
             this.sendRaw({
                 type: 'join',
                 payload: {
@@ -123,6 +124,13 @@ class RelayChannel {
             this.notifyStatus('SUBSCRIBED');
             if (this.localPresence) this.track(this.localPresence).catch(() => { });
             this.startHeartbeat();
+            if (this.stableOpenTimer) clearTimeout(this.stableOpenTimer);
+            this.stableOpenTimer = setTimeout(() => {
+                if (this.ws === ws && !this.closed && ws.readyState === WebSocket.OPEN) {
+                    this.reconnectAttempts = 0;
+                }
+                this.stableOpenTimer = null;
+            }, STABLE_OPEN_RESET_MS);
         });
         ws.addEventListener('message', (event) => {
             if (this.ws !== ws || this.closed) return;
@@ -132,14 +140,30 @@ class RelayChannel {
             if (this.ws !== ws || this.closed) return;
             this.notifyStatus('CHANNEL_ERROR');
         });
-        ws.addEventListener('close', () => {
+        ws.addEventListener('close', (event) => {
             if (this.ws !== ws) return;
             this.stopHeartbeat();
+            if (this.stableOpenTimer) {
+                clearTimeout(this.stableOpenTimer);
+                this.stableOpenTimer = null;
+            }
             this.ws = null;
             this.presenceMembers = new Map();
             if (this.closed) {
                 this.notifyStatus('CLOSED');
                 return;
+            }
+            const closeCode = event && Number.isFinite(event.code) ? event.code : 0;
+            const closeReason = toTrimmedString(event && event.reason, '', 160).trim();
+            const closeDetail = [
+                closeCode ? `code=${closeCode}` : '',
+                closeReason ? `reason=${closeReason}` : '',
+                event && event.wasClean ? 'clean=true' : 'clean=false'
+            ].filter(Boolean).join(' ');
+            if (closeCode === 1009) {
+                console.warn(`RTF_COLLAB_RELAY: Socket closed because the relay rejected an oversized message (${closeDetail}). Increase Render MAX_MESSAGE_BYTES and redeploy the relay.`);
+            } else {
+                console.warn(`RTF_COLLAB_RELAY: Socket closed (${closeDetail || 'no close details'}).`);
             }
             this.scheduleReconnect('close');
         });
@@ -297,6 +321,8 @@ class RelayChannel {
         this.closed = true;
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
+        if (this.stableOpenTimer) clearTimeout(this.stableOpenTimer);
+        this.stableOpenTimer = null;
         this.stopHeartbeat();
         if (this.ws) {
             try {

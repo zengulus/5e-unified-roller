@@ -52,7 +52,7 @@ Then put this into Tools Hub or your shared `connect.json`:
 - `SERVICE_NAME`: label used in logs and health output.
 - `ALLOWED_ORIGINS`: comma-separated allowlist for websocket `Origin` headers.
 - `LOG_CONNECTIONS`: when `true`, logs room joins/leaves.
-- `MAX_MESSAGE_BYTES`: websocket payload ceiling.
+- `MAX_MESSAGE_BYTES`: websocket payload ceiling. Default `8388608` (8 MiB), large enough for initial VTT Yjs room seeds with map/token metadata.
 - `ROOM_IDLE_TTL_MS`: how long an empty room can sit before cleanup.
 
 Room state is intentionally memory-only. A Render restart or idle-room cleanup drops the warm Yjs document; Supabase room snapshots remain the durable recovery source.

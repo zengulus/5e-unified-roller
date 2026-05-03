@@ -8,7 +8,8 @@ import * as decoding from '../js/vendor/lib0/decoding.js';
 const PORT = Number.parseInt(process.env.PORT || '10000', 10) || 10000;
 const HOST = process.env.HOST || '0.0.0.0';
 const SERVICE_NAME = String(process.env.SERVICE_NAME || 'RTF collab relay').trim() || 'RTF collab relay';
-const MAX_MESSAGE_BYTES = Math.max(1024, Number.parseInt(process.env.MAX_MESSAGE_BYTES || '262144', 10) || 262144);
+const DEFAULT_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+const MAX_MESSAGE_BYTES = Math.max(1024, Number.parseInt(process.env.MAX_MESSAGE_BYTES || String(DEFAULT_MAX_MESSAGE_BYTES), 10) || DEFAULT_MAX_MESSAGE_BYTES);
 const ROOM_IDLE_TTL_MS = Math.max(0, Number.parseInt(process.env.ROOM_IDLE_TTL_MS || '1800000', 10) || 1800000);
 const LOG_CONNECTIONS = /^(1|true|yes|on)$/i.test(String(process.env.LOG_CONNECTIONS || '').trim());
 const ALLOWED_ORIGINS = new Set(
