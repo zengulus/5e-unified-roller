@@ -451,15 +451,6 @@
             priority: 1300,
             searchTerms: 'initiative init combat turn order'
         }));
-        items.push(buildSheetCodeActionItem({
-            key: 'core:custom',
-            category: 'Utility',
-            code: 'rollCustom()',
-            label: 'Custom Roll',
-            summary: 'Sheet-only custom roll',
-            priority: 1140,
-            searchTerms: 'custom formula arbitrary dice'
-        }));
         DEFENCE_KEYS.forEach((stat) => {
             const fullName = sheetStatNames[stat] || stat.toUpperCase();
             items.push(buildSheetCodeActionItem({
@@ -2106,6 +2097,9 @@
     };
 
     const renderToolsMenu = () => {
+        if (!isDM() && [TOOL_MODE_NOTE, TOOL_MODE_FOG, TOOL_MODE_FOG_REMOVE].includes(localToolState.mode)) {
+            setToolMode(TOOL_MODE_NAVIGATE);
+        }
         if (toolsMenuEl) toolsMenuEl.hidden = !toolsMenuOpen;
         if (toolsMenuToggleEl) toolsMenuToggleEl.setAttribute('aria-expanded', toolsMenuOpen ? 'true' : 'false');
         if (rulerToggleEl) rulerToggleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false');
@@ -2115,15 +2109,18 @@
         if (toolModeConeEl) toolModeConeEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CONE ? 'true' : 'false');
         if (toolModeNoteEl) {
             toolModeNoteEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NOTE ? 'true' : 'false');
-            toolModeNoteEl.disabled = !isDM();
+            toolModeNoteEl.hidden = !isDM();
+            toolModeNoteEl.disabled = false;
         }
         if (toolModeFogEl) {
             toolModeFogEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG ? 'true' : 'false');
-            toolModeFogEl.disabled = !isDM();
+            toolModeFogEl.hidden = !isDM();
+            toolModeFogEl.disabled = false;
         }
         if (toolModeFogRemoveEl) {
             toolModeFogRemoveEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG_REMOVE ? 'true' : 'false');
-            toolModeFogRemoveEl.disabled = !isDM();
+            toolModeFogRemoveEl.hidden = !isDM();
+            toolModeFogRemoveEl.disabled = false;
         }
         if (toolSizeInputEl && document.activeElement !== toolSizeInputEl) {
             toolSizeInputEl.value = String(localToolState.sizeCells);
@@ -2138,12 +2135,14 @@
             const enabled = !!(scene && scene.stealthMode);
             stealthModeToggleEl.textContent = `Sight Cones: ${enabled ? 'On' : 'Off'}`;
             stealthModeToggleEl.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-            stealthModeToggleEl.disabled = !isDM();
+            stealthModeToggleEl.hidden = !isDM();
+            stealthModeToggleEl.disabled = false;
         }
         if (clearFogButtonEl) {
             const scene = getActiveScene();
             const fogCount = scene && Array.isArray(scene.fog) ? scene.fog.length : 0;
-            clearFogButtonEl.disabled = !isDM() || fogCount === 0;
+            clearFogButtonEl.hidden = !isDM() || fogCount === 0;
+            clearFogButtonEl.disabled = false;
             clearFogButtonEl.textContent = fogCount > 0 ? `Clear Fog (${fogCount})` : 'Clear Fog';
         }
         if (body) body.dataset.toolMode = localToolState.mode;
@@ -5131,10 +5130,14 @@
         }
         const token = stageContextMenuState.tokenId ? getTokenById(stageContextMenuState.tokenId) : null;
         const note = stageContextMenuState.noteId ? getEvidenceNoteById(stageContextMenuState.noteId) : null;
-        const canRoll = !!(token || !isDM());
+        const tokenSourceType = String(token && token.sourceType || '').trim().toLowerCase();
+        const canRollFromSheet = !isDM() || tokenSourceType === 'player';
+        const canRollStatBlock = !!(token && isDM() && isNPCRollTarget(token));
         const canPreview = !!getCanonicalTokenImageUrl(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
+        const activeScene = getActiveScene();
+        const fogCount = activeScene && Array.isArray(activeScene.fog) ? activeScene.fog.length : 0;
         stageContextMenuEl.hidden = false;
         stageContextMenuEl.innerHTML = `
             <div class="vtt-stage-context-head">
@@ -5143,7 +5146,9 @@
             </div>
             <div class="vtt-stage-context-list">
                 <button class="vtt-stage-context-item strong" type="button" data-action="context-ping">Ping</button>
-                ${canRoll ? `<button class="vtt-stage-context-item" type="button" data-action="context-make-roll"${token && isDM() && !isNPCRollTarget(token) && String(token.sourceType || '').trim().toLowerCase() !== 'player' ? ' disabled' : ''}>Make a dice roll</button>` : ''}
+                ${canRollFromSheet ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-from-sheet">Roll from character sheet</button>' : ''}
+                <button class="vtt-stage-context-item" type="button" data-action="context-custom-roll">Custom roll (any dice)</button>
+                ${canRollStatBlock ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-stat-block">Roll stat block / NPC</button>' : ''}
                 ${canEditToken ? `<button class="vtt-stage-context-item" type="button" data-action="context-token-inspector">Token inspector</button>` : ''}
                 ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-inspector">Zone inspector</button>` : ''}
                 ${canPreview ? `<button class="vtt-stage-context-item" type="button" data-action="context-preview-token">${token.id === previewTokenId ? 'Hide portrait' : 'Preview portrait'}</button>` : ''}
@@ -5155,7 +5160,7 @@
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="ruler">Ruler</button>
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="circle">Circle</button>
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="cone">Cone</button>
-                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="note"${isDM() ? '' : ' disabled'}>Pins/Zones</button>
+                    ${isDM() ? '<button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="note">Pins/Zones</button>' : ''}
                 </div>
                 <label class="vtt-stage-context-size">
                     <span>Template size</span>
@@ -5166,14 +5171,16 @@
                     <button class="vtt-stage-context-item" type="button" data-action="toggle-stealth-mode">Sight Cones: ${getActiveScene() && getActiveScene().stealthMode ? 'On' : 'Off'}</button>
                 ` : ''}
             </div>
-            <div class="vtt-stage-context-section">
-                <div class="vtt-menu-title">Fog</div>
-                <div class="vtt-stage-context-grid">
-                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog"${isDM() ? '' : ' disabled'}>Fog</button>
-                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog-remove"${isDM() ? '' : ' disabled'}>Unfog</button>
-                    <button class="vtt-stage-context-item" type="button" data-action="clear-scene-fog"${isDM() ? '' : ' disabled'}>Clear</button>
+            ${isDM() ? `
+                <div class="vtt-stage-context-section">
+                    <div class="vtt-menu-title">Fog</div>
+                    <div class="vtt-stage-context-grid">
+                        <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog">Fog</button>
+                        <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog-remove">Unfog</button>
+                        ${fogCount > 0 ? '<button class="vtt-stage-context-item" type="button" data-action="clear-scene-fog">Clear</button>' : ''}
+                    </div>
                 </div>
-            </div>
+            ` : ''}
             ${isDM() ? `
                 <div class="vtt-stage-context-section">
                     <div class="vtt-menu-title">Spawn</div>
@@ -5760,8 +5767,9 @@
         }
         const token = getTokenById(npcRollState.tokenId) || {};
         const tokenName = String(token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
-        const monster = getMonsterStatBlockForToken(token);
-        const isMonsterIdentity = String(token && token.sourceType || '').trim().toLowerCase() === 'monster' || !!(token && token.monster);
+        const isCustomRoll = String(npcRollState.mode || '').trim().toLowerCase() === 'custom';
+        const monster = isCustomRoll ? null : getMonsterStatBlockForToken(token);
+        const isMonsterIdentity = !isCustomRoll && (String(token && token.sourceType || '').trim().toLowerCase() === 'monster' || !!(token && token.monster));
         if (isMonsterIdentity && !monster && !monsterDirectoryLoading && !monsterDirectory.length) {
             ensureMonsterDirectory().catch((err) => {
                 console.warn('Failed loading monster rolls', err);
@@ -5787,8 +5795,8 @@
         npcRollPopoverEl.innerHTML = `
             <div class="vtt-popover-head">
                 <div>
-                    <strong>${monster ? 'Roll For Monster' : 'Roll For NPC'}</strong>
-                    <span>${escapeHtml(monsterSummary || tokenName)}</span>
+                    <strong>${isCustomRoll ? 'Custom Roll (Any Dice)' : (monster ? 'Roll For Monster' : 'Roll For NPC')}</strong>
+                    <span>${escapeHtml(isCustomRoll ? 'Any formula like 1d20 + 5, 2d6, or 2d20kh1' : (monsterSummary || tokenName))}</span>
                 </div>
                 <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-npc-roll" aria-label="Close NPC roll">X</button>
             </div>
@@ -5820,7 +5828,7 @@
                         </label>
                         <div class="vtt-chip-row">
                             <button class="vtt-chip-btn strong" type="button" data-action="save-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}">Save Override</button>
-                            <button class="vtt-chip-btn" type="button" data-action="reset-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}"${editingPreset.hasOverride ? '' : ' disabled'}>Reset</button>
+                            ${editingPreset.hasOverride ? `<button class="vtt-chip-btn" type="button" data-action="reset-monster-roll-override" data-preset-key="${escapeHtml(editingPreset.key)}">Reset</button>` : ''}
                             <button class="vtt-chip-btn" type="button" data-action="cancel-monster-roll-edit">Cancel</button>
                         </div>
                     </div>
@@ -5868,6 +5876,27 @@
             type: defaultPreset ? (defaultPreset.type || 'check') : 'check',
             detail: defaultPreset ? (defaultPreset.detail || '') : '',
             presetKey: defaultPreset ? (defaultPreset.key || '') : '',
+            editingPresetKey: '',
+            monsterRollQuery: '',
+            clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
+        };
+        closeSheetActionPopover();
+        renderNPCRollPopover();
+        return true;
+    };
+
+    const openCustomRollPopover = (token = null, clientX, clientY) => {
+        const tokenName = String(token && token.label || '').trim();
+        npcRollState = {
+            mode: 'custom',
+            tokenId: token && token.id ? token.id : '',
+            tokenName: tokenName || 'VTT',
+            label: tokenName ? `${tokenName} custom roll` : 'Custom roll',
+            formula: '1d20',
+            type: 'check',
+            detail: '',
+            presetKey: '',
             editingPresetKey: '',
             monsterRollQuery: '',
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
@@ -6053,7 +6082,7 @@
                 </div>
                 ${monster ? `
                     <div class="vtt-subhead">Monster</div>
-                    <div class="vtt-detail-note">${escapeHtml(monsterMeta || monster.name)}. Right-click the token and choose Make a dice roll for stat block checks, saves, attacks, and damage.</div>
+                    <div class="vtt-detail-note">${escapeHtml(monsterMeta || monster.name)}. Right-click the token and choose Roll stat block / NPC for checks, saves, attacks, and damage.</div>
                 ` : ''}
                 <div class="vtt-subhead">Assign Monster</div>
                 <label class="vtt-field">
@@ -7414,12 +7443,13 @@
             const label = String(npcRollState.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
             const token = getTokenById(npcRollState.tokenId);
             const tokenName = String(token && token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
+            const isCustomRoll = String(npcRollState.mode || '').trim().toLowerCase() === 'custom';
             renderNPCRollPopover(parsed);
             postGMDiscordRoll(tokenName, label, parsed.total, parsed.text, {
                 type: npcRollState.type || 'check',
                 detail: npcRollState.detail || ''
             }).then((sent) => {
-                if (!sent) console.warn('VTT monster/NPC roll Discord post skipped: enable Discord integration in the GM dashboard and save a webhook URL.');
+                if (!sent && !isCustomRoll) console.warn('VTT monster/NPC roll Discord post skipped: enable Discord integration in the GM dashboard and save a webhook URL.');
             }).catch((err) => {
                 console.warn('VTT NPC roll Discord post failed', err);
             });
@@ -7433,15 +7463,27 @@
             render();
             return;
         }
-        if (action === 'context-make-roll') {
+        if (action === 'context-roll-from-sheet') {
             const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
             const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
             closeStageContextMenu();
-            if (token && isDM() && isNPCRollTarget(token)) {
-                openNPCRollPopover(token, menuState.clientX, menuState.clientY);
-            } else {
-                openSheetActionPopover(token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
-            }
+            openSheetActionPopover(token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
+            render();
+            return;
+        }
+        if (action === 'context-custom-roll') {
+            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
+            const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
+            closeStageContextMenu();
+            openCustomRollPopover(token, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
+            render();
+            return;
+        }
+        if (action === 'context-roll-stat-block' || action === 'context-make-roll') {
+            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
+            const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
+            closeStageContextMenu();
+            if (token && isDM() && isNPCRollTarget(token)) openNPCRollPopover(token, menuState.clientX, menuState.clientY);
             render();
             return;
         }
