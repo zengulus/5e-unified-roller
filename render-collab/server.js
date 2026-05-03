@@ -33,46 +33,6 @@ const logEvent = (...parts) => {
   console.log('[relay]', ...parts);
 };
 
-const getRoom = (roomId) => {
-  const key = toTrimmedString(roomId, '', 160).trim();
-  if (!key) return null;
-  if (!rooms.has(key)) {
-    rooms.set(key, {
-      id: key,
-      clients: new Set(),
-      doc: new Y.Doc(),
-      lastSeenAt: Date.now()
-    });
-  }
-  return rooms.get(key);
-};
-
-const removeRoomIfEmpty = (roomId) => {
-  const room = rooms.get(roomId);
-  if (!room || room.clients.size) return;
-  if ((Date.now() - (room.lastSeenAt || 0)) < ROOM_IDLE_TTL_MS) return;
-  if (room.doc && typeof room.doc.destroy === 'function') {
-    room.doc.destroy();
-  }
-  rooms.delete(roomId);
-};
-
-const resetRoomDoc = (room) => {
-  if (!room) return;
-  if (room.doc && typeof room.doc.destroy === 'function') {
-    room.doc.destroy();
-  }
-  room.doc = new Y.Doc();
-  room.lastSeenAt = Date.now();
-};
-
-const sweepIdleRooms = () => {
-  rooms.forEach((room, roomId) => {
-    if (!room || room.clients.size) return;
-    removeRoomIfEmpty(roomId);
-  });
-};
-
 const buildPresenceState = (room) => {
   const out = {};
   if (!room) return out;
@@ -125,6 +85,76 @@ const sendYSyncMessage = (client, encoder) => {
   return true;
 };
 
+const broadcastToRoom = (room, sender, packet) => {
+  if (!room) return;
+  room.clients.forEach((client) => {
+    if (client === sender) return;
+    sendJson(client.socket, packet);
+  });
+};
+
+const attachRoomDocObserver = (room) => {
+  if (!room || !(room.doc instanceof Y.Doc)) return;
+  room.doc.on('update', (update, origin) => {
+    const sender = origin && typeof origin === 'object' && origin.socket ? origin : null;
+    const encoder = encoding.createEncoder();
+    syncProtocol.writeUpdate(encoder, update);
+    const encodedUpdate = encodeBase64(encoding.toUint8Array(encoder));
+    if (!encodedUpdate) return;
+    broadcastToRoom(room, sender, {
+      type: 'broadcast',
+      event: 'y-sync',
+      payload: {
+        update: encodedUpdate,
+        relayedBy: SERVICE_NAME
+      }
+    });
+  });
+};
+
+const getRoom = (roomId) => {
+  const key = toTrimmedString(roomId, '', 160).trim();
+  if (!key) return null;
+  if (!rooms.has(key)) {
+    const room = {
+      id: key,
+      clients: new Set(),
+      doc: new Y.Doc(),
+      lastSeenAt: Date.now()
+    };
+    attachRoomDocObserver(room);
+    rooms.set(key, room);
+  }
+  return rooms.get(key);
+};
+
+const removeRoomIfEmpty = (roomId) => {
+  const room = rooms.get(roomId);
+  if (!room || room.clients.size) return;
+  if ((Date.now() - (room.lastSeenAt || 0)) < ROOM_IDLE_TTL_MS) return;
+  if (room.doc && typeof room.doc.destroy === 'function') {
+    room.doc.destroy();
+  }
+  rooms.delete(roomId);
+};
+
+const resetRoomDoc = (room) => {
+  if (!room) return;
+  if (room.doc && typeof room.doc.destroy === 'function') {
+    room.doc.destroy();
+  }
+  room.doc = new Y.Doc();
+  attachRoomDocObserver(room);
+  room.lastSeenAt = Date.now();
+};
+
+const sweepIdleRooms = () => {
+  rooms.forEach((room, roomId) => {
+    if (!room || room.clients.size) return;
+    removeRoomIfEmpty(roomId);
+  });
+};
+
 const handleYSyncBroadcast = (room, sender, payload) => {
   if (!room || !(room.doc instanceof Y.Doc) || !sender || !payload || typeof payload !== 'object') return;
   const update = decodeBase64(payload.update);
@@ -134,7 +164,7 @@ const handleYSyncBroadcast = (room, sender, payload) => {
   const replyEncoder = encoding.createEncoder();
   let messageType = -1;
   try {
-    messageType = syncProtocol.readSyncMessage(decoder, replyEncoder, room.doc, sender.instanceId || sender.presenceKey || 'relay', (error) => {
+    messageType = syncProtocol.readSyncMessage(decoder, replyEncoder, room.doc, sender, (error) => {
       console.warn('[relay] y-sync apply failed', error);
     });
   } catch (err) {
@@ -160,14 +190,6 @@ const emitPresence = (room, event = 'sync') => {
       event,
       state
     });
-  });
-};
-
-const broadcastToRoom = (room, sender, packet) => {
-  if (!room) return;
-  room.clients.forEach((client) => {
-    if (client === sender) return;
-    sendJson(client.socket, packet);
   });
 };
 
@@ -300,6 +322,7 @@ wss.on('connection', (socket, req) => {
       }
       if (event === 'y-sync') {
         handleYSyncBroadcast(room, client, packet.payload);
+        return;
       }
       broadcastToRoom(room, client, {
         type: 'broadcast',

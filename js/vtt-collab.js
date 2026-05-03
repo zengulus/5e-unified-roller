@@ -2487,6 +2487,7 @@ class VTTCollabSession {
             payload: snapshotToSave,
             checkpointPayload: exportVTTCheckpointFromDoc(this.doc, this.coerceSnapshot.bind(this)),
             previousRevision,
+            forceOverwrite: !!opts.forceOverwrite,
             revision: nextRevision,
             updatedAt: toIsoString(getDocUpdatedAt(this.doc), '') || new Date().toISOString(),
             updatedBy: this.instanceId,
@@ -2685,7 +2686,10 @@ class VTTCollabSession {
         this.lastCloudSnapshotSignature = '';
         this.pendingReadyFlush = true;
         this.isDirty = true;
-        const result = await this.flushSnapshotNow({ forceCompatibilityMirror: true });
+        const result = await this.flushSnapshotNow({
+            forceCompatibilityMirror: true,
+            forceOverwrite: true
+        });
         this.requestPeerReconcile('dm-authoritative');
         return result && result.ok ? result : {
             ok: false,

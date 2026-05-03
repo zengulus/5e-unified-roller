@@ -8156,7 +8156,8 @@
             const tableName = ensured.config.boardRoomsTable || DEFAULT_SYNC_CONFIG.boardRoomsTable;
             const selectCols = 'room_id,board_scope,case_id,payload,revision,updated_at,updated_by,updated_by_name';
             const createOnly = !!opts.createOnly;
-            const hasPreviousRevision = Object.prototype.hasOwnProperty.call(opts, 'previousRevision');
+            const forceOverwrite = !!opts.forceOverwrite;
+            const hasPreviousRevision = !forceOverwrite && Object.prototype.hasOwnProperty.call(opts, 'previousRevision');
             const previousRevision = Math.max(0, toNonNegativeInt(opts.previousRevision, 0));
             const readCurrentRow = () => ensured.client
                 .from(tableName)
@@ -8325,7 +8326,7 @@
                     };
                 }
 
-                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
+                if (!forceOverwrite && existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
                     return buildStaleResult(existing.data);
                 }
                 const writeQuery = existing.data
