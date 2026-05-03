@@ -174,6 +174,17 @@ const handleYSyncBroadcast = (room, sender, payload) => {
 
   sendYSyncMessage(sender, replyEncoder);
 
+  if (messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2) {
+    broadcastToRoom(room, sender, {
+      type: 'broadcast',
+      event: 'y-sync',
+      payload: {
+        update: payload.update,
+        relayedBy: SERVICE_NAME
+      }
+    });
+  }
+
   if (messageType === syncProtocol.messageYjsSyncStep1) {
     const requestEncoder = encoding.createEncoder();
     syncProtocol.writeSyncStep1(requestEncoder, room.doc);
