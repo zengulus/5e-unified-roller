@@ -4373,17 +4373,32 @@
     const loadInitialVTTSnapshot = async (store) => {
         const activeCaseId = getActiveCaseId();
         if (!store) return deepClone(DEFAULT_VTT_STATE);
-        if (isDM() || !hasSupabaseVTTConfig() || typeof store.loadVTTRoomSnapshot !== 'function') {
+
+        if (hasLiveVTTConfig() && !isDM()) {
+            setVTTCollabStatus({
+                state: 'connecting',
+                detail: 'Waiting for GM live VTT room. Local and Supabase snapshots are not used for player boot.',
+                peerCount: 0
+            });
+            if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: Waiting for GM live room...';
+            return deepClone(DEFAULT_VTT_STATE);
+        }
+
+        if (!hasSupabaseVTTConfig() || typeof store.loadVTTRoomSnapshot !== 'function') {
             return readLocalInitialVTTSnapshot(store, activeCaseId);
         }
 
         const roomId = getVTTCollabRoomId(activeCaseId);
         setVTTCollabStatus({
             state: 'connecting',
-            detail: 'Checking saved VTT room before loading the scene.',
+            detail: isDM()
+                ? 'GM is loading the saved VTT room before seeding Render.'
+                : 'Checking saved VTT room before loading the scene.',
             peerCount: 0
         });
-        if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: Checking saved VTT...';
+        if (activeSceneLabelEl) activeSceneLabelEl.textContent = isDM()
+            ? 'Scene: Loading GM saved VTT...'
+            : 'Scene: Checking saved VTT...';
 
         try {
             const result = await store.loadVTTRoomSnapshot({
@@ -4408,7 +4423,9 @@
                 console.warn('VTT Supabase preflight failed', result.error || result.reason || result);
                 setVTTCollabStatus({
                     state: 'degraded',
-                    detail: result.error || 'Saved VTT check failed. Loading local fallback.',
+                    detail: result.error || (isDM()
+                        ? 'Saved VTT check failed. GM is loading local fallback.'
+                        : 'Saved VTT check failed.'),
                     peerCount: 0
                 });
             }
@@ -4416,12 +4433,14 @@
             console.warn('VTT Supabase preflight failed', err);
             setVTTCollabStatus({
                 state: 'degraded',
-                detail: err && err.message ? err.message : 'Saved VTT check failed. Loading local fallback.',
+                detail: err && err.message ? err.message : (isDM()
+                    ? 'Saved VTT check failed. GM is loading local fallback.'
+                    : 'Saved VTT check failed.'),
                 peerCount: 0
             });
         }
 
-        return readLocalInitialVTTSnapshot(store, activeCaseId);
+        return isDM() ? readLocalInitialVTTSnapshot(store, activeCaseId) : deepClone(DEFAULT_VTT_STATE);
     };
 
     const applyVTTCollabSnapshot = (payload) => {
@@ -4429,6 +4448,9 @@
         const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
             ? store.normalizeVTTStateSnapshot(payload)
             : deepClone(payload);
+        if (initialVTTLoadPending) {
+            initialVTTLoadPending = false;
+        }
         if (dragState) {
             syncRosterLinkedPlayerPresentation(clean);
             pendingRemoteVTTSnapshot = clean;
@@ -4475,6 +4497,9 @@
             const nextSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
                 ? store.normalizeVTTStateSnapshot(meta.snapshot)
                 : meta.snapshot;
+            if (initialVTTLoadPending) {
+                initialVTTLoadPending = false;
+            }
             queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
             const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
             vttState = deepClone(synced.snapshot);
@@ -4516,6 +4541,9 @@
             queuedTweens.push({ sceneId: scene.id, tokenId: token.id, fromX, fromY, toX: nextX, toY: nextY });
         });
         if (!mutated) return;
+        if (initialVTTLoadPending) {
+            initialVTTLoadPending = false;
+        }
         queuedTweens.forEach((tween) => {
             queueRemoteTokenTween(tween.sceneId, tween.tokenId, tween.fromX, tween.fromY, tween.toX, tween.toY);
         });
@@ -4562,8 +4590,13 @@
                     preferCloudRoomSnapshot: !isDM(),
                     canSaveRoom: () => isDM(),
                     canSeedRelayRoom: () => isDM(),
-                    getSeedPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
-                    getCurrentPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
+                    canLoadColdSnapshot: () => isDM(),
+                    getSeedPayload: () => isDM()
+                        ? (readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE))
+                        : deepClone(DEFAULT_VTT_STATE),
+                    getCurrentPayload: () => isDM()
+                        ? (readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE))
+                        : deepClone(DEFAULT_VTT_STATE),
                     applySnapshot: (payload) => applyVTTCollabSnapshot(payload),
                     applyPositionChanges: (changes, meta) => applyVTTCollabPositionChanges(changes, meta),
                     onStatusChange: (status) => setVTTCollabStatus(status)
@@ -9373,6 +9406,7 @@
         loadUIPreferences();
         capturePlayerImagesAtLoad();
         const initialSnapshot = await loadInitialVTTSnapshot(store);
+        const blockUntilRelaySnapshot = hasLiveVTTConfig() && !isDM();
 
         const fogMigrated = coerceSnapshotFogToCellMasks(initialSnapshot);
 
@@ -9391,8 +9425,10 @@
 
         vttState = initialSynced;
         normalizeSelections();
-        initialVTTLoadPending = false;
-        render();
+        if (!blockUntilRelaySnapshot) {
+            initialVTTLoadPending = false;
+            render();
+        }
         initVTTCollab().catch((err) => {
             console.warn('VTT collaboration init failed', err);
         }).finally(() => {

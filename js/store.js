@@ -45,6 +45,22 @@
         if (!STORE_DEBUG) return;
         console.log(...args);
     };
+    const isStorageQuotaError = (err) => !!(
+        err
+        && (
+            err.name === 'QuotaExceededError'
+            || err.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+            || err.code === 22
+            || err.code === 1014
+        )
+    );
+    const warnStorageMirrorFailure = (label, err) => {
+        if (isStorageQuotaError(err)) {
+            console.warn(`${label}. Browser storage quota is full; skipping local cache mirror.`);
+            return;
+        }
+        console.warn(label, err);
+    };
     const stableStringify = (value) => {
         if (value === null || value === undefined) return '';
         try {
@@ -1095,6 +1111,16 @@
             });
         }
     });
+    const listIndexedDbDatabases = async () => {
+        if (typeof indexedDB === 'undefined' || !indexedDB || typeof indexedDB.databases !== 'function') return [];
+        try {
+            const list = await indexedDB.databases();
+            return Array.isArray(list) ? list : [];
+        } catch (err) {
+            return [];
+        }
+    };
+    const isBoardOrVTTIndexedDbName = (name) => /^rtf-(board|vtt)-room-/.test(String(name || '').trim());
     const sanitizeCampaignMeta = (meta) => {
         const source = meta && typeof meta === 'object' ? meta : {};
         const defaults = createDefaultCampaignMetaState();
@@ -4758,7 +4784,7 @@
                 try {
                     localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
                 } catch (err) {
-                    console.warn('RTF_STORE: Failed mirroring rows v2 state to localStorage', err);
+                    warnStorageMirrorFailure('RTF_STORE: Failed mirroring rows v2 state to localStorage', err);
                 }
                 this.broadcastStoreUpdate('storage', { scopes: [SYNC_SCOPE_GLOBAL], reason: 'rows-v2-local-hydrate' });
                 return { ok: true, reason: 'hydrated', rows: existingCount };
@@ -9263,6 +9289,154 @@
             };
         }
 
+        async clearBoardVTTLocalCaches(options = {}) {
+            const opts = options && typeof options === 'object' ? options : {};
+            const dryRun = !!opts.dryRun;
+            const result = {
+                ok: true,
+                dryRun,
+                localStorageKeysRemoved: [],
+                localStorageKeysRewritten: [],
+                indexedDbDeleted: [],
+                indexedDbErrors: [],
+                preserved: [
+                    SYNC_CONFIG_KEY,
+                    DIRTY_SCOPES_KEY,
+                    SCOPE_BASELINES_KEY,
+                    LAST_PULLED_REMOTE_KEY,
+                    VTT_LOCAL_PREFS_KEY,
+                    LEAD_STORAGE_KEY,
+                    PREP_PROCEDURE_STATE_KEY,
+                    CLOCKS_STORAGE_KEY,
+                    HEAT_SYNC_KEY,
+                    HQ_LOCAL_STORAGE_KEY
+                ]
+            };
+
+            let rewrittenState = null;
+            try {
+                const raw = localStorage.getItem(STORE_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object') {
+                        rewrittenState = {
+                            ...parsed,
+                            board: sanitizeBoard(DEFAULT_BOARD_STATE)
+                        };
+
+                        if (rewrittenState.campaignMeta && typeof rewrittenState.campaignMeta === 'object') {
+                            rewrittenState.campaignMeta = {
+                                ...rewrittenState.campaignMeta,
+                                board: sanitizeBoard(DEFAULT_CAMPAIGN_META_BOARD_STATE)
+                            };
+                        }
+
+                        if (rewrittenState.cases && typeof rewrittenState.cases === 'object' && Array.isArray(rewrittenState.cases.items)) {
+                            rewrittenState.cases = {
+                                ...rewrittenState.cases,
+                                items: rewrittenState.cases.items.map((entry) => {
+                                    if (!entry || typeof entry !== 'object') return entry;
+                                    return {
+                                        ...entry,
+                                        board: sanitizeBoard(DEFAULT_BOARD_STATE),
+                                        vtt: sanitizeVTTState(createDefaultVTTState())
+                                    };
+                                })
+                            };
+                        }
+
+                        if (rewrittenState.meta && typeof rewrittenState.meta === 'object' && rewrittenState.meta.scopeUpdated && typeof rewrittenState.meta.scopeUpdated === 'object') {
+                            const nextScopeUpdated = { ...rewrittenState.meta.scopeUpdated };
+                            Object.keys(nextScopeUpdated).forEach((scope) => {
+                                if (scope === 'board'
+                                    || scope === 'campaign.meta.board'
+                                    || /^cases\.[^.]+\.(board|vtt)$/.test(scope)) {
+                                    delete nextScopeUpdated[scope];
+                                }
+                            });
+                            rewrittenState.meta = {
+                                ...rewrittenState.meta,
+                                scopeUpdated: nextScopeUpdated
+                            };
+                        }
+
+                        result.localStorageKeysRewritten.push(STORE_KEY);
+                    }
+                }
+            } catch (err) {
+                result.ok = false;
+                result.error = `Failed preparing ${STORE_KEY}: ${err && err.message ? err.message : String(err)}`;
+                return result;
+            }
+
+            const localKeysToRemove = [LEGACY_BOARD_KEY];
+            if (!dryRun) {
+                try {
+                    if (rewrittenState) {
+                        localStorage.setItem(STORE_KEY, JSON.stringify(rewrittenState));
+                    }
+                } catch (err) {
+                    result.ok = false;
+                    result.error = `Failed rewriting ${STORE_KEY}: ${err && err.message ? err.message : String(err)}`;
+                    return result;
+                }
+
+                localKeysToRemove.forEach((key) => {
+                    try {
+                        localStorage.removeItem(key);
+                        result.localStorageKeysRemoved.push(key);
+                    } catch (err) { }
+                });
+            } else {
+                result.localStorageKeysRemoved.push(...localKeysToRemove);
+            }
+
+            const dbList = await listIndexedDbDatabases();
+            const cfg = sanitizeSyncConfig(this.sync && this.sync.config ? this.sync.config : getMergedSyncConfig());
+            const knownDbNames = [];
+            if (cfg.campaignId) {
+                knownDbNames.push(`rtf-board-room-${cfg.campaignId}-${buildBoardRoomId('campaign', '')}`);
+                const caseItems = this.state && this.state.cases && Array.isArray(this.state.cases.items)
+                    ? this.state.cases.items
+                    : [];
+                caseItems.forEach((entry) => {
+                    const caseId = sanitizeCaseId(entry && entry.id, '');
+                    if (!caseId) return;
+                    knownDbNames.push(`rtf-board-room-${cfg.campaignId}-${buildBoardRoomId('case', caseId)}`);
+                    knownDbNames.push(`rtf-vtt-room-${cfg.campaignId}-${buildVTTRoomId(caseId)}`);
+                });
+            }
+            const dbNames = Array.from(new Set([
+                ...knownDbNames,
+                dbList
+                    .map((entry) => String(entry && entry.name || '').trim())
+                    .filter(isBoardOrVTTIndexedDbName)
+            ].flat().filter(isBoardOrVTTIndexedDbName)));
+
+            if (dryRun) {
+                result.indexedDbDeleted = dbNames;
+                return result;
+            }
+
+            for (const dbName of dbNames) {
+                const deleted = await deleteIndexedDbDatabase(dbName);
+                if (deleted && deleted.ok) {
+                    result.indexedDbDeleted.push(dbName);
+                } else {
+                    result.indexedDbErrors.push({
+                        name: dbName,
+                        error: deleted && (deleted.error || deleted.reason) ? (deleted.error || deleted.reason) : 'delete-failed'
+                    });
+                }
+            }
+
+            this.invalidateSyncQueryCache('board-room:', { prefix: true });
+            this.invalidateSyncQueryCache('board-history:', { prefix: true });
+            this.invalidateSyncQueryCache('vtt-room:', { prefix: true });
+
+            return result;
+        }
+
         async disconnectSync(reason = 'manual') {
             if (this.sync.autoSyncBootTimer) {
                 clearTimeout(this.sync.autoSyncBootTimer);
@@ -12319,7 +12493,7 @@
                 });
                 return true;
             } catch (err) {
-                console.warn('RTF_STORE: Failed mirroring VTT collaboration snapshot', err);
+                warnStorageMirrorFailure('RTF_STORE: Failed mirroring VTT collaboration snapshot', err);
                 return false;
             }
         }

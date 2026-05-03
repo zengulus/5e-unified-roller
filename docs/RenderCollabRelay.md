@@ -144,6 +144,8 @@ Even with the Render relay enabled:
 - Supabase still stores room snapshots and history
 - Tools Hub board recovery remains your recovery path if a room goes bad
 
+For VTT specifically, GM mode is the only cold-start authority. The GM browser loads the saved Supabase room snapshot, seeds the Render Yjs room, and performs low-frequency Supabase checkpoint saves. Player browsers in live relay mode do not bootstrap VTT from local storage or Supabase; they wait for the seeded Render room.
+
 That is the intended hosted production flow.
 
 ## Optional Local Smoke Test

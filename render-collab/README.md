@@ -57,6 +57,8 @@ Then put this into Tools Hub or your shared `connect.json`:
 
 Room state is intentionally memory-only. A Render restart or idle-room cleanup drops the warm Yjs document; Supabase room snapshots remain the durable recovery source.
 
+For VTT rooms, the GM is the only cold-start authority. In live relay mode, player browsers do not load VTT state from local storage or Supabase; they wait for the GM-seeded Render room. The GM browser loads/saves the low-frequency Supabase room snapshot and seeds the in-memory Render Yjs document.
+
 ## Optional Local Smoke Test
 
 If you want to test before deploying:

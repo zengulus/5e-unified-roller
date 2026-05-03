@@ -36,6 +36,11 @@ const syncMessageTypeName = (messageType) => {
   return `unknown-${messageType}`;
 };
 
+const isDocumentBearingSyncMessage = (messageType) => (
+  messageType === syncProtocol.messageYjsSyncStep2
+  || messageType === syncProtocol.messageYjsUpdate
+);
+
 const logEvent = (...parts) => {
   if (!LOG_CONNECTIONS) return;
   console.log('[relay]', ...parts);
@@ -207,6 +212,25 @@ const handleYSyncBroadcast = (room, sender, payload) => {
   if (!room || !(room.doc instanceof Y.Doc) || !sender || !payload || typeof payload !== 'object') return;
   const update = decodeBase64(payload.update);
   if (!update) return;
+
+  let incomingMessageType = -1;
+  try {
+    const probeDecoder = decoding.createDecoder(update);
+    incomingMessageType = decoding.readVarUint(probeDecoder);
+  } catch (err) {
+    console.warn('[relay] y-sync decode failed', err);
+    return;
+  }
+
+  const isGmSeed = payload.seed === true && toTrimmedString(payload.seedAuthority, '', 20).trim() === 'gm';
+  if (!room.seeded && isDocumentBearingSyncMessage(incomingMessageType) && !isGmSeed) {
+    console.warn('[relay] rejected non-GM y-sync update for unseeded room', room.id);
+    room.lastYSyncAt = Date.now();
+    room.syncMessageCount = Math.max(0, Number.parseInt(room.syncMessageCount || 0, 10) || 0) + 1;
+    room.lastMessageType = `rejected-${syncMessageTypeName(incomingMessageType)}`;
+    sendYSyncStatus(sender, room);
+    return;
+  }
 
   const decoder = decoding.createDecoder(update);
   const replyEncoder = encoding.createEncoder();

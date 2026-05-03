@@ -1618,6 +1618,45 @@ async function clearBoardAdminLocalCache() {
     await refreshBoardAdminPanel();
 }
 
+async function clearBoardVTTStorageCaches() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.clearBoardVTTLocalCaches !== 'function') {
+        setBoardAdminStatus('Board/VTT storage cleanup is unavailable in this build.', true);
+        return;
+    }
+
+    const preview = await store.clearBoardVTTLocalCaches({ dryRun: true });
+    if (!preview || !preview.ok) {
+        setBoardAdminStatus((preview && preview.error) || 'Failed preparing Board/VTT storage cleanup.', true);
+        return;
+    }
+
+    const dbCount = Array.isArray(preview.indexedDbDeleted) ? preview.indexedDbDeleted.length : 0;
+    const ok = confirm(
+        'Clear only this browser\'s local Board/VTT caches?\n\n'
+        + 'This rewrites ravnica_unified_v1 with Board and VTT fields reset, removes the legacy board cache key, and deletes only IndexedDB databases named rtf-board-room-* or rtf-vtt-room-*.\n\n'
+        + 'It does not delete sync config, players, NPCs, locations, events, leads, requisitions, sheets, GM dashboard data, or other non-Board/VTT data.\n\n'
+        + `Detected ${dbCount} Board/VTT IndexedDB cache ${dbCount === 1 ? 'database' : 'databases'}.`
+    );
+    if (!ok) return;
+
+    setBoardAdminStatus('Clearing local Board/VTT caches only...');
+    const result = await store.clearBoardVTTLocalCaches();
+    if (!result || !result.ok) {
+        setBoardAdminStatus((result && result.error) || 'Failed clearing local Board/VTT caches.', true);
+        return;
+    }
+
+    const removedKeys = Array.isArray(result.localStorageKeysRemoved) ? result.localStorageKeysRemoved.length : 0;
+    const rewrittenKeys = Array.isArray(result.localStorageKeysRewritten) ? result.localStorageKeysRewritten.length : 0;
+    const deletedDbs = Array.isArray(result.indexedDbDeleted) ? result.indexedDbDeleted.length : 0;
+    const dbErrors = Array.isArray(result.indexedDbErrors) ? result.indexedDbErrors.length : 0;
+    setBoardAdminStatus(
+        `Cleared Board/VTT caches only. Rewritten keys: ${rewrittenKeys}; removed keys: ${removedKeys}; IndexedDB deleted: ${deletedDbs}${dbErrors ? `; blocked/errors: ${dbErrors}` : ''}. Reload this tab to use the trimmed local store.`,
+        dbErrors > 0
+    );
+}
+
 function getSyncFormValues() {
     const autoConnectEl = document.getElementById('sync-autoconnect');
     const currentConfig = (window.RTF_STORE && typeof window.RTF_STORE.getSyncConfig === 'function')

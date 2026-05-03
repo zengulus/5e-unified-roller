@@ -8,7 +8,7 @@ import {
 import { IndexeddbPersistence } from './vendor/y-indexeddb/y-indexeddb.js';
 import * as encoding from './vendor/lib0/encoding.js';
 import * as decoding from './vendor/lib0/decoding.js';
-import { createCollabRelayChannel } from './collab-relay-client.js';
+import { createCollabRelayChannel } from './collab-relay-client.js?v=20260504a';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 60000;
@@ -1459,6 +1459,8 @@ class VTTCollabSession {
         this.peerColor = '';
         this.instanceRevisionSeed = 0;
         this.indexedDbName = '';
+        this.canLoadColdSnapshot = false;
+        this.canSeedRelayRoom = false;
         this.lastSavedRevision = 0;
         this.lastSnapshotSource = '';
         this.lastSharedStoreSignature = '';
@@ -1640,6 +1642,12 @@ class VTTCollabSession {
         this.peerColor = pickPeerColor(this.instanceId || this.profileName || this.roomId);
         this.instanceRevisionSeed = pickRevisionSeed(this.instanceId || this.userId || this.profileName || this.roomId);
         this.indexedDbName = `rtf-vtt-room-${ensured.config.campaignId}-${this.roomId}`;
+        this.canLoadColdSnapshot = typeof this.options.canLoadColdSnapshot === 'function'
+            ? !!this.options.canLoadColdSnapshot()
+            : false;
+        this.canSeedRelayRoom = typeof this.options.canSeedRelayRoom === 'function'
+            ? !!this.options.canSeedRelayRoom()
+            : false;
 
         this.doc.on('update', this.handleDocUpdate);
         this.doc.on('afterTransaction', this.handleAfterTransaction);
@@ -1649,22 +1657,26 @@ class VTTCollabSession {
             user: this.buildLocalPresence()
         });
 
-        this.persistence = new IndexeddbPersistence(this.indexedDbName, this.doc);
-        try {
-            await this.persistence.whenSynced;
-        } catch (err) {
-            console.warn('RTF_VTT_COLLAB: IndexedDB sync failed', err);
+        if (this.canLoadColdSnapshot) {
+            this.persistence = new IndexeddbPersistence(this.indexedDbName, this.doc);
+            try {
+                await this.persistence.whenSynced;
+            } catch (err) {
+                console.warn('RTF_VTT_COLLAB: IndexedDB sync failed', err);
+            }
         }
 
-        const localDocPayload = serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
-        const localDocStamp = getDocUpdatedAt(this.doc);
+        const localDocPayload = this.canLoadColdSnapshot
+            ? serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this))
+            : fallbackSnapshot();
+        const localDocStamp = this.canLoadColdSnapshot ? getDocUpdatedAt(this.doc) : 0;
         const seedPayload = this.coerceSnapshot(
-            typeof this.options.getSeedPayload === 'function'
+            this.canLoadColdSnapshot && typeof this.options.getSeedPayload === 'function'
                 ? this.options.getSeedPayload()
                 : fallbackSnapshot()
         );
         const currentPayload = this.coerceSnapshot(
-            typeof this.options.getCurrentPayload === 'function'
+            this.canLoadColdSnapshot && typeof this.options.getCurrentPayload === 'function'
                 ? this.options.getCurrentPayload()
                 : seedPayload
         );
@@ -1672,14 +1684,14 @@ class VTTCollabSession {
         this.lastSharedStoreSignature = livePayloadSig;
 
         let roomSnapshotSource = '';
-        const cloudRow = typeof this.store.loadVTTRoomSnapshot === 'function'
+        const cloudRow = this.canLoadColdSnapshot && typeof this.store.loadVTTRoomSnapshot === 'function'
             ? await this.store.loadVTTRoomSnapshot({
                 roomId: this.roomId,
                 caseId: this.caseId
             })
             : { ok: false, reason: 'unsupported' };
 
-        if (cloudRow && cloudRow.ok && cloudRow.snapshot) {
+        if (this.canLoadColdSnapshot && cloudRow && cloudRow.ok && cloudRow.snapshot) {
             const roomPayload = this.coerceSnapshot(cloudRow.snapshot.payload);
             const roomPayloadSig = buildSnapshotSignature(roomPayload, this.coerceSnapshot.bind(this));
             const localDocSig = buildSnapshotSignature(localDocPayload, this.coerceSnapshot.bind(this));
@@ -1717,7 +1729,7 @@ class VTTCollabSession {
             }
             this.pendingReadyFlush = canonicalSig && canonicalSig !== roomPayloadSig;
             this.persistSnapshotToSharedState(canonicalPayload, canonicalSig);
-        } else {
+        } else if (this.canLoadColdSnapshot) {
             const liveStoreStamp = this.getSharedStoreUpdatedAt();
             const canonicalSeed = chooseCanonicalSnapshot([
                 { kind: 'live-store', snapshot: currentPayload, stamp: liveStoreStamp, priority: 30 },
@@ -2097,7 +2109,11 @@ class VTTCollabSession {
             roomId: this.roomId,
             reason
         });
-        return this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+        return this.sendBroadcast('y-sync', {
+            update: encodeBase64(encoding.toUint8Array(encoder)),
+            seed: true,
+            seedAuthority: 'gm'
+        });
     }
 
     seedRelayRoomFromCanonicalSnapshot(reason = 'seed') {
@@ -2358,6 +2374,7 @@ class VTTCollabSession {
 
     scheduleMirror() {
         if (!this.ready || this.destroyed) return;
+        if (!this.canLoadColdSnapshot) return;
         if (this.pendingMirrorTimer) clearTimeout(this.pendingMirrorTimer);
         this.pendingMirrorTimer = setTimeout(() => {
             this.pendingMirrorTimer = null;
@@ -2482,6 +2499,7 @@ class VTTCollabSession {
     }
 
     persistSnapshotToSharedState(snapshot, signature = '', options = {}) {
+        if (!this.canLoadColdSnapshot) return false;
         if (!snapshot || !this.store || typeof this.store.updateVTTState !== 'function') return false;
         const opts = options && typeof options === 'object' ? options : {};
         const snapshotSig = signature || buildSnapshotSignature(snapshot, this.coerceSnapshot.bind(this));
