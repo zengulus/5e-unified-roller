@@ -15,6 +15,8 @@ const CLOUD_FLUSH_DELAY_MS = 30000;
 const SYNC_RECONCILE_INTERVAL_MS = 15000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
+const VTT_ADMIN_EVENT_APPLY_SNAPSHOT = 'vtt-admin-apply-snapshot';
+const VTT_ADMIN_EVENT_BUST = 'vtt-admin-bust';
 const DEFAULT_VTT_CELL_PX = 70;
 const TOKEN_COORD_PRECISION = 1000;
 const DEFAULT_CASE_ID = 'case_primary';
@@ -1664,17 +1666,20 @@ class VTTCollabSession {
             const localDocSig = buildSnapshotSignature(localDocPayload, this.coerceSnapshot.bind(this));
             const cloudStamp = Date.parse(cloudRow.snapshot.updatedAt || '') || toNonNegativeInt(cloudRow.snapshot.revision, 0);
             const liveStoreStamp = this.getSharedStoreUpdatedAt();
-            const canonicalSeed = chooseCanonicalSnapshot([
-                { kind: 'cloud-room', snapshot: roomPayload, stamp: cloudStamp, priority: 40 },
-                { kind: 'live-store', snapshot: currentPayload, stamp: liveStoreStamp, priority: 30 },
-                { kind: 'local-doc', snapshot: localDocPayload, stamp: localDocStamp, priority: 20 },
-                { kind: 'seed', snapshot: seedPayload, stamp: 0, priority: 10 }
-            ], {
+            const cloudRoomEntry = {
                 kind: 'cloud-room',
                 snapshot: roomPayload,
                 stamp: cloudStamp,
                 priority: 40
-            }, this.coerceSnapshot.bind(this));
+            };
+            const canonicalSeed = this.options.preferCloudRoomSnapshot
+                ? cloudRoomEntry
+                : chooseCanonicalSnapshot([
+                    cloudRoomEntry,
+                    { kind: 'live-store', snapshot: currentPayload, stamp: liveStoreStamp, priority: 30 },
+                    { kind: 'local-doc', snapshot: localDocPayload, stamp: localDocStamp, priority: 20 },
+                    { kind: 'seed', snapshot: seedPayload, stamp: 0, priority: 10 }
+                ], cloudRoomEntry, this.coerceSnapshot.bind(this));
             const canonicalPayload = this.coerceSnapshot(canonicalSeed && canonicalSeed.snapshot ? canonicalSeed.snapshot : roomPayload);
             const canonicalSig = buildSnapshotSignature(canonicalPayload, this.coerceSnapshot.bind(this));
             const canonicalStamp = Math.max(Date.now(), canonicalSeed && canonicalSeed.stamp ? canonicalSeed.stamp : 0);
@@ -1871,6 +1876,14 @@ class VTTCollabSession {
             if (channel !== this.channel) return;
             this.handleSyncRequestMessage(payload);
         });
+        channel.on('broadcast', { event: VTT_ADMIN_EVENT_APPLY_SNAPSHOT }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleAdminSnapshotMessage(payload);
+        });
+        channel.on('broadcast', { event: VTT_ADMIN_EVENT_BUST }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleAdminBustMessage(payload);
+        });
 
         const onPresence = () => {
             if (channel !== this.channel) return;
@@ -2012,6 +2025,52 @@ class VTTCollabSession {
         const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
         if (requestedBy && requestedBy === this.instanceId) return;
         this.sendSyncStep1();
+    }
+
+    handleAdminSnapshotMessage(payload) {
+        if (this.destroyed || !payload || typeof payload !== 'object') return;
+        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
+        if (sentBy && sentBy === this.instanceId) return;
+        const nextPayload = this.coerceSnapshot(payload.payload);
+        const nextSig = buildSnapshotSignature(nextPayload, this.coerceSnapshot.bind(this));
+        if (!nextSig) return;
+        const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this));
+        const revision = Math.max(1, toNonNegativeInt(payload.revision, Date.now()) || Date.now());
+        const stamp = Date.parse(payload.updatedAt || '') || revision || Date.now();
+        if (nextSig !== currentSig) {
+            applySnapshotToDoc(
+                this.doc,
+                nextPayload,
+                this.coerceSnapshot.bind(this),
+                this.originRemoteRestore,
+                stamp
+            );
+        }
+        if (this.channel && !this.destroyed) this.connected = true;
+        this.applyRevisionState(revision, sentBy || payload.updatedBy || '');
+        this.updateStatus({
+            state: this.connected ? 'live' : 'degraded',
+            detail: this.connected ? 'Live VTT updated by DM.' : 'VTT snapshot restored by DM.',
+            peerCount: this.remotePresence.size
+        });
+    }
+
+    handleAdminBustMessage(payload) {
+        if (this.destroyed) return;
+        if (this.pendingFlushTimer) {
+            clearTimeout(this.pendingFlushTimer);
+            this.pendingFlushTimer = null;
+        }
+        this.pendingFlushPromise = null;
+        this.pendingReadyFlush = false;
+        this.isDirty = false;
+        this.connected = false;
+        const reason = payload && payload.reason ? toTrimmedString(payload.reason, 'bust', 80) : 'bust';
+        this.updateStatus({
+            state: 'degraded',
+            detail: `Live VTT cache was busted by DM (${reason}). Reload or wait for the DM to force an authoritative snapshot.`,
+            peerCount: this.remotePresence.size
+        });
     }
 
     broadcastLocalAwareness(clientIds = [this.awareness.clientID]) {
@@ -2394,6 +2453,74 @@ class VTTCollabSession {
             this.scheduleCloudFlush({ forceCompatibilityMirror: true });
         }
         return true;
+    }
+
+    async forceAuthoritativeSnapshot(payload, options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
+        const next = this.coerceSnapshot(payload || this.getSnapshot());
+        const stamp = Date.now();
+        const revision = this.nextLocalRevision();
+        const updatedAt = new Date(stamp).toISOString();
+        const reason = toTrimmedString(opts.reason, 'dm-authoritative', 80).trim() || 'dm-authoritative';
+
+        if (this.connected) {
+            await this.sendBroadcast(VTT_ADMIN_EVENT_APPLY_SNAPSHOT, {
+                payload: next,
+                revision,
+                updatedAt,
+                reason,
+                sentBy: this.instanceId,
+                sentByUser: this.userId || null,
+                sentByName: this.profileName || ''
+            });
+        }
+
+        applySnapshotToDoc(
+            this.doc,
+            next,
+            this.coerceSnapshot.bind(this),
+            this.originManualFlush,
+            stamp
+        );
+        this.applyRevisionState(revision, this.instanceId);
+        this.lastCloudSnapshotSignature = '';
+        this.pendingReadyFlush = true;
+        this.isDirty = true;
+        const result = await this.flushSnapshotNow({ forceCompatibilityMirror: true });
+        this.requestPeerReconcile('dm-authoritative');
+        return result && result.ok ? result : {
+            ok: false,
+            reason: result && result.reason ? result.reason : 'force-failed',
+            error: result && result.error ? result.error : 'Failed to force the DM VTT snapshot.'
+        };
+    }
+
+    async bustLiveRoomCache(options = {}) {
+        const opts = options && typeof options === 'object' ? options : {};
+        const reason = toTrimmedString(opts.reason, 'dm-cache-bust', 80).trim() || 'dm-cache-bust';
+        const bustId = `bust_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const broadcast = this.connected
+            ? await this.sendBroadcast(VTT_ADMIN_EVENT_BUST, {
+                bustId,
+                reason,
+                sentBy: this.instanceId,
+                sentByUser: this.userId || null,
+                sentByName: this.profileName || '',
+                sentAt: new Date().toISOString()
+            })
+            : false;
+        if (this.pendingFlushTimer) {
+            clearTimeout(this.pendingFlushTimer);
+            this.pendingFlushTimer = null;
+        }
+        this.pendingFlushPromise = null;
+        this.pendingReadyFlush = false;
+        this.isDirty = false;
+        return {
+            ok: true,
+            bustId,
+            broadcastOk: !!broadcast
+        };
     }
 
     updateTokenPositions(changes, options = {}) {

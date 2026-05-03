@@ -5,10 +5,12 @@ Tiny websocket relay for the hosted stack:
 - GitHub Pages serves the app
 - Supabase stores campaign state and board snapshots
 - Render carries live websocket traffic for `board.html` and `vtt.html`
+- Render keeps warm room state in memory so late joiners can sync recent live edits before the next Supabase checkpoint
 
 ## Hosted Deployment
 
 Create a Node **Web Service** in Render for this folder.
+Deploy it from this full repository so the relay can import the vendored Yjs modules under `js/vendor`.
 
 You can either:
 
@@ -53,6 +55,8 @@ Then put this into Tools Hub or your shared `connect.json`:
 - `MAX_MESSAGE_BYTES`: websocket payload ceiling.
 - `ROOM_IDLE_TTL_MS`: how long an empty room can sit before cleanup.
 
+Room state is intentionally memory-only. A Render restart or idle-room cleanup drops the warm Yjs document; Supabase room snapshots remain the durable recovery source.
+
 ## Optional Local Smoke Test
 
 If you want to test before deploying:
@@ -67,5 +71,5 @@ Then point a temporary config at `ws://localhost:10000`.
 
 ## Endpoints
 
-- `/healthz`: health and room/client counts
+- `/healthz`: health plus room/client/stateful-room counts
 - `/info`: compact service metadata and websocket query requirements

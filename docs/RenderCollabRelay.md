@@ -17,6 +17,7 @@ If you want the quickest end-to-end path, use these companion files:
 ## What it does
 
 - Relays live board/VTT websocket messages room-by-room
+- Keeps an in-memory Yjs room document so clients joining after a GM-only edit can still sync from the relay while the room is warm
 - Mirrors presence state for peer cursors/awareness
 - Leaves Supabase responsible for auth, room snapshots, and recovery
 
@@ -24,6 +25,7 @@ That means:
 
 - GitHub Pages still serves the app
 - Render carries the live collaboration traffic
+- Render keeps warm room state only in memory
 - Supabase stops acting as the hot path for every collab message
 
 ## Zero To Hero
@@ -61,7 +63,7 @@ You have two valid ways to do that:
 
 #### Option A. Blueprint deploy
 
-Point Render at this repo and let [render-collab/render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) create the service.
+Point Render at this repo and let [render-collab/render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) create the service. The relay imports the app's vendored Yjs modules from `js/vendor`, so deploy it from the full repo rather than uploading only the `render-collab` folder.
 
 #### Option B. Manual service creation
 
@@ -138,6 +140,7 @@ Players then only need:
 Even with the Render relay enabled:
 
 - Render carries live board/VTT traffic
+- Render keeps warm in-memory room state for reconnecting or later-joining clients
 - Supabase still stores room snapshots and history
 - Tools Hub board recovery remains your recovery path if a room goes bad
 
@@ -184,6 +187,7 @@ The current client behavior is:
 ## Practical notes
 
 - Render free services can sleep when idle, so the first reconnect after dormancy may be slower.
+- Render relay state is memory-only. Service restarts and idle-room cleanup drop the warm Yjs document, after which clients recover from Supabase room snapshots or an active peer.
 - `ALLOWED_ORIGINS` should match your GitHub Pages origin exactly, including repo pathless origin format such as `https://user.github.io`.
 - If you use a custom domain for GitHub Pages, use that domain as the allowed origin instead.
 - This relay is intentionally tiny and room-scoped. It is a good fit for a small hobby deployment, not a hardened production collab cluster.

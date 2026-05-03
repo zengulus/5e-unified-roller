@@ -1,5 +1,9 @@
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
+import * as Y from '../js/vendor/yjs/yjs.mjs';
+import * as syncProtocol from '../js/vendor/y-protocols/sync.js';
+import * as encoding from '../js/vendor/lib0/encoding.js';
+import * as decoding from '../js/vendor/lib0/decoding.js';
 
 const PORT = Number.parseInt(process.env.PORT || '10000', 10) || 10000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -22,6 +26,7 @@ const toTrimmedString = (value, fallback = '', maxLen = 4000) => {
 };
 
 const countClients = () => Array.from(rooms.values()).reduce((sum, room) => sum + room.clients.size, 0);
+const countStatefulRooms = () => Array.from(rooms.values()).filter((room) => room && room.doc instanceof Y.Doc).length;
 
 const logEvent = (...parts) => {
   if (!LOG_CONNECTIONS) return;
@@ -35,6 +40,7 @@ const getRoom = (roomId) => {
     rooms.set(key, {
       id: key,
       clients: new Set(),
+      doc: new Y.Doc(),
       lastSeenAt: Date.now()
     });
   }
@@ -45,7 +51,19 @@ const removeRoomIfEmpty = (roomId) => {
   const room = rooms.get(roomId);
   if (!room || room.clients.size) return;
   if ((Date.now() - (room.lastSeenAt || 0)) < ROOM_IDLE_TTL_MS) return;
+  if (room.doc && typeof room.doc.destroy === 'function') {
+    room.doc.destroy();
+  }
   rooms.delete(roomId);
+};
+
+const resetRoomDoc = (room) => {
+  if (!room) return;
+  if (room.doc && typeof room.doc.destroy === 'function') {
+    room.doc.destroy();
+  }
+  room.doc = new Y.Doc();
+  room.lastSeenAt = Date.now();
 };
 
 const sweepIdleRooms = () => {
@@ -75,6 +93,62 @@ const buildPresenceState = (room) => {
 const sendJson = (socket, packet) => {
   if (!socket || socket.readyState !== 1) return;
   socket.send(JSON.stringify(packet));
+};
+
+const encodeBase64 = (bytes) => {
+  if (!(bytes instanceof Uint8Array)) return '';
+  return Buffer.from(bytes).toString('base64');
+};
+
+const decodeBase64 = (value) => {
+  const clean = toTrimmedString(value, '', MAX_MESSAGE_BYTES).trim();
+  if (!clean) return null;
+  try {
+    return new Uint8Array(Buffer.from(clean, 'base64'));
+  } catch {
+    return null;
+  }
+};
+
+const sendYSyncMessage = (client, encoder) => {
+  if (!client || !encoder || !encoding.hasContent(encoder)) return false;
+  const update = encodeBase64(encoding.toUint8Array(encoder));
+  if (!update) return false;
+  sendJson(client.socket, {
+    type: 'broadcast',
+    event: 'y-sync',
+    payload: {
+      update,
+      relayedBy: SERVICE_NAME
+    }
+  });
+  return true;
+};
+
+const handleYSyncBroadcast = (room, sender, payload) => {
+  if (!room || !(room.doc instanceof Y.Doc) || !sender || !payload || typeof payload !== 'object') return;
+  const update = decodeBase64(payload.update);
+  if (!update) return;
+
+  const decoder = decoding.createDecoder(update);
+  const replyEncoder = encoding.createEncoder();
+  let messageType = -1;
+  try {
+    messageType = syncProtocol.readSyncMessage(decoder, replyEncoder, room.doc, sender.instanceId || sender.presenceKey || 'relay', (error) => {
+      console.warn('[relay] y-sync apply failed', error);
+    });
+  } catch (err) {
+    console.warn('[relay] y-sync decode failed', err);
+    return;
+  }
+
+  sendYSyncMessage(sender, replyEncoder);
+
+  if (messageType === syncProtocol.messageYjsSyncStep1) {
+    const requestEncoder = encoding.createEncoder();
+    syncProtocol.writeSyncStep1(requestEncoder, room.doc);
+    sendYSyncMessage(sender, requestEncoder);
+  }
 };
 
 const emitPresence = (room, event = 'sync') => {
@@ -117,6 +191,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       service: SERVICE_NAME,
       rooms: rooms.size,
+      statefulRooms: countStatefulRooms(),
       clients: countClients(),
       roomIds: Array.from(rooms.keys()).slice(0, 20),
       uptimeSeconds: Math.floor(process.uptime())
@@ -217,6 +292,15 @@ wss.on('connection', (socket, req) => {
     if (packet.type === 'broadcast') {
       const event = toTrimmedString(packet.event, '', 80).trim();
       if (!event) return;
+      if (event === 'admin-bust'
+        || event === 'admin-apply-snapshot'
+        || event === 'vtt-admin-bust'
+        || event === 'vtt-admin-apply-snapshot') {
+        resetRoomDoc(room);
+      }
+      if (event === 'y-sync') {
+        handleYSyncBroadcast(room, client, packet.payload);
+      }
       broadcastToRoom(room, client, {
         type: 'broadcast',
         event,

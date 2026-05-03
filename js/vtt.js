@@ -108,6 +108,7 @@
     let selectedEvidenceNoteId = '';
     let selectedClockId = '';
     let localRole = 'player';
+    let initialVTTLoadPending = true;
     let uiState = {
         settingsCollapsed: false,
         initiativeCollapsed: false,
@@ -4327,6 +4328,76 @@
             && String(config.collabRelayUrl || '').trim());
     };
 
+    const hasSupabaseVTTConfig = () => {
+        const store = getStore();
+        if (!store || typeof store.getSyncConfig !== 'function') return false;
+        const config = store.getSyncConfig();
+        return !!(config
+            && config.enabled
+            && config.supabaseUrl
+            && config.anonKey
+            && config.campaignId);
+    };
+
+    const readLocalInitialVTTSnapshot = (store, caseId) => {
+        if (!store || typeof store.getVTTState !== 'function') return deepClone(DEFAULT_VTT_STATE);
+        return deepClone(store.getVTTState(caseId) || DEFAULT_VTT_STATE);
+    };
+
+    const loadInitialVTTSnapshot = async (store) => {
+        const activeCaseId = getActiveCaseId();
+        if (!store) return deepClone(DEFAULT_VTT_STATE);
+        if (isDM() || !hasSupabaseVTTConfig() || typeof store.loadVTTRoomSnapshot !== 'function') {
+            return readLocalInitialVTTSnapshot(store, activeCaseId);
+        }
+
+        const roomId = getVTTCollabRoomId(activeCaseId);
+        setVTTCollabStatus({
+            state: 'connecting',
+            detail: 'Checking saved VTT room before loading the scene.',
+            peerCount: 0
+        });
+        if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: Checking saved VTT...';
+
+        try {
+            const result = await store.loadVTTRoomSnapshot({
+                roomId,
+                caseId: activeCaseId,
+                force: true
+            });
+            if (result && result.ok && result.snapshot && result.snapshot.payload) {
+                const payload = deepClone(result.snapshot.payload);
+                if (typeof store.mirrorVTTSnapshotToState === 'function') {
+                    store.mirrorVTTSnapshotToState({
+                        roomId,
+                        caseId: activeCaseId,
+                        payload,
+                        updatedAt: result.snapshot.updatedAt,
+                        source: 'vtt-room-preflight'
+                    });
+                }
+                return payload;
+            }
+            if (result && !result.ok) {
+                console.warn('VTT Supabase preflight failed', result.error || result.reason || result);
+                setVTTCollabStatus({
+                    state: 'degraded',
+                    detail: result.error || 'Saved VTT check failed. Loading local fallback.',
+                    peerCount: 0
+                });
+            }
+        } catch (err) {
+            console.warn('VTT Supabase preflight failed', err);
+            setVTTCollabStatus({
+                state: 'degraded',
+                detail: err && err.message ? err.message : 'Saved VTT check failed. Loading local fallback.',
+                peerCount: 0
+            });
+        }
+
+        return readLocalInitialVTTSnapshot(store, activeCaseId);
+    };
+
     const applyVTTCollabSnapshot = (payload) => {
         const store = getStore();
         const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
@@ -4450,6 +4521,7 @@
                     store,
                     roomId: getVTTCollabRoomId(),
                     caseId: getActiveCaseId(),
+                    preferCloudRoomSnapshot: !isDM(),
                     getSeedPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
                     getCurrentPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
                     applySnapshot: (payload) => applyVTTCollabSnapshot(payload),
@@ -4558,6 +4630,122 @@
         pendingRemoteVTTSnapshot = null;
 
         return initVTTCollab();
+    };
+
+    const forceDMVTTAuthoritative = async () => {
+        if (!isDM()) return false;
+        const ok = confirm(
+            'Force this DM browser as the authoritative VTT state?\n\n'
+            + 'This publishes exactly what this browser currently shows as the durable VTT snapshot players will pick up next time they open the table.'
+        );
+        if (!ok) return false;
+
+        closeViewMenu();
+        closeToolsMenu();
+        setSyncChipState({
+            state: 'connecting',
+            label: 'Forcing...',
+            detail: 'Publishing this DM VTT snapshot as authoritative.',
+            retryable: false
+        });
+
+        const store = getStore();
+        if (!store) throw new Error('Shared store is unavailable.');
+
+        const activeCaseId = getActiveCaseId();
+        const roomId = getVTTCollabRoomId(activeCaseId);
+        const snapshot = deepClone(vttState || (store.getVTTState && store.getVTTState(activeCaseId)) || DEFAULT_VTT_STATE);
+        syncRosterLinkedPlayerPresentation(snapshot);
+        coerceSnapshotFogToCellMasks(snapshot);
+        snapshot.updatedAt = Date.now();
+
+        let result = null;
+        const session = await initVTTCollab();
+        if (session && typeof session.forceAuthoritativeSnapshot === 'function') {
+            result = await session.forceAuthoritativeSnapshot(snapshot, { reason: 'dm-authoritative' });
+            vttState = deepClone(session.getSnapshot ? session.getSnapshot() : snapshot);
+        } else if (typeof store.saveVTTRoomSnapshot === 'function') {
+            const stamp = Date.now();
+            result = await store.saveVTTRoomSnapshot({
+                roomId,
+                caseId: activeCaseId,
+                payload: snapshot,
+                revision: stamp * 1000,
+                updatedAt: new Date(stamp).toISOString(),
+                updatedBy: store.sync && store.sync.instanceId,
+                updatedByUser: store.sync && store.sync.userId || null,
+                updatedByName: store.sync && store.sync.config && store.sync.config.profileName || null
+            });
+            if (result && result.ok && typeof store.updateVTTState === 'function') {
+                vttState = deepClone(store.updateVTTState(snapshot, activeCaseId, {
+                    updatedAt: stamp,
+                    skipCloud: false
+                }));
+            }
+        }
+
+        if (!result || !result.ok) {
+            throw new Error(result && (result.error || result.reason) ? (result.error || result.reason) : 'Failed to publish the DM VTT snapshot.');
+        }
+
+        normalizeSelections();
+        render();
+        setSyncChipState({
+            state: 'live',
+            label: 'Forced',
+            detail: `DM VTT snapshot is authoritative for room ${roomId}.`,
+            retryable: false
+        });
+        alert('DM VTT snapshot is now authoritative.');
+        return true;
+    };
+
+    const bustVTTLiveCache = async () => {
+        if (!isDM()) return false;
+        const ok = confirm(
+            'Bust the warm live VTT cache for this case?\n\n'
+            + 'This resets the Render live-room cache without deleting the durable snapshot. Use Force DM Authoritative to publish prep for the next player session.'
+        );
+        if (!ok) return false;
+
+        closeViewMenu();
+        closeToolsMenu();
+        setSyncChipState({
+            state: 'degraded',
+            label: 'Busting...',
+            detail: 'Busting the live VTT room cache.',
+            retryable: false
+        });
+
+        const activeCaseId = getActiveCaseId();
+        const roomId = getVTTCollabRoomId(activeCaseId);
+        const store = getStore();
+        const session = isVTTCollabReady() ? vttCollabSession : await initVTTCollab();
+        let relayResult = null;
+        if (session && typeof session.bustLiveRoomCache === 'function') {
+            relayResult = await session.bustLiveRoomCache({ reason: 'dm-cache-bust' });
+        }
+        if (store && typeof store.invalidateSyncQueryCache === 'function' && typeof store.getVTTRoomSnapshotCacheKey === 'function') {
+            store.invalidateSyncQueryCache(store.getVTTRoomSnapshotCacheKey({ caseId: activeCaseId, roomId }));
+        }
+        setVTTCollabStatus({
+            state: 'degraded',
+            detail: `Warm VTT cache busted for ${roomId}. Durable snapshots were left intact.`,
+            peerCount: relayResult && relayResult.broadcastOk ? 0 : undefined
+        });
+        alert('Warm VTT cache busted. The durable VTT snapshot was not deleted.');
+        return true;
+    };
+
+    const reportVTTAdminActionError = (err, fallback = 'VTT admin action failed.') => {
+        const message = err && err.message ? err.message : fallback;
+        console.warn(fallback, err);
+        setVTTCollabStatus({
+            state: 'degraded',
+            detail: message,
+            peerCount: 0
+        });
+        alert(message);
     };
 
     const bindSyncChipActions = () => {
@@ -6449,6 +6637,7 @@
     };
 
     const renderStage = () => {
+        if (initialVTTLoadPending) return;
         const scene = getActiveScene();
         if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !noteLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
 
@@ -6589,6 +6778,7 @@
     };
 
     const render = () => {
+        if (initialVTTLoadPending) return;
         normalizeSelections();
         renderSceneControls();
         renderViewMenu();
@@ -7212,6 +7402,14 @@
         }
         if (action === 'toggle-grid') {
             toggleUIPreference('showGrid');
+            return;
+        }
+        if (action === 'force-vtt-authoritative') {
+            forceDMVTTAuthoritative().catch((err) => reportVTTAdminActionError(err, 'Failed to force the DM VTT snapshot.'));
+            return;
+        }
+        if (action === 'bust-vtt-cache') {
+            bustVTTLiveCache().catch((err) => reportVTTAdminActionError(err, 'Failed to bust the VTT cache.'));
             return;
         }
         if (action === 'clear-scene-fog') {
@@ -8199,6 +8397,7 @@
         const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
         const activeCaseId = getActiveCaseId();
         loadRolePreference();
+        if (initialVTTLoadPending) return;
         if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
             refreshVTTCollabRoomIfNeeded().catch((err) => {
                 console.warn('VTT collaboration room refresh failed', err);
@@ -9135,6 +9334,7 @@
     const init = async () => {
         const store = getStore();
         if (!store) {
+            initialVTTLoadPending = false;
             if (syncChipEl) syncChipEl.textContent = 'Unavailable';
             return;
         }
@@ -9143,17 +9343,16 @@
         loadRolePreference();
         loadUIPreferences();
         capturePlayerImagesAtLoad();
-        const initialSnapshot =
-            readSharedVTTSnapshot({ syncRosterPresentation: false })
-            || deepClone(store.getVTTState(getActiveCaseId()));
+        const initialSnapshot = await loadInitialVTTSnapshot(store);
 
         const fogMigrated = coerceSnapshotFogToCellMasks(initialSnapshot);
 
         let initialSynced = ensureRosterLinkedPlayerPresentationPersisted(initialSnapshot, {
+            persist: isDM(),
             reason: fogMigrated ? 'fog-mask-migration' : 'roster-player-presentation-sync'
         }).snapshot;
 
-        if (fogMigrated) {
+        if (fogMigrated && isDM()) {
             const saved = persistSharedVTTSnapshot(initialSynced, {
                 reason: 'fog-mask-migration',
                 baseSnapshot: null
@@ -9163,6 +9362,7 @@
 
         vttState = initialSynced;
         normalizeSelections();
+        initialVTTLoadPending = false;
         render();
         initVTTCollab().catch((err) => {
             console.warn('VTT collaboration init failed', err);
