@@ -1798,6 +1798,21 @@
             ? vttCollabSession.getStatus()
             : null
     );
+    const requiresLiveVTTRoom = () => hasLiveVTTConfig();
+    const canMutateLiveVTTState = (reason = 'vtt-mutation') => {
+        if (!requiresLiveVTTRoom() || isVTTCollabReady()) return true;
+        const status = getVTTCollabStatus();
+        const detail = status && status.detail
+            ? status.detail
+            : 'Live VTT room is not ready. Changes were not applied locally.';
+        setVTTCollabStatus({
+            state: vttCollabInitPromise ? 'connecting' : 'degraded',
+            detail,
+            peerCount: status && Number.isFinite(status.peerCount) ? status.peerCount : 0
+        });
+        console.warn(`VTT room mutation blocked before live room was ready: ${reason}`);
+        return false;
+    };
     const isDM = () => localRole === 'dm';
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
         npcSearchOpen = false;
@@ -3663,12 +3678,19 @@
                 ? deepClone(vttCollabSession.getSnapshot())
                 : deepClone(payload);
         }
+        if (requiresLiveVTTRoom() && options.allowLocalFallback !== true) {
+            canMutateLiveVTTState(options.reason || 'vtt-snapshot');
+            return null;
+        }
         return deepClone(store.updateVTTState(payload, getActiveCaseId()));
     };
 
     const withDraft = (mutator, options = {}) => {
+        if (options.allowLocalFallback !== true && !canMutateLiveVTTState(options.reason || 'vtt-draft')) {
+            return false;
+        }
         const draft = readSharedVTTSnapshot();
-        if (!draft) return;
+        if (!draft) return false;
 
         const baseSnapshot = deepClone(draft);
 
@@ -3686,6 +3708,7 @@
         normalizeSelections();
         if (options.fitView) fitViewOnNextMapLoad = true;
         render();
+        return true;
     };
 
     const normalizeSelections = () => {
@@ -6995,7 +7018,7 @@
             if (!draftToken) return;
             draftToken.x = nextX;
             draftToken.y = nextY;
-        });
+        }, { reason: 'token-snap-grid' });
     };
 
     const moveSelectedTokenByCells = (deltaX, deltaY) => {
@@ -7006,15 +7029,14 @@
         const nextY = Math.max(0, snapTokenCoordinate(token.y, token.y) + deltaY);
         if (token.x === nextX && token.y === nextY) return false;
 
-        withDraft((draft) => {
+        return withDraft((draft) => {
             const scene = getActiveScene(draft);
             if (!scene || !Array.isArray(scene.tokens)) return;
             const draftToken = scene.tokens.find((entry) => entry && entry.id === selectedTokenId);
             if (!draftToken) return;
             draftToken.x = nextX;
             draftToken.y = nextY;
-        });
-        return true;
+        }, { reason: 'token-keyboard-move' });
     };
 
     const syncDraggedState = (force = false) => {
@@ -7025,6 +7047,10 @@
                 typeof vttCollabSession.syncSnapshot === 'function'
                 || typeof vttCollabSession.updateTokenPositions === 'function'
             );
+        if (!canSyncLivePosition && requiresLiveVTTRoom()) {
+            canMutateLiveVTTState(force ? 'token-drop' : 'token-drag');
+            return;
+        }
         if (!force && !canSyncLivePosition) return;
         const now = Date.now();
         if (!force && lastDragSyncAt && now - lastDragSyncAt < DRAG_SYNC_INTERVAL_MS) return;
@@ -8721,6 +8747,11 @@
                 event.preventDefault();
                 return;
             }
+            if (!canMutateLiveVTTState('token-drag-start')) {
+                renderStage();
+                event.preventDefault();
+                return;
+            }
             const anchorX = (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x;
             const anchorY = (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y;
             remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, token.id));
@@ -8776,6 +8807,10 @@
             if (!pending) return;
             if (pending.targetKind === 'token') {
                 if (!pending.canMoveToken) {
+                    renderStage();
+                    return;
+                }
+                if (!canMutateLiveVTTState('token-touch-drag-start')) {
                     renderStage();
                     return;
                 }

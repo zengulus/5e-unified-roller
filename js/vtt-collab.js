@@ -2485,6 +2485,7 @@ class VTTCollabSession {
         } else {
             applySnapshotToDoc(this.doc, next, this.coerceSnapshot.bind(this), this.originLocalSnapshot, Date.now());
         }
+        this.requestPeerReconcile(opts.reason || 'local-snapshot');
         if (opts.flushNow) {
             this.scheduleCloudFlush({ forceCompatibilityMirror: true });
             return Promise.resolve({ ok: true, reason: 'scheduled' });
@@ -2585,6 +2586,7 @@ class VTTCollabSession {
             this.scheduleCloudFlush({ forceCompatibilityMirror: true });
             this.requestPeerReconcile('token-drop');
         } else {
+            this.requestPeerReconcile('token-position');
             this.scheduleCloudFlush();
         }
         return Promise.resolve({ ok: true, changes: applied });
