@@ -81,6 +81,7 @@ Then point a temporary config at `ws://localhost:10000`.
 - Confirm both clients load the same initial Supabase/cold snapshot.
 - Move a token in the DM view; the player view should update through the Render relay without high-frequency Supabase writes.
 - Move a token in the player view where permissions allow; the DM view should update.
+- If a player opens the VTT before the GM, the chip should wait for the GM to seed the Render room instead of treating the player's cold snapshot as authoritative.
 - Reload the player browser; it should receive the current warm Render Yjs room state.
 - Kill and restart the relay; clients should leave `LIVE`, show reconnecting/degraded, then recover when the relay is reachable again.
 - Open `/healthz` and confirm the VTT room shows `seeded: true`, with `updateCount` and `syncMessageCount` increasing during Yjs activity.

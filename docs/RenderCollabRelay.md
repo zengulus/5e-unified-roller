@@ -191,6 +191,7 @@ The current client behavior is:
 - Confirm both clients load the same initial snapshot.
 - Move a token on the DM view; the player view should update without Supabase live writes.
 - Move a token on the player view where allowed; the DM view should update.
+- If a player opens before the GM, the player should wait for the GM to seed the Render room rather than making the player's cold snapshot authoritative.
 - Reload the player; it should receive the current warm Render live room state.
 - Kill/restart the relay; clients should show reconnecting/degraded, then recover when the relay is back.
 - Check `/healthz`; the room should be `seeded: true`, with `updateCount` and `syncMessageCount` increasing.

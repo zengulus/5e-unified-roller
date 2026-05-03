@@ -78,7 +78,29 @@ const decodeBase64 = (value) => {
   }
 };
 
-const sendYSyncMessage = (client, encoder) => {
+const buildRoomMeta = (room) => ({
+  seeded: !!(room && room.seeded),
+  updateCount: Math.max(0, Number.parseInt(room && room.updateCount || 0, 10) || 0),
+  syncMessageCount: Math.max(0, Number.parseInt(room && room.syncMessageCount || 0, 10) || 0),
+  lastMessageType: room && room.lastMessageType ? room.lastMessageType : '',
+  lastYUpdateAt: room && room.lastYUpdateAt ? room.lastYUpdateAt : 0,
+  lastYSyncAt: room && room.lastYSyncAt ? room.lastYSyncAt : 0
+});
+
+const sendYSyncStatus = (client, room) => {
+  if (!client || !room) return false;
+  sendJson(client.socket, {
+    type: 'broadcast',
+    event: 'y-sync-status',
+    payload: {
+      room: buildRoomMeta(room),
+      relayedBy: SERVICE_NAME
+    }
+  });
+  return true;
+};
+
+const sendYSyncMessage = (client, encoder, room = null) => {
   if (!client || !encoder || !encoding.hasContent(encoder)) return false;
   const update = encodeBase64(encoding.toUint8Array(encoder));
   if (!update) return false;
@@ -87,6 +109,7 @@ const sendYSyncMessage = (client, encoder) => {
     event: 'y-sync',
     payload: {
       update,
+      room: buildRoomMeta(room),
       relayedBy: SERVICE_NAME
     }
   });
@@ -117,6 +140,7 @@ const attachRoomDocObserver = (room) => {
       event: 'y-sync',
       payload: {
         update: encodedUpdate,
+        room: buildRoomMeta(room),
         relayedBy: SERVICE_NAME
       }
     });
@@ -203,8 +227,12 @@ const handleYSyncBroadcast = (room, sender, payload) => {
   room.lastYSyncAt = Date.now();
   room.syncMessageCount = Math.max(0, Number.parseInt(room.syncMessageCount || 0, 10) || 0) + 1;
   room.lastMessageType = syncMessageTypeName(messageType);
+  if (messageType === syncProtocol.messageYjsUpdate) {
+    logEvent('y-update', room.id, `seeded=${room.seeded ? 'true' : 'false'}`, `updates=${room.updateCount}`, `sync=${room.syncMessageCount}`);
+  }
 
-  sendYSyncMessage(sender, replyEncoder);
+  sendYSyncMessage(sender, replyEncoder, room);
+  sendYSyncStatus(sender, room);
 
   if (messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2) {
     broadcastToRoom(room, sender, {
@@ -212,6 +240,7 @@ const handleYSyncBroadcast = (room, sender, payload) => {
       event: 'y-sync',
       payload: {
         update: payload.update,
+        room: buildRoomMeta(room),
         relayedBy: SERVICE_NAME
       }
     });
@@ -220,7 +249,7 @@ const handleYSyncBroadcast = (room, sender, payload) => {
   if (messageType === syncProtocol.messageYjsSyncStep1) {
     const requestEncoder = encoding.createEncoder();
     syncProtocol.writeSyncStep1(requestEncoder, room.doc);
-    sendYSyncMessage(sender, requestEncoder);
+    sendYSyncMessage(sender, requestEncoder, room);
   }
 };
 

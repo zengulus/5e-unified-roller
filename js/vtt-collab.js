@@ -1481,6 +1481,7 @@ class VTTCollabSession {
         this.lastYSyncAt = 0;
         this.lastYUpdateAt = 0;
         this.lastSeedSentAt = 0;
+        this.renderRoomSeeded = false;
         this.reconnectAttempts = 0;
         this.requestedPeerSnapshot = false;
         this.receivedPeerSnapshot = false;
@@ -1499,6 +1500,7 @@ class VTTCollabSession {
             ready: false,
             transportConnected: false,
             docSyncConfirmed: false,
+            renderRoomSeeded: false,
             lastYSyncAt: 0,
             lastYUpdateAt: 0
         };
@@ -1546,6 +1548,7 @@ class VTTCollabSession {
             ready: !!this.ready,
             transportConnected: !!this.transportConnected,
             docSyncConfirmed: !!this.docSyncConfirmed,
+            renderRoomSeeded: !!this.renderRoomSeeded,
             lastYSyncAt: this.lastYSyncAt,
             lastYUpdateAt: this.lastYUpdateAt
         };
@@ -1812,6 +1815,7 @@ class VTTCollabSession {
                 this.connected = false;
                 this.transportConnected = false;
                 this.docSyncConfirmed = false;
+                this.renderRoomSeeded = false;
                 this.updateStatus({
                     state: 'degraded',
                     detail: 'Live VTT is unavailable right now. Retrying...',
@@ -1862,6 +1866,7 @@ class VTTCollabSession {
         this.connected = false;
         this.transportConnected = false;
         this.docSyncConfirmed = false;
+        this.renderRoomSeeded = false;
         this.stopPeriodicSync();
         this.stopPeriodicSave();
         this.remotePresence = new Map();
@@ -1890,7 +1895,11 @@ class VTTCollabSession {
 
         channel.on('broadcast', { event: 'y-sync' }, ({ payload }) => {
             if (channel !== this.channel || !payload || !payload.update) return;
-            this.handleSyncMessage(payload.update);
+            this.handleSyncMessage(payload);
+        });
+        channel.on('broadcast', { event: 'y-sync-status' }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleSyncStatusMessage(payload);
         });
         channel.on('broadcast', { event: 'y-awareness' }, ({ payload }) => {
             if (channel !== this.channel || !payload || !payload.update) return;
@@ -1931,6 +1940,7 @@ class VTTCollabSession {
                 this.connected = false;
                 this.transportConnected = false;
                 this.docSyncConfirmed = false;
+                this.renderRoomSeeded = false;
                 this.updateStatus({
                     state: 'degraded',
                     detail: 'Live VTT timed out while joining.',
@@ -1949,6 +1959,7 @@ class VTTCollabSession {
                     this.connected = true;
                     this.transportConnected = true;
                     this.docSyncConfirmed = false;
+                    this.renderRoomSeeded = false;
                     this.lastYSyncAt = 0;
                     this.reconnectAttempts = 0;
                     this.startPeriodicSync();
@@ -1966,6 +1977,7 @@ class VTTCollabSession {
                     this.connected = false;
                     this.transportConnected = false;
                     this.docSyncConfirmed = false;
+                    this.renderRoomSeeded = false;
                     this.stopPeriodicSync();
                     this.stopPeriodicSave();
                     this.updateStatus({
@@ -1987,6 +1999,7 @@ class VTTCollabSession {
                     this.connected = false;
                     this.transportConnected = false;
                     this.docSyncConfirmed = false;
+                    this.renderRoomSeeded = false;
                     this.stopPeriodicSync();
                     this.stopPeriodicSave();
                     this.updateStatus({
@@ -2010,7 +2023,7 @@ class VTTCollabSession {
         const now = Date.now();
         const recentSync = this.lastYSyncAt && (now - this.lastYSyncAt) <= LIVE_SYNC_CONFIRM_WINDOW_MS;
         const recentUpdate = this.lastYUpdateAt && (now - this.lastYUpdateAt) <= LIVE_SYNC_CONFIRM_WINDOW_MS;
-        if (this.docSyncConfirmed && (recentSync || recentUpdate)) return 'live';
+        if (this.renderRoomSeeded && this.docSyncConfirmed && (recentSync || recentUpdate)) return 'live';
         return this.docSyncConfirmed ? 'degraded' : 'connecting';
     }
 
@@ -2022,6 +2035,7 @@ class VTTCollabSession {
                 : 'Live VTT document sync confirmed.';
         }
         if (state === 'reconnecting') return 'Reconnecting live VTT relay...';
+        if (this.transportConnected && !this.renderRoomSeeded) return 'Waiting for GM to seed live VTT room.';
         if (state === 'connecting') return 'Connected to relay; confirming VTT document sync...';
         if (this.transportConnected) return 'Relay connected, but VTT document sync is stale.';
         return 'Live VTT relay is unavailable right now.';
@@ -2088,12 +2102,38 @@ class VTTCollabSession {
 
     seedRelayRoomFromCanonicalSnapshot(reason = 'seed') {
         if (this.destroyed || !this.connected || !this.ready) return false;
+        const canSeed = typeof this.options.canSeedRelayRoom === 'function'
+            ? !!this.options.canSeedRelayRoom()
+            : false;
+        if (!canSeed) {
+            if (!this.renderRoomSeeded) {
+                console.warn('RTF_VTT_COLLAB: Render room is unseeded; waiting for GM to seed live VTT room.');
+            }
+            return false;
+        }
         const now = Date.now();
         if (this.lastSeedSentAt && (now - this.lastSeedSentAt) < 5000) return false;
         return this.sendFullDocUpdate(reason);
     }
 
-    handleSyncMessage(encoded) {
+    handleSyncStatusMessage(payload) {
+        const source = payload && typeof payload === 'object' ? payload : {};
+        const room = source.room && typeof source.room === 'object' ? source.room : {};
+        this.renderRoomSeeded = !!room.seeded;
+        if (this.renderRoomSeeded) {
+            this.lastYSyncAt = Date.now();
+            this.docSyncConfirmed = true;
+        }
+        this.updateLiveSyncStatus();
+    }
+
+    handleSyncMessage(payloadOrEncoded) {
+        const payload = payloadOrEncoded && typeof payloadOrEncoded === 'object'
+            ? payloadOrEncoded
+            : { update: payloadOrEncoded };
+        const encoded = payload.update;
+        const room = payload.room && typeof payload.room === 'object' ? payload.room : {};
+        const serverSeeded = !!room.seeded;
         let update;
         try {
             update = decodeBase64(encoded);
@@ -2112,7 +2152,8 @@ class VTTCollabSession {
             });
             if (applyFailed) return;
             this.lastYSyncAt = Date.now();
-            this.docSyncConfirmed = true;
+            this.renderRoomSeeded = serverSeeded || this.renderRoomSeeded;
+            this.docSyncConfirmed = !!this.renderRoomSeeded;
             if (messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2) {
                 this.lastYUpdateAt = this.lastYSyncAt;
             }
@@ -2181,6 +2222,7 @@ class VTTCollabSession {
         this.connected = false;
         this.transportConnected = false;
         this.docSyncConfirmed = false;
+        this.renderRoomSeeded = false;
         const reason = payload && payload.reason ? toTrimmedString(payload.reason, 'bust', 80) : 'bust';
         this.updateStatus({
             state: 'degraded',
@@ -2268,6 +2310,12 @@ class VTTCollabSession {
     handleDocUpdate(update, origin) {
         if (this.destroyed || !this.connected) return;
         if (origin === this.originRemoteSync) return;
+        if (origin === this.originPosition) {
+            console.debug('RTF_VTT_COLLAB: Broadcasting token position update to Render relay.', {
+                roomId: this.roomId,
+                bytes: update && update.length ? update.length : 0
+            });
+        }
         const encoder = encoding.createEncoder();
         syncProtocol.writeUpdate(encoder, update);
         this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });

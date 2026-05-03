@@ -1792,12 +1792,16 @@
             ? String(store.getVTTLocalPrefsStorageKey() || '').trim()
             : '';
     };
-    const isVTTCollabReady = () => !!(vttCollabSession && typeof vttCollabSession.isActive === 'function' && vttCollabSession.isActive());
     const getVTTCollabStatus = () => (
         vttCollabSession && typeof vttCollabSession.getStatus === 'function'
             ? vttCollabSession.getStatus()
             : null
     );
+    const isVTTCollabReady = () => {
+        if (!(vttCollabSession && typeof vttCollabSession.isActive === 'function' && vttCollabSession.isActive())) return false;
+        const status = getVTTCollabStatus();
+        return !!(status && status.connected && status.transportConnected);
+    };
     const requiresLiveVTTRoom = () => hasLiveVTTConfig();
     const canMutateLiveVTTState = (reason = 'vtt-mutation') => {
         if (!requiresLiveVTTRoom() || isVTTCollabReady()) return true;
@@ -4557,6 +4561,7 @@
                     caseId: getActiveCaseId(),
                     preferCloudRoomSnapshot: !isDM(),
                     canSaveRoom: () => isDM(),
+                    canSeedRelayRoom: () => isDM(),
                     getSeedPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
                     getCurrentPayload: () => readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE),
                     applySnapshot: (payload) => applyVTTCollabSnapshot(payload),
@@ -7066,7 +7071,16 @@
             const nextToken = nextScene && Array.isArray(nextScene.tokens)
                 ? nextScene.tokens.find((entry) => entry && entry.id === localToken.id)
                 : null;
-            if (nextToken && typeof vttCollabSession.syncSnapshot === 'function') {
+            if (typeof vttCollabSession.updateTokenPositions === 'function') {
+                Promise.resolve(vttCollabSession.updateTokenPositions([{
+                    sceneId: scene.id,
+                    tokenId: localToken.id,
+                    x: localToken.x,
+                    y: localToken.y
+                }], force ? { flushNow: true } : {})).catch((err) => {
+                    console.warn('VTT collaboration drag sync failed', err);
+                });
+            } else if (nextToken && typeof vttCollabSession.syncSnapshot === 'function') {
                 nextToken.x = localToken.x;
                 nextToken.y = localToken.y;
                 Promise.resolve(vttCollabSession.syncSnapshot(nextSnapshot, {
@@ -7074,15 +7088,6 @@
                     flushNow: !!force,
                     reason: force ? 'token-drop' : 'token-drag'
                 })).catch((err) => {
-                    console.warn('VTT collaboration drag sync failed', err);
-                });
-            } else if (typeof vttCollabSession.updateTokenPositions === 'function') {
-                Promise.resolve(vttCollabSession.updateTokenPositions([{
-                    sceneId: scene.id,
-                    tokenId: localToken.id,
-                    x: localToken.x,
-                    y: localToken.y
-                }], force ? { flushNow: true } : {})).catch((err) => {
                     console.warn('VTT collaboration drag sync failed', err);
                 });
             }
