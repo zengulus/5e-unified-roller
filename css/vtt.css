@@ -176,6 +176,12 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     color: rgba(255, 243, 203, 0.96);
 }
 
+.vtt-sync-chip[data-state="reconnecting"] {
+    border-color: rgba(255, 211, 102, 0.42);
+    background: rgba(48, 34, 8, 0.88);
+    color: rgba(255, 243, 203, 0.96);
+}
+
 .vtt-sync-chip[data-state="degraded"] {
     border-color: rgba(255, 138, 101, 0.42);
     background: rgba(52, 16, 10, 0.88);

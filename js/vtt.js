@@ -4287,7 +4287,9 @@
             ? 'live'
             : (source.state === 'connecting'
                 ? 'connecting'
-                : (source.state === 'degraded' ? 'degraded' : 'local'));
+                : (source.state === 'reconnecting'
+                    ? 'reconnecting'
+                    : (source.state === 'degraded' ? 'degraded' : 'local')));
         const peerCount = Number.isFinite(source.peerCount) ? Math.max(0, source.peerCount) : 0;
         const detail = String(source.detail || '').trim();
         let label = 'Local';
@@ -4297,16 +4299,18 @@
             vttCollabDropoutStartedAt = 0;
             clearVTTCollabDropoutTimer();
         } else if (state === 'connecting') {
-            label = 'Live...';
+            label = 'Connecting';
+        } else if (state === 'reconnecting') {
+            label = 'Reconnecting';
         } else if (state === 'degraded') {
-            label = 'Live Off';
+            label = 'Degraded';
         }
 
         if (state === 'local') {
             vttCollabDropoutStartedAt = 0;
             lastStableLiveSyncChipLabel = '';
             clearVTTCollabDropoutTimer();
-        } else if (state !== 'live' && lastStableLiveSyncChipLabel) {
+        } else if (state !== 'live' && state !== 'degraded' && lastStableLiveSyncChipLabel) {
             const now = Date.now();
             if (!vttCollabDropoutStartedAt) {
                 vttCollabDropoutStartedAt = now;
@@ -4324,7 +4328,7 @@
                 return;
             }
             clearVTTCollabDropoutTimer();
-            label = 'Live...';
+            label = state === 'reconnecting' ? 'Reconnecting' : 'Connecting';
         }
         setSyncChipState({
             state,

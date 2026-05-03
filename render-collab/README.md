@@ -71,5 +71,17 @@ Then point a temporary config at `ws://localhost:10000`.
 
 ## Endpoints
 
-- `/healthz`: health plus room/client/stateful-room counts
+- `/healthz`: health plus per-room client counts, seeded state, Yjs update/sync counts, and last-activity ages
 - `/info`: compact service metadata and websocket query requirements
+
+## Manual VTT Verification
+
+- Start the relay locally with `npm run dev`, or use the deployed Render service.
+- Open `vtt.html` in a DM browser and a player browser using the same campaign and case.
+- Confirm both clients load the same initial Supabase/cold snapshot.
+- Move a token in the DM view; the player view should update through the Render relay without high-frequency Supabase writes.
+- Move a token in the player view where permissions allow; the DM view should update.
+- Reload the player browser; it should receive the current warm Render Yjs room state.
+- Kill and restart the relay; clients should leave `LIVE`, show reconnecting/degraded, then recover when the relay is reachable again.
+- Open `/healthz` and confirm the VTT room shows `seeded: true`, with `updateCount` and `syncMessageCount` increasing during Yjs activity.
+- Confirm the VTT chip only shows `LIVE` after Yjs sync/update activity, not merely after presence appears.

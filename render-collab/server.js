@@ -19,6 +19,7 @@ const ALLOWED_ORIGINS = new Set(
 );
 
 const rooms = new Map();
+const startedAt = Date.now();
 
 const toTrimmedString = (value, fallback = '', maxLen = 4000) => {
   if (value === null || value === undefined) return fallback;
@@ -27,6 +28,13 @@ const toTrimmedString = (value, fallback = '', maxLen = 4000) => {
 
 const countClients = () => Array.from(rooms.values()).reduce((sum, room) => sum + room.clients.size, 0);
 const countStatefulRooms = () => Array.from(rooms.values()).filter((room) => room && room.doc instanceof Y.Doc).length;
+const ageMs = (stamp) => (stamp ? Math.max(0, Date.now() - stamp) : null);
+const syncMessageTypeName = (messageType) => {
+  if (messageType === syncProtocol.messageYjsSyncStep1) return 'sync-step-1';
+  if (messageType === syncProtocol.messageYjsSyncStep2) return 'sync-step-2';
+  if (messageType === syncProtocol.messageYjsUpdate) return 'update';
+  return `unknown-${messageType}`;
+};
 
 const logEvent = (...parts) => {
   if (!LOG_CONNECTIONS) return;
@@ -96,6 +104,9 @@ const broadcastToRoom = (room, sender, packet) => {
 const attachRoomDocObserver = (room) => {
   if (!room || !(room.doc instanceof Y.Doc)) return;
   room.doc.on('update', (update, origin) => {
+    room.seeded = true;
+    room.lastYUpdateAt = Date.now();
+    room.updateCount = Math.max(0, Number.parseInt(room.updateCount || 0, 10) || 0) + 1;
     const sender = origin && typeof origin === 'object' && origin.socket ? origin : null;
     const encoder = encoding.createEncoder();
     syncProtocol.writeUpdate(encoder, update);
@@ -120,7 +131,14 @@ const getRoom = (roomId) => {
       id: key,
       clients: new Set(),
       doc: new Y.Doc(),
-      lastSeenAt: Date.now()
+      seeded: false,
+      createdAt: Date.now(),
+      lastSeenAt: Date.now(),
+      lastYUpdateAt: 0,
+      lastYSyncAt: 0,
+      updateCount: 0,
+      syncMessageCount: 0,
+      lastMessageType: ''
     };
     attachRoomDocObserver(room);
     rooms.set(key, room);
@@ -146,6 +164,12 @@ const resetRoomDoc = (room) => {
   room.doc = new Y.Doc();
   attachRoomDocObserver(room);
   room.lastSeenAt = Date.now();
+  room.seeded = false;
+  room.lastYUpdateAt = 0;
+  room.lastYSyncAt = 0;
+  room.updateCount = 0;
+  room.syncMessageCount = 0;
+  room.lastMessageType = 'reset';
 };
 
 const sweepIdleRooms = () => {
@@ -163,14 +187,22 @@ const handleYSyncBroadcast = (room, sender, payload) => {
   const decoder = decoding.createDecoder(update);
   const replyEncoder = encoding.createEncoder();
   let messageType = -1;
+  let applyFailed = false;
   try {
     messageType = syncProtocol.readSyncMessage(decoder, replyEncoder, room.doc, sender, (error) => {
+      applyFailed = true;
       console.warn('[relay] y-sync apply failed', error);
     });
   } catch (err) {
     console.warn('[relay] y-sync decode failed', err);
     return;
   }
+
+  if (applyFailed) return;
+
+  room.lastYSyncAt = Date.now();
+  room.syncMessageCount = Math.max(0, Number.parseInt(room.syncMessageCount || 0, 10) || 0) + 1;
+  room.lastMessageType = syncMessageTypeName(messageType);
 
   sendYSyncMessage(sender, replyEncoder);
 
@@ -219,6 +251,23 @@ const cleanupClient = (client) => {
 
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz') {
+    const now = Date.now();
+    const roomDiagnostics = Array.from(rooms.values()).map((room) => ({
+      id: room.id,
+      clientCount: room.clients.size,
+      seeded: !!room.seeded,
+      updateCount: Math.max(0, Number.parseInt(room.updateCount || 0, 10) || 0),
+      syncMessageCount: Math.max(0, Number.parseInt(room.syncMessageCount || 0, 10) || 0),
+      lastMessageType: room.lastMessageType || '',
+      createdAt: room.createdAt || 0,
+      lastSeenAt: room.lastSeenAt || 0,
+      lastYUpdateAt: room.lastYUpdateAt || 0,
+      lastYSyncAt: room.lastYSyncAt || 0,
+      ageMs: Math.max(0, now - (room.createdAt || now)),
+      lastSeenAgeMs: ageMs(room.lastSeenAt),
+      lastYUpdateAgeMs: ageMs(room.lastYUpdateAt),
+      lastYSyncAgeMs: ageMs(room.lastYSyncAt)
+    }));
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
       ok: true,
@@ -227,6 +276,8 @@ const server = http.createServer((req, res) => {
       statefulRooms: countStatefulRooms(),
       clients: countClients(),
       roomIds: Array.from(rooms.keys()).slice(0, 20),
+      roomDiagnostics,
+      startedAt,
       uptimeSeconds: Math.floor(process.uptime())
     }));
     return;
@@ -299,6 +350,17 @@ wss.on('connection', (socket, req) => {
       return;
     }
     if (!packet || typeof packet !== 'object') return;
+
+    room.lastSeenAt = Date.now();
+
+    if (packet.type === 'ping') {
+      sendJson(socket, {
+        type: 'pong',
+        ts: packet.ts || 0,
+        serverTs: Date.now()
+      });
+      return;
+    }
 
     if (packet.type === 'join') {
       const payload = packet.payload && typeof packet.payload === 'object' ? packet.payload : {};

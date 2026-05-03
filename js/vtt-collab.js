@@ -13,6 +13,7 @@ import { createCollabRelayChannel } from './collab-relay-client.js';
 const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 60000;
 const SYNC_RECONCILE_INTERVAL_MS = 15000;
+const LIVE_SYNC_CONFIRM_WINDOW_MS = 45000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const VTT_ADMIN_EVENT_APPLY_SNAPSHOT = 'vtt-admin-apply-snapshot';
@@ -1475,6 +1476,11 @@ class VTTCollabSession {
         this.flushQueuedWhilePending = false;
         this.isDirty = false;
         this.lastLiveActivityAt = 0;
+        this.transportConnected = false;
+        this.docSyncConfirmed = false;
+        this.lastYSyncAt = 0;
+        this.lastYUpdateAt = 0;
+        this.lastSeedSentAt = 0;
         this.reconnectAttempts = 0;
         this.requestedPeerSnapshot = false;
         this.receivedPeerSnapshot = false;
@@ -1490,7 +1496,11 @@ class VTTCollabSession {
             detail: 'Shared sync is unavailable on this page.',
             peerCount: 0,
             connected: false,
-            ready: false
+            ready: false,
+            transportConnected: false,
+            docSyncConfirmed: false,
+            lastYSyncAt: 0,
+            lastYUpdateAt: 0
         };
 
         this.originBootstrap = { kind: 'vtt-collab-bootstrap' };
@@ -1533,7 +1543,11 @@ class VTTCollabSession {
             ...patch,
             peerCount,
             connected: !!this.connected,
-            ready: !!this.ready
+            ready: !!this.ready,
+            transportConnected: !!this.transportConnected,
+            docSyncConfirmed: !!this.docSyncConfirmed,
+            lastYSyncAt: this.lastYSyncAt,
+            lastYUpdateAt: this.lastYUpdateAt
         };
         if (typeof this.options.onStatusChange === 'function') {
             try {
@@ -1740,12 +1754,16 @@ class VTTCollabSession {
         }
 
         this.ready = true;
+        if (this.connected) {
+            this.seedRelayRoomFromCanonicalSnapshot('initial-ready');
+            this.sendSyncStep1();
+        }
         if (this.pendingReadyFlush) {
             this.scheduleCloudFlush();
         }
         this.updateStatus({
-            state: this.connected ? 'live' : 'degraded',
-            detail: this.connected ? 'Live VTT connected.' : 'Live VTT unavailable. Retrying connection...',
+            state: this.connected ? this.computeLiveState() : 'degraded',
+            detail: this.connected ? this.computeLiveDetail() : 'Live VTT unavailable. Retrying connection...',
             peerCount: this.remotePresence.size
         });
         if (!this.connected) {
@@ -1783,7 +1801,7 @@ class VTTCollabSession {
         const delayMs = Math.min(8000, 1200 * Math.max(1, this.reconnectAttempts + 1));
         this.reconnectAttempts = Math.min(this.reconnectAttempts + 1, 6);
         this.updateStatus({
-            state: 'connecting',
+            state: 'reconnecting',
             detail,
             peerCount: this.remotePresence.size
         });
@@ -1792,6 +1810,8 @@ class VTTCollabSession {
             this.connectChannel(this.connectConfig).catch((err) => {
                 console.warn('RTF_VTT_COLLAB: Reconnect failed', err);
                 this.connected = false;
+                this.transportConnected = false;
+                this.docSyncConfirmed = false;
                 this.updateStatus({
                     state: 'degraded',
                     detail: 'Live VTT is unavailable right now. Retrying...',
@@ -1840,6 +1860,8 @@ class VTTCollabSession {
         }
 
         this.connected = false;
+        this.transportConnected = false;
+        this.docSyncConfirmed = false;
         this.stopPeriodicSync();
         this.stopPeriodicSave();
         this.remotePresence = new Map();
@@ -1907,6 +1929,8 @@ class VTTCollabSession {
             const timeout = setTimeout(() => {
                 if (channel !== this.channel) return;
                 this.connected = false;
+                this.transportConnected = false;
+                this.docSyncConfirmed = false;
                 this.updateStatus({
                     state: 'degraded',
                     detail: 'Live VTT timed out while joining.',
@@ -1923,12 +1947,13 @@ class VTTCollabSession {
                 if (status === 'SUBSCRIBED') {
                     clearTimeout(timeout);
                     this.connected = true;
+                    this.transportConnected = true;
+                    this.docSyncConfirmed = false;
+                    this.lastYSyncAt = 0;
                     this.reconnectAttempts = 0;
                     this.startPeriodicSync();
-                    this.updateStatus({
-                        state: 'live',
-                        detail: 'Live VTT connected.',
-                        peerCount: this.remotePresence.size
+                    this.onRelaySubscribed().catch((err) => {
+                        console.warn('RTF_VTT_COLLAB: Relay resync failed after subscribe', err);
                     });
                     if (!settled) {
                         settled = true;
@@ -1939,6 +1964,8 @@ class VTTCollabSession {
                 if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
                     clearTimeout(timeout);
                     this.connected = false;
+                    this.transportConnected = false;
+                    this.docSyncConfirmed = false;
                     this.stopPeriodicSync();
                     this.stopPeriodicSave();
                     this.updateStatus({
@@ -1955,6 +1982,19 @@ class VTTCollabSession {
                     }
                     this.scheduleReconnect(status === 'CLOSED' ? 'Rejoining live VTT...' : 'Retrying live VTT connection...');
                 }
+                if (status === 'RECONNECTING') {
+                    clearTimeout(timeout);
+                    this.connected = false;
+                    this.transportConnected = false;
+                    this.docSyncConfirmed = false;
+                    this.stopPeriodicSync();
+                    this.stopPeriodicSave();
+                    this.updateStatus({
+                        state: 'reconnecting',
+                        detail: 'Reconnecting live VTT relay...',
+                        peerCount: this.remotePresence.size
+                    });
+                }
             });
         });
 
@@ -1962,6 +2002,47 @@ class VTTCollabSession {
         this.broadcastLocalAwareness();
         this.sendSyncStep1();
         this.handlePresenceState(typeof channel.presenceState === 'function' ? channel.presenceState() : {});
+    }
+
+    computeLiveState() {
+        if (!this.connectConfig || !toTrimmedString(this.connectConfig.collabRelayUrl, '', 4000).trim()) return 'local';
+        if (!this.transportConnected) return this.status.state === 'reconnecting' ? 'reconnecting' : 'connecting';
+        const now = Date.now();
+        const recentSync = this.lastYSyncAt && (now - this.lastYSyncAt) <= LIVE_SYNC_CONFIRM_WINDOW_MS;
+        const recentUpdate = this.lastYUpdateAt && (now - this.lastYUpdateAt) <= LIVE_SYNC_CONFIRM_WINDOW_MS;
+        if (this.docSyncConfirmed && (recentSync || recentUpdate)) return 'live';
+        return this.docSyncConfirmed ? 'degraded' : 'connecting';
+    }
+
+    computeLiveDetail() {
+        const state = this.computeLiveState();
+        if (state === 'live') {
+            return this.remotePresence.size
+                ? `Live VTT synced with ${this.remotePresence.size} other ${this.remotePresence.size === 1 ? 'player' : 'players'}.`
+                : 'Live VTT document sync confirmed.';
+        }
+        if (state === 'reconnecting') return 'Reconnecting live VTT relay...';
+        if (state === 'connecting') return 'Connected to relay; confirming VTT document sync...';
+        if (this.transportConnected) return 'Relay connected, but VTT document sync is stale.';
+        return 'Live VTT relay is unavailable right now.';
+    }
+
+    updateLiveSyncStatus(detail = '') {
+        this.updateStatus({
+            state: this.computeLiveState(),
+            detail: detail || this.computeLiveDetail(),
+            peerCount: this.remotePresence.size
+        });
+    }
+
+    async onRelaySubscribed() {
+        if (this.destroyed || !this.channel || !this.connected) return;
+        await this.refreshPresenceTracking({ force: true });
+        this.broadcastLocalAwareness();
+        this.seedRelayRoomFromCanonicalSnapshot('relay-subscribed');
+        this.sendSyncStep1();
+        this.handlePresenceState(typeof this.channel.presenceState === 'function' ? this.channel.presenceState() : {});
+        this.updateLiveSyncStatus();
     }
 
     async sendBroadcast(event, payload) {
@@ -1985,7 +2066,31 @@ class VTTCollabSession {
     sendSyncStep1() {
         const encoder = encoding.createEncoder();
         syncProtocol.writeSyncStep1(encoder, this.doc);
-        this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+        const sent = this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+        this.updateLiveSyncStatus();
+        return sent;
+    }
+
+    sendFullDocUpdate(reason = 'seed') {
+        if (!this.doc) return false;
+        const update = Y.encodeStateAsUpdate(this.doc);
+        if (!update || !update.length) return false;
+        const encoder = encoding.createEncoder();
+        syncProtocol.writeUpdate(encoder, update);
+        this.lastSeedSentAt = Date.now();
+        this.lastYSyncAt = this.lastSeedSentAt;
+        console.debug('RTF_VTT_COLLAB: Seeding Render relay room from canonical VTT snapshot', {
+            roomId: this.roomId,
+            reason
+        });
+        return this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+    }
+
+    seedRelayRoomFromCanonicalSnapshot(reason = 'seed') {
+        if (this.destroyed || !this.connected || !this.ready) return false;
+        const now = Date.now();
+        if (this.lastSeedSentAt && (now - this.lastSeedSentAt) < 5000) return false;
+        return this.sendFullDocUpdate(reason);
     }
 
     handleSyncMessage(encoded) {
@@ -1999,10 +2104,18 @@ class VTTCollabSession {
 
         const decoder = decoding.createDecoder(update);
         const encoder = encoding.createEncoder();
+        let applyFailed = false;
         try {
-            syncProtocol.readSyncMessage(decoder, encoder, this.doc, this.originRemoteSync, (error) => {
+            const messageType = syncProtocol.readSyncMessage(decoder, encoder, this.doc, this.originRemoteSync, (error) => {
+                applyFailed = true;
                 console.warn('RTF_VTT_COLLAB: Sync message failed', error);
             });
+            if (applyFailed) return;
+            this.lastYSyncAt = Date.now();
+            this.docSyncConfirmed = true;
+            if (messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2) {
+                this.lastYUpdateAt = this.lastYSyncAt;
+            }
         } catch (err) {
             console.warn('RTF_VTT_COLLAB: Sync decode failed', err);
             return;
@@ -2011,6 +2124,7 @@ class VTTCollabSession {
         if (encoding.hasContent(encoder)) {
             this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
         }
+        this.updateLiveSyncStatus();
     }
 
     requestPeerReconcile(reason = 'manual') {
@@ -2050,11 +2164,9 @@ class VTTCollabSession {
         }
         if (this.channel && !this.destroyed) this.connected = true;
         this.applyRevisionState(revision, sentBy || payload.updatedBy || '');
-        this.updateStatus({
-            state: this.connected ? 'live' : 'degraded',
-            detail: this.connected ? 'Live VTT updated by DM.' : 'VTT snapshot restored by DM.',
-            peerCount: this.remotePresence.size
-        });
+        this.lastYUpdateAt = Date.now();
+        this.docSyncConfirmed = true;
+        this.updateLiveSyncStatus(this.connected ? 'Live VTT updated by DM.' : 'VTT snapshot restored by DM.');
     }
 
     handleAdminBustMessage(payload) {
@@ -2067,6 +2179,8 @@ class VTTCollabSession {
         this.pendingReadyFlush = false;
         this.isDirty = false;
         this.connected = false;
+        this.transportConnected = false;
+        this.docSyncConfirmed = false;
         const reason = payload && payload.reason ? toTrimmedString(payload.reason, 'bust', 80) : 'bust';
         this.updateStatus({
             state: 'degraded',
@@ -2129,11 +2243,8 @@ class VTTCollabSession {
         }
         this.updateStatus({
             peerCount: peers.size,
-            detail: this.connected
-                ? (peers.size
-                    ? `Live VTT connected with ${peers.size} other ${peers.size === 1 ? 'player' : 'players'}.`
-                    : 'Live VTT connected. Only you are here.')
-                : this.status.detail
+            state: this.connected ? this.computeLiveState() : this.status.state,
+            detail: this.connected ? this.computeLiveDetail() : this.status.detail
         });
     }
 
@@ -2160,6 +2271,7 @@ class VTTCollabSession {
         const encoder = encoding.createEncoder();
         syncProtocol.writeUpdate(encoder, update);
         this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+        this.updateLiveSyncStatus();
     }
 
     handleAfterTransaction(transaction) {

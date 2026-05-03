@@ -181,8 +181,20 @@ The current client behavior is:
 
 ## Endpoints
 
-- `/healthz` returns room/client counts for quick verification
+- `/healthz` returns room/client counts plus per-room seeded state, Yjs update/sync counts, last message type, and last-activity ages
 - `/info` returns a compact summary of service options and websocket query params
+
+## Manual VTT Verification
+
+- Start the Render relay locally or open the deployed service.
+- Open VTT in a DM browser and a player browser using the same campaign and case.
+- Confirm both clients load the same initial snapshot.
+- Move a token on the DM view; the player view should update without Supabase live writes.
+- Move a token on the player view where allowed; the DM view should update.
+- Reload the player; it should receive the current warm Render live room state.
+- Kill/restart the relay; clients should show reconnecting/degraded, then recover when the relay is back.
+- Check `/healthz`; the room should be `seeded: true`, with `updateCount` and `syncMessageCount` increasing.
+- Confirm `LIVE` only appears after Yjs sync/update activity, not merely after presence.
 
 ## Practical notes
 

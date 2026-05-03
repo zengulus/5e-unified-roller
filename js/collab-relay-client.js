@@ -13,6 +13,12 @@ const buildPresenceState = (members = new Map()) => {
     return out;
 };
 
+const HEARTBEAT_INTERVAL_MS = 15000;
+const HEARTBEAT_TIMEOUT_MS = 8000;
+const RECONNECT_BASE_DELAY_MS = 700;
+const RECONNECT_MAX_DELAY_MS = 12000;
+const RECONNECT_MAX_ATTEMPTS = 12;
+
 class RelayChannel {
     constructor(options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
@@ -35,6 +41,12 @@ class RelayChannel {
         this.presenceMembers = new Map();
         this.localPresence = null;
         this.closed = false;
+        this.reconnectAttempts = 0;
+        this.reconnectTimer = null;
+        this.heartbeatTimer = null;
+        this.heartbeatTimeoutTimer = null;
+        this.lastPongAt = 0;
+        this.lastPingTs = 0;
     }
 
     on(kind, filter, callback) {
@@ -85,11 +97,16 @@ class RelayChannel {
         if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return this;
 
         this.closed = false;
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
         const ws = new WebSocket(this.buildSocketUrl());
         this.ws = ws;
 
         ws.addEventListener('open', () => {
             if (this.ws !== ws || this.closed) return;
+            this.reconnectAttempts = 0;
             this.sendRaw({
                 type: 'join',
                 payload: {
@@ -103,6 +120,7 @@ class RelayChannel {
             });
             this.notifyStatus('SUBSCRIBED');
             if (this.localPresence) this.track(this.localPresence).catch(() => { });
+            this.startHeartbeat();
         });
         ws.addEventListener('message', (event) => {
             if (this.ws !== ws || this.closed) return;
@@ -113,11 +131,66 @@ class RelayChannel {
             this.notifyStatus('CHANNEL_ERROR');
         });
         ws.addEventListener('close', () => {
-            if (this.ws !== ws || this.closed) return;
-            this.notifyStatus('CLOSED');
+            if (this.ws !== ws) return;
+            this.stopHeartbeat();
+            this.ws = null;
+            this.presenceMembers = new Map();
+            if (this.closed) {
+                this.notifyStatus('CLOSED');
+                return;
+            }
+            this.scheduleReconnect('close');
         });
 
         return this;
+    }
+
+    scheduleReconnect(reason = 'close') {
+        if (this.closed || this.reconnectTimer) return;
+        this.notifyStatus('RECONNECTING');
+        this.reconnectAttempts = Math.min(this.reconnectAttempts + 1, RECONNECT_MAX_ATTEMPTS);
+        const jitter = Math.floor(Math.random() * 250);
+        const delayMs = Math.min(
+            RECONNECT_MAX_DELAY_MS,
+            RECONNECT_BASE_DELAY_MS * (2 ** Math.max(0, this.reconnectAttempts - 1))
+        ) + jitter;
+        console.warn(`RTF_COLLAB_RELAY: Reconnecting after ${reason} in ${delayMs}ms`);
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            if (this.closed) return;
+            this.subscribe();
+        }, delayMs);
+    }
+
+    startHeartbeat() {
+        this.stopHeartbeat();
+        this.lastPongAt = Date.now();
+        const sendPing = () => {
+            if (this.closed || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+            this.lastPingTs = Date.now();
+            const ok = this.sendRaw({ type: 'ping', ts: this.lastPingTs });
+            if (!ok) return;
+            if (this.heartbeatTimeoutTimer) clearTimeout(this.heartbeatTimeoutTimer);
+            this.heartbeatTimeoutTimer = setTimeout(() => {
+                if (this.closed || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+                console.warn('RTF_COLLAB_RELAY: Heartbeat timed out; reconnecting relay socket.');
+                try {
+                    this.ws.close(4000, 'heartbeat-timeout');
+                } catch (err) {
+                    try { this.ws = null; } catch (innerErr) { }
+                    this.scheduleReconnect('heartbeat-timeout');
+                }
+            }, HEARTBEAT_TIMEOUT_MS);
+        };
+        sendPing();
+        this.heartbeatTimer = setInterval(sendPing, HEARTBEAT_INTERVAL_MS);
+    }
+
+    stopHeartbeat() {
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        if (this.heartbeatTimeoutTimer) clearTimeout(this.heartbeatTimeoutTimer);
+        this.heartbeatTimer = null;
+        this.heartbeatTimeoutTimer = null;
     }
 
     sendRaw(packet) {
@@ -168,6 +241,18 @@ class RelayChannel {
         }
         if (!packet || typeof packet !== 'object') return;
 
+        if (packet.type === 'pong') {
+            const pongTs = Number(packet.ts || 0);
+            if (!this.lastPingTs || pongTs === this.lastPingTs) {
+                this.lastPongAt = Date.now();
+                if (this.heartbeatTimeoutTimer) {
+                    clearTimeout(this.heartbeatTimeoutTimer);
+                    this.heartbeatTimeoutTimer = null;
+                }
+            }
+            return;
+        }
+
         if (packet.type === 'broadcast') {
             this.emit('broadcast', {
                 event: toTrimmedString(packet.event, '', 80).trim(),
@@ -199,6 +284,9 @@ class RelayChannel {
 
     async close() {
         this.closed = true;
+        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        this.stopHeartbeat();
         if (this.ws) {
             try {
                 this.ws.close(1000, 'client-close');
