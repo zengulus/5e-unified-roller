@@ -2401,6 +2401,7 @@ class VTTCollabSession {
         if (!applied.length) {
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
+        this.scheduleCloudFlush();
         if (options && options.flushNow) {
             this.requestPeerReconcile('token-drop');
         }
