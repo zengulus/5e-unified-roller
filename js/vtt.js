@@ -4149,6 +4149,7 @@
     };
 
     const setRolePreference = (role) => {
+        const previousRole = localRole;
         localRole = role === 'player' ? 'player' : 'dm';
         const store = getStore();
         if (store && typeof store.setVTTLocalRole === 'function') {
@@ -4172,6 +4173,17 @@
         render();
         if (vttCollabSession && typeof vttCollabSession.handleSavePermissionChanged === 'function') {
             vttCollabSession.handleSavePermissionChanged();
+        }
+        if (previousRole !== localRole && hasLiveVTTConfig()) {
+            handleVTTAuthorityRoleChange(previousRole, localRole).catch((err) => {
+                console.warn('VTT collaboration role authority refresh failed', err);
+                setVTTCollabStatus({
+                    state: 'degraded',
+                    detail: err && err.message ? err.message : 'Live VTT role refresh failed.',
+                    peerCount: 0,
+                    retryable: true
+                });
+            });
         }
     };
 
@@ -4441,6 +4453,63 @@
         }
 
         return isDM() ? readLocalInitialVTTSnapshot(store, activeCaseId) : deepClone(DEFAULT_VTT_STATE);
+    };
+
+    const handleVTTAuthorityRoleChange = async (previousRole, nextRole) => {
+        if (previousRole === nextRole || !hasLiveVTTConfig()) return null;
+        const store = getStore();
+        if (!store) return null;
+
+        setVTTCollabStatus({
+            state: 'connecting',
+            detail: nextRole === 'dm'
+                ? 'GM mode enabled. Loading the saved VTT room before seeding Render.'
+                : 'Player mode enabled. Waiting for the GM live VTT room.',
+            peerCount: 0
+        });
+
+        if (vttCollabSession && typeof vttCollabSession.destroy === 'function') {
+            try {
+                await vttCollabSession.destroy();
+            } catch (err) {
+                console.warn('VTT collaboration role session teardown failed', err);
+            }
+        }
+        vttCollabSession = null;
+        vttCollabInitPromise = null;
+        pendingRemoteVTTSnapshot = null;
+
+        if (nextRole === 'dm') {
+            const snapshot = await loadInitialVTTSnapshot(store);
+            const fogMigrated = coerceSnapshotFogToCellMasks(snapshot);
+            let synced = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
+                persist: true,
+                reason: fogMigrated ? 'fog-mask-migration' : 'roster-player-presentation-sync'
+            }).snapshot;
+            if (fogMigrated) {
+                const saved = persistSharedVTTSnapshot(synced, {
+                    reason: 'fog-mask-migration',
+                    baseSnapshot: null
+                });
+                synced = deepClone(saved || synced);
+            }
+            vttState = deepClone(synced);
+            initialVTTLoadPending = false;
+            normalizeSelections();
+            render();
+        } else {
+            vttState = deepClone(DEFAULT_VTT_STATE);
+            initialVTTLoadPending = true;
+            pendingRemoteVTTSnapshot = null;
+            normalizeSelections();
+            render();
+        }
+
+        const session = await initVTTCollab();
+        if (session && typeof session.handleAuthorityChanged === 'function') {
+            session.handleAuthorityChanged();
+        }
+        return session;
     };
 
     const applyVTTCollabSnapshot = (payload) => {

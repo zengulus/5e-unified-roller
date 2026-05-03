@@ -8,7 +8,7 @@ import {
 import { IndexeddbPersistence } from './vendor/y-indexeddb/y-indexeddb.js';
 import * as encoding from './vendor/lib0/encoding.js';
 import * as decoding from './vendor/lib0/decoding.js';
-import { createCollabRelayChannel } from './collab-relay-client.js?v=20260504a';
+import { createCollabRelayChannel } from './collab-relay-client.js?v=20260504b';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 60000;
@@ -2469,6 +2469,20 @@ class VTTCollabSession {
             this.scheduleCloudFlush({
                 ...(this.pendingFlushOptions && typeof this.pendingFlushOptions === 'object' ? this.pendingFlushOptions : {})
             });
+        }
+    }
+
+    handleAuthorityChanged() {
+        this.canLoadColdSnapshot = typeof this.options.canLoadColdSnapshot === 'function'
+            ? !!this.options.canLoadColdSnapshot()
+            : false;
+        this.canSeedRelayRoom = typeof this.options.canSeedRelayRoom === 'function'
+            ? !!this.options.canSeedRelayRoom()
+            : false;
+        this.handleSavePermissionChanged();
+        if (this.canSeedRelayRoom && this.connected && this.ready) {
+            this.seedRelayRoomFromCanonicalSnapshot('authority-changed');
+            this.sendSyncStep1();
         }
     }
 

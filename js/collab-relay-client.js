@@ -45,6 +45,8 @@ class RelayChannel {
         this.reconnectTimer = null;
         this.heartbeatTimer = null;
         this.heartbeatTimeoutTimer = null;
+        this.heartbeatSupported = false;
+        this.heartbeatWarnedUnsupported = false;
         this.lastPongAt = 0;
         this.lastPingTs = 0;
     }
@@ -173,6 +175,13 @@ class RelayChannel {
             if (this.heartbeatTimeoutTimer) clearTimeout(this.heartbeatTimeoutTimer);
             this.heartbeatTimeoutTimer = setTimeout(() => {
                 if (this.closed || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+                if (!this.heartbeatSupported) {
+                    if (!this.heartbeatWarnedUnsupported) {
+                        console.warn('RTF_COLLAB_RELAY: Relay heartbeat pong not observed yet; keeping socket open for compatibility with older relay builds.');
+                        this.heartbeatWarnedUnsupported = true;
+                    }
+                    return;
+                }
                 console.warn('RTF_COLLAB_RELAY: Heartbeat timed out; reconnecting relay socket.');
                 try {
                     this.ws.close(4000, 'heartbeat-timeout');
@@ -244,6 +253,8 @@ class RelayChannel {
         if (packet.type === 'pong') {
             const pongTs = Number(packet.ts || 0);
             if (!this.lastPingTs || pongTs === this.lastPingTs) {
+                this.heartbeatSupported = true;
+                this.heartbeatWarnedUnsupported = false;
                 this.lastPongAt = Date.now();
                 if (this.heartbeatTimeoutTimer) {
                     clearTimeout(this.heartbeatTimeoutTimer);
