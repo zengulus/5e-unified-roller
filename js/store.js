@@ -3637,6 +3637,15 @@
 
     const isYjsCollabPage = () => isBoardPage() || isVTTPage();
 
+    const hasUsableCloudSyncConfig = (config) => !!(
+        config
+        && config.enabled
+        && config.autoConnect
+        && config.supabaseUrl
+        && config.anonKey
+        && config.campaignId
+    );
+
     const coerceAutoConnectBackendMode = (config) => {
         const clean = sanitizeSyncConfig(config);
         if (!global.RTF_ALLOW_LEGACY_SYNC_BACKEND) {
@@ -3701,7 +3710,10 @@
                 roomHydrationSeenAt: new Map(),
                 queryCache: new Map(),
                 rowsV2LocalReady: null,
-                rowsV2LocalError: ''
+                rowsV2LocalError: '',
+                initialCloudPullDone: !hasUsableCloudSyncConfig(coercedSyncConfig.config),
+                initialCloudPullInFlight: false,
+                initialCloudActionBlocker: null
             };
 
             if (coercedSyncConfig.changed) {
@@ -3714,6 +3726,9 @@
 
             this.isApplyingRemote = false;
             this.syncStatusListeners = new Set();
+            if (this.shouldRequireInitialCloudPull()) {
+                this.startInitialCloudActionBlock();
+            }
 
             this.syncStatus = {
                 mode: this.sync.config.enabled ? 'idle' : 'disabled',
@@ -3770,8 +3785,53 @@
                 && shouldAutoConnectOnThisPage());
         }
 
+        shouldRequireInitialCloudPull() {
+            return !!(hasUsableCloudSyncConfig(this.sync && this.sync.config) && shouldAutoConnectOnThisPage());
+        }
+
+        isInitialCloudPullPending() {
+            return !!(this.shouldRequireInitialCloudPull()
+                && !this.sync.initialCloudPullDone);
+        }
+
+        startInitialCloudActionBlock() {
+            if (!global.document || this.sync.initialCloudActionBlocker) return;
+            const block = (event) => {
+                if (!this.isInitialCloudPullPending()) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            };
+            this.sync.initialCloudActionBlocker = block;
+            ['click', 'input', 'change', 'submit', 'keydown'].forEach((name) => {
+                global.document.addEventListener(name, block, true);
+            });
+            try {
+                global.document.documentElement.dataset.rtfCloudHydrating = '1';
+            } catch (err) { }
+        }
+
+        stopInitialCloudActionBlock() {
+            if (!global.document || !this.sync.initialCloudActionBlocker) return;
+            const block = this.sync.initialCloudActionBlocker;
+            ['click', 'input', 'change', 'submit', 'keydown'].forEach((name) => {
+                global.document.removeEventListener(name, block, true);
+            });
+            this.sync.initialCloudActionBlocker = null;
+            try {
+                delete global.document.documentElement.dataset.rtfCloudHydrating;
+            } catch (err) { }
+        }
+
+        markInitialCloudPullComplete() {
+            if (!this.sync.initialCloudPullDone) {
+                this.sync.initialCloudPullDone = true;
+            }
+            this.stopInitialCloudActionBlock();
+        }
+
         canAutoPushCloud(reason = 'scheduled') {
             if (!this.sync.config || !this.sync.config.enabled) return false;
+            if (this.isInitialCloudPullPending()) return false;
             if (this.hasLiveSyncConnection()) return true;
             if (!isYjsCollabPage() && shouldAutoConnectOnThisPage()) {
                 return !!(this.sync.config.supabaseUrl && this.sync.config.anonKey && this.sync.config.campaignId);
@@ -3784,24 +3844,70 @@
             if (this.sync.autoSyncBootTimer) clearTimeout(this.sync.autoSyncBootTimer);
             this.sync.autoSyncBootTimer = setTimeout(() => {
                 this.sync.autoSyncBootTimer = null;
+                if (this.sync.initialCloudPullInFlight || this.sync.initialCloudPullDone) return;
+                this.sync.initialCloudPullInFlight = true;
+                this.updateSyncStatus({
+                    mode: 'connecting',
+                    pendingPush: !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size),
+                    message: 'Loading latest cloud state before enabling edits...',
+                    lastError: ''
+                });
                 this.ensureCloudAccess({
                     silent: true,
                     requirePageSync: true
                 }).then((result) => {
-                    if (!result || !result.ok) return;
+                    if (!result || !result.ok) return result || { ok: false, reason: 'not-connected' };
+                    return this.pullFromCloud({
+                        force: true,
+                        silent: true,
+                        skipAccessCheck: true
+                    }).then((pull) => ({ ...pull, access: result }));
+                }).then((result) => {
+                    if (!result || !result.ok) {
+                        this.updateSyncStatus({
+                            mode: result && result.reason === 'conflict' ? 'conflict' : 'error',
+                            connected: this.hasLiveSyncConnection(),
+                            enabled: true,
+                            pendingPush: !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size),
+                            message: result && result.reason === 'conflict'
+                                ? 'Cloud state needs review before autosave can run.'
+                                : 'Could not load latest cloud state before editing.',
+                            lastError: result && result.error ? result.error : ''
+                        });
+                        return;
+                    }
+                    this.sync.initialCloudPullDone = true;
+                    this.stopInitialCloudActionBlock();
                     this.updateSyncStatus({
-                        mode: 'idle',
-                        connected: false,
+                        mode: 'ready',
+                        connected: this.hasLiveSyncConnection(),
                         enabled: true,
-                        userId: result.userId || this.sync.userId || '',
+                        userId: result.access && result.access.userId || this.sync.userId || '',
                         campaignId: this.sync.config.campaignId,
                         profileName: this.sync.config.profileName,
-                        message: result.userId
-                            ? 'Signed in. Cloud sync will fetch or push only when needed.'
-                            : 'Cloud sync is standing by until needed.',
+                        pendingPush: !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size),
+                        message: result.reason === 'empty'
+                            ? 'Cloud is empty; local edits can seed it now.'
+                            : 'Loaded latest cloud state.',
                         lastError: ''
                     });
-                }).catch(() => { });
+                    if (result.reason === 'empty' && this.sync.localDirtyScopes && this.sync.localDirtyScopes.size) {
+                        this.scheduleCloudPush('seed-cloud');
+                    }
+                }).catch((err) => {
+                    const message = err && err.message ? err.message : String(err);
+                    this.updateSyncStatus({
+                        mode: 'error',
+                        connected: this.hasLiveSyncConnection(),
+                        enabled: true,
+                        pendingPush: !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size),
+                        message: 'Could not load latest cloud state before editing.',
+                        lastError: message
+                    });
+                }).finally(() => {
+                    this.sync.initialCloudPullInFlight = false;
+                    this.stopInitialCloudActionBlock();
+                });
             }, AUTO_SYNC_BOOT_DELAY_MS);
         }
 
@@ -5323,6 +5429,8 @@
             const next = coerceAutoConnectBackendMode(sanitized).config;
 
             this.sync.config = next;
+            this.sync.initialCloudPullDone = !hasUsableCloudSyncConfig(next);
+            this.sync.initialCloudPullInFlight = false;
             this.sync.lastPulledRemote = parseStoredLastPulledRemote(next);
             this.sync.lastPullAt = this.sync.lastPulledRemote ? toTimestamp(this.sync.lastPulledRemote.pulledAt, 0) : 0;
             this.sync.lastRemoteSeenAt = this.sync.lastPulledRemote ? toTimestamp(this.sync.lastPulledRemote.remoteUpdatedAt, 0) : 0;
@@ -5351,6 +5459,7 @@
 
             if (reconnect) {
                 if (next.enabled) {
+                    if (this.shouldRequireInitialCloudPull()) this.startInitialCloudActionBlock();
                     if (this.hasLiveSyncConnection()) {
                         this.connectSync({ explicit: true }).catch((err) => {
                             this.updateSyncStatus({
@@ -5385,6 +5494,9 @@
             this.sync.pendingConflict = null;
             this.sync.lastPulledRemote = null;
             this.sync.lastPullAt = 0;
+            this.sync.initialCloudPullDone = true;
+            this.sync.initialCloudPullInFlight = false;
+            this.stopInitialCloudActionBlock();
             this.sync.lastKnownRemoteRevision = toNonNegativeInt(this.state && this.state.meta && this.state.meta.syncRevision, 0);
             this.updateSyncStatus({
                 mode: 'disabled',
@@ -7924,8 +8036,7 @@
                     message: 'Connected to cloud sync.'
                 });
 
-                const shouldForceInitialPull = !this.sync.hadStoredStateAtBoot && !this.sync.lastPullAt;
-                const pull = await this.pullFromCloud({ force: shouldForceInitialPull, silent: true, skipAccessCheck: true });
+                const pull = await this.pullFromCloud({ force: true, silent: true, skipAccessCheck: true });
                 if (!pull.ok && pull.reason !== 'conflict') {
                     throw new Error(pull.error || 'Initial cloud pull failed.');
                 }
@@ -7941,6 +8052,10 @@
                 if (pull.ok && pull.reason === 'empty') {
                     this.scheduleCloudPush('seed-cloud');
                     this.updateSyncStatus({ message: 'Connected. No cloud row yet; pending first push.' });
+                }
+                if (pull.ok) {
+                    this.sync.initialCloudPullDone = true;
+                    this.stopInitialCloudActionBlock();
                 }
 
                 return { ok: true };
@@ -10014,6 +10129,17 @@
                         return;
                     }
 
+                    if (reasonText === 'initial-pull-pending') {
+                        this.updateSyncStatus({
+                            mode: 'connecting',
+                            pendingPush: stillDirty,
+                            connected: this.hasLiveSyncConnection(),
+                            message: 'Waiting for latest cloud state before autosave.',
+                            lastError: ''
+                        });
+                        return;
+                    }
+
                     if (reasonText === 'conflict') {
                         this.updateSyncStatus({
                             mode: 'conflict',
@@ -11056,6 +11182,7 @@
             }
 
             if (!fetched.row) {
+                this.markInitialCloudPullComplete();
                 return { ok: true, reason: 'empty', applied: false };
             }
             const row = fetched.row;
@@ -11108,6 +11235,7 @@
                     if (shouldApplyResolution) {
                         markPulled();
                         this.sync.lastPullAt = Date.now();
+                        this.markInitialCloudPullComplete();
                         return {
                             ok: true,
                             reason: resolution.retainedDirtyScopes.length ? 'merged' : 'applied-remote-win',
@@ -11138,7 +11266,9 @@
                             pendingPush: false,
                             message: 'Pulled latest cloud state (local was older).'
                         });
+                        this.markInitialCloudPullComplete();
                     }
+                    this.markInitialCloudPullComplete();
                     return { ok: true, reason: appliedStale ? 'applied-stale-local' : 'skipped-stale-local', applied: appliedStale };
                 }
 
@@ -11150,6 +11280,7 @@
                 this.adoptMergedConflictState(conflict, 'auto-merge-pull');
                 markPulled();
                 this.sync.lastPullAt = Date.now();
+                this.markInitialCloudPullComplete();
                 return { ok: true, reason: 'merged', applied: false, merged: true };
             }
             const shouldApply = force || localIsOlder;
@@ -11167,6 +11298,7 @@
                     connected: this.hasLiveSyncConnection(),
                     pendingPush: false
                 });
+                this.markInitialCloudPullComplete();
                 return { ok: true, reason: 'up-to-date', applied: false };
             }
 
@@ -11190,6 +11322,7 @@
                     message: 'Pulled latest cloud state.'
                 });
             }
+            this.markInitialCloudPullComplete();
 
             return { ok: true, reason: applied ? 'applied' : 'skipped', applied };
         }
@@ -11200,6 +11333,16 @@
             const force = !!opts.force;
             const startAttempt = toNonNegativeInt(opts.attempt, 0);
             const dirtyScopes = this.getDirtyScopesSnapshot(opts.scopes);
+            if (!force && this.isInitialCloudPullPending()) {
+                if (!this.sync.initialCloudPullInFlight) this.scheduleAutoSyncBoot();
+                this.updateSyncStatus({
+                    mode: 'connecting',
+                    pendingPush: !!dirtyScopes.length,
+                    message: 'Waiting for latest cloud state before autosave...',
+                    lastError: ''
+                });
+                return { ok: false, reason: 'initial-pull-pending' };
+            }
             const access = await this.ensureCloudAccess({
                 explicit: opts.explicit === true,
                 silent,
