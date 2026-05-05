@@ -434,8 +434,14 @@
         if (value === null || value === undefined) return fallback;
         return String(value).slice(0, maxLen);
     };
+    const toImageUrlCandidate = (value, maxLen = 4000) => {
+        if (value === null || value === undefined) return '';
+        const raw = String(value).trim();
+        if (!raw) return '';
+        return /^data:image\//i.test(raw) ? raw : raw.slice(0, maxLen).trim();
+    };
     const toImageUrl = (value) => {
-        const candidate = toTrimmedString(value, '', 4000).trim();
+        const candidate = toImageUrlCandidate(value);
         if (!candidate) return '';
 
         if (/^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+$/i.test(candidate)) {
@@ -457,7 +463,7 @@
         return '';
     };
     const toSharedVTTMediaUrl = (value) => {
-        const candidate = toTrimmedString(value, '', 4000).trim();
+        const candidate = toImageUrlCandidate(value);
         if (!candidate) return '';
 
         if (/^data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+$/i.test(candidate)) {

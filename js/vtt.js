@@ -316,8 +316,7 @@
     };
     const getTokenImageRenderUrl = (token) => {
         if (!token) return '';
-        const isRosterManagedPlayerToken = String(token && token.sourceType || '').trim() === 'player';
-        const retryKey = isRosterManagedPlayerToken ? '' : (tokenImageRetryKeys.get(String(token.id || '').trim()) || '');
+        const retryKey = tokenImageRetryKeys.get(String(token.id || '').trim()) || '';
         return getUsableMediaUrl(appendTokenImageRetryKey(getCanonicalTokenImageUrl(token), retryKey));
     };
     const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
@@ -2489,6 +2488,10 @@
         });
     };
 
+    const refreshPlayerImageCache = () => {
+        capturePlayerImagesAtLoad();
+    };
+
     const getNPCs = () => {
         const store = getStore();
         return store && typeof store.getNPCs === 'function' ? store.getNPCs() : [];
@@ -3446,7 +3449,11 @@
         if (!rosterPlayer || !store || typeof store.getPlayers !== 'function' || typeof store.save !== 'function') return null;
 
         if (typeof store.updatePlayer === 'function') {
-            return store.updatePlayer(String(rosterPlayer.id || '').trim(), { imageUrl: rawValue });
+            const updated = store.updatePlayer(String(rosterPlayer.id || '').trim(), { imageUrl: rawValue });
+            if (updated && updated.id) {
+                playerImageUrlsAtLoad.set(String(updated.id || '').trim(), toSharedTokenImageUrl(updated.imageUrl));
+            }
+            return updated;
         }
 
         const players = Array.isArray(store.getPlayers()) ? store.getPlayers() : [];
@@ -3454,6 +3461,7 @@
         if (!target) return null;
         target.imageUrl = toSharedTokenImageUrl(rawValue);
         store.save({ scope: `campaign.players.${target.id}` });
+        playerImageUrlsAtLoad.set(String(target.id || '').trim(), target.imageUrl || '');
         return { ...target };
     };
 
@@ -6062,7 +6070,7 @@
                     </label>
                 </div>
                 <div class="vtt-chip-row">
-                    <button class="vtt-chip-btn" data-action="token-retry-image" data-id="${escapeHtml(token.id)}" data-image-url="${escapeHtml(imageUrlValue)}"${imageUrlValue && !isRosterManagedPlayer ? '' : ' disabled'}>Retry Image</button>
+                    <button class="vtt-chip-btn" data-action="token-retry-image" data-id="${escapeHtml(token.id)}" data-image-url="${escapeHtml(imageUrlValue)}"${imageUrlValue ? '' : ' disabled'}>Retry Image</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="1">1x1</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="2">2x2</button>
                 </div>
@@ -7776,7 +7784,6 @@
         if (action === 'token-retry-image') {
             selectedTokenId = id || selectedTokenId;
             const token = getTokenById(selectedTokenId);
-            if (String(token && token.sourceType || '').trim() === 'player') return;
             const imageUrl = toImageUrl(actionEl.dataset.imageUrl || getCanonicalTokenImageUrl(token));
             if (imageUrl && window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberSuccess === 'function') {
                 window.RTF_MEDIA_CACHE.rememberSuccess(imageUrl);
@@ -8596,6 +8603,7 @@
         const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
         const activeCaseId = getActiveCaseId();
         loadRolePreference();
+        refreshPlayerImageCache();
         if (initialVTTLoadPending) return;
         if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
             refreshVTTCollabRoomIfNeeded().catch((err) => {
