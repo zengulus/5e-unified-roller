@@ -2224,6 +2224,10 @@ class VTTCollabSession {
         this.lastYUpdateAt = Date.now();
         this.docSyncConfirmed = true;
         this.updateLiveSyncStatus(this.connected ? 'Live VTT updated by DM.' : 'VTT snapshot restored by DM.');
+        if (this.connected) {
+            this.sendFullDocUpdate('dm-authoritative-apply');
+            this.sendSyncStep1();
+        }
     }
 
     handleAdminBustMessage(payload) {
@@ -2719,6 +2723,9 @@ class VTTCollabSession {
             this.originManualFlush,
             stamp
         );
+        if (this.connected) {
+            this.sendFullDocUpdate(reason);
+        }
         this.applyRevisionState(revision, this.instanceId);
         this.lastCloudSnapshotSignature = '';
         this.pendingReadyFlush = true;

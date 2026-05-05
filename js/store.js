@@ -10697,7 +10697,19 @@
 
             const localCaseIds = new Set(rows.map((row) => row.case_id));
             const existingCaseIds = this.getLastSyncedCaseIds();
-            const toDelete = existingCaseIds.filter((id) => !localCaseIds.has(id));
+            const remoteCaseIds = new Set(existingCaseIds);
+            const existingRemote = await this.sync.client
+                .from(tables.caseState)
+                .select('case_id')
+                .eq('campaign_id', campaignId);
+            if (existingRemote.error) {
+                return { ok: false, error: existingRemote.error.message || 'Failed reading existing case state.' };
+            }
+            (Array.isArray(existingRemote.data) ? existingRemote.data : []).forEach((row) => {
+                const caseId = sanitizeCaseId(row && row.case_id, '');
+                if (caseId) remoteCaseIds.add(caseId);
+            });
+            const toDelete = Array.from(remoteCaseIds.values()).filter((id) => !localCaseIds.has(id));
 
             const upsert = await this.sync.client
                 .from(tables.caseState)

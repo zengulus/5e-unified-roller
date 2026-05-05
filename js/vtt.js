@@ -8665,13 +8665,13 @@
         const activeCaseId = getActiveCaseId();
         loadRolePreference();
         refreshPlayerImageCache();
-        if (initialVTTLoadPending) return;
         if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
             refreshVTTCollabRoomIfNeeded().catch((err) => {
                 console.warn('VTT collaboration room refresh failed', err);
             });
             return;
         }
+        if (initialVTTLoadPending) return;
         if (isVTTCollabReady()) {
             if (vttState && syncRosterLinkedPlayerPresentation(vttState)) {
                 normalizeSelections();

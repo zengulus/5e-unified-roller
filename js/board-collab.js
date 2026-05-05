@@ -1009,6 +1009,7 @@ class BoardCollabSession {
         this.channel = channel;
         await this.refreshPresenceTracking();
         this.broadcastLocalAwareness();
+        this.sendFullDocUpdate('board-connect');
         this.sendSyncStep1();
         this.handlePresenceState(typeof channel.presenceState === 'function' ? channel.presenceState() : {});
     }
@@ -1033,6 +1034,20 @@ class BoardCollabSession {
         const encoder = encoding.createEncoder();
         syncProtocol.writeSyncStep1(encoder, this.doc);
         this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+    }
+
+    sendFullDocUpdate(reason = 'seed') {
+        if (!this.doc) return false;
+        const update = Y.encodeStateAsUpdate(this.doc);
+        if (!update || !update.length) return false;
+        const encoder = encoding.createEncoder();
+        syncProtocol.writeUpdate(encoder, update);
+        return this.sendBroadcast('y-sync', {
+            update: encodeBase64(encoding.toUint8Array(encoder)),
+            seed: true,
+            seedAuthority: 'gm',
+            reason: toTrimmedString(reason, 'seed', 80).trim() || 'seed'
+        });
     }
 
     handleSyncMessage(encoded) {
@@ -1115,6 +1130,10 @@ class BoardCollabSession {
             detail: this.connected ? 'Live board updated by admin.' : 'Board snapshot restored by admin.',
             peerCount: this.remotePresence.size
         });
+        if (this.connected) {
+            this.sendFullDocUpdate('admin-apply-snapshot');
+            this.sendSyncStep1();
+        }
     }
 
     handleAdminBustMessage(payload) {
