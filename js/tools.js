@@ -1696,6 +1696,7 @@ function normalizeConnectPayload(raw) {
         campaignId,
         profileName,
         collabRelayUrl: String(raw.collabRelayUrl || raw.collabServerUrl || raw.relayUrl || '').trim(),
+        backendMode: String(raw.backendMode || raw.syncBackend || 'normalized_rows_v2').trim() || 'normalized_rows_v2',
         enabled: true,
         autoConnect
     };
@@ -2381,6 +2382,7 @@ function exportConnectFile() {
         campaignId: config.campaignId || '',
         profileName: '',
         collabRelayUrl: config.collabRelayUrl || '',
+        backendMode: String(config.backendMode || 'normalized_rows_v2').trim() || 'normalized_rows_v2',
         autoConnect: config.autoConnect !== false
     };
     const form = getSyncFormValues();

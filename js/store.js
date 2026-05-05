@@ -2751,6 +2751,7 @@
     const composeStateFromRowsV2 = (rowsByStore) => {
         const rows = rowsByStore && typeof rowsByStore === 'object' ? rowsByStore : {};
         const base = sanitizeState(null);
+        let rawCampaignContext = null;
         const campaignRow = sortRowsV2(rows.campaigns)[0];
         if (campaignRow && campaignRow.extra && campaignRow.extra.meta) {
             base.meta = {
@@ -2766,7 +2767,7 @@
             else if (id.endsWith('.cognitive-risk')) base.campaign.cognitiveRisk = toNumber(row.value_number, toNumber(extra.value, 0));
             else if (id.endsWith('.case')) base.campaign.case = sanitizeCase(extra);
             else if (id.endsWith('.ledger')) base.campaign.ledger = sanitizeLedgerState(extra);
-            else if (id.endsWith('.context')) base.campaignContext = sanitizeCampaignContext(extra, base.cases);
+            else if (id.endsWith('.context')) rawCampaignContext = rowsV2CloneExtra(extra);
             else if (id.endsWith('.meta')) base.campaignMeta = sanitizeCampaignMeta(extra);
             else if (id.endsWith('.hq-meta')) {
                 base.hq.grid = extra.grid && typeof extra.grid === 'object' ? extra.grid : base.hq.grid;
@@ -2974,6 +2975,56 @@
             activeCaseId: caseMap.has(base.cases.activeCaseId) ? base.cases.activeCaseId : (finalCases[0] && finalCases[0].id) || 'case_primary',
             items: finalCases
         }, base.campaign, base.board);
+        const granularScopeRows = sortRowsV2(rows.campaignScopes);
+        if (granularScopeRows.length) {
+            const scopeCasesByScope = new Map();
+            sortRowsV2(rows.campaignScopeCases).forEach((row) => {
+                const extra = row.extra && typeof row.extra === 'object' ? row.extra : {};
+                const scopeId = sanitizeScopeId(extra.scopeId || row.parent_id, '');
+                const caseId = sanitizeCaseIdOptional(extra.caseId || row.target_id);
+                if (!scopeId || !caseId) return;
+                if (!scopeCasesByScope.has(scopeId)) scopeCasesByScope.set(scopeId, []);
+                scopeCasesByScope.get(scopeId).push({
+                    caseId,
+                    status: sanitizeCampaignScopeStatus(row.status || extra.status, 'planned'),
+                    active: row.status === 'active' || extra.active === true
+                });
+            });
+            const scopes = granularScopeRows.map((row, idx) => {
+                const extra = row.extra && typeof row.extra === 'object' ? rowsV2CloneExtra(row.extra) : {};
+                const scopeId = sanitizeScopeId(extra.id || String(row.scope || '').split('.').pop(), idx === 0 ? DEFAULT_CAMPAIGN_SCOPE_ID : `scope_${idx + 1}`);
+                const caseLinks = scopeCasesByScope.get(scopeId) || [];
+                const caseOrder = caseLinks.map((entry) => entry.caseId);
+                const caseStatus = Object.create(null);
+                caseLinks.forEach((entry) => {
+                    caseStatus[entry.caseId] = entry.status;
+                });
+                const activeLink = caseLinks.find((entry) => entry.active || entry.status === 'active');
+                return {
+                    ...extra,
+                    id: scopeId,
+                    name: sanitizeCaseName(extra.name || row.name, idx === 0 ? DEFAULT_CAMPAIGN_SCOPE_NAME : `Scope ${idx + 1}`),
+                    description: toTrimmedString(extra.description, '', 500).trim(),
+                    activeCaseId: sanitizeCaseIdOptional(activeLink && activeLink.caseId) || sanitizeCaseIdOptional(extra.activeCaseId),
+                    caseOrder: caseOrder.length ? caseOrder : (Array.isArray(extra.caseOrder) ? extra.caseOrder : []),
+                    caseStatus: Object.keys(caseStatus).length ? caseStatus : (extra.caseStatus || {}),
+                    boardRefs: Array.isArray(extra.boardRefs) ? extra.boardRefs : []
+                };
+            });
+            const activeScope = granularScopeRows.find((row) => String(row && row.status || '').trim().toLowerCase() === 'active');
+            const activeScopeId = activeScope && activeScope.extra && activeScope.extra.id
+                ? activeScope.extra.id
+                : (activeScope && activeScope.scope ? String(activeScope.scope).split('.').pop() : '');
+            base.campaignContext = sanitizeCampaignContext({
+                ...(rawCampaignContext || {}),
+                activeScopeId: sanitizeScopeId(activeScopeId, (rawCampaignContext && rawCampaignContext.activeScopeId) || (scopes[0] && scopes[0].id) || DEFAULT_CAMPAIGN_SCOPE_ID),
+                scopes
+            }, base.cases);
+        } else if (rawCampaignContext) {
+            base.campaignContext = sanitizeCampaignContext(rawCampaignContext, base.cases);
+        } else {
+            base.campaignContext = sanitizeCampaignContext(base.campaignContext, base.cases);
+        }
         const activeCase = base.cases.items.find((entry) => entry.id === base.cases.activeCaseId) || base.cases.items[0];
         base.board = activeCase ? activeCase.board : sanitizeBoard(null);
         base.campaign.events = activeCase ? sanitizeEventList(activeCase.events) : [];
@@ -3562,7 +3613,7 @@
     const sanitizeSyncBackendMode = (value) => {
         if (!global.RTF_ALLOW_LEGACY_SYNC_BACKEND) return SYNC_BACKEND_ROWS_V2;
         const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
-        if (raw === SYNC_BACKEND_ROWS_V2 || raw === 'rows_v2' || raw === 'row-normalized' || raw === 'row-normalized-v2') return SYNC_BACKEND_ROWS_V2;
+        if (raw === SYNC_BACKEND_ROWS_V2 || raw === 'rows-v2' || raw === 'rows_v2' || raw === 'row-normalized' || raw === 'row-normalized-v2') return SYNC_BACKEND_ROWS_V2;
         if (raw === SYNC_BACKEND_NORMALIZED || raw === 'norm' || raw === 'normalized-only') return SYNC_BACKEND_NORMALIZED;
         if (raw === SYNC_BACKEND_LEGACY_MIRROR || raw === 'legacy+mirror' || raw === 'legacy-mirror' || raw === 'mirror' || raw === 'dualwrite') {
             return SYNC_BACKEND_LEGACY_MIRROR;
@@ -6917,6 +6968,7 @@
             const rowsToWrite = writeAll ? allRows : scopeToRowWritesV2(scopeList, allRows);
             const versionRows = [];
             const writtenScopes = new Set();
+            const tombstones = [];
 
             for (const storeName of ROWS_V2_CAMPAIGN_CLOUD_STORES) {
                 const tableName = tables[storeName];
@@ -6958,7 +7010,61 @@
                 }
             }
 
-            const tombstones = [];
+            if (!writeAll && scopeList.length) {
+                for (const storeName of ROWS_V2_CAMPAIGN_CLOUD_STORES) {
+                    if (ROWS_V2_ROOM_BACKED_STORE_SET.has(storeName)) continue;
+                    const tableName = tables[storeName];
+                    const desiredRows = Array.isArray(rowsToWrite[storeName]) ? rowsToWrite[storeName] : [];
+                    const desiredIds = new Set(desiredRows.map((row) => toTrimmedString(row && row.id, '', 240)).filter(Boolean));
+                    const existing = await this.sync.client
+                        .from(tableName)
+                        .select('id,scope')
+                        .eq('campaign_id', campaignId)
+                        .is('deleted_at', null);
+                    if (existing.error) return { ok: false, error: existing.error.message || `Rows v2 stale row read failed for ${tableName}.` };
+                    const staleIds = (Array.isArray(existing.data) ? existing.data : [])
+                        .filter((row) => rowsV2ScopeMatches(row && row.scope, scopeList))
+                        .map((row) => ({
+                            id: toTrimmedString(row && row.id, '', 240),
+                            scope: normalizeScopeToken(row && row.scope)
+                        }))
+                        .filter((row) => row.id && row.scope && !desiredIds.has(row.id));
+                    const staleIdValues = staleIds.map((row) => row.id);
+                    if (!staleIds.length) continue;
+                    const del = await this.sync.client
+                        .from(tableName)
+                        .delete()
+                        .eq('campaign_id', campaignId)
+                        .in('id', staleIdValues);
+                    if (del.error) return { ok: false, error: del.error.message || `Rows v2 stale row delete failed for ${tableName}.` };
+                    staleIds.forEach((row) => {
+                        tombstones.push({
+                            campaign_id: campaignId,
+                            table_name: tableName,
+                            row_id: row.id,
+                            scope: row.scope,
+                            revision,
+                            deleted_at: updatedAt,
+                            updated_by: meta.updatedBy || this.sync.instanceId,
+                            updated_by_user: meta.updatedByUser || this.sync.userId || null,
+                            updated_by_name: meta.updatedByName || this.sync.config.profileName || null
+                        });
+                        versionRows.push({
+                            campaign_id: campaignId,
+                            scope: row.scope,
+                            table_name: tableName,
+                            row_id: row.id,
+                            exists: false,
+                            revision,
+                            updated_at: updatedAt,
+                            updated_by: meta.updatedBy || this.sync.instanceId,
+                            updated_by_user: meta.updatedByUser || this.sync.userId || null,
+                            updated_by_name: meta.updatedByName || this.sync.config.profileName || null
+                        });
+                    });
+                }
+            }
+
             if (!writeAll) {
                 for (const scope of scopeList) {
                     if (!scope || scope === SYNC_SCOPE_GLOBAL || writtenScopes.has(scope)) continue;

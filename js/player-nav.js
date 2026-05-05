@@ -81,7 +81,7 @@
         const supabaseUrl = String(source.supabaseUrl || source.projectUrl || source.url || '').trim();
         const anonKey = String(source.anonKey || source.key || '').trim();
         const campaignId = String(source.campaignId || source.campaign || '').trim().toLowerCase();
-        const backendMode = String(source.backendMode || source.syncBackend || '').trim() || 'normalized';
+        const backendMode = String(source.backendMode || source.syncBackend || '').trim() || 'normalized_rows_v2';
         const login = readConnectLogin(source);
         if (!supabaseUrl || !anonKey || !campaignId) return null;
 
@@ -210,7 +210,7 @@
             anonKey: String(config && config.anonKey || '').trim(),
             campaignId: String(config && config.campaignId || '').trim(),
             profileName: '',
-            backendMode: String(config && config.backendMode || 'legacy').trim() || 'legacy',
+            backendMode: String(config && config.backendMode || 'normalized_rows_v2').trim() || 'normalized_rows_v2',
             autoConnect: config ? (config.autoConnect !== false) : true
         };
         const loginEmail = String(config && config.loginEmail || '').trim();
