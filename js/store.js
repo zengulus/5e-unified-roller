@@ -3920,7 +3920,9 @@
                     });
                 }).finally(() => {
                     this.sync.initialCloudPullInFlight = false;
-                    this.stopInitialCloudActionBlock();
+                    if (!this.isInitialCloudPullPending()) {
+                        this.stopInitialCloudActionBlock();
+                    }
                 });
             }, this.isCloudOnlyMode() ? 0 : AUTO_SYNC_BOOT_DELAY_MS);
         }

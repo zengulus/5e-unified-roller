@@ -28,6 +28,7 @@ const PLAYER_SCOPE_PREFIX = 'campaign.players';
 const SHARED_TRACK_MIN = 0;
 const SHARED_TRACK_MAX = 6;
 let systemDetailToggleBound = false;
+let hubStoreEventsBound = false;
 
 function normalizePlayerScopeId(value) {
     const raw = String(value || '').trim().toLowerCase();
@@ -130,6 +131,25 @@ function bindSystemDetailToggle() {
 function getCampaign() {
     if (!window.RTF_STORE) return null;
     return window.RTF_STORE.state.campaign;
+}
+
+function isHubWaitingForCloudStore() {
+    return !!(window.RTF_STORE
+        && typeof window.RTF_STORE.isCloudOnlyMode === 'function'
+        && window.RTF_STORE.isCloudOnlyMode()
+        && typeof window.RTF_STORE.isInitialCloudPullPending === 'function'
+        && window.RTF_STORE.isInitialCloudPullPending());
+}
+
+function renderHubCloudLoading() {
+    const narrativeEl = document.getElementById('hubNarrativePressureSummary');
+    if (narrativeEl) {
+        narrativeEl.innerHTML = '<div>Loading authoritative campaign state from Supabase...</div>';
+    }
+    const rosterEl = document.getElementById('rosterList');
+    if (rosterEl) {
+        rosterEl.innerHTML = '<div class="empty-state">Loading Supabase campaign state...</div>';
+    }
 }
 
 function save(scope = 'campaign') {
@@ -403,6 +423,10 @@ function updatePlayer(idx, field, val) {
 
 
 function render() {
+    if (isHubWaitingForCloudStore()) {
+        renderHubCloudLoading();
+        return;
+    }
     const c = getCampaign();
     if (!c) return; // Wait for store load
     const players = Array.isArray(c.players) ? c.players : [];
@@ -492,9 +516,20 @@ function render() {
 
 }
 
+function bindHubStoreEvents() {
+    if (hubStoreEventsBound) return;
+    hubStoreEventsBound = true;
+    window.addEventListener('rtf-store-updated', render);
+    window.addEventListener('rtf-sync-status', render);
+    if (window.RTF_STORE && typeof window.RTF_STORE.onSyncStatus === 'function') {
+        window.RTF_STORE.onSyncStatus(render);
+    }
+}
+
 // Initial render on load
 window.addEventListener('load', () => {
     bindSystemDetailToggle();
+    bindHubStoreEvents();
     // Check if store loaded
     if (window.RTF_STORE) {
         render();
@@ -504,3 +539,4 @@ window.addEventListener('load', () => {
 });
 
 bindSystemDetailToggle();
+bindHubStoreEvents();
