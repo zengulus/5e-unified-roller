@@ -260,6 +260,7 @@
     const LOCAL_ROWS_DB_VERSION = 1;
     const LOCAL_ROWS_META_KEY = 'rtf_campaign_rows_v2_meta';
     const LOCAL_ROWS_BACKUP_KEY = 'ravnica_unified_v1_backup_before_idb';
+    const STORE_ROWS_V2_LOCAL_ONLY_FORMAT = 'rows-v2-local-only-v1';
     const LOCAL_ROWS_STORES = Object.freeze([
         'campaigns',
         'campaignFields',
@@ -2118,6 +2119,30 @@
         }
     };
 
+    const isRowsV2LocalOnlyStorePayload = (value) => !!(
+        value
+        && typeof value === 'object'
+        && value.__rtfStoreFormat === STORE_ROWS_V2_LOCAL_ONLY_FORMAT
+        && value.rowsV2LocalOnly === true
+    );
+
+    const buildRowsV2LocalOnlyStorePayload = (state, campaignId, reason = 'save') => {
+        const clean = sanitizeState(state);
+        return {
+            __rtfStoreFormat: STORE_ROWS_V2_LOCAL_ONLY_FORMAT,
+            rowsV2LocalOnly: true,
+            campaignId: sanitizeCampaignId(campaignId || '') || 'local',
+            reason: toTrimmedString(reason, 'save', 80).trim() || 'save',
+            savedAt: new Date().toISOString(),
+            meta: {
+                version: clean.meta.version,
+                created: clean.meta.created,
+                updated: clean.meta.updated,
+                syncRevision: clean.meta.syncRevision
+            }
+        };
+    };
+
     const scopesOverlap = (leftScope, rightScope) => {
         const left = normalizeScopeToken(leftScope);
         const right = normalizeScopeToken(rightScope);
@@ -3781,6 +3806,16 @@
             try {
                 const parsed = JSON.parse(event.newValue);
                 if (!parsed || typeof parsed !== 'object') return;
+                if (isRowsV2LocalOnlyStorePayload(parsed)) {
+                    if (this.isRowsV2Mode()) {
+                        this.sync.rowsV2LocalReady = this.bootstrapRowsV2Local().catch((err) => {
+                            const message = err && err.message ? err.message : String(err);
+                            this.sync.rowsV2LocalError = message;
+                            console.warn('RTF_STORE: Rows v2 local refresh failed', err);
+                        });
+                    }
+                    return;
+                }
 
                 const updatedAt = toTimestamp(parsed.meta && parsed.meta.updated, Date.now());
                 const revision = toNonNegativeInt(parsed.meta && parsed.meta.syncRevision, 0);
@@ -4711,11 +4746,17 @@
         load() {
             try {
                 const raw = localStorage.getItem(STORE_KEY);
+                let awaitingRowsV2LocalHydrate = false;
                 this.sync.hadStoredStateAtBoot = !!raw;
                 if (raw) {
                     const loaded = JSON.parse(raw);
-                    this.state = sanitizeState(loaded);
-                    logInfo("RTF_STORE: Loaded unified data.");
+                    if (isRowsV2LocalOnlyStorePayload(loaded)) {
+                        awaitingRowsV2LocalHydrate = true;
+                        logInfo("RTF_STORE: LocalStorage has rows v2 marker. Hydrating IndexedDB rows...");
+                    } else {
+                        this.state = sanitizeState(loaded);
+                        logInfo("RTF_STORE: Loaded unified data.");
+                    }
                 } else {
                     logInfo("RTF_STORE: No unified data found. Attempting migration...");
                     this.migrate();
@@ -4724,7 +4765,7 @@
                 this.state = sanitizeState(this.state);
                 this.ensureCampaignEntityIds(false);
                 this.syncActiveCaseLegacyState();
-                if (this.ingestPreloadedData()) {
+                if (!awaitingRowsV2LocalHydrate && this.ingestPreloadedData()) {
                     const dirtyBeforeSeed = this.sync.localDirtyScopes
                         ? new Set(this.sync.localDirtyScopes)
                         : new Set();
@@ -4781,11 +4822,7 @@
                 this.ensureCampaignEntityIds(false);
                 this.syncActiveCaseLegacyState();
                 this.sync.lastSyncedState = sanitizeState(this.state);
-                try {
-                    localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                } catch (err) {
-                    warnStorageMirrorFailure('RTF_STORE: Failed mirroring rows v2 state to localStorage', err);
-                }
+                this.writeLocalStorageMirror('rows-v2-local-hydrate');
                 this.broadcastStoreUpdate('storage', { scopes: [SYNC_SCOPE_GLOBAL], reason: 'rows-v2-local-hydrate' });
                 return { ok: true, reason: 'hydrated', rows: existingCount };
             }
@@ -4861,6 +4898,30 @@
                 console.warn('RTF_STORE: Failed writing rows v2 local rows', err);
                 return { ok: false, error: message };
             });
+        }
+
+        writeLocalStorageMirror(reason = 'save') {
+            try {
+                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                return true;
+            } catch (err) {
+                if (isStorageQuotaError(err) && this.isRowsV2Mode()) {
+                    try {
+                        localStorage.removeItem(STORE_KEY);
+                        localStorage.setItem(
+                            STORE_KEY,
+                            JSON.stringify(buildRowsV2LocalOnlyStorePayload(this.state, this.getRowsV2CampaignId(), reason))
+                        );
+                        warnStorageMirrorFailure('RTF_STORE: Full localStorage mirror exceeded quota', err);
+                        return false;
+                    } catch (markerErr) {
+                        warnStorageMirrorFailure('RTF_STORE: Failed writing rows v2 localStorage marker', markerErr);
+                        return false;
+                    }
+                }
+                console.error('RTF_STORE: Failed writing localStorage mirror', err);
+                return false;
+            }
         }
 
         ingestPreloadedData() {
@@ -5041,8 +5102,9 @@
                 this.recordScopeUpdated(scopes, now);
                 const cloudScopes = this.markLocalDirtyScopes(scopes, now);
                 if (cloudScopes.length) this.touchSoftLockScopes(cloudScopes);
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                this.persistRowsV2LocalSnapshot(scopes).catch(() => { });
+                const rowsSnapshot = this.persistRowsV2LocalSnapshot(scopes);
+                this.writeLocalStorageMirror('save');
+                rowsSnapshot.catch(() => { });
 
                 if (!skipCloud && !this.isApplyingRemote && cloudScopes.length) {
                     if (this.canAutoPushCloud('local-save')) {
@@ -5220,12 +5282,7 @@
                 }
             });
 
-            try {
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-            } catch (err) {
-                console.error('RTF_STORE: Failed resetting campaign data', err);
-                return false;
-            }
+            this.writeLocalStorageMirror('reset');
             this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL).catch(() => { });
 
             this.updateSyncStatus({
@@ -6815,11 +6872,7 @@
                     if (!silent) this.updateSyncStatus({ mode: 'error', connected: this.hasLiveSyncConnection(), pendingPush: false, message: 'Cloud push failed.', lastError: message });
                     return { ok: false, reason: 'error', error: message };
                 }
-                try {
-                    localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                } catch (err) {
-                    console.warn('RTF_STORE: Failed updating local rows v2 timestamp', err);
-                }
+                this.writeLocalStorageMirror('rows-v2-cloud-push');
                 this.persistRowsV2LocalSnapshot(dirtyScopes).catch(() => { });
                 this.clearLocalDirtyScopes(dirtyScopes);
                 this.syncScopeBaselinesFromLocalState(dirtyScopes, { revision: nextRevision, updatedAt });
@@ -7372,11 +7425,7 @@
             this.sync.lastCloudStateSig = JSON.stringify(stripLocalOnlyFieldsForCloud(remoteState));
             this.sync.lastSyncedState = sanitizeState(remoteState);
 
-            try {
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-            } catch (writeErr) {
-                console.warn('RTF_STORE: Failed writing merged local state', writeErr);
-            }
+            this.writeLocalStorageMirror('rows-v2-merge');
             this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL).catch(() => { });
 
             this.syncScopeBaselinesFromRemoteRow(remoteRow, null, { skipDirtyScopes: true });
@@ -10929,11 +10978,7 @@
                         return { ok: false, reason: 'error', error: message };
                     }
 
-                    try {
-                        localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                    } catch (writeErr) {
-                        console.warn('RTF_STORE: Failed updating local timestamp after cloud push', writeErr);
-                    }
+                    this.writeLocalStorageMirror('cloud-push');
 
                     this.clearLocalDirtyScopes(dirtyScopes);
                     this.syncScopeBaselinesFromLocalState(dirtyScopes, { revision: nextRevision, updatedAt });
@@ -11207,11 +11252,7 @@
                             this.syncActiveCaseLegacyState();
                             this.ensureCampaignEntityIds(false);
                             this.markLocalDirtyScopes(dirtyScopes, Date.now());
-                            try {
-                                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                            } catch (writeErr) {
-                                console.warn('RTF_STORE: Failed writing merged local state', writeErr);
-                            }
+                            this.writeLocalStorageMirror('cloud-merge');
                             baseRevision = conflict.remoteRevision;
                             continue;
                         }
@@ -11314,11 +11355,7 @@
                             this.syncActiveCaseLegacyState();
                             this.ensureCampaignEntityIds(false);
                             this.markLocalDirtyScopes(dirtyScopes, Date.now());
-                            try {
-                                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                            } catch (writeErr) {
-                                console.warn('RTF_STORE: Failed writing merged local state', writeErr);
-                            }
+                            this.writeLocalStorageMirror('cloud-merge');
                             baseRevision = conflict.remoteRevision;
                             continue;
                         }
@@ -11326,11 +11363,7 @@
                         return { ok: false, reason: 'conflict', conflict: this.getPendingConflict() };
                     }
 
-                    try {
-                        localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-                    } catch (writeErr) {
-                        console.warn('RTF_STORE: Failed updating local timestamp after cloud push', writeErr);
-                    }
+                    this.writeLocalStorageMirror('cloud-push');
 
                     this.clearLocalDirtyScopes(dirtyScopes);
                     this.sync.lastPushAt = Date.now();
@@ -11403,11 +11436,7 @@
             this.ensureCampaignEntityIds(false);
             this.syncActiveCaseLegacyState();
 
-            try {
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
-            } catch (err) {
-                console.error('RTF_STORE: Failed writing remote state locally', err);
-            }
+            this.writeLocalStorageMirror('remote-apply');
             this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL).catch(() => { });
 
             this.isApplyingRemote = false;
@@ -12449,7 +12478,8 @@
                 scopes.forEach((scopeToken) => {
                     this.state.meta.scopeUpdated[scopeToken] = now;
                 });
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                this.persistRowsV2LocalSnapshot(scopes).catch(() => { });
+                this.writeLocalStorageMirror('board-collab');
                 this.broadcastStoreUpdate(opts.source || 'board-collab', {
                     scopes,
                     roomId: toTrimmedString(opts.roomId, '', 160).trim()
@@ -12486,7 +12516,8 @@
                 scopes.forEach((scopeToken) => {
                     this.state.meta.scopeUpdated[scopeToken] = now;
                 });
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                this.persistRowsV2LocalSnapshot(scopes).catch(() => { });
+                this.writeLocalStorageMirror('vtt-collab');
                 this.broadcastStoreUpdate(opts.source || 'vtt-collab', {
                     scopes,
                     roomId: target.roomId
