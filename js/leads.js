@@ -939,12 +939,25 @@
         focusLeadFromUrlIfPresent();
     }
 
+    let leadsInitialized = false;
+
+    function isWaitingForCloudStore() {
+        const store = getStore();
+        return !!(store
+            && typeof store.isCloudOnlyMode === 'function'
+            && store.isCloudOnlyMode()
+            && typeof store.isInitialCloudPullPending === 'function'
+            && store.isInitialCloudPullPending());
+    }
+
     function waitForStore() {
-        if (getStore()) {
-            init();
-        } else {
+        if (leadsInitialized) return;
+        if (!getStore() || isWaitingForCloudStore()) {
             setTimeout(waitForStore, 100);
+            return;
         }
+        init();
+        leadsInitialized = true;
     }
 
     window.addLeadFromForm = addLeadFromForm;
@@ -963,6 +976,13 @@
     });
     window.addEventListener('rtf-store-updated', (event) => {
         if (!event || !event.detail || event.detail.source !== 'remote') return;
+        if (!leadsInitialized) {
+            waitForStore();
+            return;
+        }
         renderLeadQueue();
+    });
+    window.addEventListener('rtf-sync-status', () => {
+        if (!leadsInitialized) waitForStore();
     });
 })();

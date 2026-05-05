@@ -500,12 +500,25 @@
         renderRequisitions();
     }
 
+    let requisitionsInitialized = false;
+
+    function isWaitingForCloudStore() {
+        const store = getStore();
+        return !!(store
+            && typeof store.isCloudOnlyMode === 'function'
+            && store.isCloudOnlyMode()
+            && typeof store.isInitialCloudPullPending === 'function'
+            && store.isInitialCloudPullPending());
+    }
+
     function waitForStore() {
-        if (getStore()) {
-            init();
-        } else {
+        if (requisitionsInitialized) return;
+        if (!getStore() || isWaitingForCloudStore()) {
             setTimeout(waitForStore, 100);
+            return;
         }
+        init();
+        requisitionsInitialized = true;
     }
 
     bindDelegatedDataHandlers();
@@ -519,6 +532,16 @@
     window.openRequisitionInTimeline = openRequisitionInTimeline;
 
     window.addEventListener('load', waitForStore);
+    window.addEventListener('rtf-store-updated', () => {
+        if (requisitionsInitialized) {
+            renderRequisitions();
+            return;
+        }
+        waitForStore();
+    });
+    window.addEventListener('rtf-sync-status', () => {
+        if (!requisitionsInitialized) waitForStore();
+    });
     window.addEventListener('beforeunload', () => {
         const manager = getDeleteManager();
         if (manager && typeof manager.flush === 'function') manager.flush();

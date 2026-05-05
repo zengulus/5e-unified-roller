@@ -450,14 +450,27 @@
             : '<div class="empty-state">No encounter recipes yet.</div>';
     }
 
+    let encountersInitialized = false;
+
+    function isWaitingForCloudStore() {
+        const store = getStore();
+        return !!(store
+            && typeof store.isCloudOnlyMode === 'function'
+            && store.isCloudOnlyMode()
+            && typeof store.isInitialCloudPullPending === 'function'
+            && store.isInitialCloudPullPending());
+    }
+
     function waitForStore() {
-        if (getStore()) {
-            getDeleteManager();
-            renderEncounters();
-            applyBoardDraftToForm();
-        } else {
+        if (encountersInitialized) return;
+        if (!getStore() || isWaitingForCloudStore()) {
             setTimeout(waitForStore, 100);
+            return;
         }
+        getDeleteManager();
+        renderEncounters();
+        applyBoardDraftToForm();
+        encountersInitialized = true;
     }
 
     bindDelegatedDataHandlers();
@@ -470,6 +483,16 @@
     window.openEncounterInTracker = openEncounterInTracker;
 
     window.addEventListener('load', waitForStore);
+    window.addEventListener('rtf-store-updated', () => {
+        if (encountersInitialized) {
+            renderEncounters();
+            return;
+        }
+        waitForStore();
+    });
+    window.addEventListener('rtf-sync-status', () => {
+        if (!encountersInitialized) waitForStore();
+    });
     window.addEventListener('beforeunload', () => {
         const manager = getDeleteManager();
         if (manager && typeof manager.flush === 'function') manager.flush();

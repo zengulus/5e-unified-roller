@@ -461,6 +461,27 @@ function render() {
     applyPendingLocationDeepLinkFocus();
 }
 
+let locationsInitialized = false;
+
+function isWaitingForCloudStore() {
+    const store = window.RTF_STORE;
+    return !!(store
+        && typeof store.isCloudOnlyMode === 'function'
+        && store.isCloudOnlyMode()
+        && typeof store.isInitialCloudPullPending === 'function'
+        && store.isInitialCloudPullPending());
+}
+
+function waitForStoreAndRender() {
+    if (locationsInitialized) return;
+    if (!window.RTF_STORE || isWaitingForCloudStore()) {
+        setTimeout(waitForStoreAndRender, 100);
+        return;
+    }
+    render();
+    locationsInitialized = true;
+}
+
 window.addEventListener('load', async () => {
     pendingLinkLocationId = getLocationIdFromUrl();
     if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
@@ -470,15 +491,18 @@ window.addEventListener('load', async () => {
             console.warn('Failed loading location preload dataset', err);
         }
     }
-    if (window.RTF_STORE) {
-        render();
-    } else {
-        setTimeout(render, 100);
-    }
+    waitForStoreAndRender();
 });
 
 window.addEventListener('rtf-store-updated', () => {
+    if (!locationsInitialized) {
+        waitForStoreAndRender();
+        return;
+    }
     render();
+});
+window.addEventListener('rtf-sync-status', () => {
+    if (!locationsInitialized) waitForStoreAndRender();
 });
 
 window.copyLocationLink = copyLocationLink;

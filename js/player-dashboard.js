@@ -257,19 +257,43 @@ window.addPlayer = addPlayer;
 window.updatePlayer = updatePlayer;
 window.deletePlayer = deletePlayer;
 
+function isWaitingForCloudStore() {
+    const store = window.RTF_STORE;
+    return !!(store
+        && typeof store.isCloudOnlyMode === 'function'
+        && store.isCloudOnlyMode()
+        && typeof store.isInitialCloudPullPending === 'function'
+        && store.isInitialCloudPullPending());
+}
+
+function waitForStore() {
+    if (playerDashboardInitialized) return;
+    if (!window.RTF_STORE || isWaitingForCloudStore()) {
+        setTimeout(waitForStore, 100);
+        return;
+    }
+    render();
+    playerDashboardInitialized = true;
+}
+
+let playerDashboardInitialized = false;
+
 // Init
 bindDelegatedDataHandlers();
 
-window.addEventListener('load', () => {
-    if (window.RTF_STORE) {
-        render();
-    } else {
-        setTimeout(render, 100);
-    }
-});
+window.addEventListener('load', waitForStore);
 
 window.addEventListener('rtf-store-updated', (event) => {
     if (!event || !event.detail) return;
     if (event.detail.source !== 'remote' && event.detail.source !== 'storage') return;
+    if (!playerDashboardInitialized) {
+        waitForStore();
+        return;
+    }
+    if (isWaitingForCloudStore()) {
+        waitForStore();
+        return;
+    }
     render();
 });
+window.addEventListener('rtf-sync-status', waitForStore);

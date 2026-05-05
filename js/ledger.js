@@ -802,12 +802,25 @@
         setTimeout(() => URL.revokeObjectURL(link.href), 500);
     }
 
+    let ledgerInitialized = false;
+
+    function isWaitingForCloudStore() {
+        const store = getStore();
+        return !!(store
+            && typeof store.isCloudOnlyMode === 'function'
+            && store.isCloudOnlyMode()
+            && typeof store.isInitialCloudPullPending === 'function'
+            && store.isInitialCloudPullPending());
+    }
+
     function waitForStore() {
-        if (getStore()) {
-            renderLedger();
+        if (ledgerInitialized) return;
+        if (!getStore() || isWaitingForCloudStore()) {
+            setTimeout(waitForStore, 100);
             return;
         }
-        setTimeout(waitForStore, 100);
+        renderLedger();
+        ledgerInitialized = true;
     }
 
     window.renderLedger = renderLedger;
@@ -824,6 +837,13 @@
     window.addEventListener('load', waitForStore);
     window.addEventListener('rtf-store-updated', (event) => {
         if (!event || !event.detail) return;
+        if (!ledgerInitialized) {
+            waitForStore();
+            return;
+        }
         renderLedger();
+    });
+    window.addEventListener('rtf-sync-status', () => {
+        if (!ledgerInitialized) waitForStore();
     });
 })();

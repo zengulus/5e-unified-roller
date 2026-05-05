@@ -592,6 +592,29 @@ function render() {
     applyPendingNpcDeepLinkFocus();
 }
 
+let rosterInitialized = false;
+
+function isWaitingForCloudStore() {
+    const store = window.RTF_STORE;
+    return !!(store
+        && typeof store.isCloudOnlyMode === 'function'
+        && store.isCloudOnlyMode()
+        && typeof store.isInitialCloudPullPending === 'function'
+        && store.isInitialCloudPullPending());
+}
+
+function waitForStoreAndRender() {
+    if (rosterInitialized) return;
+    if (!window.RTF_STORE || isWaitingForCloudStore()) {
+        setTimeout(waitForStoreAndRender, 100);
+        return;
+    }
+    ensureGuildOptions();
+    setFormMode(false);
+    render();
+    rosterInitialized = true;
+}
+
 window.addEventListener('load', async () => {
     pendingLinkNPCId = getLinkedNpcIdFromUrl();
     if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
@@ -602,21 +625,18 @@ window.addEventListener('load', async () => {
         }
     }
     refreshPreloadedNPCSignatures();
-    if (window.RTF_STORE) {
-        ensureGuildOptions();
-        setFormMode(false);
-        render();
-    } else {
-        setTimeout(() => {
-            ensureGuildOptions();
-            setFormMode(false);
-            render();
-        }, 100);
-    }
+    waitForStoreAndRender();
 });
 
 window.addEventListener('rtf-store-updated', () => {
+    if (!rosterInitialized) {
+        waitForStoreAndRender();
+        return;
+    }
     render();
+});
+window.addEventListener('rtf-sync-status', () => {
+    if (!rosterInitialized) waitForStoreAndRender();
 });
 
 window.copyNPCLink = copyNPCLink;
