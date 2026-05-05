@@ -3836,10 +3836,22 @@
         }
 
         markInitialCloudPullComplete() {
+            const wasPending = this.isInitialCloudPullPending();
             if (!this.sync.initialCloudPullDone) {
                 this.sync.initialCloudPullDone = true;
             }
             this.stopInitialCloudActionBlock();
+            if (wasPending) {
+                this.updateSyncStatus({
+                    mode: this.syncStatus.mode === 'connecting' ? 'ready' : this.syncStatus.mode,
+                    connected: this.hasLiveSyncConnection(),
+                    pendingPush: !!(this.sync.localDirtyScopes && this.sync.localDirtyScopes.size)
+                });
+                this.broadcastStoreUpdate('remote', {
+                    scopes: [SYNC_SCOPE_GLOBAL],
+                    reason: 'initial-cloud-pull-complete'
+                });
+            }
         }
 
         canAutoPushCloud(reason = 'scheduled') {
