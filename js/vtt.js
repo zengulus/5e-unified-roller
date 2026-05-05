@@ -2550,7 +2550,7 @@
     const getCanonicalTokenImageUrl = (token) => {
         if (!token) return '';
         const rosterImageUrl = getRosterPlayerImageUrlForToken(token);
-        if (rosterImageUrl !== null) return rosterImageUrl;
+        if (rosterImageUrl !== null) return rosterImageUrl || String(token.imageUrl || '').trim();
         return String(token.imageUrl || '').trim();
     };
 
@@ -6803,6 +6803,103 @@
         schedulePingExpiryRender(scene);
     };
 
+    const buildTokenClassName = (options = {}) => {
+        const token = options.token;
+        const stealthStatus = String(options.stealthStatus || '').trim();
+        const classes = ['vtt-token'];
+        if (options.usableImageUrl) classes.push('has-image');
+        if (options.moodEmoji) classes.push('has-mood-corner');
+        if (token && token.id === selectedTokenId) classes.push('is-selected');
+        if (token && token.id === options.focusedEntryTokenId) classes.push('is-entry-linked');
+        if (token && token.id === options.activeTurnTokenId) classes.push('is-active-turn');
+        if (options.isHiddenToPlayers) classes.push('is-hidden');
+        if (token && token.id === previewTokenId) classes.push('is-preview-open');
+        if (stealthStatus === STEALTH_STATUS_DETECTED) classes.push('is-stealth-detected');
+        if (stealthStatus === STEALTH_STATUS_UNSEEN) classes.push('is-stealth-unseen');
+        return classes.join(' ');
+    };
+
+    const renderTokenStableContent = (tokenEl, token, usableImageUrl, moodEmoji, moodText) => {
+        const label = String(token && token.label || 'Token');
+        const initials = buildInitials(label);
+        const signature = JSON.stringify({
+            image: usableImageUrl || '',
+            label,
+            initials,
+            moodEmoji: moodEmoji || '',
+            moodText: moodText || ''
+        });
+        if (tokenEl.dataset.renderSignature === signature) return;
+        const hasHoverCard = !!(usableImageUrl || moodText);
+        tokenEl.innerHTML = `
+            <div class="vtt-token-corona"></div>
+            <div class="vtt-token-face">
+                ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(label)}" draggable="false" decoding="async">` : `<div class="vtt-token-initials">${escapeHtml(initials)}</div>`}
+            </div>
+            ${moodEmoji ? `<div class="vtt-token-mood-corner" title="${escapeHtml(moodText || moodEmoji)}">${escapeHtml(moodEmoji)}</div>` : ''}
+            ${hasHoverCard ? `
+                <div class="vtt-token-hover-card${usableImageUrl ? '' : ' has-mood-only'}">
+                    ${usableImageUrl ? `<img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(label)} portrait" draggable="false" loading="lazy" decoding="async">` : ''}
+                    ${moodText ? `<div class="vtt-token-mood-badge">${escapeHtml(moodText)}</div>` : ''}
+                </div>
+            ` : ''}
+            <div class="vtt-token-subtitle">${escapeHtml(label)}</div>
+        `;
+        tokenEl.dataset.renderSignature = signature;
+    };
+
+    const renderTokenLayer = (scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime) => {
+        if (!tokenLayerEl || !scene || !scene.grid) return;
+        const liveIds = new Set();
+        visibleTokens.forEach((token) => {
+            const tokenId = String(token && token.id || '').trim();
+            if (tokenId) liveIds.add(tokenId);
+        });
+        Array.from(tokenLayerEl.querySelectorAll('.vtt-token')).forEach((tokenEl) => {
+            const tokenId = String(tokenEl.getAttribute('data-token-id') || '').trim();
+            if (!liveIds.has(tokenId)) tokenEl.remove();
+        });
+
+        visibleTokens.forEach((token) => {
+            const tokenId = String(token && token.id || '').trim();
+            if (!tokenId) return;
+            const renderedCells = getRenderableTokenCells(token, scene, renderTime);
+            const usableImageUrl = getTokenImageRenderUrl(token);
+            const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
+            const isBloodied = isTokenBloodied(token);
+            const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
+            const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
+            const moodText = getTokenMoodText(token);
+            const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(tokenId) : tokenId.replace(/"/g, '\\"');
+            let tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
+            if (!tokenEl) {
+                tokenEl = document.createElement('div');
+            }
+            tokenLayerEl.appendChild(tokenEl);
+            tokenEl.className = buildTokenClassName({
+                token,
+                usableImageUrl,
+                moodEmoji,
+                focusedEntryTokenId,
+                activeTurnTokenId,
+                isHiddenToPlayers,
+                stealthStatus
+            });
+            tokenEl.dataset.tokenId = tokenId;
+            tokenEl.dataset.id = tokenId;
+            tokenEl.dataset.action = 'select-token';
+            tokenEl.dataset.side = token.side || 'neutral';
+            tokenEl.dataset.stealthStatus = stealthStatus;
+            tokenEl.dataset.bloodied = isBloodied ? '1' : '0';
+            tokenEl.dataset.worldLeft = String(scene.grid.offsetX + renderedCells.x * scene.grid.cellPx);
+            tokenEl.dataset.worldTop = String(scene.grid.offsetY + renderedCells.y * scene.grid.cellPx);
+            tokenEl.dataset.worldWidth = String(token.w * scene.grid.cellPx);
+            tokenEl.dataset.worldHeight = String(token.h * scene.grid.cellPx);
+            tokenEl.style.setProperty('--vtt-token-damage', String(getTokenDamageFraction(token)));
+            renderTokenStableContent(tokenEl, token, usableImageUrl, moodEmoji, moodText);
+        });
+    };
+
     const renderStage = () => {
         if (initialVTTLoadPending) return;
         const scene = getActiveScene();
@@ -6846,43 +6943,7 @@
 
         renderTemplateLayer(scene, visibleTokens, worldSize, renderTime);
 
-        tokenLayerEl.innerHTML = visibleTokens.map((token) => {
-            const renderedCells = getRenderableTokenCells(token, scene, renderTime);
-            const usableImageUrl = getTokenImageRenderUrl(token);
-            const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
-            const isBloodied = isTokenBloodied(token);
-            const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
-            const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
-            const moodText = getTokenMoodText(token);
-            const hasHoverCard = !!(usableImageUrl || moodText);
-            return `
-                <div class="vtt-token${usableImageUrl ? ' has-image' : ''}${moodEmoji ? ' has-mood-corner' : ''}${token.id === selectedTokenId ? ' is-selected' : ''}${token.id === focusedEntryTokenId ? ' is-entry-linked' : ''}${token.id === activeTurnTokenId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${token.id === previewTokenId ? ' is-preview-open' : ''}${stealthStatus === STEALTH_STATUS_DETECTED ? ' is-stealth-detected' : ''}${stealthStatus === STEALTH_STATUS_UNSEEN ? ' is-stealth-unseen' : ''}"
-                    data-token-id="${escapeHtml(token.id)}"
-                    data-id="${escapeHtml(token.id)}"
-                    data-action="select-token"
-                    data-side="${escapeHtml(token.side || 'neutral')}"
-                    data-stealth-status="${escapeHtml(stealthStatus)}"
-                    data-bloodied="${isBloodied ? '1' : '0'}"
-                    data-world-left="${escapeHtml(String(scene.grid.offsetX + renderedCells.x * scene.grid.cellPx))}"
-                    data-world-top="${escapeHtml(String(scene.grid.offsetY + renderedCells.y * scene.grid.cellPx))}"
-                    data-world-width="${escapeHtml(String(token.w * scene.grid.cellPx))}"
-                    data-world-height="${escapeHtml(String(token.h * scene.grid.cellPx))}"
-                    style="--vtt-token-damage:${getTokenDamageFraction(token)};">
-                    <div class="vtt-token-corona"></div>
-                    <div class="vtt-token-face">
-                        ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')}" draggable="false">` : `<div class="vtt-token-initials">${escapeHtml(buildInitials(token.label))}</div>`}
-                    </div>
-                    ${moodEmoji ? `<div class="vtt-token-mood-corner" title="${escapeHtml(moodText || moodEmoji)}">${escapeHtml(moodEmoji)}</div>` : ''}
-                    ${hasHoverCard ? `
-                        <div class="vtt-token-hover-card${usableImageUrl ? '' : ' has-mood-only'}">
-                            ${usableImageUrl ? `<img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(token.label || 'Token')} portrait" draggable="false">` : ''}
-                            ${moodText ? `<div class="vtt-token-mood-badge">${escapeHtml(moodText)}</div>` : ''}
-                        </div>
-                    ` : ''}
-                    <div class="vtt-token-subtitle">${escapeHtml(token.label || 'Token')}</div>
-                </div>
-            `;
-        }).join('');
+        renderTokenLayer(scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime);
 
         renderVisionLayer(scene, visibleTokens, worldSize, renderTime);
 

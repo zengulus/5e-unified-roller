@@ -3646,6 +3646,14 @@
         && config.campaignId
     );
 
+    const hasConfiguredSupabaseSyncConfig = (config) => !!(
+        config
+        && config.enabled
+        && config.supabaseUrl
+        && config.anonKey
+        && config.campaignId
+    );
+
     const coerceAutoConnectBackendMode = (config) => {
         const clean = sanitizeSyncConfig(config);
         if (!global.RTF_ALLOW_LEGACY_SYNC_BACKEND) {
@@ -3668,7 +3676,8 @@
         constructor() {
             this.state = deepClone(DEFAULT_STATE);
             const coercedSyncConfig = coerceAutoConnectBackendMode(getMergedSyncConfig());
-            const storedLastPulledRemote = parseStoredLastPulledRemote(coercedSyncConfig.config);
+            const cloudOnlyMode = hasConfiguredSupabaseSyncConfig(coercedSyncConfig.config);
+            const storedLastPulledRemote = cloudOnlyMode ? null : parseStoredLastPulledRemote(coercedSyncConfig.config);
 
             this.sync = {
                 config: coercedSyncConfig.config,
@@ -3695,8 +3704,8 @@
                 authPromise: null,
                 supabaseLoadPromise: null,
                 lastCloudStateSig: '',
-                localDirtyScopes: new Set(parseStoredDirtyScopes()),
-                scopeBaselines: parseStoredScopeBaselines(),
+                localDirtyScopes: cloudOnlyMode ? new Set() : new Set(parseStoredDirtyScopes()),
+                scopeBaselines: cloudOnlyMode ? new Map() : parseStoredScopeBaselines(),
                 lastSyncedState: sanitizeState(this.state),
                 lastKnownRemoteRevision: storedLastPulledRemote ? toNonNegativeInt(storedLastPulledRemote.revision, 0) : 0,
                 pendingConflict: null,
@@ -3711,7 +3720,8 @@
                 queryCache: new Map(),
                 rowsV2LocalReady: null,
                 rowsV2LocalError: '',
-                initialCloudPullDone: !hasUsableCloudSyncConfig(coercedSyncConfig.config),
+                cloudOnlyMode,
+                initialCloudPullDone: !cloudOnlyMode,
                 initialCloudPullInFlight: false,
                 initialCloudActionBlocker: null
             };
@@ -3769,7 +3779,7 @@
             this.load();
             this.updateSyncStatus({});
 
-            if (this.sync.config.enabled && this.sync.config.autoConnect && shouldAutoConnectOnThisPage()) {
+            if (this.isAutoSyncEnabledOnPage()) {
                 this.scheduleAutoSyncBoot();
             }
         }
@@ -3778,15 +3788,18 @@
             return !!this.sync.channel;
         }
 
+        isCloudOnlyMode() {
+            return hasConfiguredSupabaseSyncConfig(this.sync && this.sync.config);
+        }
+
         isAutoSyncEnabledOnPage() {
             return !!(this.sync.config
                 && this.sync.config.enabled
-                && this.sync.config.autoConnect
-                && shouldAutoConnectOnThisPage());
+                && (this.isCloudOnlyMode() || (this.sync.config.autoConnect && shouldAutoConnectOnThisPage())));
         }
 
         shouldRequireInitialCloudPull() {
-            return !!(hasUsableCloudSyncConfig(this.sync && this.sync.config) && shouldAutoConnectOnThisPage());
+            return this.isCloudOnlyMode();
         }
 
         isInitialCloudPullPending() {
@@ -3833,6 +3846,7 @@
             if (!this.sync.config || !this.sync.config.enabled) return false;
             if (this.isInitialCloudPullPending()) return false;
             if (this.hasLiveSyncConnection()) return true;
+            if (this.isCloudOnlyMode()) return true;
             if (!isYjsCollabPage() && shouldAutoConnectOnThisPage()) {
                 return !!(this.sync.config.supabaseUrl && this.sync.config.anonKey && this.sync.config.campaignId);
             }
@@ -3908,10 +3922,11 @@
                     this.sync.initialCloudPullInFlight = false;
                     this.stopInitialCloudActionBlock();
                 });
-            }, AUTO_SYNC_BOOT_DELAY_MS);
+            }, this.isCloudOnlyMode() ? 0 : AUTO_SYNC_BOOT_DELAY_MS);
         }
 
         onStorageSyncEvent(event) {
+            if (this.isCloudOnlyMode()) return;
             if (!event || event.key !== STORE_KEY) return;
             if (!event.newValue || event.newValue === event.oldValue) return;
 
@@ -3972,6 +3987,7 @@
         }
 
         persistScopeBaselines() {
+            if (this.isCloudOnlyMode()) return;
             try {
                 const payload = {};
                 if (this.sync.scopeBaselines && this.sync.scopeBaselines.size) {
@@ -4008,6 +4024,21 @@
             );
             const pulledAt = toTimestamp(opts.pulledAt, Date.now());
             if (!revision && !remoteUpdatedAt) return null;
+            if (this.isCloudOnlyMode()) {
+                this.sync.lastPulledRemote = null;
+                this.sync.lastPullAt = pulledAt;
+                this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, revision);
+                if (remoteUpdatedAt > this.sync.lastRemoteSeenAt) this.sync.lastRemoteSeenAt = remoteUpdatedAt;
+                return {
+                    revision,
+                    pulledAt,
+                    remoteUpdatedAt,
+                    remoteUpdatedAtRaw: typeof (remoteRow && remoteRow.updatedAtRaw) === 'string' ? remoteRow.updatedAtRaw : '',
+                    remoteUpdatedBy: toTrimmedString(remoteRow && remoteRow.updatedBy, '', 120),
+                    remoteUpdatedByName: toTrimmedString(remoteRow && remoteRow.updatedByName, '', 120),
+                    backendMode: this.sync.config && this.sync.config.backendMode ? this.sync.config.backendMode : ''
+                };
+            }
 
             const record = {
                 revision,
@@ -4857,6 +4888,16 @@
 
         load() {
             try {
+                if (this.isCloudOnlyMode()) {
+                    this.sync.hadStoredStateAtBoot = false;
+                    this.state = sanitizeState(DEFAULT_STATE);
+                    this.ensureCampaignEntityIds(false);
+                    this.syncActiveCaseLegacyState();
+                    this.sync.lastSyncedState = sanitizeState(this.state);
+                    this.sync.lastKnownRemoteRevision = 0;
+                    this.clearLocalDirtyScopes();
+                    return;
+                }
                 const raw = localStorage.getItem(STORE_KEY);
                 let awaitingRowsV2LocalHydrate = false;
                 this.sync.hadStoredStateAtBoot = !!raw;
@@ -4920,6 +4961,7 @@
         }
 
         async bootstrapRowsV2Local() {
+            if (this.isCloudOnlyMode()) return { ok: true, reason: 'cloud-only-disabled' };
             const campaignId = this.getRowsV2CampaignId();
             const marker = readJsonStorage(LOCAL_ROWS_META_KEY, null);
             const hasMarker = !!(marker && marker.version === LOCAL_ROWS_DB_VERSION && marker.campaignId === campaignId);
@@ -4930,7 +4972,22 @@
 
             if (hasMarker && existingCount) {
                 const composed = composeStateFromRowsV2(existingRows);
-                this.state = sanitizeState(composed);
+                const composedState = sanitizeState(composed);
+                if (this.sync.cloudAuthoritativeAt) {
+                    await this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL);
+                    return { ok: true, reason: 'skipped-after-cloud-authoritative', rows: existingCount };
+                }
+                const currentRevision = toNonNegativeInt(this.state.meta && this.state.meta.syncRevision, 0);
+                const currentUpdatedAt = toTimestamp(this.state.meta && this.state.meta.updated, 0);
+                const composedRevision = toNonNegativeInt(composedState.meta && composedState.meta.syncRevision, 0);
+                const composedUpdatedAt = toTimestamp(composedState.meta && composedState.meta.updated, 0);
+                const currentIsNewer = currentRevision > composedRevision
+                    || (currentRevision === composedRevision && currentUpdatedAt > composedUpdatedAt);
+                if (currentIsNewer) {
+                    await this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL);
+                    return { ok: true, reason: 'skipped-stale-local-rows', rows: existingCount };
+                }
+                this.state = composedState;
                 this.ensureCampaignEntityIds(false);
                 this.syncActiveCaseLegacyState();
                 this.sync.lastSyncedState = sanitizeState(this.state);
@@ -4980,6 +5037,7 @@
         }
 
         persistRowsV2LocalSnapshot(scopes = SYNC_SCOPE_GLOBAL) {
+            if (this.isCloudOnlyMode()) return Promise.resolve({ ok: true, reason: 'cloud-only-disabled' });
             if (!this.isRowsV2Mode()) return Promise.resolve({ ok: true, reason: 'disabled' });
             const campaignId = this.getRowsV2CampaignId();
             const rows = decomposeStateToRowsV2(this.state, campaignId, {
@@ -5013,6 +5071,7 @@
         }
 
         writeLocalStorageMirror(reason = 'save') {
+            if (this.isCloudOnlyMode()) return false;
             try {
                 localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
                 return true;
@@ -5427,17 +5486,23 @@
             const base = merge ? this.sync.config : DEFAULT_SYNC_CONFIG;
             const sanitized = sanitizeSyncConfig({ ...base, ...(configPatch || {}) });
             const next = coerceAutoConnectBackendMode(sanitized).config;
+            const nextCloudOnly = hasConfiguredSupabaseSyncConfig(next);
 
             this.sync.config = next;
-            this.sync.initialCloudPullDone = !hasUsableCloudSyncConfig(next);
+            this.sync.cloudOnlyMode = nextCloudOnly;
+            this.sync.initialCloudPullDone = !nextCloudOnly;
             this.sync.initialCloudPullInFlight = false;
-            this.sync.lastPulledRemote = parseStoredLastPulledRemote(next);
+            this.sync.lastPulledRemote = nextCloudOnly ? null : parseStoredLastPulledRemote(next);
             this.sync.lastPullAt = this.sync.lastPulledRemote ? toTimestamp(this.sync.lastPulledRemote.pulledAt, 0) : 0;
             this.sync.lastRemoteSeenAt = this.sync.lastPulledRemote ? toTimestamp(this.sync.lastPulledRemote.remoteUpdatedAt, 0) : 0;
             this.sync.lastKnownRemoteRevision = Math.max(
                 toNonNegativeInt(this.state && this.state.meta && this.state.meta.syncRevision, 0),
                 this.sync.lastPulledRemote ? toNonNegativeInt(this.sync.lastPulledRemote.revision, 0) : 0
             );
+            if (nextCloudOnly) {
+                this.clearLocalDirtyScopes();
+                this.sync.scopeBaselines = new Map();
+            }
             try {
                 localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(next));
             } catch (err) {
@@ -5469,7 +5534,7 @@
                                 lastError: err && err.message ? err.message : String(err)
                             });
                         });
-                    } else if (next.autoConnect && shouldAutoConnectOnThisPage()) {
+                    } else if (this.isAutoSyncEnabledOnPage()) {
                         this.scheduleAutoSyncBoot();
                     }
                 } else {
@@ -5583,6 +5648,7 @@
         }
 
         persistDirtyScopes() {
+            if (this.isCloudOnlyMode()) return;
             try {
                 const list = this.sync.localDirtyScopes
                     ? Array.from(this.sync.localDirtyScopes.values())
@@ -7874,7 +7940,7 @@
                 return { ok: false, reason: 'missing-config' };
             }
 
-            if (requirePageSync && !explicit && !shouldAutoConnectOnThisPage()) {
+            if (requirePageSync && !explicit && !this.isCloudOnlyMode() && !shouldAutoConnectOnThisPage()) {
                 if (!silent) {
                     this.updateSyncStatus({
                         mode: 'idle',
@@ -7982,7 +8048,7 @@
                 return { ok: false, reason: 'missing-config' };
             }
 
-            if (!explicit && !shouldAutoConnectOnThisPage()) {
+            if (!explicit && !this.isCloudOnlyMode() && !shouldAutoConnectOnThisPage()) {
                 this.updateSyncStatus({
                     mode: 'idle',
                     connected: false,
@@ -11156,7 +11222,7 @@
 
         async pullFromCloud(options = {}) {
             const opts = options && typeof options === 'object' ? options : {};
-            const force = !!opts.force;
+            const force = this.isCloudOnlyMode() || !!opts.force;
             const silent = !!opts.silent;
             const access = opts.skipAccessCheck
                 ? { ok: !!this.sync.client }
@@ -11589,6 +11655,9 @@
             this.persistRowsV2LocalSnapshot(SYNC_SCOPE_GLOBAL).catch(() => { });
 
             this.isApplyingRemote = false;
+            if (meta.source === 'pull' || meta.source === 'pull-stale-local' || meta.source === 'conflict-accept') {
+                this.sync.cloudAuthoritativeAt = Date.now();
+            }
             this.sync.lastKnownRemoteRevision = Math.max(this.sync.lastKnownRemoteRevision, toNonNegativeInt(this.state.meta.syncRevision, 0));
             this.sync.lastSyncedState = sanitizeState(this.state);
             if (meta.clearDirty !== false) this.clearLocalDirtyScopes();
