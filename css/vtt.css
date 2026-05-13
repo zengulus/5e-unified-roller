@@ -1864,7 +1864,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     position: absolute;
     left: calc(100% + 0.7rem);
     top: 50%;
-    width: clamp(140px, 14vw, 220px);
+    width: clamp(186px, 18.6vw, 293px);
     aspect-ratio: 1;
     padding: 0.35rem;
     border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2639,6 +2639,63 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
     }
 }
 
+@media (min-width: 861px) and (hover: hover) and (pointer: fine) {
+    body[data-player-nav="vtt"] {
+        overflow: hidden;
+    }
+
+    .vtt-topbar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 0;
+        width: auto;
+        max-width: none;
+        z-index: 40;
+        margin: 0;
+        border-radius: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background:
+            linear-gradient(180deg, rgba(7, 11, 19, 0.98), rgba(7, 11, 19, 0.9)),
+            rgba(0, 0, 0, 0.86);
+        box-shadow: 0 18px 38px rgba(0, 0, 0, 0.32);
+        backdrop-filter: blur(14px);
+        transform: translateY(calc(-100% + 14px));
+        transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+
+    .vtt-topbar::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: -11px;
+        width: min(12rem, 32vw);
+        height: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-top: 0;
+        border-radius: 0 0 999px 999px;
+        background: rgba(7, 11, 19, 0.94);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+        transform: translateX(-50%);
+    }
+
+    .vtt-topbar:hover,
+    .vtt-topbar:focus-within {
+        transform: translateY(0);
+        box-shadow: 0 22px 46px rgba(0, 0, 0, 0.46);
+    }
+
+    .vtt-shell {
+        --vtt-shell-height: calc(100vh - 1rem);
+        --vtt-overlay-top: 1rem;
+        padding-top: 0.5rem;
+    }
+
+    .vtt-stage {
+        border-radius: 0.9rem;
+    }
+}
+
 @media (max-width: 1360px) {
     .vtt-topbar {
         align-items: flex-start;
@@ -2936,4 +2993,107 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
     .vtt-token-spawn {
         min-height: 42px;
     }
+}
+
+/* VTT is usually read at a distance from the table, so keep labels and controls comfortably legible. */
+body[data-player-nav="vtt"] {
+    font-size: 17px;
+}
+
+body[data-player-nav="vtt"] .hero-btn,
+.vtt-chip-btn,
+.vtt-token-spawn,
+.vtt-inline-btn,
+.vtt-field input,
+.vtt-field select,
+.vtt-entry-input,
+.vtt-inspector-input,
+.vtt-inspector-select,
+.vtt-inspector-textarea {
+    font-size: 1rem;
+    line-height: 1.2;
+}
+
+.vtt-topbar-case,
+.vtt-topbar-scene {
+    font-size: 1rem;
+}
+
+.vtt-panel-head h2 {
+    font-size: 1.15rem;
+}
+
+.vtt-field span,
+.vtt-subhead,
+.vtt-inspector-label,
+.vtt-panel-pill,
+.vtt-menu-title,
+.vtt-quick-spawn-title,
+.vtt-scene-summary-eyebrow,
+.vtt-scene-tag,
+.vtt-sync-chip {
+    font-size: 0.9rem;
+}
+
+.vtt-scene-summary-title,
+.vtt-scene-row-name,
+.vtt-token-spawn-name,
+.vtt-clock-title,
+.vtt-entry-name,
+.vtt-action-search-label,
+.vtt-popover-head strong,
+.vtt-stage-context-head strong {
+    font-size: 1.04rem;
+}
+
+.vtt-scene-summary-meta,
+.vtt-scene-summary-note,
+.vtt-scene-row-meta,
+.vtt-token-spawn-meta,
+.vtt-spawn-ghost-meta,
+.vtt-clock-note,
+.vtt-detail-note,
+.vtt-empty,
+.vtt-entry-meta,
+.vtt-popover-head span,
+.vtt-action-search-summary,
+.vtt-stage-context-head span,
+.vtt-stage-context-item,
+.vtt-stage-context-size span {
+    font-size: 0.9rem;
+}
+
+.vtt-map-note-kicker {
+    font-size: 0.66rem;
+}
+
+.vtt-map-note-title {
+    font-size: 1rem;
+}
+
+.vtt-map-note-body,
+.vtt-clock-pie span,
+.vtt-ping-label,
+.vtt-ruler-label {
+    font-size: 0.9rem;
+}
+
+.vtt-map-note-meta {
+    font-size: 0.76rem;
+}
+
+.vtt-token::after {
+    font-size: calc(0.88rem * var(--vtt-token-font-scale, 1));
+}
+
+.vtt-token-initials {
+    font-size: calc(1.28rem * var(--vtt-token-font-scale, 1));
+}
+
+.vtt-token-subtitle {
+    font-size: calc(0.95rem * var(--vtt-token-font-scale, 1));
+}
+
+.vtt-token-mood-badge {
+    font-size: 0.88rem;
 }
