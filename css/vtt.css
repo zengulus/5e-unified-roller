@@ -2691,6 +2691,27 @@ body[data-vtt-role="player"] [data-dm-only="1"] {
         padding-top: 0.5rem;
     }
 
+    .vtt-sidebar,
+    .vtt-initiative-panel {
+        box-sizing: border-box;
+        width: clamp(398px, calc(32vw + 1rem), 446px);
+        max-width: calc(50vw - 1rem);
+        padding: 0.5rem;
+        gap: 1rem;
+    }
+
+    .vtt-sidebar {
+        left: 0.5rem;
+    }
+
+    .vtt-initiative-panel {
+        right: 0.5rem;
+    }
+
+    .vtt-panel {
+        padding: 1.08rem;
+    }
+
     .vtt-stage {
         border-radius: 0.9rem;
     }
