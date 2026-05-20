@@ -153,6 +153,8 @@
     let sheetActionState = null;
     let sheetActionQuery = '';
     let npcRollState = null;
+    let playerRollMenuOpen = false;
+    let localRollMode = 'norm';
     let lastContextPointerState = null;
     let viewMenuOpen = false;
     let toolsMenuOpen = false;
@@ -210,6 +212,9 @@
     const stageContextMenuEl = document.getElementById('vtt-stage-context-menu');
     const sheetActionPopoverEl = document.getElementById('vtt-sheet-action-popover');
     const npcRollPopoverEl = document.getElementById('vtt-npc-roll-popover');
+    const playerRollPanelEl = document.getElementById('vtt-player-roll-panel');
+    const playerRollToggleEl = document.getElementById('vtt-player-roll-toggle');
+    const playerRollMenuEl = document.getElementById('vtt-player-roll-menu');
     const clockListEl = document.getElementById('vtt-clock-list');
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
@@ -258,6 +263,12 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     };
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const normalizeRollMode = (value) => {
+        const clean = String(value || '').trim().toLowerCase();
+        if (clean === 'adv' || clean === 'advantage') return 'adv';
+        if (clean === 'dis' || clean === 'disadvantage') return 'dis';
+        return 'norm';
+    };
     const hasValue = (value) => value !== null && value !== undefined && value !== '';
     const clampMapScale = (value, fallback = 1) => {
         const parsed = Number(value);
@@ -4171,6 +4182,10 @@
             closeTokenInspectorPopover();
             clearSpawnDrag();
             closeInitiativeDetail();
+        } else {
+            playerRollMenuOpen = false;
+            closeSheetActionPopover();
+            closeNPCRollPopover();
         }
         clearPendingTouchContext();
         closeViewMenu();
@@ -5139,8 +5154,9 @@
         const token = stageContextMenuState.tokenId ? getTokenById(stageContextMenuState.tokenId) : null;
         const note = stageContextMenuState.noteId ? getEvidenceNoteById(stageContextMenuState.noteId) : null;
         const tokenSourceType = String(token && token.sourceType || '').trim().toLowerCase();
-        const canRollFromSheet = !isDM() || tokenSourceType === 'player';
+        const canRollFromSheet = isDM() && tokenSourceType === 'player';
         const canRollStatBlock = !!(token && isDM() && isNPCRollTarget(token));
+        const canCustomRoll = isDM();
         const canPreview = !!getCanonicalTokenImageUrl(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
@@ -5155,7 +5171,7 @@
             <div class="vtt-stage-context-list">
                 <button class="vtt-stage-context-item strong" type="button" data-action="context-ping">Ping</button>
                 ${canRollFromSheet ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-from-sheet">Roll from character sheet</button>' : ''}
-                <button class="vtt-stage-context-item" type="button" data-action="context-custom-roll">Custom roll (any dice)</button>
+                ${canCustomRoll ? '<button class="vtt-stage-context-item" type="button" data-action="context-custom-roll">Custom roll (any dice)</button>' : ''}
                 ${canRollStatBlock ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-stat-block">Roll stat block / NPC</button>' : ''}
                 ${canEditToken ? `<button class="vtt-stage-context-item" type="button" data-action="context-token-inspector">Token inspector</button>` : ''}
                 ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-inspector">Zone inspector</button>` : ''}
@@ -5366,7 +5382,7 @@
     const rollSheetD20 = (character, bonus, label, options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
         const allowAdvantage = opts.allowAdvantage !== false;
-        const mode = allowAdvantage ? String(character && character.rollMode || 'norm').trim().toLowerCase() : 'norm';
+        const mode = allowAdvantage ? normalizeRollMode(opts.rollMode || localRollMode || (character && character.rollMode) || 'norm') : 'norm';
         let result = null;
         if (allowAdvantage && (mode === 'adv' || mode === 'dis')) {
             const first = randomIntInclusive(1, 20);
@@ -5549,6 +5565,13 @@
             dl: Math.max(0, parseInt((source.match(/d[l]?(\d+)/i) || [])[1], 10) || 0),
             kh: Math.max(0, parseInt((source.match(/k[h]?(\d+)/i) || [])[1], 10) || 0)
         };
+    };
+
+    const applyRollModeToD20Formula = (formula, mode = localRollMode) => {
+        const cleanMode = normalizeRollMode(mode);
+        const source = String(formula || '').trim();
+        if (!source || cleanMode === 'norm') return source;
+        return source.replace(/\b1d20\b(?!\s*(?:kh|k|dl|d|r)\d*)/gi, cleanMode === 'adv' ? '2d20kh1' : '2d20dl1');
     };
 
     const gmCoreRoll = (count, sides, mods = {}) => {
@@ -6454,6 +6477,22 @@
         }).join('');
     };
 
+    const renderPlayerRollMenu = () => {
+        if (playerRollToggleEl) {
+            playerRollToggleEl.setAttribute('aria-expanded', playerRollMenuOpen ? 'true' : 'false');
+            playerRollToggleEl.textContent = playerRollMenuOpen ? 'Close' : 'Roll';
+        }
+        if (playerRollMenuEl) {
+            playerRollMenuEl.hidden = isDM() || !playerRollMenuOpen;
+            playerRollMenuEl.querySelectorAll('[data-roll-mode]').forEach((button) => {
+                if (!(button instanceof HTMLElement)) return;
+                const mode = normalizeRollMode(button.dataset.rollMode);
+                button.setAttribute('aria-pressed', mode === localRollMode ? 'true' : 'false');
+            });
+        }
+        if (playerRollPanelEl) playerRollPanelEl.hidden = isDM();
+    };
+
     const renderInitiativeDetail = () => {
         if (!initiativeDetailPanelEl) return;
         const activePopoverId = initiativeDetailState && initiativeDetailState.entryId ? initiativeDetailState.entryId : '';
@@ -7022,6 +7061,7 @@
         renderNPCRollPopover();
         renderClockList();
         renderInitiativeList();
+        renderPlayerRollMenu();
         renderInitiativeDetail();
         renderSpawnGhost();
     };
@@ -7371,6 +7411,18 @@
         });
     };
 
+    const getPlayerRollAnchorPoint = () => {
+        const anchor = playerRollToggleEl || playerRollPanelEl;
+        if (anchor && typeof anchor.getBoundingClientRect === 'function') {
+            const rect = anchor.getBoundingClientRect();
+            return {
+                x: Math.round(rect.left + rect.width / 2),
+                y: Math.round(rect.bottom)
+            };
+        }
+        return { x: Math.round(window.innerWidth / 2), y: Math.round(window.innerHeight / 2) };
+    };
+
     const handleAction = (actionEl) => {
         const action = String(actionEl.dataset.action || '').trim();
         if (!action) return;
@@ -7398,6 +7450,35 @@
         }
         if (action === 'close-npc-roll') {
             closeNPCRollPopover();
+            return;
+        }
+        if (action === 'toggle-player-roll-menu') {
+            if (isDM()) return;
+            playerRollMenuOpen = !playerRollMenuOpen;
+            if (!playerRollMenuOpen) {
+                closeSheetActionPopover();
+                closeNPCRollPopover();
+            }
+            render();
+            return;
+        }
+        if (action === 'set-roll-mode') {
+            localRollMode = normalizeRollMode(actionEl.dataset.rollMode);
+            renderPlayerRollMenu();
+            return;
+        }
+        if (action === 'player-roll-from-sheet') {
+            if (isDM()) return;
+            const point = getPlayerRollAnchorPoint();
+            openSheetActionPopover(null, point.x, point.y);
+            render();
+            return;
+        }
+        if (action === 'player-custom-roll') {
+            if (isDM()) return;
+            const point = getPlayerRollAnchorPoint();
+            openCustomRollPopover(null, point.x, point.y);
+            render();
             return;
         }
         if (action === 'run-sheet-action') {
@@ -7504,7 +7585,8 @@
         }
         if (action === 'roll-npc-dice') {
             if (!npcRollState) return;
-            const parsed = gmParseComplexFormula(npcRollState.formula || '1d20');
+            const rollFormula = applyRollModeToD20Formula(npcRollState.formula || '1d20');
+            const parsed = gmParseComplexFormula(rollFormula);
             if (!parsed.text) {
                 renderNPCRollPopover({ total: 'Invalid', text: 'Use a formula like 1d20 + 3 or 2d6.' });
                 return;
@@ -9336,6 +9418,13 @@
             toolsMenuOpen = false;
             needsRender = true;
         }
+        if (playerRollMenuOpen
+            && !targetEl.closest('#vtt-player-roll-panel')
+            && !targetEl.closest('#vtt-sheet-action-popover')
+            && !targetEl.closest('#vtt-npc-roll-popover')) {
+            playerRollMenuOpen = false;
+            needsRender = true;
+        }
         if (initiativeDetailState && !targetEl.closest('#vtt-initiative-detail-panel') && !targetEl.closest('.vtt-entry')) {
             initiativeDetailState = null;
             needsRender = true;
@@ -9486,11 +9575,13 @@
             const closedTokenInspector = closeTokenInspectorPopover();
             const closedSheetActions = closeSheetActionPopover();
             const closedNPCRoll = closeNPCRollPopover();
+            const closedPlayerRollMenu = playerRollMenuOpen;
+            playerRollMenuOpen = false;
             if (previewTokenId) {
                 previewTokenId = '';
                 renderStage();
                 event.preventDefault();
-            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll) {
+            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll || closedPlayerRollMenu) {
                 render();
                 event.preventDefault();
             }
