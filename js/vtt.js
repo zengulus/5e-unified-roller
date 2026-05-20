@@ -2364,15 +2364,15 @@
             settingsRailTabEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
         }
         if (playerRollRailTabEl) {
-            playerRollRailTabEl.textContent = uiState.playerRollRailCollapsed ? 'Roll Pin' : 'Roll Unpin';
-            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Open roll rail' : 'Close roll rail';
-            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Open roll rail' : 'Close roll rail');
+            playerRollRailTabEl.textContent = 'Dice Rolls 📌';
+            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Pin dice rolls open' : 'Unpin dice rolls';
+            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Pin dice rolls open' : 'Unpin dice rolls');
             playerRollRailTabEl.setAttribute('aria-pressed', uiState.playerRollRailCollapsed ? 'false' : 'true');
         }
         if (initiativeRailTabEl) {
-            initiativeRailTabEl.textContent = uiState.initiativeCollapsed ? 'Init Pin' : 'Init Unpin';
-            initiativeRailTabEl.title = uiState.initiativeCollapsed ? 'Open initiative rail' : 'Close initiative rail';
-            initiativeRailTabEl.setAttribute('aria-label', uiState.initiativeCollapsed ? 'Open initiative rail' : 'Close initiative rail');
+            initiativeRailTabEl.textContent = 'Clocks / Init 📌';
+            initiativeRailTabEl.title = uiState.initiativeCollapsed ? 'Pin clocks and initiative open' : 'Unpin clocks and initiative';
+            initiativeRailTabEl.setAttribute('aria-label', uiState.initiativeCollapsed ? 'Pin clocks and initiative open' : 'Unpin clocks and initiative');
             initiativeRailTabEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (scenePanelToggleEl) {
@@ -9690,10 +9690,10 @@
         if (stageEl) stageEl.addEventListener('dragstart', handleStageDragStart);
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
         if (initiativeListEl) initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
-        if (topbarEl) topbarEl.addEventListener('pointerleave', () => clearHoverSuppression('topbarHoverSuppressed'));
-        if (sidebarEl) sidebarEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));
-        if (playerRollRailEl) playerRollRailEl.addEventListener('pointerleave', () => clearHoverSuppression('playerRollHoverSuppressed'));
-        if (initiativePanelEl) initiativePanelEl.addEventListener('pointerleave', () => clearHoverSuppression('initiativeHoverSuppressed'));
+        if (topbarTabEl) topbarTabEl.addEventListener('pointerleave', () => clearHoverSuppression('topbarHoverSuppressed'));
+        if (settingsRailTabEl) settingsRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));
+        if (playerRollRailTabEl) playerRollRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('playerRollHoverSuppressed'));
+        if (initiativeRailTabEl) initiativeRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('initiativeHoverSuppressed'));
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerUp);
