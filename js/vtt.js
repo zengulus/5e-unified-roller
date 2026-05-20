@@ -180,6 +180,7 @@
     const playerImageUrlsAtLoad = new Map();
 
     const body = document.body;
+    const topbarEl = document.querySelector('.vtt-topbar');
     const stageEl = document.getElementById('vtt-stage');
     const mapWorldEl = document.getElementById('vtt-map-world');
     const worldEl = document.getElementById('vtt-world');
@@ -217,6 +218,8 @@
     const playerRollPanelEl = document.getElementById('vtt-player-roll-panel');
     const playerRollToggleEl = document.getElementById('vtt-player-roll-toggle');
     const playerRollMenuEl = document.getElementById('vtt-player-roll-menu');
+    const playerRollRailEl = document.getElementById('vtt-player-roll-rail');
+    const initiativePanelEl = document.getElementById('vtt-initiative-panel');
     const settingsRailTabEl = document.getElementById('vtt-settings-rail-tab');
     const playerRollRailTabEl = document.getElementById('vtt-player-roll-rail-tab');
     const initiativeRailTabEl = document.getElementById('vtt-initiative-rail-tab');
@@ -2340,9 +2343,9 @@
             body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
         }
         if (topbarTabEl) {
-            topbarTabEl.textContent = '📌';
-            topbarTabEl.title = uiState.topbarCollapsed ? 'Pin top bar' : 'Unpin top bar';
-            topbarTabEl.setAttribute('aria-label', uiState.topbarCollapsed ? 'Pin top bar' : 'Unpin top bar');
+            topbarTabEl.textContent = uiState.topbarCollapsed ? 'Top Pin' : 'Top Unpin';
+            topbarTabEl.title = uiState.topbarCollapsed ? 'Open top bar' : 'Close top bar';
+            topbarTabEl.setAttribute('aria-label', uiState.topbarCollapsed ? 'Open top bar' : 'Close top bar');
             topbarTabEl.setAttribute('aria-pressed', uiState.topbarCollapsed ? 'false' : 'true');
         }
         if (settingsToggleEl) {
@@ -2355,21 +2358,21 @@
             initiativeToggleEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (settingsRailTabEl) {
-            settingsRailTabEl.textContent = '📌';
-            settingsRailTabEl.title = uiState.settingsCollapsed ? 'Pin DM rail' : 'Unpin DM rail';
-            settingsRailTabEl.setAttribute('aria-label', uiState.settingsCollapsed ? 'Pin DM rail' : 'Unpin DM rail');
+            settingsRailTabEl.textContent = uiState.settingsCollapsed ? 'DM Pin' : 'DM Unpin';
+            settingsRailTabEl.title = uiState.settingsCollapsed ? 'Open DM rail' : 'Close DM rail';
+            settingsRailTabEl.setAttribute('aria-label', uiState.settingsCollapsed ? 'Open DM rail' : 'Close DM rail');
             settingsRailTabEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
         }
         if (playerRollRailTabEl) {
-            playerRollRailTabEl.textContent = '📌';
-            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Pin roll rail' : 'Unpin roll rail';
-            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Pin roll rail' : 'Unpin roll rail');
+            playerRollRailTabEl.textContent = uiState.playerRollRailCollapsed ? 'Roll Pin' : 'Roll Unpin';
+            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Open roll rail' : 'Close roll rail';
+            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Open roll rail' : 'Close roll rail');
             playerRollRailTabEl.setAttribute('aria-pressed', uiState.playerRollRailCollapsed ? 'false' : 'true');
         }
         if (initiativeRailTabEl) {
-            initiativeRailTabEl.textContent = '📌';
-            initiativeRailTabEl.title = uiState.initiativeCollapsed ? 'Pin initiative rail' : 'Unpin initiative rail';
-            initiativeRailTabEl.setAttribute('aria-label', uiState.initiativeCollapsed ? 'Pin initiative rail' : 'Unpin initiative rail');
+            initiativeRailTabEl.textContent = uiState.initiativeCollapsed ? 'Init Pin' : 'Init Unpin';
+            initiativeRailTabEl.title = uiState.initiativeCollapsed ? 'Open initiative rail' : 'Close initiative rail';
+            initiativeRailTabEl.setAttribute('aria-label', uiState.initiativeCollapsed ? 'Open initiative rail' : 'Close initiative rail');
             initiativeRailTabEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (scenePanelToggleEl) {
@@ -2447,6 +2450,23 @@
         window.requestAnimationFrame(() => {
             applyWorldTransform();
         });
+    };
+
+    const toggleDrawerPreference = (key, suppressDatasetKey = '') => {
+        uiState[key] = !uiState[key];
+        if (body && suppressDatasetKey) {
+            body.dataset[suppressDatasetKey] = uiState[key] ? '1' : '0';
+        }
+        persistUIPreferences();
+        applyUIPreferences();
+        window.requestAnimationFrame(() => {
+            applyWorldTransform();
+        });
+    };
+
+    const clearHoverSuppression = (suppressDatasetKey = '') => {
+        if (!body || !suppressDatasetKey) return;
+        body.dataset[suppressDatasetKey] = '0';
     };
 
     const getActiveScene = (state = vttState) => {
@@ -7473,7 +7493,7 @@
             return;
         }
         if (action === 'toggle-topbar-pin') {
-            toggleUIPreference('topbarCollapsed');
+            toggleDrawerPreference('topbarCollapsed', 'topbarHoverSuppressed');
             return;
         }
         if (action === 'close-dm-unlock') {
@@ -7500,7 +7520,7 @@
         }
         if (action === 'toggle-player-roll-rail') {
             if (isDM()) return;
-            toggleUIPreference('playerRollRailCollapsed');
+            toggleDrawerPreference('playerRollRailCollapsed', 'playerRollHoverSuppressed');
             return;
         }
         if (action === 'set-roll-mode') {
@@ -7762,11 +7782,11 @@
             return;
         }
         if (action === 'toggle-settings') {
-            toggleUIPreference('settingsCollapsed');
+            toggleDrawerPreference('settingsCollapsed', 'settingsHoverSuppressed');
             return;
         }
         if (action === 'toggle-initiative') {
-            toggleUIPreference('initiativeCollapsed');
+            toggleDrawerPreference('initiativeCollapsed', 'initiativeHoverSuppressed');
             return;
         }
         if (action === 'toggle-scene-panel') {
@@ -9670,6 +9690,10 @@
         if (stageEl) stageEl.addEventListener('dragstart', handleStageDragStart);
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
         if (initiativeListEl) initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
+        if (topbarEl) topbarEl.addEventListener('pointerleave', () => clearHoverSuppression('topbarHoverSuppressed'));
+        if (sidebarEl) sidebarEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));
+        if (playerRollRailEl) playerRollRailEl.addEventListener('pointerleave', () => clearHoverSuppression('playerRollHoverSuppressed'));
+        if (initiativePanelEl) initiativePanelEl.addEventListener('pointerleave', () => clearHoverSuppression('initiativeHoverSuppressed'));
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerUp);

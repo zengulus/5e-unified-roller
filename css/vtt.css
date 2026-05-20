@@ -213,9 +213,10 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     z-index: 8;
     display: grid;
     gap: 1rem;
-    width: min(360px, calc(100vw - 2rem));
+    --vtt-rail-width: min(360px, calc(100vw - 2rem));
+    width: var(--vtt-rail-width);
     max-height: calc(var(--vtt-shell-height) - var(--vtt-overlay-top));
-    overflow: auto;
+    overflow: visible;
 }
 
 .vtt-sidebar {
@@ -2638,44 +2639,40 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
 
 .vtt-side-rail-tab {
     position: absolute;
-    top: 0.9rem;
-    z-index: 2;
+    top: 0.85rem;
+    z-index: 3;
     display: inline-grid;
     place-items: center;
-    width: 2rem;
-    height: 2rem;
-    min-width: 0;
+    min-width: 3.6rem;
+    height: 2.15rem;
     min-height: 0;
-    padding: 0;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(7, 11, 19, 0.94);
-    color: rgba(244, 249, 255, 0.94);
+    padding: 0 0.7rem;
+    border: 1px solid rgba(78, 60, 34, 0.62);
+    background: linear-gradient(180deg, rgba(222, 190, 123, 0.98), rgba(178, 132, 62, 0.98));
+    color: rgba(38, 26, 12, 0.96);
     font: inherit;
-    font-size: 0.92rem;
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
     line-height: 1;
     cursor: pointer;
-    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
-    opacity: 0.78;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
 }
 
 .vtt-side-rail-tab-left {
-    right: -1.95rem;
-    border-left: 0;
-    border-radius: 0 0.65rem 0.65rem 0;
+    left: 0;
+    border-radius: 0 0.7rem 0.7rem 0;
 }
 
 .vtt-side-rail-tab-right {
-    left: -1.95rem;
-    border-right: 0;
-    border-radius: 0.65rem 0 0 0.65rem;
+    right: 0;
+    border-radius: 0.7rem 0 0 0.7rem;
 }
 
 .vtt-side-rail-tab:hover,
 .vtt-side-rail-tab:focus-visible {
-    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.5);
-    background: rgba(10, 18, 30, 0.98);
-    color: #fff;
-    opacity: 1;
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.42);
+    filter: brightness(1.08);
 }
 
 .vtt-player-roll-menu {
@@ -2734,7 +2731,7 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
             rgba(0, 0, 0, 0.86);
         box-shadow: 0 18px 38px rgba(0, 0, 0, 0.32);
         backdrop-filter: blur(14px);
-        transform: translateY(calc(-100% + 14px));
+        transform: translateY(-100%);
         transition: transform 160ms ease, box-shadow 160ms ease;
     }
 
@@ -2745,17 +2742,20 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
         bottom: -1.45rem;
         align-items: center;
         justify-content: center;
-        width: 2.35rem;
+        width: auto;
+        min-width: 5rem;
         height: 1.95rem;
         min-height: 0;
         padding: 0;
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-top: 0;
         border-radius: 0 0 0.7rem 0.7rem;
-        background: rgba(7, 11, 19, 0.94);
-        color: rgba(244, 249, 255, 0.94);
+        background: linear-gradient(180deg, rgba(222, 190, 123, 0.98), rgba(178, 132, 62, 0.98));
+        color: rgba(38, 26, 12, 0.96);
         font: inherit;
-        font-size: 0.95rem;
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
         line-height: 1;
         box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
         transform: translateX(-50%);
@@ -2768,8 +2768,8 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
         opacity: 1;
     }
 
-    .vtt-topbar:hover,
-    .vtt-topbar:focus-within,
+    body[data-topbar-collapsed="1"]:not([data-topbar-hover-suppressed="1"]) .vtt-topbar:hover,
+    body[data-topbar-collapsed="1"]:not([data-topbar-hover-suppressed="1"]) .vtt-topbar:focus-within,
     body[data-topbar-collapsed="0"] .vtt-topbar {
         transform: translateY(0);
         box-shadow: 0 22px 46px rgba(0, 0, 0, 0.46);
@@ -2781,8 +2781,8 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
         padding-top: 0.5rem;
     }
 
-    .vtt-topbar:hover + .vtt-shell,
-    .vtt-topbar:focus-within + .vtt-shell,
+    body[data-topbar-collapsed="1"]:not([data-topbar-hover-suppressed="1"]) .vtt-topbar:hover + .vtt-shell,
+    body[data-topbar-collapsed="1"]:not([data-topbar-hover-suppressed="1"]) .vtt-topbar:focus-within + .vtt-shell,
     body[data-topbar-collapsed="0"] .vtt-shell {
         --vtt-overlay-top: 8.9rem;
     }
@@ -2791,12 +2791,13 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
     .vtt-player-roll-rail,
     .vtt-initiative-panel {
         box-sizing: border-box;
-        width: clamp(398px, calc(32vw + 1rem), 446px);
+        --vtt-rail-width: clamp(398px, calc(32vw + 1rem), 446px);
+        width: var(--vtt-rail-width);
         max-width: calc(50vw - 1rem);
         padding: 0;
         gap: 1rem;
         overflow: visible;
-        transition: transform 160ms ease, top 160ms ease, max-height 160ms ease;
+        pointer-events: none;
     }
 
     .vtt-sidebar {
@@ -2811,21 +2812,44 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
         right: 0.5rem;
     }
 
-    body[data-settings-collapsed="1"] .vtt-sidebar,
-    body[data-player-roll-rail-collapsed="1"] .vtt-player-roll-rail {
-        transform: translateX(calc(-100% + 1.95rem));
+    .vtt-sidebar > .vtt-side-rail-tab,
+    .vtt-player-roll-rail > .vtt-side-rail-tab,
+    .vtt-initiative-panel > .vtt-side-rail-tab,
+    .vtt-sidebar > .vtt-panel,
+    .vtt-player-roll-rail > .vtt-panel,
+    .vtt-initiative-panel > .vtt-panel {
+        pointer-events: auto;
     }
 
-    body[data-initiative-collapsed="1"] .vtt-initiative-panel {
-        transform: translateX(calc(100% - 1.95rem));
+    .vtt-sidebar > .vtt-panel,
+    .vtt-player-roll-rail > .vtt-panel,
+    .vtt-initiative-panel > .vtt-panel {
+        box-sizing: border-box;
+        width: var(--vtt-rail-width);
+        transition: transform 160ms ease, max-height 160ms ease;
     }
 
-    body[data-settings-collapsed="1"] .vtt-sidebar:hover,
-    body[data-settings-collapsed="1"] .vtt-sidebar:focus-within,
-    body[data-player-roll-rail-collapsed="1"] .vtt-player-roll-rail:hover,
-    body[data-player-roll-rail-collapsed="1"] .vtt-player-roll-rail:focus-within,
-    body[data-initiative-collapsed="1"] .vtt-initiative-panel:hover,
-    body[data-initiative-collapsed="1"] .vtt-initiative-panel:focus-within {
+    body[data-settings-collapsed="1"] .vtt-sidebar > .vtt-panel,
+    body[data-player-roll-rail-collapsed="1"] .vtt-player-roll-rail > .vtt-panel {
+        transform: translateX(calc(-100% - 1rem));
+    }
+
+    body[data-initiative-collapsed="1"] .vtt-initiative-panel > .vtt-panel {
+        transform: translateX(calc(100% + 1rem));
+    }
+
+    body[data-settings-collapsed="1"]:not([data-settings-hover-suppressed="1"]) .vtt-sidebar:hover > .vtt-panel,
+    body[data-settings-collapsed="1"]:not([data-settings-hover-suppressed="1"]) .vtt-sidebar:focus-within > .vtt-panel,
+    body[data-settings-collapsed="1"]:not([data-settings-hover-suppressed="1"]) .vtt-sidebar > .vtt-side-rail-tab:hover ~ .vtt-panel,
+    body[data-settings-collapsed="1"]:not([data-settings-hover-suppressed="1"]) .vtt-sidebar > .vtt-side-rail-tab:focus-visible ~ .vtt-panel,
+    body[data-player-roll-rail-collapsed="1"]:not([data-player-roll-hover-suppressed="1"]) .vtt-player-roll-rail:hover > .vtt-panel,
+    body[data-player-roll-rail-collapsed="1"]:not([data-player-roll-hover-suppressed="1"]) .vtt-player-roll-rail:focus-within > .vtt-panel,
+    body[data-player-roll-rail-collapsed="1"]:not([data-player-roll-hover-suppressed="1"]) .vtt-player-roll-rail > .vtt-side-rail-tab:hover ~ .vtt-panel,
+    body[data-player-roll-rail-collapsed="1"]:not([data-player-roll-hover-suppressed="1"]) .vtt-player-roll-rail > .vtt-side-rail-tab:focus-visible ~ .vtt-panel,
+    body[data-initiative-collapsed="1"]:not([data-initiative-hover-suppressed="1"]) .vtt-initiative-panel:hover > .vtt-panel,
+    body[data-initiative-collapsed="1"]:not([data-initiative-hover-suppressed="1"]) .vtt-initiative-panel:focus-within > .vtt-panel,
+    body[data-initiative-collapsed="1"]:not([data-initiative-hover-suppressed="1"]) .vtt-initiative-panel > .vtt-side-rail-tab:hover ~ .vtt-panel,
+    body[data-initiative-collapsed="1"]:not([data-initiative-hover-suppressed="1"]) .vtt-initiative-panel > .vtt-side-rail-tab:focus-visible ~ .vtt-panel {
         transform: translateX(0);
     }
 
