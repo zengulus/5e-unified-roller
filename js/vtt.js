@@ -155,7 +155,7 @@
     let sheetActionState = null;
     let sheetActionQuery = '';
     let npcRollState = null;
-    let playerRollMenuOpen = false;
+    let playerRollMenuOpen = true;
     let localRollMode = 'norm';
     let lastContextPointerState = null;
     let viewMenuOpen = false;
@@ -2340,7 +2340,9 @@
             body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
         }
         if (topbarTabEl) {
-            topbarTabEl.textContent = uiState.topbarCollapsed ? 'Pin Top' : 'Unpin Top';
+            topbarTabEl.textContent = '📌';
+            topbarTabEl.title = uiState.topbarCollapsed ? 'Pin top bar' : 'Unpin top bar';
+            topbarTabEl.setAttribute('aria-label', uiState.topbarCollapsed ? 'Pin top bar' : 'Unpin top bar');
             topbarTabEl.setAttribute('aria-pressed', uiState.topbarCollapsed ? 'false' : 'true');
         }
         if (settingsToggleEl) {
@@ -2353,15 +2355,21 @@
             initiativeToggleEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (settingsRailTabEl) {
-            settingsRailTabEl.textContent = uiState.settingsCollapsed ? 'Pin DM' : 'Unpin DM';
+            settingsRailTabEl.textContent = '📌';
+            settingsRailTabEl.title = uiState.settingsCollapsed ? 'Pin DM rail' : 'Unpin DM rail';
+            settingsRailTabEl.setAttribute('aria-label', uiState.settingsCollapsed ? 'Pin DM rail' : 'Unpin DM rail');
             settingsRailTabEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
         }
         if (playerRollRailTabEl) {
-            playerRollRailTabEl.textContent = uiState.playerRollRailCollapsed ? 'Pin Roll' : 'Unpin Roll';
+            playerRollRailTabEl.textContent = '📌';
+            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Pin roll rail' : 'Unpin roll rail';
+            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Pin roll rail' : 'Unpin roll rail');
             playerRollRailTabEl.setAttribute('aria-pressed', uiState.playerRollRailCollapsed ? 'false' : 'true');
         }
         if (initiativeRailTabEl) {
-            initiativeRailTabEl.textContent = uiState.initiativeCollapsed ? 'Pin Init' : 'Unpin Init';
+            initiativeRailTabEl.textContent = '📌';
+            initiativeRailTabEl.title = uiState.initiativeCollapsed ? 'Pin initiative rail' : 'Unpin initiative rail';
+            initiativeRailTabEl.setAttribute('aria-label', uiState.initiativeCollapsed ? 'Pin initiative rail' : 'Unpin initiative rail');
             initiativeRailTabEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (scenePanelToggleEl) {
@@ -6508,7 +6516,7 @@
     const renderPlayerRollMenu = () => {
         if (playerRollToggleEl) {
             playerRollToggleEl.setAttribute('aria-expanded', playerRollMenuOpen ? 'true' : 'false');
-            playerRollToggleEl.textContent = playerRollMenuOpen ? 'Close' : 'Roll';
+            playerRollToggleEl.textContent = playerRollMenuOpen ? 'Hide' : 'Show';
         }
         if (playerRollMenuEl) {
             playerRollMenuEl.hidden = isDM() || !playerRollMenuOpen;
@@ -7486,11 +7494,7 @@
         }
         if (action === 'toggle-player-roll-menu') {
             if (isDM()) return;
-            playerRollMenuOpen = !playerRollMenuOpen;
-            if (!playerRollMenuOpen) {
-                closeSheetActionPopover();
-                closeNPCRollPopover();
-            }
+            playerRollMenuOpen = true;
             render();
             return;
         }
