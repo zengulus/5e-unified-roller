@@ -2343,9 +2343,9 @@
             body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
         }
         if (topbarTabEl) {
-            topbarTabEl.textContent = uiState.topbarCollapsed ? 'Top Pin' : 'Top Unpin';
-            topbarTabEl.title = uiState.topbarCollapsed ? 'Open top bar' : 'Close top bar';
-            topbarTabEl.setAttribute('aria-label', uiState.topbarCollapsed ? 'Open top bar' : 'Close top bar');
+            topbarTabEl.textContent = 'Menu 📌';
+            topbarTabEl.title = uiState.topbarCollapsed ? 'Pin menu open' : 'Unpin menu';
+            topbarTabEl.setAttribute('aria-label', uiState.topbarCollapsed ? 'Pin menu open' : 'Unpin menu');
             topbarTabEl.setAttribute('aria-pressed', uiState.topbarCollapsed ? 'false' : 'true');
         }
         if (settingsToggleEl) {
@@ -2457,6 +2457,12 @@
         if (body && suppressDatasetKey) {
             body.dataset[suppressDatasetKey] = uiState[key] ? '1' : '0';
         }
+        if (body) {
+            if (key === 'topbarCollapsed') body.dataset.topbarPreview = '0';
+            if (key === 'settingsCollapsed') body.dataset.settingsPreview = '0';
+            if (key === 'playerRollRailCollapsed') body.dataset.playerRollPreview = '0';
+            if (key === 'initiativeCollapsed') body.dataset.initiativePreview = '0';
+        }
         persistUIPreferences();
         applyUIPreferences();
         window.requestAnimationFrame(() => {
@@ -2467,6 +2473,12 @@
     const clearHoverSuppression = (suppressDatasetKey = '') => {
         if (!body || !suppressDatasetKey) return;
         body.dataset[suppressDatasetKey] = '0';
+    };
+
+    const setDrawerPreview = (previewDatasetKey = '', suppressDatasetKey = '', active = false) => {
+        if (!body || !previewDatasetKey) return;
+        if (active && suppressDatasetKey && body.dataset[suppressDatasetKey] === '1') return;
+        body.dataset[previewDatasetKey] = active ? '1' : '0';
     };
 
     const getActiveScene = (state = vttState) => {
@@ -9694,6 +9706,14 @@
         if (settingsRailTabEl) settingsRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));
         if (playerRollRailTabEl) playerRollRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('playerRollHoverSuppressed'));
         if (initiativeRailTabEl) initiativeRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('initiativeHoverSuppressed'));
+        if (topbarTabEl) topbarTabEl.addEventListener('pointerenter', () => setDrawerPreview('topbarPreview', 'topbarHoverSuppressed', uiState.topbarCollapsed));
+        if (settingsRailTabEl) settingsRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('settingsPreview', 'settingsHoverSuppressed', uiState.settingsCollapsed));
+        if (playerRollRailTabEl) playerRollRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('playerRollPreview', 'playerRollHoverSuppressed', uiState.playerRollRailCollapsed));
+        if (initiativeRailTabEl) initiativeRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('initiativePreview', 'initiativeHoverSuppressed', uiState.initiativeCollapsed));
+        if (topbarEl) topbarEl.addEventListener('pointerleave', () => setDrawerPreview('topbarPreview', '', false));
+        if (sidebarEl) sidebarEl.addEventListener('pointerleave', () => setDrawerPreview('settingsPreview', '', false));
+        if (playerRollRailEl) playerRollRailEl.addEventListener('pointerleave', () => setDrawerPreview('playerRollPreview', '', false));
+        if (initiativePanelEl) initiativePanelEl.addEventListener('pointerleave', () => setDrawerPreview('initiativePreview', '', false));
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerUp);
