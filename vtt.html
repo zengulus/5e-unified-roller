@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260520a">
+    <link rel="stylesheet" href="css/vtt.css?v=20260520b">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
@@ -76,10 +76,15 @@
                 <div class="hero-action-bar primary"></div>
             </div>
         </div>
+        <button class="vtt-topbar-tab" type="button" data-action="toggle-topbar-pin"
+            id="vtt-topbar-tab" aria-controls="vtt-topbar">Pin Top</button>
     </header>
 
     <main class="vtt-shell">
         <aside class="vtt-sidebar" id="vtt-settings-panel">
+            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="toggle-settings"
+                id="vtt-settings-rail-tab"
+                aria-controls="vtt-settings-panel">DM</button>
             <section class="vtt-panel" data-dm-only="1" id="vtt-scene-panel">
                 <div class="vtt-panel-head">
                     <h2>Scene</h2>
@@ -163,6 +168,30 @@
             </section>
         </aside>
 
+        <aside class="vtt-player-roll-rail" id="vtt-player-roll-rail" data-player-only="1">
+            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="toggle-player-roll-rail"
+                id="vtt-player-roll-rail-tab"
+                aria-controls="vtt-player-roll-panel">Roll</button>
+            <section class="vtt-panel vtt-player-roll-panel" id="vtt-player-roll-panel">
+                <div class="vtt-panel-head">
+                    <h2>Roll</h2>
+                    <button class="vtt-chip-btn strong" type="button" data-action="toggle-player-roll-menu"
+                        id="vtt-player-roll-toggle" aria-controls="vtt-player-roll-menu" aria-expanded="false">Roll</button>
+                </div>
+                <div class="vtt-player-roll-menu" id="vtt-player-roll-menu" hidden>
+                    <div class="vtt-roll-mode-toggle" role="group" aria-label="Roll mode">
+                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="adv">Adv</button>
+                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="norm">Normal</button>
+                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="dis">Dis</button>
+                    </div>
+                    <div class="vtt-stage-context-list">
+                        <button class="vtt-stage-context-item strong" type="button" data-action="player-roll-from-sheet">Character Sheet</button>
+                        <button class="vtt-stage-context-item" type="button" data-action="player-custom-roll">Custom Roll</button>
+                    </div>
+                </div>
+            </section>
+        </aside>
+
         <section class="vtt-stage-panel">
             <div class="vtt-stage" id="vtt-stage">
                 <div class="vtt-map-world" id="vtt-map-world">
@@ -183,25 +212,9 @@
         </section>
 
         <aside class="vtt-initiative-panel" id="vtt-initiative-panel">
-            <section class="vtt-panel vtt-player-roll-panel" id="vtt-player-roll-panel" data-player-only="1">
-                <div class="vtt-panel-head">
-                    <h2>Roll</h2>
-                    <button class="vtt-chip-btn strong" type="button" data-action="toggle-player-roll-menu"
-                        id="vtt-player-roll-toggle" aria-controls="vtt-player-roll-menu" aria-expanded="false">Roll</button>
-                </div>
-                <div class="vtt-player-roll-menu" id="vtt-player-roll-menu" hidden>
-                    <div class="vtt-roll-mode-toggle" role="group" aria-label="Roll mode">
-                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="adv">Adv</button>
-                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="norm">Normal</button>
-                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="dis">Dis</button>
-                    </div>
-                    <div class="vtt-stage-context-list">
-                        <button class="vtt-stage-context-item strong" type="button" data-action="player-roll-from-sheet">Character Sheet</button>
-                        <button class="vtt-stage-context-item" type="button" data-action="player-custom-roll">Custom Roll</button>
-                    </div>
-                </div>
-            </section>
-
+            <button class="vtt-side-rail-tab vtt-side-rail-tab-right" type="button" data-action="toggle-initiative"
+                id="vtt-initiative-rail-tab"
+                aria-controls="vtt-initiative-panel">Init</button>
             <section class="vtt-panel" id="vtt-clock-panel">
                 <div class="vtt-panel-head">
                     <h2>Clocks</h2>
@@ -276,7 +289,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260520a"></script>
+    <script src="js/vtt.js?v=20260520b"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

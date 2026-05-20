@@ -110,8 +110,10 @@
     let localRole = 'player';
     let initialVTTLoadPending = true;
     let uiState = {
-        settingsCollapsed: false,
-        initiativeCollapsed: false,
+        topbarCollapsed: true,
+        settingsCollapsed: true,
+        initiativeCollapsed: true,
+        playerRollRailCollapsed: true,
         scenePanelCollapsed: false,
         spawnPanelCollapsed: false,
         inspectorPanelCollapsed: false,
@@ -215,6 +217,9 @@
     const playerRollPanelEl = document.getElementById('vtt-player-roll-panel');
     const playerRollToggleEl = document.getElementById('vtt-player-roll-toggle');
     const playerRollMenuEl = document.getElementById('vtt-player-roll-menu');
+    const settingsRailTabEl = document.getElementById('vtt-settings-rail-tab');
+    const playerRollRailTabEl = document.getElementById('vtt-player-roll-rail-tab');
+    const initiativeRailTabEl = document.getElementById('vtt-initiative-rail-tab');
     const clockListEl = document.getElementById('vtt-clock-list');
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
@@ -244,6 +249,7 @@
     const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
     const viewMenuEl = document.getElementById('vtt-view-menu');
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
+    const topbarTabEl = document.getElementById('vtt-topbar-tab');
     const sidebarEl = document.getElementById('vtt-settings-panel');
     const dmUnlockModalEl = document.getElementById('vtt-dm-unlock-modal');
     const dmUnlockFormEl = document.getElementById('vtt-dm-unlock-form');
@@ -2323,22 +2329,40 @@
 
     const applyUIPreferences = () => {
         if (body) {
+            body.dataset.topbarCollapsed = uiState.topbarCollapsed ? '1' : '0';
             body.dataset.settingsCollapsed = uiState.settingsCollapsed ? '1' : '0';
             body.dataset.initiativeCollapsed = uiState.initiativeCollapsed ? '1' : '0';
+            body.dataset.playerRollRailCollapsed = uiState.playerRollRailCollapsed ? '1' : '0';
             body.dataset.scenePanelCollapsed = uiState.scenePanelCollapsed ? '1' : '0';
             body.dataset.spawnPanelCollapsed = uiState.spawnPanelCollapsed ? '1' : '0';
             body.dataset.inspectorPanelCollapsed = uiState.inspectorPanelCollapsed ? '1' : '0';
             body.dataset.gridHidden = uiState.showGrid ? '0' : '1';
             body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
         }
+        if (topbarTabEl) {
+            topbarTabEl.textContent = uiState.topbarCollapsed ? 'Pin Top' : 'Unpin Top';
+            topbarTabEl.setAttribute('aria-pressed', uiState.topbarCollapsed ? 'false' : 'true');
+        }
         if (settingsToggleEl) {
-            settingsToggleEl.textContent = `Sidebar: ${uiState.settingsCollapsed ? 'Off' : 'On'}`;
+            settingsToggleEl.textContent = `Sidebar: ${uiState.settingsCollapsed ? 'Tucked' : 'Pinned'}`;
             settingsToggleEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
             settingsToggleEl.disabled = !isDM();
         }
         if (initiativeToggleEl) {
-            initiativeToggleEl.textContent = `Initiative: ${uiState.initiativeCollapsed ? 'Off' : 'On'}`;
+            initiativeToggleEl.textContent = `Initiative: ${uiState.initiativeCollapsed ? 'Tucked' : 'Pinned'}`;
             initiativeToggleEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
+        }
+        if (settingsRailTabEl) {
+            settingsRailTabEl.textContent = uiState.settingsCollapsed ? 'Pin DM' : 'Unpin DM';
+            settingsRailTabEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
+        }
+        if (playerRollRailTabEl) {
+            playerRollRailTabEl.textContent = uiState.playerRollRailCollapsed ? 'Pin Roll' : 'Unpin Roll';
+            playerRollRailTabEl.setAttribute('aria-pressed', uiState.playerRollRailCollapsed ? 'false' : 'true');
+        }
+        if (initiativeRailTabEl) {
+            initiativeRailTabEl.textContent = uiState.initiativeCollapsed ? 'Pin Init' : 'Unpin Init';
+            initiativeRailTabEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (scenePanelToggleEl) {
             scenePanelToggleEl.textContent = `Scene Panel: ${uiState.scenePanelCollapsed ? 'Off' : 'On'}`;
@@ -2370,8 +2394,10 @@
             const raw = localStorage.getItem(getUIPrefsStorageKey());
             const parsed = raw ? JSON.parse(raw) : {};
             uiState = {
-                settingsCollapsed: !!(parsed && parsed.settingsCollapsed),
-                initiativeCollapsed: !!(parsed && parsed.initiativeCollapsed),
+                topbarCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'topbarCollapsed') ? !!parsed.topbarCollapsed : true,
+                settingsCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'settingsCollapsed') ? !!parsed.settingsCollapsed : true,
+                initiativeCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'initiativeCollapsed') ? !!parsed.initiativeCollapsed : true,
+                playerRollRailCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'playerRollRailCollapsed') ? !!parsed.playerRollRailCollapsed : true,
                 scenePanelCollapsed: !!(parsed && parsed.scenePanelCollapsed),
                 spawnPanelCollapsed: !!(parsed && parsed.spawnPanelCollapsed),
                 inspectorPanelCollapsed: !!(parsed && parsed.inspectorPanelCollapsed),
@@ -2382,8 +2408,10 @@
             };
         } catch (err) {
             uiState = {
-                settingsCollapsed: false,
-                initiativeCollapsed: false,
+                topbarCollapsed: true,
+                settingsCollapsed: true,
+                initiativeCollapsed: true,
+                playerRollRailCollapsed: true,
                 scenePanelCollapsed: false,
                 spawnPanelCollapsed: false,
                 inspectorPanelCollapsed: false,
@@ -7436,6 +7464,10 @@
             }
             return;
         }
+        if (action === 'toggle-topbar-pin') {
+            toggleUIPreference('topbarCollapsed');
+            return;
+        }
         if (action === 'close-dm-unlock') {
             closeDMUnlockModal();
             return;
@@ -7460,6 +7492,11 @@
                 closeNPCRollPopover();
             }
             render();
+            return;
+        }
+        if (action === 'toggle-player-roll-rail') {
+            if (isDM()) return;
+            toggleUIPreference('playerRollRailCollapsed');
             return;
         }
         if (action === 'set-roll-mode') {
