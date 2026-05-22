@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260520g">
+    <link rel="stylesheet" href="css/vtt.css?v=20260522b">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
@@ -203,6 +203,7 @@
                     <div class="vtt-template-layer" id="vtt-template-layer"></div>
                     <div class="vtt-token-layer" id="vtt-token-layer"></div>
                     <div class="vtt-vision-layer" id="vtt-vision-layer"></div>
+                    <div class="vtt-proximity-prompt-stack" id="vtt-proximity-prompt-stack" aria-live="polite"></div>
                 </div>
                 <div class="vtt-mode-chip" id="vtt-mode-chip" hidden></div>
                 <div class="vtt-quick-spawn-menu vtt-popover" id="vtt-quick-spawn-menu" hidden></div>
@@ -250,17 +251,16 @@
     <div class="vtt-popover vtt-stage-context-menu" id="vtt-stage-context-menu" hidden></div>
     <div class="vtt-popover vtt-token-inspector-popover vtt-sheet-action-popover" id="vtt-sheet-action-popover" hidden></div>
     <div class="vtt-popover vtt-token-inspector-popover vtt-npc-roll-popover" id="vtt-npc-roll-popover" hidden></div>
-    <div class="vtt-proximity-prompt-stack" id="vtt-proximity-prompt-stack" aria-live="polite"></div>
 
     <script src="js/delegated-handler.js"></script>
     <script src="js/sw-register.js"></script>
     <script src="js/media-cache.js"></script>
     <script src="js/data-loader.js"></script>
-    <script src="js/store.js?v=20260505a"></script>
+    <script src="js/store.js?v=20260522a"></script>
     <script src="js/player-nav.js?v=20260428a"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script>
-        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260504d')
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260522a')
             .then(() => window.RTF_VTT_COLLAB || null)
             .catch((err) => {
                 console.warn('VTT collaboration module failed to load', err);
@@ -288,7 +288,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260520f"></script>
+    <script src="js/vtt.js?v=20260522c"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

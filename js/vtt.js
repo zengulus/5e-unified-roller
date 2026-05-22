@@ -453,6 +453,10 @@
             skill: normalizeProximityTriggerSkill(source.skill),
             dc: hasDc ? clamp(Math.round(toNumber(rawDc, 10)), 1, 40) : null,
             dcVisible: !!source.dcVisible,
+            revealOnSuccess: !!source.revealOnSuccess,
+            clockId: String(source.clockId || '').trim().slice(0, 120),
+            clockSuccessDelta: clamp(Math.round(toNumber(source.clockSuccessDelta, 0)), -20, 20),
+            clockFailDelta: clamp(Math.round(toNumber(source.clockFailDelta, 0)), -20, 20),
             title: String(source.title || 'Something catches your attention').trim().slice(0, 160) || 'Something catches your attention',
             body: String(source.body || '').trim().slice(0, 800),
             successText: String(source.successText || '').trim().slice(0, 600),
@@ -4129,6 +4133,10 @@
             }
         });
 
+        if (proximityPromptStackEl && !proximityPromptStackEl.hidden) {
+            positionProximityPrompt(scene);
+        }
+
         tokenLayerEl.querySelectorAll('.vtt-token').forEach((tokenEl) => {
             if (!(tokenEl instanceof HTMLElement)) return;
             tokenEl.style.left = `${scaleForZoom(toNumber(tokenEl.dataset.worldLeft, 0))}px`;
@@ -5892,15 +5900,57 @@
         if (normalized.repeat === 'always') return suppressedProximityPromptKeys.has(key);
         return !!(seenMap && seenMap[key]);
     };
-    const markProximityPromptSeen = (key, trigger) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        if (!key) return;
-        if (normalized.repeat === 'always') return;
+    const getProximitySeenEntry = (seenMap, key) => {
+        if (!seenMap || !key || !seenMap[key]) return null;
+        const entry = seenMap[key];
+        if (entry && typeof entry === 'object' && !Array.isArray(entry)) return entry;
+        return { at: Number.isFinite(Number(entry)) ? Number(entry) : Date.now() };
+    };
+    const getPersistedProximityResult = (seenMap, key) => {
+        const entry = getProximitySeenEntry(seenMap, key);
+        const result = entry && entry.result && typeof entry.result === 'object' ? entry.result : null;
+        if (!result || entry.dismissed) return null;
+        return {
+            ok: !!result.ok,
+            total: result.total,
+            formula: String(result.formula || '').slice(0, 160),
+            label: String(result.label || '').slice(0, 120),
+            success: result.success === true ? true : (result.success === false ? false : null),
+            persisted: true
+        };
+    };
+    const persistProximityPromptResult = (prompt, result, trigger) => {
+        if (!prompt || !prompt.key || !result) return;
         const seenMap = readProximitySeenMap();
-        seenMap[key] = Date.now();
+        const previous = getProximitySeenEntry(seenMap, prompt.key) || {};
+        seenMap[prompt.key] = {
+            ...previous,
+            at: previous.at || Date.now(),
+            resolvedAt: Date.now(),
+            dismissed: false,
+            result: {
+                ok: !!result.ok,
+                total: result.total,
+                formula: String(result.formula || '').slice(0, 160),
+                label: String(result.label || getProximitySkillLabel(trigger && trigger.skill)).slice(0, 120),
+                success: result.success === true ? true : (result.success === false ? false : null)
+            }
+        };
         writeProximitySeenMap(seenMap);
     };
-    const buildProximityCandidate = ({ scene, sourceKind, source, trigger, token, distance }) => {
+    const markProximityPromptDismissed = (prompt) => {
+        if (!prompt || !prompt.key) return;
+        const seenMap = readProximitySeenMap();
+        const previous = getProximitySeenEntry(seenMap, prompt.key) || {};
+        seenMap[prompt.key] = {
+            ...previous,
+            at: previous.at || Date.now(),
+            dismissed: true,
+            dismissedAt: Date.now()
+        };
+        writeProximitySeenMap(seenMap);
+    };
+    const buildProximityCandidate = ({ scene, sourceKind, source, trigger, token, distance, result = null }) => {
         const normalized = normalizeProximityTrigger(trigger);
         const sourceId = String(source && source.id || '').trim();
         const key = getProximityPromptSeenKey(scene, sourceKind, sourceId, normalized, token);
@@ -5914,27 +5964,88 @@
                 : String(source && source.label || 'Token').trim(),
             tokenId: String(token && token.id || '').trim(),
             tokenLabel: String(token && token.label || 'Token').trim(),
+            tokenAnchorCellX: toNumber(token && token.x, 0) + Math.max(1, toNumber(token && token.w, 1)) / 2,
+            tokenAnchorCellY: toNumber(token && token.y, 0),
             distance: Number.isFinite(distance) ? distance : 0,
             trigger: normalized,
-            result: null
+            result
         };
+    };
+    const getProximityPromptToken = (scene, prompt = activeProximityPrompt) => {
+        const tokenId = String(prompt && prompt.tokenId || '').trim();
+        if (!scene || !tokenId) return null;
+        return getVisibleTokensForRole(scene, 'player').find((token) => String(token && token.id || '').trim() === tokenId) || null;
+    };
+    const getProximityPromptAnchorWorldPoint = (scene, prompt = activeProximityPrompt) => {
+        const token = getProximityPromptToken(scene, prompt);
+        if (!scene || !scene.grid) return null;
+        const cellPx = getSceneCellPx(scene);
+        if (!token) {
+            if (!Number.isFinite(Number(prompt && prompt.tokenAnchorCellX)) || !Number.isFinite(Number(prompt && prompt.tokenAnchorCellY))) return null;
+            return {
+                x: toNumber(scene.grid.offsetX, 0) + toNumber(prompt.tokenAnchorCellX, 0) * cellPx,
+                y: toNumber(scene.grid.offsetY, 0) + toNumber(prompt.tokenAnchorCellY, 0) * cellPx
+            };
+        }
+        const renderedCells = getRenderableTokenCells(token, scene, Date.now());
+        return {
+            x: toNumber(scene.grid.offsetX, 0) + (toNumber(renderedCells.x, token.x) + Math.max(1, toNumber(token.w, 1)) / 2) * cellPx,
+            y: toNumber(scene.grid.offsetY, 0) + toNumber(renderedCells.y, token.y) * cellPx
+        };
+    };
+    const positionProximityPrompt = (scene = getActiveScene()) => {
+        if (!proximityPromptStackEl || !activeProximityPrompt || proximityPromptStackEl.hidden) return false;
+        const anchor = getProximityPromptAnchorWorldPoint(scene, activeProximityPrompt);
+        if (!anchor) {
+            proximityPromptStackEl.hidden = true;
+            return false;
+        }
+        proximityPromptStackEl.dataset.worldLeft = String(anchor.x);
+        proximityPromptStackEl.dataset.worldTop = String(anchor.y);
+        proximityPromptStackEl.style.left = `${scaleForZoom(anchor.x)}px`;
+        proximityPromptStackEl.style.top = `${scaleForZoom(anchor.y)}px`;
+        if (stageEl) {
+            const stageRect = stageEl.getBoundingClientRect();
+            const anchorStageY = localView.y + scaleForZoom(anchor.y);
+            const useBelow = anchorStageY < Math.min(180, stageRect.height * 0.24);
+            proximityPromptStackEl.dataset.placement = useBelow ? 'below' : 'above';
+        } else {
+            proximityPromptStackEl.dataset.placement = 'above';
+        }
+        return true;
     };
     const collectProximityPromptCandidates = (scene) => {
         if (!scene) return [];
         const seenMap = readProximitySeenMap();
         const candidates = [];
         const visibleTokens = getVisibleTokensForRole(scene, 'player');
-        const visibleNotes = getVisibleEvidenceNotesForRole(scene, 'player');
-        visibleNotes.forEach((note) => {
+        const playerFogCellSet = collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
+        const sourceNotes = getSceneEvidenceNotes(scene);
+        sourceNotes.forEach((note) => {
             const sourceRect = getEvidenceNoteTriggerRect(scene, note);
             if (!sourceRect) return;
+            const noteVisible = isEvidenceNoteVisibleToRole(note, scene, 'player', playerFogCellSet);
             normalizeProximityTriggers(note.triggers)
                 .filter((trigger) => trigger.enabled && trigger.trigger === 'enter')
                 .forEach((trigger) => {
+                    if (!noteVisible && !(trigger.kind === 'skillRoll' && trigger.revealOnSuccess)) return;
                     getProximityTargetTokens(scene, trigger).forEach((token) => {
                         const tokenRect = getTokenCellRect(token);
                         if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
                         const key = getProximityPromptSeenKey(scene, 'note', note.id, trigger, token);
+                        const persistedResult = getPersistedProximityResult(seenMap, key);
+                        if (persistedResult) {
+                            candidates.push(buildProximityCandidate({
+                                scene,
+                                sourceKind: 'note',
+                                source: note,
+                                trigger,
+                                token,
+                                distance: getCellRectDistance(sourceRect, tokenRect),
+                                result: persistedResult
+                            }));
+                            return;
+                        }
                         if (isProximityPromptSeen(seenMap, key, trigger)) return;
                         candidates.push(buildProximityCandidate({
                             scene,
@@ -5957,6 +6068,19 @@
                         const tokenRect = getTokenCellRect(token);
                         if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
                         const key = getProximityPromptSeenKey(scene, 'token', sourceToken.id, trigger, token);
+                        const persistedResult = getPersistedProximityResult(seenMap, key);
+                        if (persistedResult) {
+                            candidates.push(buildProximityCandidate({
+                                scene,
+                                sourceKind: 'token',
+                                source: sourceToken,
+                                trigger,
+                                token,
+                                distance: getCellRectDistance(sourceRect, tokenRect),
+                                result: persistedResult
+                            }));
+                            return;
+                        }
                         if (isProximityPromptSeen(seenMap, key, trigger)) return;
                         candidates.push(buildProximityCandidate({
                             scene,
@@ -5986,7 +6110,6 @@
         const candidate = collectProximityPromptCandidates(scene)[0] || null;
         if (!candidate) return;
         activeProximityPrompt = candidate;
-        markProximityPromptSeen(candidate.key, candidate.trigger);
     };
     const renderProximityPrompt = () => {
         if (!proximityPromptStackEl) return;
@@ -5995,14 +6118,13 @@
             proximityPromptStackEl.hidden = true;
             return;
         }
+        const scene = getActiveScene();
         const prompt = activeProximityPrompt;
         const trigger = normalizeProximityTrigger(prompt.trigger);
         const isSkillRoll = trigger.kind === 'skillRoll';
         const skillLabel = getProximitySkillLabel(trigger.skill);
-        const sourcePrefix = prompt.sourceKind === 'note'
-            ? `${prompt.sourceLabel || 'Map marker'}`
-            : `${prompt.sourceLabel || 'Nearby token'}`;
         const dcLabel = isSkillRoll && trigger.dc !== null && trigger.dcVisible ? `DC ${trigger.dc}` : '';
+        const narratorLabel = `Narrator${dcLabel ? ` - ${dcLabel}` : ''}`;
         const result = prompt.result || null;
         const resultText = result
             ? `${result.total} - ${result.formula || skillLabel}`
@@ -6010,23 +6132,23 @@
         const outcomeText = result && result.success === true
             ? (trigger.successText || 'Success.')
             : (result && result.success === false ? (trigger.failText || 'Miss.') : '');
+        const narratorBody = result && outcomeText ? outcomeText : trigger.body;
         proximityPromptStackEl.hidden = false;
         proximityPromptStackEl.innerHTML = `
             <div class="vtt-proximity-prompt-card">
                 <div class="vtt-proximity-prompt-top">
                     <div>
-                        <span class="vtt-proximity-eyebrow">${escapeHtml(sourcePrefix)}${dcLabel ? ` · ${escapeHtml(dcLabel)}` : ''}</span>
+                        <span class="vtt-proximity-eyebrow">${escapeHtml(narratorLabel)}</span>
                         <strong>${escapeHtml(trigger.title)}</strong>
                     </div>
                     <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="dismiss-proximity-prompt" aria-label="Dismiss proximity prompt">X</button>
                 </div>
-                ${trigger.body ? `<div class="vtt-proximity-prompt-body">${escapeHtml(trigger.body)}</div>` : ''}
+                ${narratorBody ? `<div class="vtt-proximity-prompt-body">${escapeHtml(narratorBody)}</div>` : ''}
                 ${result ? `
                     <div class="vtt-proximity-prompt-result">
                         <strong>${escapeHtml(String(result.total))}</strong>
                         <span>${escapeHtml(resultText)}</span>
                     </div>
-                    ${outcomeText ? `<div class="vtt-proximity-prompt-outcome">${escapeHtml(outcomeText)}</div>` : ''}
                 ` : ''}
                 <div class="vtt-proximity-prompt-actions">
                     ${isSkillRoll && !result ? `<button class="vtt-chip-btn strong" type="button" data-action="resolve-proximity-roll">Roll ${escapeHtml(skillLabel)}</button>` : ''}
@@ -6034,10 +6156,15 @@
                 </div>
             </div>
         `;
+        if (!positionProximityPrompt(scene)) {
+            proximityPromptStackEl.innerHTML = '';
+            proximityPromptStackEl.hidden = true;
+        }
     };
     const dismissActiveProximityPrompt = () => {
         if (activeProximityPrompt && activeProximityPrompt.key) {
             suppressedProximityPromptKeys.add(activeProximityPrompt.key);
+            markProximityPromptDismissed(activeProximityPrompt);
         }
         activeProximityPrompt = null;
         renderProximityPrompt();
@@ -6066,6 +6193,31 @@
         const bonus = getSheetMod(character, stat) + (profLevel * getSheetPB(character)) + getSheetSkillMiscBonus(character, skill);
         return rollSheetD20(character, bonus, `${skillLabel} (${String(stat || '').toUpperCase()})`, { type: 'check' });
     };
+    const applyProximityResolutionEffects = (prompt, trigger, result) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        const success = result && result.success === true ? true : (result && result.success === false ? false : null);
+        if (success === null) return false;
+        const clockDelta = success ? normalized.clockSuccessDelta : normalized.clockFailDelta;
+        const shouldRevealSource = success && normalized.revealOnSuccess && prompt && prompt.sourceKind === 'note';
+        const shouldUpdateClock = !!normalized.clockId && !!clockDelta;
+        if (!shouldRevealSource && !shouldUpdateClock) return false;
+        return withDraft((draft) => {
+            const scene = getSceneById(prompt && prompt.sceneId, draft) || getActiveScene(draft);
+            if (!scene) return;
+            if (shouldRevealSource && Array.isArray(scene.evidenceNotes)) {
+                const note = scene.evidenceNotes.find((entry) => String(entry && entry.id || '').trim() === String(prompt && prompt.sourceId || '').trim());
+                if (note) note.hidden = false;
+            }
+            if (shouldUpdateClock && Array.isArray(scene.clocks)) {
+                const clock = scene.clocks.find((entry) => String(entry && entry.id || '').trim() === normalized.clockId);
+                if (clock) {
+                    const max = normalizeClockMax(clock.max, 4);
+                    clock.max = max;
+                    clock.current = normalizeClockCurrent(toNumber(clock.current, 0) + clockDelta, max, 0);
+                }
+            }
+        }, { reason: 'proximity-resolution-effects' });
+    };
     const resolveActiveProximityRoll = () => {
         if (!activeProximityPrompt) return false;
         const trigger = normalizeProximityTrigger(activeProximityPrompt.trigger);
@@ -6083,6 +6235,8 @@
                 success: result && result.ok && hasDc ? result.total >= trigger.dc : null
             }
         };
+        persistProximityPromptResult(activeProximityPrompt, activeProximityPrompt.result, trigger);
+        applyProximityResolutionEffects(activeProximityPrompt, trigger, activeProximityPrompt.result);
         if (result && result.ok && result.character) {
             postSheetDiscordRoll(result.character, result.label, result.total, result.formula, result.type, result.detail).catch((err) => {
                 console.warn('VTT proximity roll Discord post failed', err);
@@ -6514,6 +6668,8 @@
     const buildProximityTriggerEditorRow = (ownerKind, ownerId, trigger) => {
         const normalized = normalizeProximityTrigger(trigger);
         const isSkillRoll = normalized.kind === 'skillRoll';
+        const sceneClocks = getSceneClocks(getActiveScene());
+        const hasClock = !!normalized.clockId;
         return `
             <div class="vtt-proximity-trigger-row" data-trigger-id="${escapeHtml(normalized.id)}">
                 <div class="vtt-proximity-trigger-head">
@@ -6577,6 +6733,31 @@
                             <input type="checkbox" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'dcVisible')} ${normalized.dcVisible ? ' checked' : ''}>
                             <span>Show DC</span>
                         </label>
+                        ${ownerKind === 'note' ? `
+                            <label class="vtt-inspector-check">
+                                <input type="checkbox" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'revealOnSuccess')} ${normalized.revealOnSuccess ? ' checked' : ''}>
+                                <span>Reveal marker on pass</span>
+                            </label>
+                        ` : ''}
+                        <label class="vtt-field">
+                            <span>Clock</span>
+                            <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'clockId')}>
+                                <option value=""${hasClock ? '' : ' selected'}>No Clock</option>
+                                ${sceneClocks.map((clock) => `
+                                    <option value="${escapeHtml(String(clock.id || ''))}"${normalized.clockId === String(clock.id || '') ? ' selected' : ''}>${escapeHtml(clock.title || 'Scene Clock')}</option>
+                                `).join('')}
+                            </select>
+                        </label>
+                        ${hasClock ? `
+                            <label class="vtt-field">
+                                <span>Pass Delta</span>
+                                <input class="vtt-inspector-input" type="number" min="-20" max="20" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'clockSuccessDelta')} value="${escapeHtml(String(normalized.clockSuccessDelta))}">
+                            </label>
+                            <label class="vtt-field">
+                                <span>Miss Delta</span>
+                                <input class="vtt-inspector-input" type="number" min="-20" max="20" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'clockFailDelta')} value="${escapeHtml(String(normalized.clockFailDelta))}">
+                            </label>
+                        ` : ''}
                     ` : ''}
                 </div>
                 <label class="vtt-field">
@@ -7626,6 +7807,8 @@
         } else {
             applyWorldTransform(scene);
         }
+        evaluateProximityTriggers();
+        renderProximityPrompt();
     };
 
     const renderSceneControls = () => {
@@ -7798,6 +7981,10 @@
                 trigger.dcVisible = target.checked;
                 return;
             }
+            if (field === 'revealOnSuccess' && target instanceof HTMLInputElement && target.type === 'checkbox') {
+                trigger.revealOnSuccess = target.checked;
+                return;
+            }
             if (field === 'kind' && target instanceof HTMLSelectElement) {
                 trigger.kind = PROXIMITY_TRIGGER_KIND_OPTIONS.includes(target.value) ? target.value : 'skillRoll';
                 return;
@@ -7814,6 +8001,10 @@
                 trigger.repeat = PROXIMITY_TRIGGER_REPEAT_OPTIONS.includes(target.value) ? target.value : 'oncePerToken';
                 return;
             }
+            if (field === 'clockId' && target instanceof HTMLSelectElement) {
+                trigger.clockId = String(target.value || '').trim().slice(0, 120);
+                return;
+            }
             if (field === 'radiusCells') {
                 trigger.radiusCells = clamp(Math.round(toNumber(target.value, trigger.radiusCells || 0)), 0, 24);
                 return;
@@ -7821,6 +8012,14 @@
             if (field === 'dc') {
                 const raw = String(target.value || '').trim();
                 trigger.dc = raw === '' ? null : clamp(Math.round(toNumber(raw, trigger.dc || 10)), 1, 40);
+                return;
+            }
+            if (field === 'clockSuccessDelta') {
+                trigger.clockSuccessDelta = clamp(Math.round(toNumber(target.value, trigger.clockSuccessDelta || 0)), -20, 20);
+                return;
+            }
+            if (field === 'clockFailDelta') {
+                trigger.clockFailDelta = clamp(Math.round(toNumber(target.value, trigger.clockFailDelta || 0)), -20, 20);
                 return;
             }
             if (field === 'title') {

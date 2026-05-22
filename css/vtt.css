@@ -936,7 +936,8 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-note-layer,
 .vtt-template-layer,
 .vtt-token-layer,
-.vtt-vision-layer {
+.vtt-vision-layer,
+.vtt-proximity-prompt-stack {
     position: absolute;
 }
 
@@ -987,6 +988,10 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-vision-layer {
     z-index: 5;
+}
+
+.vtt-proximity-prompt-stack {
+    z-index: 6;
 }
 
 .vtt-fog-mask {
@@ -2672,15 +2677,14 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
 }
 
 .vtt-proximity-prompt-stack {
-    position: fixed;
-    left: 50%;
-    bottom: 1rem;
-    z-index: 44;
-    display: grid;
-    gap: 0.65rem;
-    width: min(32rem, calc(100vw - 2rem));
-    transform: translateX(-50%);
+    width: min(25rem, calc(100vw - 2rem));
+    transform: translate(-50%, calc(-100% - 0.9rem));
     pointer-events: none;
+    overflow: visible;
+}
+
+.vtt-proximity-prompt-stack[data-placement="below"] {
+    transform: translate(-50%, 0.9rem);
 }
 
 .vtt-proximity-prompt-stack[hidden],
@@ -2689,16 +2693,42 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
 }
 
 .vtt-proximity-prompt-card {
+    position: relative;
     display: grid;
-    gap: 0.65rem;
-    padding: 0.86rem;
-    border: 1px solid rgba(var(--accent-rgb, 78, 205, 196), 0.34);
+    gap: 0.58rem;
+    padding: 0.86rem 0.92rem;
+    border: 1px solid rgba(229, 194, 122, 0.46);
     border-radius: 8px;
-    background: rgba(7, 11, 18, 0.96);
-    box-shadow: 0 1rem 2.4rem rgba(0, 0, 0, 0.44);
-    color: #f3f8ff;
+    background:
+        linear-gradient(180deg, rgba(27, 22, 15, 0.98), rgba(13, 13, 15, 0.97)),
+        rgba(10, 12, 15, 0.98);
+    box-shadow:
+        0 1rem 2.1rem rgba(0, 0, 0, 0.46),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+    color: #fff7e8;
     pointer-events: auto;
     backdrop-filter: blur(14px);
+}
+
+.vtt-proximity-prompt-card::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -0.46rem;
+    width: 0.78rem;
+    height: 0.78rem;
+    border-right: 1px solid rgba(229, 194, 122, 0.42);
+    border-bottom: 1px solid rgba(229, 194, 122, 0.42);
+    background: rgba(13, 13, 15, 0.98);
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.vtt-proximity-prompt-stack[data-placement="below"] .vtt-proximity-prompt-card::after {
+    top: -0.46rem;
+    bottom: auto;
+    border: 0;
+    border-left: 1px solid rgba(229, 194, 122, 0.42);
+    border-top: 1px solid rgba(229, 194, 122, 0.42);
 }
 
 .vtt-proximity-prompt-top {
@@ -2715,24 +2745,28 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
 }
 
 .vtt-proximity-prompt-top strong {
-    font-size: 0.98rem;
+    font-size: 1rem;
     line-height: 1.25;
     overflow-wrap: anywhere;
 }
 
 .vtt-proximity-eyebrow {
-    color: rgba(var(--accent-rgb, 78, 205, 196), 0.86);
-    font-size: 0.68rem;
+    color: rgba(231, 199, 136, 0.88);
+    font-size: 0.66rem;
     font-weight: 800;
     text-transform: uppercase;
 }
 
 .vtt-proximity-prompt-body,
 .vtt-proximity-prompt-outcome {
-    color: rgba(229, 238, 249, 0.86);
+    color: rgba(251, 240, 218, 0.88);
     font-size: 0.84rem;
     line-height: 1.45;
     white-space: pre-wrap;
+}
+
+.vtt-proximity-prompt-body {
+    font-style: italic;
 }
 
 .vtt-proximity-prompt-result {
@@ -2741,7 +2775,7 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
     gap: 0.55rem;
     padding: 0.58rem 0.65rem;
     border-radius: 8px;
-    background: rgba(var(--accent-rgb, 78, 205, 196), 0.12);
+    background: rgba(229, 194, 122, 0.12);
 }
 
 .vtt-proximity-prompt-result strong {
@@ -2749,7 +2783,7 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
 }
 
 .vtt-proximity-prompt-result span {
-    color: rgba(220, 229, 241, 0.78);
+    color: rgba(251, 240, 218, 0.76);
     overflow-wrap: anywhere;
 }
 
