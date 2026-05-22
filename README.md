@@ -41,6 +41,11 @@ For simpler player onboarding, share/import a `connect.json` profile (also docum
 
 For a comprehensive guide on using the player tools, see **[Player Guide](player.md)**.
 
+## Testing
+Run `npm test` to start a temporary local static server and smoke-test the browser entrypoints with Playwright. The suite opens the Tools Hub, campaign tools, boards, VTT, player sheet, trackers, generators, and utility pages, then fails on page exceptions, console warnings/errors, or missing assets.
+
+`tools.html` is allowed to receive a 404 for `/connect.json`; that file is an optional bundled sync profile for deployments that want automatic player onboarding.
+
 ## License
 Project-authored code and documentation in this repository are released under [The Unlicense](LICENSE), unless a file or section states otherwise.
 

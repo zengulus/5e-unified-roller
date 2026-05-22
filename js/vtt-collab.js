@@ -74,8 +74,28 @@ const parseJsonObject = (value) => {
     }
 };
 
+const parseJsonArray = (value) => {
+    const source = toTrimmedString(value, '', 100000).trim();
+    if (!source) return [];
+    try {
+        const parsed = JSON.parse(source);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        return [];
+    }
+};
+
 const stringifyJsonObject = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+    try {
+        return JSON.stringify(value);
+    } catch (err) {
+        return '';
+    }
+};
+
+const stringifyJsonArray = (value) => {
+    if (!Array.isArray(value)) return '';
     try {
         return JSON.stringify(value);
     } catch (err) {
@@ -424,6 +444,7 @@ const syncYTokenRecord = (record, token) => {
     setYScalar(record, 'moodEmoji', source.moodEmoji || '');
     setYScalar(record, 'moodLabel', source.moodLabel || '');
     setYScalar(record, 'monsterRollOverrides', stringifyJsonObject(source.monsterRollOverrides));
+    setYScalar(record, 'triggers', stringifyJsonArray(source.triggers));
     syncYDefencesMap(record, 'defences', source.defences || {});
     syncYStringArray(ensureYArrayEntry(record, 'conditions'), Array.isArray(source.conditions) ? source.conditions.slice(0, 24) : [], 80);
     syncYVisionMap(record, 'vision', source.vision || {});
@@ -431,7 +452,7 @@ const syncYTokenRecord = (record, token) => {
         'id', 'label', 'side', 'imageUrl', 'x', 'y', 'w', 'h',
         'sourceType', 'sourceId', 'moveAccess', 'hpCurrent', 'hpMax',
         'ac', 'passivePerception', 'hidden', 'stealthRoll',
-        'moodEmoji', 'moodLabel', 'monsterRollOverrides', 'defences', 'conditions', 'vision'
+        'moodEmoji', 'moodLabel', 'monsterRollOverrides', 'triggers', 'defences', 'conditions', 'vision'
     ]));
 };
 
@@ -458,6 +479,7 @@ const serializeYTokenRecord = (record, tokenId) => ({
     moodEmoji: toTrimmedString(record.get('moodEmoji'), '', 16),
     moodLabel: toTrimmedString(record.get('moodLabel'), '', 40),
     monsterRollOverrides: parseJsonObject(record.get('monsterRollOverrides')),
+    triggers: parseJsonArray(record.get('triggers')),
     hidden: !!record.get('hidden'),
     stealthRoll: record.get('stealthRoll') ?? null,
     vision: serializeYVisionMap(record, 'vision')
@@ -488,6 +510,7 @@ const serializeYTemplateRecord = (record, templateId) => ({
 const syncYEvidenceNoteRecord = (record, note) => {
     const source = note && typeof note === 'object' ? note : {};
     setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
+    setYScalar(record, 'shape', toTrimmedString(source.shape, 'zone', 20).trim() || 'zone');
     setYScalar(record, 'category', source.category || 'evidence');
     setYScalar(record, 'title', source.title || '');
     setYScalar(record, 'body', source.body || '');
@@ -497,11 +520,13 @@ const syncYEvidenceNoteRecord = (record, note) => {
     setYScalar(record, 'h', source.h);
     setYScalar(record, 'hidden', !!source.hidden);
     setYScalar(record, 'highlightColor', source.highlightColor || '');
-    removeExtraneousMapKeys(record, new Set(['id', 'category', 'title', 'body', 'x', 'y', 'w', 'h', 'hidden', 'highlightColor']));
+    setYScalar(record, 'triggers', stringifyJsonArray(source.triggers));
+    removeExtraneousMapKeys(record, new Set(['id', 'shape', 'category', 'title', 'body', 'x', 'y', 'w', 'h', 'hidden', 'highlightColor', 'triggers']));
 };
 
 const serializeYEvidenceNoteRecord = (record, noteId) => ({
     id: toTrimmedString(record.get('id'), noteId, 120).trim() || noteId,
+    shape: toTrimmedString(record.get('shape'), 'zone', 20),
     category: toTrimmedString(record.get('category'), 'evidence', 20),
     title: toTrimmedString(record.get('title'), '', 160),
     body: toTrimmedString(record.get('body'), '', 6000),
@@ -510,7 +535,8 @@ const serializeYEvidenceNoteRecord = (record, noteId) => ({
     w: record.get('w'),
     h: record.get('h'),
     hidden: !!record.get('hidden'),
-    highlightColor: toTrimmedString(record.get('highlightColor'), '', 20)
+    highlightColor: toTrimmedString(record.get('highlightColor'), '', 20),
+    triggers: parseJsonArray(record.get('triggers'))
 });
 
 const syncYClockRecord = (record, clock) => {
@@ -786,6 +812,7 @@ const patchYTokenRecord = (record, baseToken = {}, nextToken = {}) => {
     mutated = patchYScalar(record, 'moodEmoji', baseToken.moodEmoji || '', nextToken.moodEmoji || '') || mutated;
     mutated = patchYScalar(record, 'moodLabel', baseToken.moodLabel || '', nextToken.moodLabel || '') || mutated;
     mutated = patchYScalar(record, 'monsterRollOverrides', stringifyJsonObject(baseToken.monsterRollOverrides), stringifyJsonObject(nextToken.monsterRollOverrides)) || mutated;
+    mutated = patchYScalar(record, 'triggers', stringifyJsonArray(baseToken.triggers), stringifyJsonArray(nextToken.triggers)) || mutated;
     mutated = patchYDefencesMap(record, 'defences', baseToken.defences || {}, nextToken.defences || {}) || mutated;
     mutated = patchYStringArray(
         ensureYArrayEntry(record, 'conditions'),
@@ -812,6 +839,7 @@ const patchYTemplateRecord = (record, baseTemplate = {}, nextTemplate = {}) => {
 const patchYEvidenceNoteRecord = (record, baseNote = {}, nextNote = {}) => {
     let mutated = false;
     mutated = patchYScalar(record, 'id', baseNote.id, nextNote.id) || mutated;
+    mutated = patchYScalar(record, 'shape', baseNote.shape || 'zone', nextNote.shape || 'zone') || mutated;
     mutated = patchYScalar(record, 'category', baseNote.category, nextNote.category) || mutated;
     mutated = patchYScalar(record, 'title', baseNote.title, nextNote.title) || mutated;
     mutated = patchYScalar(record, 'body', baseNote.body, nextNote.body) || mutated;
@@ -821,6 +849,7 @@ const patchYEvidenceNoteRecord = (record, baseNote = {}, nextNote = {}) => {
     mutated = patchYScalar(record, 'h', baseNote.h, nextNote.h) || mutated;
     mutated = patchYScalar(record, 'hidden', !!baseNote.hidden, !!nextNote.hidden) || mutated;
     mutated = patchYScalar(record, 'highlightColor', baseNote.highlightColor, nextNote.highlightColor) || mutated;
+    mutated = patchYScalar(record, 'triggers', stringifyJsonArray(baseNote.triggers), stringifyJsonArray(nextNote.triggers)) || mutated;
     return mutated;
 };
 

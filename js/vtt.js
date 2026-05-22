@@ -46,6 +46,9 @@
     const DEFAULT_VTT_CELL_PX = 70;
     const DEFAULT_EVIDENCE_NOTE_CATEGORY = 'evidence';
     const DEFAULT_EVIDENCE_NOTE_COLOR = '#39b66b';
+    const EVIDENCE_NOTE_SHAPE_PIN = 'pin';
+    const EVIDENCE_NOTE_SHAPE_ZONE = 'zone';
+    const EVIDENCE_NOTE_SHAPE_OPTIONS = [EVIDENCE_NOTE_SHAPE_PIN, EVIDENCE_NOTE_SHAPE_ZONE];
     const EVIDENCE_NOTE_CATEGORY_META = Object.freeze({
         evidence: { label: 'Evidence', shortLabel: 'E', color: '#39b66b', defaultTitle: 'Evidence Zone' },
         clue: { label: 'Clue', shortLabel: '?', color: '#58d4f7', defaultTitle: 'Clue Pin' },
@@ -63,6 +66,51 @@
         other: { label: 'Other', shortLabel: '?', color: '#8f9aa8', defaultTitle: 'Zone' }
     });
     const MOOD_EMOJI_OPTIONS = ['🙂', '😠', '😰', '🤔', '😏', '😢', '😨', '😤', '🫡', '👁️', '🩸', '🏃', '🛡️', '✨'];
+    const PROXIMITY_PROMPT_STORAGE_PREFIX = 'rtf_vtt_proximity_seen_';
+    const PROXIMITY_TRIGGER_KIND_OPTIONS = ['fiction', 'skillRoll'];
+    const PROXIMITY_TRIGGER_TYPE_OPTIONS = ['enter', 'startTurnNear', 'click', 'reveal'];
+    const PROXIMITY_TRIGGER_TARGET_OPTIONS = ['playerTokens', 'anyVisibleToken'];
+    const PROXIMITY_TRIGGER_REPEAT_OPTIONS = ['oncePerToken', 'oncePerScene', 'always'];
+    const PROXIMITY_TRIGGER_SKILL_OPTIONS = [
+        'acrobatics',
+        'animal handling',
+        'perception',
+        'investigation',
+        'insight',
+        'arcana',
+        'deception',
+        'stealth',
+        'survival',
+        'athletics',
+        'intimidation',
+        'medicine',
+        'nature',
+        'performance',
+        'persuasion',
+        'religion',
+        'history',
+        'sleight of hand'
+    ];
+    const PROXIMITY_TRIGGER_SKILL_LABELS = {
+        'acrobatics': 'Acrobatics',
+        'animal handling': 'Animal Handling',
+        'arcana': 'Arcana',
+        'athletics': 'Athletics',
+        'deception': 'Deception',
+        'history': 'History',
+        'insight': 'Insight',
+        'intimidation': 'Intimidation',
+        'investigation': 'Investigation',
+        'medicine': 'Medicine',
+        'nature': 'Nature',
+        'perception': 'Perception',
+        'performance': 'Performance',
+        'persuasion': 'Persuasion',
+        'religion': 'Religion',
+        'sleight of hand': 'Sleight Of Hand',
+        'stealth': 'Stealth',
+        'survival': 'Survival'
+    };
     const TOKEN_COORD_PRECISION = 1000;
     const MIN_VTT_MAP_SCALE = 0.25;
     const MAX_VTT_MAP_SCALE = 4;
@@ -156,6 +204,8 @@
     let sheetActionQuery = '';
     let npcRollState = null;
     let playerRollMenuOpen = true;
+    let activeProximityPrompt = null;
+    let suppressedProximityPromptKeys = new Set();
     let localRollMode = 'norm';
     let lastContextPointerState = null;
     let viewMenuOpen = false;
@@ -215,6 +265,7 @@
     const stageContextMenuEl = document.getElementById('vtt-stage-context-menu');
     const sheetActionPopoverEl = document.getElementById('vtt-sheet-action-popover');
     const npcRollPopoverEl = document.getElementById('vtt-npc-roll-popover');
+    const proximityPromptStackEl = document.getElementById('vtt-proximity-prompt-stack');
     const playerRollPanelEl = document.getElementById('vtt-player-roll-panel');
     const playerRollToggleEl = document.getElementById('vtt-player-roll-toggle');
     const playerRollMenuEl = document.getElementById('vtt-player-roll-menu');
@@ -376,6 +427,68 @@
         word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     );
     const normalizeSearchText = (value = '') => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const normalizeProximityTriggerSkill = (value) => {
+        const clean = String(value || '').trim().toLowerCase();
+        if (PROXIMITY_TRIGGER_SKILL_OPTIONS.includes(clean)) return clean;
+        return 'perception';
+    };
+    const getProximitySkillLabel = (value) => PROXIMITY_TRIGGER_SKILL_LABELS[normalizeProximityTriggerSkill(value)] || toTitleCaseWords(value || 'Perception');
+    const normalizeProximityTrigger = (trigger, idx = 0) => {
+        const source = trigger && typeof trigger === 'object' ? trigger : {};
+        const kind = String(source.kind || 'skillRoll').trim();
+        const triggerType = String(source.trigger || 'enter').trim();
+        const target = String(source.target || 'playerTokens').trim();
+        const repeat = String(source.repeat || 'oncePerToken').trim();
+        const rawDc = source.dc;
+        const hasDc = rawDc !== null && rawDc !== undefined && rawDc !== '';
+        const fallbackId = `prompt_${idx + 1}`;
+        return {
+            id: String(source.id || fallbackId).trim().slice(0, 120) || fallbackId,
+            enabled: source.enabled !== undefined ? !!source.enabled : true,
+            trigger: PROXIMITY_TRIGGER_TYPE_OPTIONS.includes(triggerType) ? triggerType : 'enter',
+            radiusCells: clamp(Math.round(toNumber(source.radiusCells, 0)), 0, 24),
+            target: PROXIMITY_TRIGGER_TARGET_OPTIONS.includes(target) ? target : 'playerTokens',
+            repeat: PROXIMITY_TRIGGER_REPEAT_OPTIONS.includes(repeat) ? repeat : 'oncePerToken',
+            kind: PROXIMITY_TRIGGER_KIND_OPTIONS.includes(kind) ? kind : 'skillRoll',
+            skill: normalizeProximityTriggerSkill(source.skill),
+            dc: hasDc ? clamp(Math.round(toNumber(rawDc, 10)), 1, 40) : null,
+            dcVisible: !!source.dcVisible,
+            title: String(source.title || 'Something catches your attention').trim().slice(0, 160) || 'Something catches your attention',
+            body: String(source.body || '').trim().slice(0, 800),
+            successText: String(source.successText || '').trim().slice(0, 600),
+            failText: String(source.failText || '').trim().slice(0, 600)
+        };
+    };
+    const normalizeProximityTriggers = (triggers) => (
+        Array.isArray(triggers)
+            ? triggers.map((entry, idx) => normalizeProximityTrigger(entry, idx)).slice(0, 12)
+            : []
+    );
+    const buildSeededProximityTrigger = (seed = 'perception') => {
+        const cleanSeed = String(seed || 'perception').trim().toLowerCase();
+        if (cleanSeed === 'fiction') {
+            return normalizeProximityTrigger({
+                id: buildId('prompt'),
+                kind: 'fiction',
+                title: 'A detail surfaces',
+                body: 'Describe the sensory detail, clue, or pressure beat the players notice here.',
+                radiusCells: 0
+            });
+        }
+        const skill = normalizeProximityTriggerSkill(cleanSeed);
+        return normalizeProximityTrigger({
+            id: buildId('prompt'),
+            kind: 'skillRoll',
+            skill,
+            dc: 15,
+            dcVisible: false,
+            title: `${getProximitySkillLabel(skill)} prompt`,
+            body: `Something here invites a ${getProximitySkillLabel(skill)} check.`,
+            successText: 'On a success, give the player a concrete, actionable detail.',
+            failText: 'On a miss, give texture or partial information without stopping play.',
+            radiusCells: 0
+        });
+    };
     const sheetStatNames = {
         str: 'Strength',
         dex: 'Dexterity',
@@ -1409,6 +1522,12 @@
         const key = String(value || '').trim().toLowerCase();
         return EVIDENCE_NOTE_CATEGORY_META[key] ? key : fallback;
     };
+    const normalizeEvidenceNoteShape = (value, fallback = EVIDENCE_NOTE_SHAPE_ZONE) => {
+        const clean = String(value || '').trim().toLowerCase();
+        return EVIDENCE_NOTE_SHAPE_OPTIONS.includes(clean) ? clean : fallback;
+    };
+    const isEvidenceNotePin = (note) => normalizeEvidenceNoteShape(note && note.shape) === EVIDENCE_NOTE_SHAPE_PIN;
+    const getEvidenceNoteShapeLabel = (note) => isEvidenceNotePin(note) ? 'Pin' : 'Zone';
     const getEvidenceNoteCategoryLabel = (category) => getEvidenceNoteCategoryConfig(category).label;
     const getEvidenceNoteCategoryShortLabel = (category) => getEvidenceNoteCategoryConfig(category).shortLabel;
     const getDefaultEvidenceNoteTitle = (category = DEFAULT_EVIDENCE_NOTE_CATEGORY) => getEvidenceNoteCategoryConfig(category).defaultTitle || 'Zone';
@@ -1440,18 +1559,21 @@
         const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
         const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
         const category = normalizeEvidenceNoteCategory(source.category);
+        const shape = normalizeEvidenceNoteShape(source.shape, EVIDENCE_NOTE_SHAPE_ZONE);
         const defaultTitle = getDefaultEvidenceNoteTitle(category);
         const left = Math.round(toNumber(bounds.left, 0));
         const top = Math.round(toNumber(bounds.top, 0));
-        const widthCells = Math.max(1, Math.round(toNumber(bounds.widthCells, 1)));
-        const heightCells = Math.max(1, Math.round(toNumber(bounds.heightCells, 1)));
+        const widthCells = shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, Math.round(toNumber(bounds.widthCells, 1)));
+        const heightCells = shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, Math.round(toNumber(bounds.heightCells, 1)));
         return {
             id: String(source.id || buildId('evidence')).trim() || buildId('evidence'),
+            shape,
             category,
             title: normalizeEvidenceNoteTitle(source.title, defaultTitle),
             body: normalizeEvidenceNoteBody(source.body),
             hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
             highlightColor: getDefaultEvidenceNoteHighlightColor(category),
+            triggers: normalizeProximityTriggers(source.triggers),
             x: Math.round(offsetX + left * cellPx),
             y: Math.round(offsetY + top * cellPx),
             w: Math.max(1, Math.round(widthCells * cellPx)),
@@ -1469,6 +1591,10 @@
         const startRow = Math.round((start.y - offsetY) / cellPx);
         const endCol = Math.round((end.x - offsetX) / cellPx);
         const endRow = Math.round((end.y - offsetY) / cellPx);
+        const hasDraggedArea = Math.abs(endCol - startCol) > 0 || Math.abs(endRow - startRow) > 0;
+        const shape = hasDraggedArea
+            ? EVIDENCE_NOTE_SHAPE_ZONE
+            : normalizeEvidenceNoteShape(source.shape, EVIDENCE_NOTE_SHAPE_PIN);
         return buildEvidenceNoteFromCellBounds(scene, {
             left: Math.min(startCol, endCol),
             top: Math.min(startRow, endRow),
@@ -1476,6 +1602,7 @@
             heightCells: Math.max(1, Math.abs(endRow - startRow))
         }, {
             ...source,
+            shape,
             id
         });
     };
@@ -1562,6 +1689,10 @@
     };
     const buildEvidenceNoteAreaLabel = (note, scene) => {
         const bounds = getEvidenceNoteCellBounds(scene, note);
+        if (isEvidenceNotePin(note)) {
+            if (!bounds) return 'Pin';
+            return `Pin ${bounds.left}, ${bounds.top}`;
+        }
         if (!bounds) return '1 x 1 sq';
         return `${bounds.widthCells} x ${bounds.heightCells} sq`;
     };
@@ -1844,7 +1975,7 @@
         if (clean === TOOL_MODE_RULER) return 'Ruler';
         if (clean === TOOL_MODE_CIRCLE) return 'Circle';
         if (clean === TOOL_MODE_CONE) return 'Cone';
-        if (clean === TOOL_MODE_NOTE) return 'Zone';
+        if (clean === TOOL_MODE_NOTE) return 'Pin / Zone';
         if (clean === TOOL_MODE_FOG) return 'Fog';
         if (clean === TOOL_MODE_FOG_REMOVE) return 'Unfog';
         return 'Navigate';
@@ -2964,6 +3095,7 @@
             passivePerception: Number.isFinite(Number(player && player.pp)) ? clamp(Math.round(Number(player.pp)), 0, 99) : null,
             defences: normalizeDefences(null),
             conditions: [],
+            triggers: [],
             hidden: false,
             stealthRoll: null,
             vision: {
@@ -2996,6 +3128,7 @@
             passivePerception: Number.isFinite(Number(npc && npc.pp)) ? clamp(Math.round(Number(npc.pp)), 0, 99) : null,
             defences: normalizeDefences(npc && npc.defences),
             conditions: [],
+            triggers: [],
             hidden: false,
             stealthRoll: null,
             vision: {
@@ -3030,6 +3163,7 @@
             defences: normalizeDefences(statBlock.saves),
             monster: statBlock,
             conditions: [],
+            triggers: [],
             hidden: false,
             stealthRoll: null,
             vision: {
@@ -3130,6 +3264,7 @@
         passivePerception: null,
         defences: normalizeDefences(null),
         conditions: [],
+        triggers: [],
         hidden: false,
         stealthRoll: null,
         vision: {
@@ -3310,7 +3445,9 @@
             const scene = getActiveScene(draft);
             if (!scene) return;
             if (!Array.isArray(scene.evidenceNotes)) scene.evidenceNotes = [];
-            const note = buildEvidenceNoteFromWorldPoints(scene, safeWorldPoint, safeWorldPoint);
+            const note = buildEvidenceNoteFromWorldPoints(scene, safeWorldPoint, safeWorldPoint, buildId('evidence'), {
+                shape: normalizeEvidenceNoteShape(opts.shape, EVIDENCE_NOTE_SHAPE_PIN)
+            });
             if (!note) return;
             scene.evidenceNotes.push(note);
             createdNoteId = note.id;
@@ -5188,9 +5325,13 @@
                     <span class="vtt-token-spawn-name">Custom Token</span>
                     <span class="vtt-token-spawn-meta">Spawn here</span>
                 </button>
-                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note">
-                    <span class="vtt-token-spawn-name">Pin / Zone Indicator</span>
-                    <span class="vtt-token-spawn-meta">Create a 1x1 public marker here and open it</span>
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note" data-shape="pin">
+                    <span class="vtt-token-spawn-name">Pin</span>
+                    <span class="vtt-token-spawn-meta">Create a point marker here and open it</span>
+                </button>
+                <button class="vtt-token-spawn" type="button" data-action="quick-spawn-evidence-note" data-shape="zone">
+                    <span class="vtt-token-spawn-name">1x1 Zone</span>
+                    <span class="vtt-token-spawn-meta">Create a small tagged area here and open it</span>
                 </button>
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-open-npc-search">
                     <span class="vtt-token-spawn-name">NPC Search Here</span>
@@ -5669,6 +5810,288 @@
         return { total, formula };
     };
 
+    const getProximitySeenStorageKey = () => `${PROXIMITY_PROMPT_STORAGE_PREFIX}${getActiveCaseId() || 'case'}`;
+    const readProximitySeenMap = () => {
+        const raw = readJSONStorage(getProximitySeenStorageKey(), {});
+        return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    };
+    const writeProximitySeenMap = (seenMap) => {
+        try {
+            localStorage.setItem(getProximitySeenStorageKey(), JSON.stringify(seenMap && typeof seenMap === 'object' ? seenMap : {}));
+        } catch (err) { }
+    };
+    const getTokenCellRect = (token) => {
+        if (!token) return null;
+        const left = toNumber(token.x, 0);
+        const top = toNumber(token.y, 0);
+        const width = Math.max(1, toNumber(token.w, 1));
+        const height = Math.max(1, toNumber(token.h, 1));
+        return { left, top, right: left + width, bottom: top + height, width, height };
+    };
+    const getEvidenceNoteTriggerRect = (scene, note) => {
+        const bounds = getEvidenceNoteCellBounds(scene, note);
+        if (!bounds) return null;
+        return {
+            left: bounds.left,
+            top: bounds.top,
+            right: bounds.right,
+            bottom: bounds.bottom,
+            width: bounds.widthCells,
+            height: bounds.heightCells
+        };
+    };
+    const doCellRectsOverlap = (left, right) => !!(
+        left && right
+        && left.left < right.right
+        && left.right > right.left
+        && left.top < right.bottom
+        && left.bottom > right.top
+    );
+    const getCellRectDistance = (left, right) => {
+        if (!left || !right) return Infinity;
+        if (doCellRectsOverlap(left, right)) return 0;
+        const dx = Math.max(0, right.left - left.right, left.left - right.right);
+        const dy = Math.max(0, right.top - left.bottom, left.top - right.bottom);
+        return Math.hypot(dx, dy);
+    };
+    const isWithinProximityRadius = (sourceRect, targetRect, radiusCells = 0) => {
+        const radius = Math.max(0, Math.round(toNumber(radiusCells, 0)));
+        return radius <= 0
+            ? doCellRectsOverlap(sourceRect, targetRect)
+            : getCellRectDistance(sourceRect, targetRect) <= radius;
+    };
+    const isPlayerFacingToken = (token) => {
+        const side = String(token && token.side || '').trim().toLowerCase();
+        const sourceType = String(token && token.sourceType || '').trim().toLowerCase();
+        return side === 'player' || sourceType === 'player';
+    };
+    const getProximityTargetTokens = (scene, trigger, sourceToken = null) => {
+        const visibleTokens = getVisibleTokensForRole(scene, 'player');
+        const target = String(trigger && trigger.target || 'playerTokens').trim();
+        return visibleTokens.filter((token) => {
+            if (!token || (sourceToken && token.id === sourceToken.id)) return false;
+            if (target === 'anyVisibleToken') return true;
+            return isPlayerFacingToken(token);
+        });
+    };
+    const getProximityPromptSeenKey = (scene, sourceKind, sourceId, trigger, token) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        const tokenPart = normalized.repeat === 'oncePerScene'
+            ? 'scene'
+            : String(token && token.id || 'token').trim();
+        return [
+            String(scene && scene.id || '').trim(),
+            String(sourceKind || '').trim(),
+            String(sourceId || '').trim(),
+            normalized.id,
+            tokenPart
+        ].join('|');
+    };
+    const isProximityPromptSeen = (seenMap, key, trigger) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        if (normalized.repeat === 'always') return suppressedProximityPromptKeys.has(key);
+        return !!(seenMap && seenMap[key]);
+    };
+    const markProximityPromptSeen = (key, trigger) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        if (!key) return;
+        if (normalized.repeat === 'always') return;
+        const seenMap = readProximitySeenMap();
+        seenMap[key] = Date.now();
+        writeProximitySeenMap(seenMap);
+    };
+    const buildProximityCandidate = ({ scene, sourceKind, source, trigger, token, distance }) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        const sourceId = String(source && source.id || '').trim();
+        const key = getProximityPromptSeenKey(scene, sourceKind, sourceId, normalized, token);
+        return {
+            key,
+            sceneId: String(scene && scene.id || '').trim(),
+            sourceKind,
+            sourceId,
+            sourceLabel: sourceKind === 'note'
+                ? getEvidenceNoteDisplayTitle(source)
+                : String(source && source.label || 'Token').trim(),
+            tokenId: String(token && token.id || '').trim(),
+            tokenLabel: String(token && token.label || 'Token').trim(),
+            distance: Number.isFinite(distance) ? distance : 0,
+            trigger: normalized,
+            result: null
+        };
+    };
+    const collectProximityPromptCandidates = (scene) => {
+        if (!scene) return [];
+        const seenMap = readProximitySeenMap();
+        const candidates = [];
+        const visibleTokens = getVisibleTokensForRole(scene, 'player');
+        const visibleNotes = getVisibleEvidenceNotesForRole(scene, 'player');
+        visibleNotes.forEach((note) => {
+            const sourceRect = getEvidenceNoteTriggerRect(scene, note);
+            if (!sourceRect) return;
+            normalizeProximityTriggers(note.triggers)
+                .filter((trigger) => trigger.enabled && trigger.trigger === 'enter')
+                .forEach((trigger) => {
+                    getProximityTargetTokens(scene, trigger).forEach((token) => {
+                        const tokenRect = getTokenCellRect(token);
+                        if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
+                        const key = getProximityPromptSeenKey(scene, 'note', note.id, trigger, token);
+                        if (isProximityPromptSeen(seenMap, key, trigger)) return;
+                        candidates.push(buildProximityCandidate({
+                            scene,
+                            sourceKind: 'note',
+                            source: note,
+                            trigger,
+                            token,
+                            distance: getCellRectDistance(sourceRect, tokenRect)
+                        }));
+                    });
+                });
+        });
+        visibleTokens.forEach((sourceToken) => {
+            const sourceRect = getTokenCellRect(sourceToken);
+            if (!sourceRect) return;
+            normalizeProximityTriggers(sourceToken.triggers)
+                .filter((trigger) => trigger.enabled && trigger.trigger === 'enter')
+                .forEach((trigger) => {
+                    getProximityTargetTokens(scene, trigger, sourceToken).forEach((token) => {
+                        const tokenRect = getTokenCellRect(token);
+                        if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
+                        const key = getProximityPromptSeenKey(scene, 'token', sourceToken.id, trigger, token);
+                        if (isProximityPromptSeen(seenMap, key, trigger)) return;
+                        candidates.push(buildProximityCandidate({
+                            scene,
+                            sourceKind: 'token',
+                            source: sourceToken,
+                            trigger,
+                            token,
+                            distance: getCellRectDistance(sourceRect, tokenRect)
+                        }));
+                    });
+                });
+        });
+        return candidates.sort((left, right) => left.distance - right.distance);
+    };
+    const evaluateProximityTriggers = () => {
+        if (initialVTTLoadPending || isDM()) {
+            activeProximityPrompt = null;
+            return;
+        }
+        const scene = getActiveScene();
+        if (!scene) {
+            activeProximityPrompt = null;
+            return;
+        }
+        if (activeProximityPrompt && activeProximityPrompt.sceneId === scene.id) return;
+        activeProximityPrompt = null;
+        const candidate = collectProximityPromptCandidates(scene)[0] || null;
+        if (!candidate) return;
+        activeProximityPrompt = candidate;
+        markProximityPromptSeen(candidate.key, candidate.trigger);
+    };
+    const renderProximityPrompt = () => {
+        if (!proximityPromptStackEl) return;
+        if (!activeProximityPrompt || isDM()) {
+            proximityPromptStackEl.innerHTML = '';
+            proximityPromptStackEl.hidden = true;
+            return;
+        }
+        const prompt = activeProximityPrompt;
+        const trigger = normalizeProximityTrigger(prompt.trigger);
+        const isSkillRoll = trigger.kind === 'skillRoll';
+        const skillLabel = getProximitySkillLabel(trigger.skill);
+        const sourcePrefix = prompt.sourceKind === 'note'
+            ? `${prompt.sourceLabel || 'Map marker'}`
+            : `${prompt.sourceLabel || 'Nearby token'}`;
+        const dcLabel = isSkillRoll && trigger.dc !== null && trigger.dcVisible ? `DC ${trigger.dc}` : '';
+        const result = prompt.result || null;
+        const resultText = result
+            ? `${result.total} - ${result.formula || skillLabel}`
+            : '';
+        const outcomeText = result && result.success === true
+            ? (trigger.successText || 'Success.')
+            : (result && result.success === false ? (trigger.failText || 'Miss.') : '');
+        proximityPromptStackEl.hidden = false;
+        proximityPromptStackEl.innerHTML = `
+            <div class="vtt-proximity-prompt-card">
+                <div class="vtt-proximity-prompt-top">
+                    <div>
+                        <span class="vtt-proximity-eyebrow">${escapeHtml(sourcePrefix)}${dcLabel ? ` · ${escapeHtml(dcLabel)}` : ''}</span>
+                        <strong>${escapeHtml(trigger.title)}</strong>
+                    </div>
+                    <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="dismiss-proximity-prompt" aria-label="Dismiss proximity prompt">X</button>
+                </div>
+                ${trigger.body ? `<div class="vtt-proximity-prompt-body">${escapeHtml(trigger.body)}</div>` : ''}
+                ${result ? `
+                    <div class="vtt-proximity-prompt-result">
+                        <strong>${escapeHtml(String(result.total))}</strong>
+                        <span>${escapeHtml(resultText)}</span>
+                    </div>
+                    ${outcomeText ? `<div class="vtt-proximity-prompt-outcome">${escapeHtml(outcomeText)}</div>` : ''}
+                ` : ''}
+                <div class="vtt-proximity-prompt-actions">
+                    ${isSkillRoll && !result ? `<button class="vtt-chip-btn strong" type="button" data-action="resolve-proximity-roll">Roll ${escapeHtml(skillLabel)}</button>` : ''}
+                    <button class="vtt-chip-btn" type="button" data-action="dismiss-proximity-prompt">${result || !isSkillRoll ? 'Done' : 'Skip'}</button>
+                </div>
+            </div>
+        `;
+    };
+    const dismissActiveProximityPrompt = () => {
+        if (activeProximityPrompt && activeProximityPrompt.key) {
+            suppressedProximityPromptKeys.add(activeProximityPrompt.key);
+        }
+        activeProximityPrompt = null;
+        renderProximityPrompt();
+    };
+    const rollProximitySkillCheck = (token, trigger) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        const skill = normalizeProximityTriggerSkill(normalized.skill);
+        const skillLabel = getProximitySkillLabel(skill);
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        const bundle = getActiveSheetBundle(rosterPlayer && rosterPlayer.sheetKey);
+        const character = bundle && bundle.character ? bundle.character : null;
+        if (!character) {
+            const roll = gmCoreRoll(1, 20);
+            return {
+                ok: true,
+                character: null,
+                label: skillLabel,
+                total: roll.total,
+                formula: roll.formula,
+                type: 'check',
+                detail: ''
+            };
+        }
+        const stat = character.skillOverrides && character.skillOverrides[skill] ? character.skillOverrides[skill] : sheetSkillsMap[skill];
+        const profLevel = character.skills && Number.isFinite(Number(character.skills[skill])) ? Number(character.skills[skill]) : 0;
+        const bonus = getSheetMod(character, stat) + (profLevel * getSheetPB(character)) + getSheetSkillMiscBonus(character, skill);
+        return rollSheetD20(character, bonus, `${skillLabel} (${String(stat || '').toUpperCase()})`, { type: 'check' });
+    };
+    const resolveActiveProximityRoll = () => {
+        if (!activeProximityPrompt) return false;
+        const trigger = normalizeProximityTrigger(activeProximityPrompt.trigger);
+        if (trigger.kind !== 'skillRoll') return false;
+        const token = getTokenById(activeProximityPrompt.tokenId);
+        const result = rollProximitySkillCheck(token, trigger);
+        const hasDc = trigger.dc !== null && trigger.dc !== undefined;
+        activeProximityPrompt = {
+            ...activeProximityPrompt,
+            result: {
+                ok: !!(result && result.ok),
+                total: result && result.ok ? result.total : 'VTT',
+                formula: result && result.ok ? result.formula : 'No roll available',
+                label: result && result.label ? result.label : getProximitySkillLabel(trigger.skill),
+                success: result && result.ok && hasDc ? result.total >= trigger.dc : null
+            }
+        };
+        if (result && result.ok && result.character) {
+            postSheetDiscordRoll(result.character, result.label, result.total, result.formula, result.type, result.detail).catch((err) => {
+                console.warn('VTT proximity roll Discord post failed', err);
+            });
+        }
+        renderProximityPrompt();
+        return true;
+    };
+
     const gmParseComplexFormula = (value = '') => {
         const source = String(value || '').trim();
         if (!source) return { total: 0, text: '' };
@@ -6064,6 +6487,130 @@
             : '<div class="vtt-empty">No scenes yet.</div>';
     };
 
+    const buildProximityTriggerSeedButtons = (ownerKind, ownerId) => `
+        <div class="vtt-chip-row vtt-proximity-seeds">
+            ${['perception', 'investigation', 'insight', 'arcana', 'stealth'].map((skill) => `
+                <button class="vtt-chip-btn" type="button"
+                    data-action="seed-proximity-trigger"
+                    data-owner-kind="${escapeHtml(ownerKind)}"
+                    data-owner-id="${escapeHtml(ownerId)}"
+                    data-seed="${escapeHtml(skill)}">${escapeHtml(getProximitySkillLabel(skill))}</button>
+            `).join('')}
+            <button class="vtt-chip-btn" type="button"
+                data-action="seed-proximity-trigger"
+                data-owner-kind="${escapeHtml(ownerKind)}"
+                data-owner-id="${escapeHtml(ownerId)}"
+                data-seed="fiction">Fiction</button>
+        </div>
+    `;
+
+    const buildProximityTriggerFieldAttrs = (ownerKind, ownerId, trigger, field) => `
+        data-proximity-trigger-field="${escapeHtml(field)}"
+        data-owner-kind="${escapeHtml(ownerKind)}"
+        data-owner-id="${escapeHtml(ownerId)}"
+        data-trigger-id="${escapeHtml(trigger.id)}"
+    `;
+
+    const buildProximityTriggerEditorRow = (ownerKind, ownerId, trigger) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        const isSkillRoll = normalized.kind === 'skillRoll';
+        return `
+            <div class="vtt-proximity-trigger-row" data-trigger-id="${escapeHtml(normalized.id)}">
+                <div class="vtt-proximity-trigger-head">
+                    <label class="vtt-inspector-check">
+                        <input type="checkbox" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'enabled')} ${normalized.enabled ? ' checked' : ''}>
+                        <span>Enabled</span>
+                    </label>
+                    <button class="vtt-inline-btn danger" type="button"
+                        data-action="delete-proximity-trigger"
+                        data-owner-kind="${escapeHtml(ownerKind)}"
+                        data-owner-id="${escapeHtml(ownerId)}"
+                        data-trigger-id="${escapeHtml(normalized.id)}">Delete</button>
+                </div>
+                <label class="vtt-field">
+                    <span>Prompt</span>
+                    <input class="vtt-inspector-input" type="text" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'title')} value="${escapeHtml(normalized.title)}">
+                </label>
+                <div class="vtt-inspector-grid">
+                    <label class="vtt-field">
+                        <span>Kind</span>
+                        <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'kind')}>
+                            <option value="skillRoll"${isSkillRoll ? ' selected' : ''}>Skill Roll</option>
+                            <option value="fiction"${normalized.kind === 'fiction' ? ' selected' : ''}>Fiction</option>
+                        </select>
+                    </label>
+                    ${isSkillRoll ? `
+                        <label class="vtt-field">
+                            <span>Skill</span>
+                            <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'skill')}>
+                                ${PROXIMITY_TRIGGER_SKILL_OPTIONS.map((skill) => `
+                                    <option value="${escapeHtml(skill)}"${normalized.skill === skill ? ' selected' : ''}>${escapeHtml(getProximitySkillLabel(skill))}</option>
+                                `).join('')}
+                            </select>
+                        </label>
+                    ` : ''}
+                    <label class="vtt-field">
+                        <span>Radius</span>
+                        <input class="vtt-inspector-input" type="number" min="0" max="24" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'radiusCells')} value="${escapeHtml(String(normalized.radiusCells))}">
+                    </label>
+                    <label class="vtt-field">
+                        <span>Target</span>
+                        <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'target')}>
+                            <option value="playerTokens"${normalized.target === 'playerTokens' ? ' selected' : ''}>Player Tokens</option>
+                            <option value="anyVisibleToken"${normalized.target === 'anyVisibleToken' ? ' selected' : ''}>Any Visible Token</option>
+                        </select>
+                    </label>
+                    <label class="vtt-field">
+                        <span>Repeat</span>
+                        <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'repeat')}>
+                            <option value="oncePerToken"${normalized.repeat === 'oncePerToken' ? ' selected' : ''}>Once / Token</option>
+                            <option value="oncePerScene"${normalized.repeat === 'oncePerScene' ? ' selected' : ''}>Once / Scene</option>
+                            <option value="always"${normalized.repeat === 'always' ? ' selected' : ''}>Always</option>
+                        </select>
+                    </label>
+                    ${isSkillRoll ? `
+                        <label class="vtt-field">
+                            <span>DC</span>
+                            <input class="vtt-inspector-input" type="number" min="1" max="40" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'dc')} value="${normalized.dc === null ? '' : escapeHtml(String(normalized.dc))}">
+                        </label>
+                        <label class="vtt-inspector-check">
+                            <input type="checkbox" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'dcVisible')} ${normalized.dcVisible ? ' checked' : ''}>
+                            <span>Show DC</span>
+                        </label>
+                    ` : ''}
+                </div>
+                <label class="vtt-field">
+                    <span>Fiction</span>
+                    <textarea class="vtt-inspector-textarea vtt-proximity-textarea" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'body')}>${escapeHtml(normalized.body)}</textarea>
+                </label>
+                ${isSkillRoll ? `
+                    <div class="vtt-inspector-grid">
+                        <label class="vtt-field">
+                            <span>Success</span>
+                            <textarea class="vtt-inspector-textarea vtt-proximity-textarea" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'successText')}>${escapeHtml(normalized.successText)}</textarea>
+                        </label>
+                        <label class="vtt-field">
+                            <span>Miss</span>
+                            <textarea class="vtt-inspector-textarea vtt-proximity-textarea" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'failText')}>${escapeHtml(normalized.failText)}</textarea>
+                        </label>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    };
+
+    const buildProximityTriggerEditor = (ownerKind, ownerId, triggers = []) => {
+        const normalized = normalizeProximityTriggers(triggers);
+        return `
+            <div class="vtt-proximity-editor">
+                ${buildProximityTriggerSeedButtons(ownerKind, ownerId)}
+                ${normalized.length
+                    ? normalized.map((trigger) => buildProximityTriggerEditorRow(ownerKind, ownerId, trigger)).join('')
+                    : '<div class="vtt-empty">No proximity prompts yet.</div>'}
+            </div>
+        `;
+    };
+
     const buildDMTokenInspectorContent = (token) => {
         const rosterPlayer = getRosterPlayerForRecord(token);
         const isRosterManagedPlayer = !!rosterPlayer;
@@ -6179,6 +6726,8 @@
                     <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Poisoned">Poisoned</button>
                     <button class="vtt-chip-btn" data-action="token-clear-conditions" data-id="${escapeHtml(token.id)}">Clear Cond</button>
                 </div>
+                <div class="vtt-subhead">Proximity Prompts</div>
+                ${buildProximityTriggerEditor('token', token.id, token.triggers)}
                 ${monster ? `
                     <div class="vtt-subhead">Monster</div>
                     <div class="vtt-detail-note">${escapeHtml(monsterMeta || monster.name)}. Right-click the token and choose Roll stat block / NPC for checks, saves, attacks, and damage.</div>
@@ -6257,6 +6806,8 @@
             heightCells: 1
         };
         const category = normalizeEvidenceNoteCategory(note && note.category);
+        const shape = normalizeEvidenceNoteShape(note && note.shape, EVIDENCE_NOTE_SHAPE_ZONE);
+        const shapeLabel = getEvidenceNoteShapeLabel(note);
         return `
             <div class="vtt-inspector-stack">
                 <label class="vtt-field">
@@ -6264,6 +6815,13 @@
                     <input class="vtt-inspector-input" type="text" data-note-field="title" value="${escapeHtml(getEvidenceNoteDisplayTitle(note))}">
                 </label>
                 <div class="vtt-inspector-grid">
+                    <label class="vtt-field">
+                        <span>Shape</span>
+                        <select class="vtt-inspector-select" data-note-field="shape">
+                            <option value="pin"${shape === EVIDENCE_NOTE_SHAPE_PIN ? ' selected' : ''}>Pin</option>
+                            <option value="zone"${shape === EVIDENCE_NOTE_SHAPE_ZONE ? ' selected' : ''}>Zone</option>
+                        </select>
+                    </label>
                     <label class="vtt-field">
                         <span>Category</span>
                         <select class="vtt-inspector-select" data-note-field="category">
@@ -6280,18 +6838,20 @@
                         <span>Grid Y</span>
                         <input class="vtt-inspector-input" type="number" data-note-field="gridY" value="${escapeHtml(String(bounds.top))}">
                     </label>
-                    <label class="vtt-field">
-                        <span>Cells Wide</span>
-                        <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsWide" value="${escapeHtml(String(bounds.widthCells))}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Cells High</span>
-                        <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsHigh" value="${escapeHtml(String(bounds.heightCells))}">
-                    </label>
+                    ${shape === EVIDENCE_NOTE_SHAPE_ZONE ? `
+                        <label class="vtt-field">
+                            <span>Cells Wide</span>
+                            <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsWide" value="${escapeHtml(String(bounds.widthCells))}">
+                        </label>
+                        <label class="vtt-field">
+                            <span>Cells High</span>
+                            <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsHigh" value="${escapeHtml(String(bounds.heightCells))}">
+                        </label>
+                    ` : ''}
                 </div>
                 <label class="vtt-field">
                     <span>Details</span>
-                    <textarea class="vtt-inspector-textarea" data-note-field="body" placeholder="What should this zone communicate?">${escapeHtml(note.body || '')}</textarea>
+                    <textarea class="vtt-inspector-textarea" data-note-field="body" placeholder="What should this ${shapeLabel.toLowerCase()} communicate?">${escapeHtml(note.body || '')}</textarea>
                 </label>
                 <label class="vtt-inspector-check">
                     <input type="checkbox" data-note-field="hidden"${note.hidden ? ' checked' : ''}>
@@ -6299,12 +6859,14 @@
                 </label>
                 <div class="vtt-detail-note">
                     ${note.hidden
-                        ? 'DM-only zones stay hidden until you reveal them.'
-                        : 'Revealed zones still stay hidden from players while their tagged area is fully covered by fog.'}
+                        ? `DM-only ${shapeLabel.toLowerCase()}s stay hidden until you reveal them.`
+                        : `Revealed ${shapeLabel.toLowerCase()}s still stay hidden from players while their tagged area is fully covered by fog.`}
                 </div>
+                <div class="vtt-subhead">Proximity Prompts</div>
+                ${buildProximityTriggerEditor('note', String(note.id || ''), note.triggers)}
                 <div class="vtt-inspector-actions">
                     <button class="vtt-inline-btn" data-action="toggle-evidence-hidden-quick" data-id="${escapeHtml(String(note.id || ''))}">${note.hidden ? 'Reveal To Players' : 'Hide From Players'}</button>
-                    <button class="vtt-inline-btn danger" data-action="delete-evidence-note" data-id="${escapeHtml(String(note.id || ''))}">Delete Zone</button>
+                    <button class="vtt-inline-btn danger" data-action="delete-evidence-note" data-id="${escapeHtml(String(note.id || ''))}">Delete ${shapeLabel}</button>
                 </div>
             </div>
         `;
@@ -6312,12 +6874,12 @@
 
     const buildEvidenceNoteViewerContent = (note, scene) => `
         <div class="vtt-inspector-stack">
-            <div class="vtt-subhead">Zone Indicator</div>
+            <div class="vtt-subhead">${escapeHtml(getEvidenceNoteShapeLabel(note))} Indicator</div>
             <div class="vtt-chip-row">
                 <span class="vtt-panel-pill">${escapeHtml(getEvidenceNoteCategoryLabel(note && note.category))}</span>
                 <span class="vtt-panel-pill">${escapeHtml(buildEvidenceNoteAreaLabel(note, scene))}</span>
             </div>
-            <div class="vtt-note-view-body">${escapeHtml(note && note.body ? note.body : 'No zone details shared yet.')}</div>
+            <div class="vtt-note-view-body">${escapeHtml(note && note.body ? note.body : 'No marker details shared yet.')}</div>
         </div>
     `;
 
@@ -6347,8 +6909,8 @@
         selectionPillEl.textContent = token ? token.label : 'No Selection';
         if (!token) {
             tokenInspectorEl.innerHTML = isDM()
-                ? '<div class="vtt-empty">Right-click a token or zone to edit it near your cursor, or click a zone to edit the tagged map area here.</div>'
-                : '<div class="vtt-empty">Select a token or zone on the map to inspect it.</div>';
+                ? '<div class="vtt-empty">Right-click a token, pin, or zone to edit it near your cursor, or click a map marker to edit it here.</div>'
+                : '<div class="vtt-empty">Select a token, pin, or zone on the map to inspect it.</div>';
             return;
         }
 
@@ -6405,7 +6967,7 @@
         tokenInspectorPopoverEl.innerHTML = activePopoverKind === 'note'
             ? `
                 <div class="vtt-panel-head vtt-popover-head">
-                    <h2>Zone Indicator</h2>
+                    <h2>${escapeHtml(note ? getEvidenceNoteShapeLabel(note) : 'Zone')} Indicator</h2>
                     <div class="vtt-panel-head-actions">
                         <span class="vtt-panel-pill">${escapeHtml(note ? getEvidenceNoteDisplayTitle(note) : getDefaultEvidenceNoteTitle())}</span>
                         <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close zone inspector">X</button>
@@ -6822,6 +7384,7 @@
         if (preview) classes.push('is-preview');
         if (selected) classes.push('is-selected');
         if (note.hidden) classes.push('is-hidden');
+        if (isEvidenceNotePin(note)) classes.push('is-pin', 'is-icon-only');
         const category = normalizeEvidenceNoteCategory(note.category);
         const categoryLabel = getEvidenceNoteCategoryLabel(category);
         const displayTitle = getEvidenceNoteDisplayTitle(note);
@@ -6833,6 +7396,7 @@
         return `
             <div class="${classes.join(' ')}"
                 data-note-id="${escapeHtml(String(note.id || ''))}"
+                data-note-shape="${escapeHtml(normalizeEvidenceNoteShape(note.shape, EVIDENCE_NOTE_SHAPE_ZONE))}"
                 data-note-category="${escapeHtml(category)}"
                 data-note-title="${escapeHtml(displayTitle)}"
                 data-world-left="${escapeHtml(String(note.x || 0))}"
@@ -6843,7 +7407,7 @@
                 <div class="vtt-map-note-chip">
                     <span class="vtt-map-note-kicker">${escapeHtml(kicker)}</span>
                     <strong class="vtt-map-note-title" data-note-category-short="${escapeHtml(getEvidenceNoteCategoryShortLabel(category))}">${escapeHtml(displayTitle)}</strong>
-                    <span class="vtt-map-note-body">${escapeHtml(description || 'No zone details shared yet.')}</span>
+                    <span class="vtt-map-note-body">${escapeHtml(description || 'No marker details shared yet.')}</span>
                     <span class="vtt-map-note-meta">${escapeHtml(areaLabel)}</span>
                 </div>
             </div>
@@ -7077,14 +7641,14 @@
                 : (localToolState.mode === TOOL_MODE_CONE
                     ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
                     : (localToolState.mode === TOOL_MODE_NOTE
-                        ? 'Zone tool active: drag a rectangle on the map to pin a category-coded zone to that area. Zones can be shared to players or kept DM-only.'
+                        ? 'Pin / Zone tool active: click to place a point pin, or drag a rectangle to tag a zone. Both can be shared to players or kept DM-only.'
                     : (localToolState.mode === TOOL_MODE_FOG
                         ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tokens under fog are hidden from players.'
                         : (localToolState.mode === TOOL_MODE_FOG_REMOVE
                             ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
                     : (isDM()
                         ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
-                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.')))))));
+                        : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click pins or zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.')))))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         applyUIPreferences();
         renderToolsMenu();
@@ -7132,6 +7696,8 @@
         renderPlayerRollMenu();
         renderInitiativeDetail();
         renderSpawnGhost();
+        evaluateProximityTriggers();
+        renderProximityPrompt();
     };
 
     const updateSelectedEvidenceNote = (mutator) => {
@@ -7168,6 +7734,112 @@
             });
             sortInitiativeEntries(draft.initiative.entries);
         });
+    };
+
+    const findProximityTriggerOwner = (draft, ownerKind, ownerId) => {
+        const scene = getActiveScene(draft);
+        const targetId = String(ownerId || '').trim();
+        if (!scene || !targetId) return null;
+        if (ownerKind === 'token') {
+            const tokens = Array.isArray(scene.tokens) ? scene.tokens : [];
+            return tokens.find((token) => String(token && token.id || '').trim() === targetId) || null;
+        }
+        if (ownerKind === 'note') {
+            const notes = Array.isArray(scene.evidenceNotes) ? scene.evidenceNotes : [];
+            return notes.find((note) => String(note && note.id || '').trim() === targetId) || null;
+        }
+        return null;
+    };
+
+    const updateProximityTriggerOwner = (ownerKind, ownerId, mutator) => {
+        if (!isDM() || typeof mutator !== 'function') return false;
+        return withDraft((draft) => {
+            const owner = findProximityTriggerOwner(draft, ownerKind, ownerId);
+            if (!owner) return;
+            owner.triggers = normalizeProximityTriggers(owner.triggers);
+            mutator(owner);
+            owner.triggers = normalizeProximityTriggers(owner.triggers);
+        });
+    };
+
+    const addProximityTrigger = (ownerKind, ownerId, seed = 'perception') => updateProximityTriggerOwner(ownerKind, ownerId, (owner) => {
+        owner.triggers = normalizeProximityTriggers(owner.triggers);
+        if (owner.triggers.length >= 12) return;
+        owner.triggers.push(buildSeededProximityTrigger(seed));
+    });
+
+    const deleteProximityTrigger = (ownerKind, ownerId, triggerId) => updateProximityTriggerOwner(ownerKind, ownerId, (owner) => {
+        const targetId = String(triggerId || '').trim();
+        owner.triggers = normalizeProximityTriggers(owner.triggers).filter((trigger) => trigger.id !== targetId);
+    });
+
+    const updateProximityTrigger = (ownerKind, ownerId, triggerId, mutator) => updateProximityTriggerOwner(ownerKind, ownerId, (owner) => {
+        const targetId = String(triggerId || '').trim();
+        owner.triggers = normalizeProximityTriggers(owner.triggers);
+        const trigger = owner.triggers.find((entry) => entry.id === targetId);
+        if (!trigger || typeof mutator !== 'function') return;
+        mutator(trigger);
+    });
+
+    const handleProximityTriggerFieldChange = (target) => {
+        if (!(target instanceof HTMLElement) || target.dataset.proximityTriggerField === undefined) return false;
+        if (!isDM()) return true;
+        const field = String(target.dataset.proximityTriggerField || '').trim();
+        const ownerKind = String(target.dataset.ownerKind || '').trim();
+        const ownerId = String(target.dataset.ownerId || '').trim();
+        const triggerId = String(target.dataset.triggerId || '').trim();
+        if (!field || !ownerKind || !ownerId || !triggerId) return true;
+        updateProximityTrigger(ownerKind, ownerId, triggerId, (trigger) => {
+            if (field === 'enabled' && target instanceof HTMLInputElement && target.type === 'checkbox') {
+                trigger.enabled = target.checked;
+                return;
+            }
+            if (field === 'dcVisible' && target instanceof HTMLInputElement && target.type === 'checkbox') {
+                trigger.dcVisible = target.checked;
+                return;
+            }
+            if (field === 'kind' && target instanceof HTMLSelectElement) {
+                trigger.kind = PROXIMITY_TRIGGER_KIND_OPTIONS.includes(target.value) ? target.value : 'skillRoll';
+                return;
+            }
+            if (field === 'skill' && target instanceof HTMLSelectElement) {
+                trigger.skill = normalizeProximityTriggerSkill(target.value);
+                return;
+            }
+            if (field === 'target' && target instanceof HTMLSelectElement) {
+                trigger.target = PROXIMITY_TRIGGER_TARGET_OPTIONS.includes(target.value) ? target.value : 'playerTokens';
+                return;
+            }
+            if (field === 'repeat' && target instanceof HTMLSelectElement) {
+                trigger.repeat = PROXIMITY_TRIGGER_REPEAT_OPTIONS.includes(target.value) ? target.value : 'oncePerToken';
+                return;
+            }
+            if (field === 'radiusCells') {
+                trigger.radiusCells = clamp(Math.round(toNumber(target.value, trigger.radiusCells || 0)), 0, 24);
+                return;
+            }
+            if (field === 'dc') {
+                const raw = String(target.value || '').trim();
+                trigger.dc = raw === '' ? null : clamp(Math.round(toNumber(raw, trigger.dc || 10)), 1, 40);
+                return;
+            }
+            if (field === 'title') {
+                trigger.title = String(target.value || '').trim().slice(0, 160) || 'Something catches your attention';
+                return;
+            }
+            if (field === 'body') {
+                trigger.body = String(target.value || '').trim().slice(0, 800);
+                return;
+            }
+            if (field === 'successText') {
+                trigger.successText = String(target.value || '').trim().slice(0, 600);
+                return;
+            }
+            if (field === 'failText') {
+                trigger.failText = String(target.value || '').trim().slice(0, 600);
+            }
+        });
+        return true;
     };
 
     const updateSelectedEntry = (mutator) => {
@@ -7522,6 +8194,32 @@
         }
         if (action === 'close-npc-roll') {
             closeNPCRollPopover();
+            return;
+        }
+        if (action === 'seed-proximity-trigger') {
+            if (!isDM()) return;
+            addProximityTrigger(
+                String(actionEl.dataset.ownerKind || '').trim(),
+                String(actionEl.dataset.ownerId || '').trim(),
+                String(actionEl.dataset.seed || 'perception').trim()
+            );
+            return;
+        }
+        if (action === 'delete-proximity-trigger') {
+            if (!isDM()) return;
+            deleteProximityTrigger(
+                String(actionEl.dataset.ownerKind || '').trim(),
+                String(actionEl.dataset.ownerId || '').trim(),
+                String(actionEl.dataset.triggerId || '').trim()
+            );
+            return;
+        }
+        if (action === 'dismiss-proximity-prompt') {
+            dismissActiveProximityPrompt();
+            return;
+        }
+        if (action === 'resolve-proximity-roll') {
+            resolveActiveProximityRoll();
             return;
         }
         if (action === 'toggle-player-roll-menu') {
@@ -8028,7 +8726,8 @@
             if (!quickSpawnMenuState) return;
             createEvidenceNoteAtWorldPoint(quickSpawnMenuState.worldPoint, {
                 clientX: quickSpawnMenuState.clientX,
-                clientY: quickSpawnMenuState.clientY
+                clientY: quickSpawnMenuState.clientY,
+                shape: actionEl.dataset.shape || EVIDENCE_NOTE_SHAPE_PIN
             });
             return;
         }
@@ -8399,6 +9098,11 @@
             }
             return;
         }
+        if (target.dataset.proximityTriggerField !== undefined) {
+            if (event.type === 'input' && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+            handleProximityTriggerFieldChange(target);
+            return;
+        }
         if (event.type === 'input' && target instanceof HTMLInputElement) return;
         if (event.type === 'input' && target instanceof HTMLTextAreaElement) return;
 
@@ -8611,6 +9315,21 @@
                     note.hidden = target.checked;
                     return;
                 }
+                if (field === 'shape' && target instanceof HTMLSelectElement) {
+                    const nextShape = normalizeEvidenceNoteShape(target.value, note.shape || EVIDENCE_NOTE_SHAPE_ZONE);
+                    note.shape = nextShape;
+                    if (nextShape === EVIDENCE_NOTE_SHAPE_PIN) {
+                        const bounds = getEvidenceNoteCellBounds(scene, note);
+                        const nextNote = buildEvidenceNoteFromCellBounds(scene, {
+                            left: bounds ? bounds.left : 0,
+                            top: bounds ? bounds.top : 0,
+                            widthCells: 1,
+                            heightCells: 1
+                        }, note);
+                        if (nextNote) Object.assign(note, nextNote);
+                    }
+                    return;
+                }
                 if (field === 'category' && target instanceof HTMLSelectElement) {
                     const previousCategory = normalizeEvidenceNoteCategory(note.category);
                     const nextCategory = normalizeEvidenceNoteCategory(target.value, previousCategory);
@@ -8631,6 +9350,7 @@
                     note.body = normalizeEvidenceNoteBody(target.value);
                     return;
                 }
+                note.shape = normalizeEvidenceNoteShape(note.shape, EVIDENCE_NOTE_SHAPE_ZONE);
                 const bounds = getEvidenceNoteCellBounds(scene, note) || {
                     left: 0,
                     top: 0,
@@ -8640,8 +9360,8 @@
                 const nextValue = Math.round(toNumber(target.value, 0));
                 if (field === 'gridX') bounds.left = Math.max(0, nextValue);
                 else if (field === 'gridY') bounds.top = Math.max(0, nextValue);
-                else if (field === 'cellsWide') bounds.widthCells = Math.max(1, nextValue);
-                else if (field === 'cellsHigh') bounds.heightCells = Math.max(1, nextValue);
+                else if (field === 'cellsWide') bounds.widthCells = note.shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, nextValue);
+                else if (field === 'cellsHigh') bounds.heightCells = note.shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, nextValue);
                 const nextNote = buildEvidenceNoteFromCellBounds(scene, bounds, note);
                 if (nextNote) Object.assign(note, nextNote);
             });

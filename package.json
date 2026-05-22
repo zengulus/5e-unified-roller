@@ -7,7 +7,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node scripts/smoke-static.mjs",
+    "test:smoke": "node scripts/smoke-static.mjs"
   },
   "repository": {
     "type": "git",
@@ -15,7 +16,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Unlicense",
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/zengulus/5e-unified-roller/issues"

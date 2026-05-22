@@ -191,6 +191,7 @@
         other: { label: 'Other', color: '#8f9aa8', defaultTitle: 'Zone' }
     });
     const DEFAULT_VTT_ZONE_CATEGORY = 'evidence';
+    const VTT_NOTE_SHAPES = new Set(['pin', 'zone']);
     const getVTTZoneCategoryMeta = (category) => {
         const key = String(category || '').trim().toLowerCase();
         return VTT_ZONE_CATEGORY_META[key] || VTT_ZONE_CATEGORY_META[DEFAULT_VTT_ZONE_CATEGORY];
@@ -683,6 +684,61 @@
 
     const sanitizeVTTTokenMoodEmoji = (value) => toTrimmedString(value, '', 16).trim();
     const sanitizeVTTTokenMoodLabel = (value) => toTrimmedString(value, '', 40).trim();
+    const VTT_PROXIMITY_TRIGGER_KINDS = new Set(['fiction', 'skillRoll']);
+    const VTT_PROXIMITY_TRIGGER_TYPES = new Set(['enter', 'startTurnNear', 'click', 'reveal']);
+    const VTT_PROXIMITY_TRIGGER_TARGETS = new Set(['playerTokens', 'anyVisibleToken']);
+    const VTT_PROXIMITY_TRIGGER_REPEATS = new Set(['oncePerToken', 'oncePerScene', 'always']);
+    const VTT_PROXIMITY_TRIGGER_SKILLS = new Set([
+        'acrobatics',
+        'animal handling',
+        'arcana',
+        'athletics',
+        'deception',
+        'history',
+        'insight',
+        'intimidation',
+        'investigation',
+        'medicine',
+        'nature',
+        'perception',
+        'performance',
+        'persuasion',
+        'religion',
+        'sleight of hand',
+        'stealth',
+        'survival'
+    ]);
+    const sanitizeVTTProximityTrigger = (trigger, idx = 0) => {
+        const source = trigger && typeof trigger === 'object' ? trigger : {};
+        const fallbackId = `prompt_${idx + 1}`;
+        const kind = toTrimmedString(source.kind, 'skillRoll', 30).trim();
+        const triggerType = toTrimmedString(source.trigger, 'enter', 30).trim();
+        const target = toTrimmedString(source.target, 'playerTokens', 30).trim();
+        const repeat = toTrimmedString(source.repeat, 'oncePerToken', 30).trim();
+        const rawSkill = toTrimmedString(source.skill, 'perception', 80).trim().toLowerCase();
+        const hasDc = source.dc !== null && source.dc !== undefined && source.dc !== '';
+        return {
+            id: toTrimmedString(source.id, fallbackId, 120).trim() || fallbackId,
+            enabled: source.enabled !== undefined ? !!source.enabled : true,
+            trigger: VTT_PROXIMITY_TRIGGER_TYPES.has(triggerType) ? triggerType : 'enter',
+            radiusCells: Math.max(0, Math.min(24, Math.round(toNumber(source.radiusCells, 0)))),
+            target: VTT_PROXIMITY_TRIGGER_TARGETS.has(target) ? target : 'playerTokens',
+            repeat: VTT_PROXIMITY_TRIGGER_REPEATS.has(repeat) ? repeat : 'oncePerToken',
+            kind: VTT_PROXIMITY_TRIGGER_KINDS.has(kind) ? kind : 'skillRoll',
+            skill: VTT_PROXIMITY_TRIGGER_SKILLS.has(rawSkill) ? rawSkill : 'perception',
+            dc: hasDc ? Math.max(1, Math.min(40, Math.round(toNumber(source.dc, 10)))) : null,
+            dcVisible: !!source.dcVisible,
+            title: toTrimmedString(source.title, 'Something catches your attention', 160).trim() || 'Something catches your attention',
+            body: toTrimmedString(source.body, '', 800).trim(),
+            successText: toTrimmedString(source.successText, '', 600).trim(),
+            failText: toTrimmedString(source.failText, '', 600).trim()
+        };
+    };
+    const sanitizeVTTProximityTriggers = (triggers) => (
+        Array.isArray(triggers)
+            ? triggers.map((entry, idx) => sanitizeVTTProximityTrigger(entry, idx)).slice(0, 12)
+            : []
+    );
 
     const sanitizeVTTGrid = (grid) => {
         const source = grid && typeof grid === 'object' ? grid : {};
@@ -754,7 +810,8 @@
             hidden: !!source.hidden,
             stealthRoll: hasStealthRoll ? Math.max(0, Math.min(99, Math.round(toNumber(rawStealthRoll, 10)))) : null,
             vision: sanitizeVTTVision(source.vision),
-            monsterRollOverrides: sanitizeVTTMonsterRollOverrides(source.monsterRollOverrides)
+            monsterRollOverrides: sanitizeVTTMonsterRollOverrides(source.monsterRollOverrides),
+            triggers: sanitizeVTTProximityTriggers(source.triggers)
         };
     };
 
@@ -843,8 +900,10 @@
         const categoryMeta = getVTTZoneCategoryMeta(category);
         const highlightColor = categoryMeta.color;
         const defaultTitle = categoryMeta.defaultTitle || 'Zone';
+        const cleanShape = toTrimmedString(source.shape, 'zone', 20).trim().toLowerCase();
         return {
             id: toTrimmedString(source.id, `evidence_${idx + 1}`, 120).trim() || `evidence_${idx + 1}`,
+            shape: VTT_NOTE_SHAPES.has(cleanShape) ? cleanShape : 'zone',
             category,
             title: toTrimmedString(source.title, defaultTitle, 160).trim() || defaultTitle,
             body: toTrimmedString(source.body, '', 6000).trim(),
@@ -853,7 +912,8 @@
             w: Math.max(1, Math.round(toNumber(source.w, 1))),
             h: Math.max(1, Math.round(toNumber(source.h, 1))),
             hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
-            highlightColor
+            highlightColor,
+            triggers: sanitizeVTTProximityTriggers(source.triggers)
         };
     };
 
