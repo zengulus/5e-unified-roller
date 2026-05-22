@@ -192,6 +192,7 @@
     });
     const DEFAULT_VTT_ZONE_CATEGORY = 'evidence';
     const VTT_NOTE_SHAPES = new Set(['pin', 'zone']);
+    const VTT_PROXIMITY_PROMPT_STATE_LIMIT = 80;
     const getVTTZoneCategoryMeta = (category) => {
         const key = String(category || '').trim().toLowerCase();
         return VTT_ZONE_CATEGORY_META[key] || VTT_ZONE_CATEGORY_META[DEFAULT_VTT_ZONE_CATEGORY];
@@ -743,6 +744,39 @@
             ? triggers.map((entry, idx) => sanitizeVTTProximityTrigger(entry, idx)).slice(0, 12)
             : []
     );
+    const sanitizeVTTProximityPromptResult = (result) => {
+        const source = result && typeof result === 'object' && !Array.isArray(result) ? result : null;
+        if (!source) return null;
+        const numericTotal = Number(source.total);
+        return {
+            ok: !!source.ok,
+            total: Number.isFinite(numericTotal) ? Math.round(numericTotal) : toTrimmedString(source.total, '', 40),
+            formula: toTrimmedString(source.formula, '', 160),
+            label: toTrimmedString(source.label, '', 120),
+            success: source.success === true ? true : (source.success === false ? false : null),
+            persisted: source.persisted !== undefined ? !!source.persisted : true
+        };
+    };
+    const sanitizeVTTProximityPromptState = (entry, idx = 0) => {
+        const source = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {};
+        const fallbackKey = `prompt_state_${idx + 1}`;
+        return {
+            key: toTrimmedString(source.key || source.id, fallbackKey, 320).trim() || fallbackKey,
+            sceneId: toTrimmedString(source.sceneId, '', 120).trim(),
+            triggerId: toTrimmedString(source.triggerId, '', 120).trim(),
+            tokenId: toTrimmedString(source.tokenId, '', 120).trim(),
+            at: Math.max(0, Math.round(toNumber(source.at, Date.now()))),
+            resolvedAt: Math.max(0, Math.round(toNumber(source.resolvedAt, 0))),
+            dismissed: !!source.dismissed,
+            dismissedAt: Math.max(0, Math.round(toNumber(source.dismissedAt, 0))),
+            result: sanitizeVTTProximityPromptResult(source.result)
+        };
+    };
+    const sanitizeVTTProximityPromptStates = (states) => (
+        Array.isArray(states)
+            ? states.map((entry, idx) => sanitizeVTTProximityPromptState(entry, idx)).slice(-VTT_PROXIMITY_PROMPT_STATE_LIMIT)
+            : []
+    );
 
     const sanitizeVTTGrid = (grid) => {
         const source = grid && typeof grid === 'object' ? grid : {};
@@ -815,7 +849,8 @@
             stealthRoll: hasStealthRoll ? Math.max(0, Math.min(99, Math.round(toNumber(rawStealthRoll, 10)))) : null,
             vision: sanitizeVTTVision(source.vision),
             monsterRollOverrides: sanitizeVTTMonsterRollOverrides(source.monsterRollOverrides),
-            triggers: sanitizeVTTProximityTriggers(source.triggers)
+            triggers: sanitizeVTTProximityTriggers(source.triggers),
+            proximityPromptStates: sanitizeVTTProximityPromptStates(source.proximityPromptStates)
         };
     };
 
@@ -917,7 +952,8 @@
             h: Math.max(1, Math.round(toNumber(source.h, 1))),
             hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
             highlightColor,
-            triggers: sanitizeVTTProximityTriggers(source.triggers)
+            triggers: sanitizeVTTProximityTriggers(source.triggers),
+            proximityPromptStates: sanitizeVTTProximityPromptStates(source.proximityPromptStates)
         };
     };
 

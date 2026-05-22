@@ -221,6 +221,11 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
 
 .vtt-sidebar {
     left: 1rem;
+    align-content: start;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
 }
 
 .vtt-player-roll-rail {
@@ -3022,6 +3027,9 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
 
     .vtt-sidebar {
         left: 0.5rem;
+        overflow-y: auto;
+        overflow-x: hidden;
+        pointer-events: auto;
     }
 
     .vtt-player-roll-rail {
@@ -3072,6 +3080,11 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
     .vtt-initiative-panel > .vtt-panel {
         max-height: calc(var(--vtt-shell-height) - var(--vtt-overlay-top) - 1rem);
         overflow: auto;
+    }
+
+    .vtt-sidebar > .vtt-panel {
+        max-height: none;
+        overflow: visible;
     }
 
     .vtt-panel {

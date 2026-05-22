@@ -67,6 +67,7 @@
     });
     const MOOD_EMOJI_OPTIONS = ['🙂', '😠', '😰', '🤔', '😏', '😢', '😨', '😤', '🫡', '👁️', '🩸', '🏃', '🛡️', '✨'];
     const PROXIMITY_PROMPT_STORAGE_PREFIX = 'rtf_vtt_proximity_seen_';
+    const PROXIMITY_PROMPT_STATE_LIMIT = 80;
     const PROXIMITY_TRIGGER_KIND_OPTIONS = ['fiction', 'skillRoll'];
     const PROXIMITY_TRIGGER_TYPE_OPTIONS = ['enter', 'startTurnNear', 'click', 'reveal'];
     const PROXIMITY_TRIGGER_TARGET_OPTIONS = ['playerTokens', 'anyVisibleToken'];
@@ -466,6 +467,45 @@
     const normalizeProximityTriggers = (triggers) => (
         Array.isArray(triggers)
             ? triggers.map((entry, idx) => normalizeProximityTrigger(entry, idx)).slice(0, 12)
+            : []
+    );
+    const normalizeProximityPromptResult = (result, trigger = null) => {
+        const source = result && typeof result === 'object' ? result : null;
+        if (!source) return null;
+        const rawSuccess = source.success;
+        const rawTotal = source.total;
+        const numericTotal = Number(rawTotal);
+        return {
+            ok: !!source.ok,
+            total: Number.isFinite(numericTotal) ? Math.round(numericTotal) : String(rawTotal || '').slice(0, 40),
+            formula: String(source.formula || '').slice(0, 160),
+            label: String(source.label || getProximitySkillLabel(trigger && trigger.skill)).slice(0, 120),
+            success: rawSuccess === true ? true : (rawSuccess === false ? false : null),
+            persisted: source.persisted !== undefined ? !!source.persisted : true
+        };
+    };
+    const normalizeProximityPromptStateEntry = (entry, idx = 0) => {
+        const source = entry && typeof entry === 'object' ? entry : {};
+        const fallbackKey = `prompt_state_${idx + 1}`;
+        const key = String(source.key || source.id || fallbackKey).trim().slice(0, 320) || fallbackKey;
+        const at = Math.max(0, Math.round(toNumber(source.at, Date.now())));
+        const resolvedAt = Math.max(0, Math.round(toNumber(source.resolvedAt, 0)));
+        const dismissedAt = Math.max(0, Math.round(toNumber(source.dismissedAt, 0)));
+        return {
+            key,
+            sceneId: String(source.sceneId || '').trim().slice(0, 120),
+            triggerId: String(source.triggerId || '').trim().slice(0, 120),
+            tokenId: String(source.tokenId || '').trim().slice(0, 120),
+            at,
+            resolvedAt,
+            dismissed: !!source.dismissed,
+            dismissedAt,
+            result: normalizeProximityPromptResult(source.result)
+        };
+    };
+    const normalizeProximityPromptStates = (states) => (
+        Array.isArray(states)
+            ? states.map((entry, idx) => normalizeProximityPromptStateEntry(entry, idx)).slice(-PROXIMITY_PROMPT_STATE_LIMIT)
             : []
     );
     const buildSeededProximityTrigger = (seed = 'perception') => {
@@ -1578,6 +1618,7 @@
             hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
             highlightColor: getDefaultEvidenceNoteHighlightColor(category),
             triggers: normalizeProximityTriggers(source.triggers),
+            proximityPromptStates: normalizeProximityPromptStates(source.proximityPromptStates),
             x: Math.round(offsetX + left * cellPx),
             y: Math.round(offsetY + top * cellPx),
             w: Math.max(1, Math.round(widthCells * cellPx)),
@@ -3100,6 +3141,7 @@
             defences: normalizeDefences(null),
             conditions: [],
             triggers: [],
+            proximityPromptStates: [],
             hidden: false,
             stealthRoll: null,
             vision: {
@@ -3133,6 +3175,7 @@
             defences: normalizeDefences(npc && npc.defences),
             conditions: [],
             triggers: [],
+            proximityPromptStates: [],
             hidden: false,
             stealthRoll: null,
             vision: {
@@ -3168,6 +3211,7 @@
             monster: statBlock,
             conditions: [],
             triggers: [],
+            proximityPromptStates: [],
             hidden: false,
             stealthRoll: null,
             vision: {
@@ -3269,6 +3313,7 @@
         defences: normalizeDefences(null),
         conditions: [],
         triggers: [],
+        proximityPromptStates: [],
         hidden: false,
         stealthRoll: null,
         vision: {
@@ -5895,65 +5940,146 @@
             tokenPart
         ].join('|');
     };
-    const isProximityPromptSeen = (seenMap, key, trigger) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        if (normalized.repeat === 'always') return suppressedProximityPromptKeys.has(key);
-        return !!(seenMap && seenMap[key]);
-    };
     const getProximitySeenEntry = (seenMap, key) => {
         if (!seenMap || !key || !seenMap[key]) return null;
         const entry = seenMap[key];
         if (entry && typeof entry === 'object' && !Array.isArray(entry)) return entry;
         return { at: Number.isFinite(Number(entry)) ? Number(entry) : Date.now() };
     };
-    const getPersistedProximityResult = (seenMap, key) => {
-        const entry = getProximitySeenEntry(seenMap, key);
-        const result = entry && entry.result && typeof entry.result === 'object' ? entry.result : null;
-        if (!result || entry.dismissed) return null;
-        return {
-            ok: !!result.ok,
-            total: result.total,
-            formula: String(result.formula || '').slice(0, 160),
-            label: String(result.label || '').slice(0, 120),
-            success: result.success === true ? true : (result.success === false ? false : null),
-            persisted: true
+    const getProximityPromptStateEntry = (source, key) => {
+        const cleanKey = String(key || '').trim();
+        if (!source || !cleanKey) return null;
+        return normalizeProximityPromptStates(source.proximityPromptStates)
+            .find((entry) => entry.key === cleanKey) || null;
+    };
+    const getPersistedProximityResult = (source, seenMap, key, trigger) => {
+        const stateEntry = getProximityPromptStateEntry(source, key);
+        const stateResult = normalizeProximityPromptResult(stateEntry && stateEntry.result, trigger);
+        if (stateResult) return { ...stateResult, persisted: true };
+        const legacyEntry = getProximitySeenEntry(seenMap, key);
+        const legacyResult = normalizeProximityPromptResult(legacyEntry && legacyEntry.result, trigger);
+        return legacyResult ? { ...legacyResult, persisted: true } : null;
+    };
+    const isProximityPromptSeen = (source, seenMap, key, trigger) => {
+        const normalized = normalizeProximityTrigger(trigger);
+        if (suppressedProximityPromptKeys.has(key)) return true;
+        if (normalized.repeat === 'always') return false;
+        const stateEntry = getProximityPromptStateEntry(source, key);
+        if (stateEntry && stateEntry.result) return false;
+        if (stateEntry) return true;
+        const legacyEntry = getProximitySeenEntry(seenMap, key);
+        if (legacyEntry && legacyEntry.result) return false;
+        return !!legacyEntry;
+    };
+    const writeLocalProximityPromptState = (entry) => {
+        const normalized = normalizeProximityPromptStateEntry(entry);
+        if (!normalized.key) return;
+        const seenMap = readProximitySeenMap();
+        const previous = getProximitySeenEntry(seenMap, normalized.key) || {};
+        seenMap[normalized.key] = {
+            ...previous,
+            ...normalized,
+            at: previous.at || normalized.at || Date.now()
         };
+        writeProximitySeenMap(seenMap);
+    };
+    const findProximityPromptSource = (scene, prompt) => {
+        if (!scene || !prompt) return null;
+        const sourceId = String(prompt.sourceId || '').trim();
+        if (!sourceId) return null;
+        if (prompt.sourceKind === 'token') {
+            const tokens = Array.isArray(scene.tokens) ? scene.tokens : [];
+            return tokens.find((token) => String(token && token.id || '').trim() === sourceId) || null;
+        }
+        if (prompt.sourceKind === 'note') {
+            const notes = Array.isArray(scene.evidenceNotes) ? scene.evidenceNotes : [];
+            return notes.find((note) => String(note && note.id || '').trim() === sourceId) || null;
+        }
+        return null;
+    };
+    const upsertProximityPromptState = (source, entry) => {
+        if (!source || !entry || !entry.key) return false;
+        const states = normalizeProximityPromptStates(source.proximityPromptStates);
+        const idx = states.findIndex((candidate) => candidate.key === entry.key);
+        const previous = idx >= 0 ? states[idx] : {};
+        const merged = {
+            ...previous,
+            ...entry,
+            at: previous.at || entry.at || Date.now()
+        };
+        if (!Object.prototype.hasOwnProperty.call(entry, 'result')) {
+            merged.result = previous.result || null;
+        }
+        const next = normalizeProximityPromptStateEntry({
+            ...merged
+        }, idx >= 0 ? idx : states.length);
+        if (idx >= 0) states[idx] = next;
+        else states.push(next);
+        source.proximityPromptStates = normalizeProximityPromptStates(states);
+        return true;
+    };
+    const buildProximityPromptStateEntry = (prompt, patch = {}) => {
+        const trigger = normalizeProximityTrigger((patch && patch.trigger) || (prompt && prompt.trigger));
+        const hasResultPatch = patch && Object.prototype.hasOwnProperty.call(patch, 'result');
+        const entry = normalizeProximityPromptStateEntry({
+            key: prompt && prompt.key,
+            sceneId: prompt && prompt.sceneId,
+            triggerId: trigger.id,
+            tokenId: prompt && prompt.tokenId,
+            at: Date.now(),
+            ...patch,
+            result: hasResultPatch ? normalizeProximityPromptResult(patch.result, trigger) : undefined
+        });
+        if (!hasResultPatch) delete entry.result;
+        return entry;
+    };
+    const persistProximityPromptState = (prompt, patch = {}, options = {}) => {
+        if (!prompt || !prompt.key) return false;
+        const entry = buildProximityPromptStateEntry(prompt, patch);
+        let wroteSourceState = false;
+        const persisted = withDraft((draft) => {
+            const scene = getSceneById(prompt.sceneId, draft) || getActiveScene(draft);
+            const source = findProximityPromptSource(scene, prompt);
+            if (!source) return;
+            wroteSourceState = upsertProximityPromptState(source, entry);
+        }, { reason: options.reason || 'proximity-prompt-state' });
+        if (!persisted || !wroteSourceState) writeLocalProximityPromptState(entry);
+        return !!(persisted && wroteSourceState);
     };
     const persistProximityPromptResult = (prompt, result, trigger) => {
-        if (!prompt || !prompt.key || !result) return;
-        const seenMap = readProximitySeenMap();
-        const previous = getProximitySeenEntry(seenMap, prompt.key) || {};
-        seenMap[prompt.key] = {
-            ...previous,
-            at: previous.at || Date.now(),
+        if (!prompt || !prompt.key || !result) return false;
+        return persistProximityPromptState(prompt, {
+            trigger,
             resolvedAt: Date.now(),
             dismissed: false,
-            result: {
-                ok: !!result.ok,
-                total: result.total,
-                formula: String(result.formula || '').slice(0, 160),
-                label: String(result.label || getProximitySkillLabel(trigger && trigger.skill)).slice(0, 120),
-                success: result.success === true ? true : (result.success === false ? false : null)
-            }
-        };
-        writeProximitySeenMap(seenMap);
+            dismissedAt: 0,
+            result
+        }, { reason: 'proximity-prompt-result' });
     };
     const markProximityPromptDismissed = (prompt) => {
-        if (!prompt || !prompt.key) return;
-        const seenMap = readProximitySeenMap();
-        const previous = getProximitySeenEntry(seenMap, prompt.key) || {};
-        seenMap[prompt.key] = {
-            ...previous,
-            at: previous.at || Date.now(),
+        if (!prompt || !prompt.key) return false;
+        if (prompt.result) return false;
+        return persistProximityPromptState(prompt, {
             dismissed: true,
             dismissedAt: Date.now()
-        };
-        writeProximitySeenMap(seenMap);
+        }, { reason: 'proximity-prompt-dismissed' });
     };
-    const buildProximityCandidate = ({ scene, sourceKind, source, trigger, token, distance, result = null }) => {
+    const getProximitySourceAnchorCells = (scene, sourceKind, source, sourceRect = null) => {
+        if (!source) return null;
+        const rect = sourceRect || (sourceKind === 'note'
+            ? getEvidenceNoteTriggerRect(scene, source)
+            : getTokenCellRect(source));
+        if (!rect) return null;
+        return {
+            x: toNumber(rect.left, 0) + Math.max(1, toNumber(rect.width, 1)) / 2,
+            y: toNumber(rect.top, 0)
+        };
+    };
+    const buildProximityCandidate = ({ scene, sourceKind, source, sourceRect = null, trigger, token, distance, result = null }) => {
         const normalized = normalizeProximityTrigger(trigger);
         const sourceId = String(source && source.id || '').trim();
         const key = getProximityPromptSeenKey(scene, sourceKind, sourceId, normalized, token);
+        const sourceAnchor = getProximitySourceAnchorCells(scene, sourceKind, source, sourceRect);
         return {
             key,
             sceneId: String(scene && scene.id || '').trim(),
@@ -5966,6 +6092,8 @@
             tokenLabel: String(token && token.label || 'Token').trim(),
             tokenAnchorCellX: toNumber(token && token.x, 0) + Math.max(1, toNumber(token && token.w, 1)) / 2,
             tokenAnchorCellY: toNumber(token && token.y, 0),
+            sourceAnchorCellX: sourceAnchor ? sourceAnchor.x : null,
+            sourceAnchorCellY: sourceAnchor ? sourceAnchor.y : null,
             distance: Number.isFinite(distance) ? distance : 0,
             trigger: normalized,
             result
@@ -5976,21 +6104,37 @@
         if (!scene || !tokenId) return null;
         return getVisibleTokensForRole(scene, 'player').find((token) => String(token && token.id || '').trim() === tokenId) || null;
     };
+    const getProximityPromptSourceToken = (scene, prompt = activeProximityPrompt) => {
+        if (!scene || !prompt || prompt.sourceKind !== 'token') return null;
+        const sourceId = String(prompt.sourceId || '').trim();
+        if (!sourceId) return null;
+        return getVisibleTokensForRole(scene, 'player').find((token) => String(token && token.id || '').trim() === sourceId) || null;
+    };
     const getProximityPromptAnchorWorldPoint = (scene, prompt = activeProximityPrompt) => {
-        const token = getProximityPromptToken(scene, prompt);
         if (!scene || !scene.grid) return null;
         const cellPx = getSceneCellPx(scene);
-        if (!token) {
-            if (!Number.isFinite(Number(prompt && prompt.tokenAnchorCellX)) || !Number.isFinite(Number(prompt && prompt.tokenAnchorCellY))) return null;
+        const sourceToken = getProximityPromptSourceToken(scene, prompt);
+        if (sourceToken) {
+            const renderedCells = getRenderableTokenCells(sourceToken, scene, Date.now());
             return {
-                x: toNumber(scene.grid.offsetX, 0) + toNumber(prompt.tokenAnchorCellX, 0) * cellPx,
-                y: toNumber(scene.grid.offsetY, 0) + toNumber(prompt.tokenAnchorCellY, 0) * cellPx
+                x: toNumber(scene.grid.offsetX, 0) + (toNumber(renderedCells.x, sourceToken.x) + Math.max(1, toNumber(sourceToken.w, 1)) / 2) * cellPx,
+                y: toNumber(scene.grid.offsetY, 0) + toNumber(renderedCells.y, sourceToken.y) * cellPx
             };
         }
-        const renderedCells = getRenderableTokenCells(token, scene, Date.now());
+        if (prompt && prompt.sourceKind === 'note') {
+            const sourceNote = findProximityPromptSource(scene, prompt);
+            const sourceAnchor = sourceNote ? getProximitySourceAnchorCells(scene, 'note', sourceNote) : null;
+            if (sourceAnchor) {
+                return {
+                    x: toNumber(scene.grid.offsetX, 0) + sourceAnchor.x * cellPx,
+                    y: toNumber(scene.grid.offsetY, 0) + sourceAnchor.y * cellPx
+                };
+            }
+        }
+        if (!Number.isFinite(Number(prompt && prompt.sourceAnchorCellX)) || !Number.isFinite(Number(prompt && prompt.sourceAnchorCellY))) return null;
         return {
-            x: toNumber(scene.grid.offsetX, 0) + (toNumber(renderedCells.x, token.x) + Math.max(1, toNumber(token.w, 1)) / 2) * cellPx,
-            y: toNumber(scene.grid.offsetY, 0) + toNumber(renderedCells.y, token.y) * cellPx
+            x: toNumber(scene.grid.offsetX, 0) + toNumber(prompt.sourceAnchorCellX, 0) * cellPx,
+            y: toNumber(scene.grid.offsetY, 0) + toNumber(prompt.sourceAnchorCellY, 0) * cellPx
         };
     };
     const positionProximityPrompt = (scene = getActiveScene()) => {
@@ -6033,12 +6177,14 @@
                         const tokenRect = getTokenCellRect(token);
                         if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
                         const key = getProximityPromptSeenKey(scene, 'note', note.id, trigger, token);
-                        const persistedResult = getPersistedProximityResult(seenMap, key);
+                        if (suppressedProximityPromptKeys.has(key)) return;
+                        const persistedResult = getPersistedProximityResult(note, seenMap, key, trigger);
                         if (persistedResult) {
                             candidates.push(buildProximityCandidate({
                                 scene,
                                 sourceKind: 'note',
                                 source: note,
+                                sourceRect,
                                 trigger,
                                 token,
                                 distance: getCellRectDistance(sourceRect, tokenRect),
@@ -6046,11 +6192,12 @@
                             }));
                             return;
                         }
-                        if (isProximityPromptSeen(seenMap, key, trigger)) return;
+                        if (isProximityPromptSeen(note, seenMap, key, trigger)) return;
                         candidates.push(buildProximityCandidate({
                             scene,
                             sourceKind: 'note',
                             source: note,
+                            sourceRect,
                             trigger,
                             token,
                             distance: getCellRectDistance(sourceRect, tokenRect)
@@ -6068,12 +6215,14 @@
                         const tokenRect = getTokenCellRect(token);
                         if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
                         const key = getProximityPromptSeenKey(scene, 'token', sourceToken.id, trigger, token);
-                        const persistedResult = getPersistedProximityResult(seenMap, key);
+                        if (suppressedProximityPromptKeys.has(key)) return;
+                        const persistedResult = getPersistedProximityResult(sourceToken, seenMap, key, trigger);
                         if (persistedResult) {
                             candidates.push(buildProximityCandidate({
                                 scene,
                                 sourceKind: 'token',
                                 source: sourceToken,
+                                sourceRect,
                                 trigger,
                                 token,
                                 distance: getCellRectDistance(sourceRect, tokenRect),
@@ -6081,11 +6230,12 @@
                             }));
                             return;
                         }
-                        if (isProximityPromptSeen(seenMap, key, trigger)) return;
+                        if (isProximityPromptSeen(sourceToken, seenMap, key, trigger)) return;
                         candidates.push(buildProximityCandidate({
                             scene,
                             sourceKind: 'token',
                             source: sourceToken,
+                            sourceRect,
                             trigger,
                             token,
                             distance: getCellRectDistance(sourceRect, tokenRect)
@@ -6105,11 +6255,18 @@
             activeProximityPrompt = null;
             return;
         }
-        if (activeProximityPrompt && activeProximityPrompt.sceneId === scene.id) return;
-        activeProximityPrompt = null;
-        const candidate = collectProximityPromptCandidates(scene)[0] || null;
-        if (!candidate) return;
-        activeProximityPrompt = candidate;
+        const candidates = collectProximityPromptCandidates(scene);
+        if (activeProximityPrompt && activeProximityPrompt.sceneId === scene.id) {
+            const current = candidates.find((candidate) => candidate.key === activeProximityPrompt.key) || null;
+            activeProximityPrompt = current
+                ? {
+                    ...current,
+                    result: current.result || activeProximityPrompt.result || null
+                }
+                : null;
+            return;
+        }
+        activeProximityPrompt = candidates[0] || null;
     };
     const renderProximityPrompt = () => {
         if (!proximityPromptStackEl) return;
@@ -6164,7 +6321,10 @@
     const dismissActiveProximityPrompt = () => {
         if (activeProximityPrompt && activeProximityPrompt.key) {
             suppressedProximityPromptKeys.add(activeProximityPrompt.key);
-            markProximityPromptDismissed(activeProximityPrompt);
+            const trigger = normalizeProximityTrigger(activeProximityPrompt.trigger);
+            if (!activeProximityPrompt.result && trigger.repeat !== 'always') {
+                markProximityPromptDismissed(activeProximityPrompt);
+            }
         }
         activeProximityPrompt = null;
         renderProximityPrompt();
