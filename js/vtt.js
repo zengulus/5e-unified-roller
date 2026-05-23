@@ -2793,6 +2793,17 @@
         return clean === 'player' ? 'player' : 'dm';
     };
 
+    const hasLocalSheetKey = (sheetKey) => {
+        const cleanSheetKey = String(sheetKey || '').trim();
+        if (!cleanSheetKey) return false;
+        const bundle = getActiveSheetBundle(cleanSheetKey);
+        return !!(
+            bundle
+            && bundle.character
+            && String(bundle.character.meta && bundle.character.meta.sheetKey || '').trim() === cleanSheetKey
+        );
+    };
+
     const getRosterPlayerForRecord = (record) => {
         const source = record && typeof record === 'object' ? record : null;
         if (!source) return null;
@@ -2800,6 +2811,13 @@
             return findPlayerById(source.sourceId);
         }
         return null;
+    };
+
+    const getTokenLinkedSheetKey = (token) => {
+        if (!token || typeof token !== 'object') return '';
+        if (String(token.sourceType || '').trim() === 'sheet') return String(token.sourceId || '').trim();
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        return String(rosterPlayer && rosterPlayer.sheetKey || '').trim();
     };
 
     const getRosterPlayerImageUrlForToken = (token) => {
@@ -2896,7 +2914,10 @@
     const canRoleMoveToken = (token, role = localRole) => {
         if (!token) return false;
         if (role === 'dm') return true;
-        return normalizeMoveAccess(token.moveAccess, token.sourceType === 'player' ? 'player' : 'dm') === 'player';
+        if (normalizeMoveAccess(token.moveAccess, token.sourceType === 'player' ? 'player' : 'dm') !== 'player') return false;
+        const linkedSheetKey = getTokenLinkedSheetKey(token);
+        if (linkedSheetKey) return hasLocalSheetKey(linkedSheetKey);
+        return true;
     };
 
     const getActiveCaseName = () => {
@@ -5614,6 +5635,9 @@
         if (!item || !item.action) return false;
         const directResult = runSheetActionDirect(item);
         if (directResult && directResult.ok) {
+            if (isInitiativeSheetAction(item)) {
+                applySheetInitiativeRollToTracker(directResult);
+            }
             sheetActionState = {
                 ...(sheetActionState || {}),
                 lastResult: directResult
@@ -5647,6 +5671,50 @@
         if (!raw) return 0;
         if (DEFENCE_KEYS.includes(raw)) return getSheetMod(character, raw);
         return parseInt(raw, 10) || 0;
+    };
+    const getSheetSkillBonus = (character, skillName) => {
+        const skill = String(skillName || '').trim().toLowerCase();
+        const stat = character && character.skillOverrides && character.skillOverrides[skill]
+            ? character.skillOverrides[skill]
+            : sheetSkillsMap[skill];
+        if (!stat) return 0;
+        const profLevel = character && character.skills && Number.isFinite(Number(character.skills[skill]))
+            ? Number(character.skills[skill])
+            : 0;
+        return getSheetMod(character, stat) + (profLevel * getSheetPB(character)) + getSheetSkillMiscBonus(character, skill);
+    };
+    const getSheetArmorClass = (character) => {
+        const ac = character && character.ac && typeof character.ac === 'object' ? character.ac : {};
+        const bonuses = Array.isArray(ac.bonuses) ? ac.bonuses : [];
+        const bonusTotal = bonuses.reduce((sum, bonus) => (
+            bonus && bonus.active ? sum + Math.round(toNumber(bonus.val, 0)) : sum
+        ), 0);
+        if (String(ac.mode || 'std') === 'custom') {
+            const stat1 = DEFENCE_KEYS.includes(String(ac.customStat1 || '').trim()) ? String(ac.customStat1).trim() : 'dex';
+            const stat2 = DEFENCE_KEYS.includes(String(ac.customStat2 || '').trim()) ? String(ac.customStat2).trim() : '';
+            return clamp(Math.round(10 + getSheetMod(character, stat1) + (stat2 ? getSheetMod(character, stat2) : 0) + bonusTotal), 0, 99);
+        }
+        const rawDex = getSheetMod(character, 'dex');
+        const dexCap = Number.isFinite(Number(ac.dexCap)) ? Number(ac.dexCap) : 100;
+        const effectiveDex = dexCap === 100 ? rawDex : (dexCap === 0 ? 0 : Math.min(rawDex, dexCap));
+        return clamp(Math.round(toNumber(ac.base, 10) + effectiveDex + bonusTotal), 0, 99);
+    };
+    const getSheetDefences = (character) => DEFENCE_KEYS.reduce((out, stat) => {
+        const statRow = character && character.stats && character.stats[stat] ? character.stats[stat] : { val: 10, save: false };
+        const saveBonus = getSheetMod(character, stat) + (statRow.save ? getSheetPB(character) : 0);
+        out[stat] = clamp(Math.round(11 + saveBonus), 0, 99);
+        return out;
+    }, {});
+    const getSheetStealthRoll = (character) => {
+        const raw = character && character.meta ? character.meta.stealthRoll : null;
+        if (raw === null || raw === undefined || raw === '') return null;
+        return clamp(Math.round(toNumber(raw, 0)), 0, 99);
+    };
+    const findRosterPlayerBySheetKey = (sheetKey) => {
+        const cleanSheetKey = String(sheetKey || '').trim();
+        if (!cleanSheetKey) return null;
+        const matches = getPlayers().filter((player) => String(player && player.sheetKey || '').trim() === cleanSheetKey);
+        return matches.length === 1 ? matches[0] : null;
     };
     const rollSheetD20 = (character, bonus, label, options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
@@ -5829,6 +5897,174 @@
             return rollSheetFormula(character, `Recharge: ${resource.name || 'Resource'}`, resource.rFormula || '1d6', { type: 'check' });
         }
         return { ok: false, reason: 'unsupported' };
+    };
+    const isInitiativeSheetAction = (item) => {
+        const action = item && item.action ? item.action : {};
+        return String(item && item.key || '').trim() === 'core:initiative'
+            || String(action.code || '').trim() === 'rollInitiative()'
+            || String(item && item.label || '').trim().toLowerCase() === 'initiative';
+    };
+    const buildDeterministicInitiativeEntryId = (sourceType, sourceId) => {
+        const type = String(sourceType || '').trim();
+        const id = String(sourceId || '').trim();
+        if (!type || !id) return '';
+        return String(`init_${type}_${id}`).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 120);
+    };
+    const hasDefenceValues = (defences) => DEFENCE_KEYS.some((key) => hasValue(defences && defences[key]));
+    const upsertRolledInitiativeEntry = (roll) => {
+        const packet = roll && typeof roll === 'object' ? roll : null;
+        if (!packet) return false;
+        const total = Math.round(toNumber(packet.total, 0));
+        const tie = clamp(Math.round(toNumber(packet.tie, 10)), 0, 99);
+        const name = String(packet.name || 'Combatant').trim() || 'Combatant';
+        const sourceType = String(packet.sourceType || '').trim();
+        const sourceId = String(packet.sourceId || '').trim();
+        const linkedTokenId = String(packet.linkedTokenId || packet.tokenId || '').trim();
+        let applied = false;
+
+        const saved = withDraft((draft) => {
+            if (!draft.initiative || !Array.isArray(draft.initiative.entries)) {
+                draft.initiative = { entries: [], round: 1, activeEntryId: '' };
+            }
+            const entries = draft.initiative.entries;
+            let linkedToken = linkedTokenId ? findTokenByIdAcrossScenes(draft, linkedTokenId) : null;
+            if (!linkedToken && sourceType && sourceId) linkedToken = findTokenAcrossScenes(draft, sourceType, sourceId);
+            const hasSourceIdentity = !!(sourceType && sourceId);
+            const existingIdx = entries.findIndex((entry) => {
+                if (linkedToken && String(entry && entry.linkedTokenId || '').trim() === String(linkedToken.id || '').trim()) return true;
+                if (hasSourceIdentity && String(entry && entry.sourceType || '').trim() === sourceType && String(entry && entry.sourceId || '').trim() === sourceId) return true;
+                if (!hasSourceIdentity) return String(entry && entry.name || '').trim().toLowerCase() === name.toLowerCase();
+                return false;
+            });
+            const previous = existingIdx >= 0 && entries[existingIdx] && typeof entries[existingIdx] === 'object'
+                ? entries[existingIdx]
+                : null;
+            const seed = previous
+                ? (linkedToken ? syncInitiativeEntryFromToken(previous, linkedToken) : { ...previous })
+                : (linkedToken ? buildInitiativeEntryFromToken(linkedToken) : {
+                    id: buildDeterministicInitiativeEntryId(sourceType, sourceId) || buildId('init'),
+                    name,
+                    linkedTokenId: linkedToken ? linkedToken.id : '',
+                    side: packet.side || 'player',
+                    imageUrl: '',
+                    sourceType,
+                    sourceId,
+                    total: 0,
+                    tie: 10,
+                    hpCurrent: null,
+                    hpMax: null,
+                    ac: null,
+                    passivePerception: null,
+                    stealthRoll: null,
+                    defences: normalizeDefences(null),
+                    reactionUsed: false,
+                    concentrating: false,
+                    hidden: false,
+                    conditions: []
+                });
+            const packetDefences = normalizeDefences(packet.defences);
+            const nextEntry = {
+                ...seed,
+                id: previous && previous.id ? previous.id : (buildDeterministicInitiativeEntryId(sourceType || seed.sourceType, sourceId || seed.sourceId) || seed.id || buildId('init')),
+                name,
+                linkedTokenId: linkedToken ? String(linkedToken.id || '').trim() : String(seed.linkedTokenId || '').trim(),
+                side: linkedToken ? linkedToken.side : (packet.side || seed.side || 'player'),
+                imageUrl: linkedToken ? getTokenMetadataImageUrl(linkedToken) : (seed.imageUrl || ''),
+                sourceType: sourceType || seed.sourceType || '',
+                sourceId: sourceId || seed.sourceId || '',
+                total,
+                tie,
+                hpCurrent: packet.hpCurrent !== null && packet.hpCurrent !== undefined ? packet.hpCurrent : seed.hpCurrent,
+                hpMax: packet.hpMax !== null && packet.hpMax !== undefined ? packet.hpMax : seed.hpMax,
+                ac: packet.ac !== null && packet.ac !== undefined ? packet.ac : seed.ac,
+                passivePerception: packet.passivePerception !== null && packet.passivePerception !== undefined ? packet.passivePerception : seed.passivePerception,
+                stealthRoll: packet.stealthRoll !== null && packet.stealthRoll !== undefined ? packet.stealthRoll : (seed.stealthRoll ?? null),
+                defences: hasDefenceValues(packetDefences) ? packetDefences : normalizeDefences(seed.defences),
+                reactionUsed: !!seed.reactionUsed,
+                concentrating: !!seed.concentrating,
+                hidden: !!seed.hidden,
+                conditions: Array.isArray(seed.conditions) ? seed.conditions.slice(0, 24) : []
+            };
+            const rosterPlayer = packet.rosterPlayer || getRosterPlayerForRecord(linkedToken) || getRosterPlayerForRecord(nextEntry);
+            if (rosterPlayer) {
+                if (linkedToken) syncTokenRosterIdentity(linkedToken, rosterPlayer);
+                syncEntryRosterIdentity(nextEntry, rosterPlayer);
+            }
+            if (linkedToken && nextEntry.stealthRoll !== null && nextEntry.stealthRoll !== undefined) {
+                linkedToken.stealthRoll = nextEntry.stealthRoll;
+            }
+
+            if (existingIdx >= 0) entries[existingIdx] = nextEntry;
+            else entries.push(nextEntry);
+            sortInitiativeEntries(entries);
+            if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
+            selectedEntryId = nextEntry.id;
+            selectedTokenId = linkedToken ? linkedToken.id : selectedTokenId;
+            applied = true;
+        }, { reason: 'vtt-initiative-roll' });
+
+        return !!(saved && applied);
+    };
+    const applySheetInitiativeRollToTracker = (result) => {
+        const character = result && result.character ? result.character : null;
+        if (!character) return false;
+        const sheetKey = String(character.meta && character.meta.sheetKey || '').trim();
+        const tokenId = String(sheetActionState && sheetActionState.tokenId || '').trim();
+        const token = tokenId ? findTokenByIdAcrossScenes(vttState, tokenId) : null;
+        const rosterPlayer = getRosterPlayerForRecord(token) || findRosterPlayerBySheetKey(sheetKey);
+        const tokenSourceType = String(token && token.sourceType || '').trim();
+        const tokenSourceId = String(token && token.sourceId || '').trim();
+        const sourceType = rosterPlayer ? 'player' : (tokenSourceType && tokenSourceId ? tokenSourceType : 'sheet');
+        const sourceId = rosterPlayer
+            ? String(rosterPlayer.id || '').trim()
+            : (tokenSourceType && tokenSourceId ? tokenSourceId : sheetKey);
+        const sheetName = String(character.meta && (character.meta.name || character.meta.player) || '').trim();
+        const dexScore = clamp(Math.round(toNumber(character.stats && character.stats.dex ? character.stats.dex.val : 10, 10)), 0, 99);
+        const hpCurrent = character.vitals && hasValue(character.vitals.curr) ? clamp(Math.round(toNumber(character.vitals.curr, 0)), 0, 999999) : null;
+        const hpMax = character.vitals && hasValue(character.vitals.max) ? clamp(Math.round(toNumber(character.vitals.max, hpCurrent || 0)), 0, 999999) : hpCurrent;
+        return upsertRolledInitiativeEntry({
+            name: String(rosterPlayer && rosterPlayer.name || sheetName || token && token.label || 'Player').trim() || 'Player',
+            sourceType,
+            sourceId,
+            linkedTokenId: tokenId,
+            side: token && token.side ? token.side : 'player',
+            total: result.total,
+            tie: dexScore,
+            hpCurrent,
+            hpMax,
+            ac: getSheetArmorClass(character),
+            passivePerception: clamp(Math.round(10 + getSheetSkillBonus(character, 'perception')), 0, 99),
+            stealthRoll: getSheetStealthRoll(character),
+            defences: getSheetDefences(character),
+            rosterPlayer
+        });
+    };
+    const getTokenInitiativeTie = (token) => {
+        const monster = getMonsterStatBlockForToken(token);
+        const dex = monster && monster.abilities && Number.isFinite(Number(monster.abilities.dex))
+            ? Number(monster.abilities.dex)
+            : 10;
+        return clamp(Math.round(dex), 0, 99);
+    };
+    const applyTokenInitiativeRollToTracker = (token, result) => {
+        if (!token || !result) return false;
+        const sourceType = String(token.sourceType || '').trim();
+        const sourceId = String(token.sourceId || '').trim();
+        return upsertRolledInitiativeEntry({
+            name: String(token.label || 'Combatant').trim() || 'Combatant',
+            sourceType,
+            sourceId,
+            linkedTokenId: String(token.id || '').trim(),
+            side: token.side || 'neutral',
+            total: result.total,
+            tie: getTokenInitiativeTie(token),
+            hpCurrent: hasValue(token.hpCurrent) ? clamp(Math.round(toNumber(token.hpCurrent, 0)), 0, 999999) : null,
+            hpMax: hasValue(token.hpMax) ? clamp(Math.round(toNumber(token.hpMax, 0)), 0, 999999) : null,
+            ac: hasValue(token.ac) ? clamp(Math.round(toNumber(token.ac, 0)), 0, 99) : null,
+            passivePerception: hasValue(token.passivePerception) ? clamp(Math.round(toNumber(token.passivePerception, 10)), 0, 99) : null,
+            stealthRoll: getTokenStealthRoll(token),
+            defences: normalizeDefences(token.defences)
+        });
     };
     const postSheetDiscordRoll = (character, label, total, formula, type = 'check', detail = '') => {
         if (!character || !character.meta || !character.meta.discordActive || !String(character.meta.webhook || '').trim()) return Promise.resolve(false);
@@ -8767,6 +9003,9 @@
             const token = getTokenById(npcRollState.tokenId);
             const tokenName = String(token && token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
             const isCustomRoll = String(npcRollState.mode || '').trim().toLowerCase() === 'custom';
+            if (!isCustomRoll && String(npcRollState.presetKey || '').trim() === 'core:initiative' && token) {
+                applyTokenInitiativeRollToTracker(token, parsed);
+            }
             renderNPCRollPopover(parsed);
             postGMDiscordRoll(tokenName, label, parsed.total, parsed.text, {
                 type: npcRollState.type || 'check',
