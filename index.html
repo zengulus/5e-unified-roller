@@ -309,6 +309,22 @@
                                     </div>
                                 </div>
                             </details>
+                            <details class="settings-quiet-group" id="rosterLinkGroup">
+                                <summary>Roster Link</summary>
+                                <div class="settings-quiet-body">
+                                    <div class="field-group">
+                                        <label for="rosterLinkSelect">Existing Roster Entry</label>
+                                        <select id="rosterLinkSelect" data-onchange="updateRosterLinkStatus()"></select>
+                                    </div>
+                                    <div class="settings-utility-actions roster-link-actions">
+                                        <button type="button" class="settings-utility-btn" data-onclick="linkSelectedRosterPlayer()"
+                                            data-quick-pin="false">Link Sheet</button>
+                                        <button type="button" class="settings-utility-btn" data-onclick="publishSheetSummaryToRoster()"
+                                            data-quick-pin="false">Publish Stats</button>
+                                    </div>
+                                    <div class="roster-link-status" id="rosterLinkStatus"></div>
+                                </div>
+                            </details>
                             <label class="ix-inl-034">
                                 <div class="toggle-switch"><input type="checkbox" id="showHiddenCards"
                                         data-onchange="toggleShowHidden(this.checked)"><span class="slider"></span></div>
@@ -818,7 +834,7 @@
     <script src="js/pdf.min.js"></script>
     <script src="js/importer.js?v=20260222e"></script>
     <script src="js/store.js?v=20260505a"></script>
-    <script src="js/index.js?v=20260417a"></script>
+    <script src="js/index.js?v=20260523a"></script>
     <script src="js/player-nav.js?v=20260428a"></script>
     <script src="js/vector-field.js?v=20260224h"></script>
 </body>

@@ -2799,6 +2799,18 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
     gap: 0.5rem;
 }
 
+.vtt-proximity-roll-mode-toggle {
+    flex: 1 1 100%;
+    width: 100%;
+    gap: 0.35rem;
+}
+
+.vtt-proximity-roll-mode-toggle .vtt-chip-btn {
+    min-height: 2rem;
+    padding: 0.38rem 0.5rem;
+    font-size: 0.72rem;
+}
+
 .vtt-modal-backdrop {
     position: fixed;
     inset: 0;

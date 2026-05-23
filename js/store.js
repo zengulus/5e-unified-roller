@@ -748,12 +748,14 @@
         const source = result && typeof result === 'object' && !Array.isArray(result) ? result : null;
         if (!source) return null;
         const numericTotal = Number(source.total);
+        const cleanRollMode = toTrimmedString(source.rollMode, 'norm', 20).trim().toLowerCase();
         return {
             ok: !!source.ok,
             total: Number.isFinite(numericTotal) ? Math.round(numericTotal) : toTrimmedString(source.total, '', 40),
             formula: toTrimmedString(source.formula, '', 160),
             label: toTrimmedString(source.label, '', 120),
             success: source.success === true ? true : (source.success === false ? false : null),
+            rollMode: cleanRollMode === 'adv' || cleanRollMode === 'dis' ? cleanRollMode : 'norm',
             persisted: source.persisted !== undefined ? !!source.persisted : true
         };
     };

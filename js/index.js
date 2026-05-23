@@ -89,6 +89,7 @@ let quickActionSuppressTarget = null;
 let myStoryBoardInitialized = false;
 let myStoryFrameMessageBound = false;
 let myStoryFrameLoadedCharId = '';
+let rosterLinkStoreEventsBound = false;
 const MY_STORY_FRAME_ID = 'myStoryBoardFrame';
 const MY_STORY_MSG = Object.freeze({
     REQUEST_INIT: 'rtf-my-story:request-init',
@@ -2084,6 +2085,7 @@ function init() {
     setupDragAndDrop();
     bindQuickActionCaptureEvents();
     bindQuickActionsPanelEvents();
+    bindRosterLinkStoreEvents();
     setQuickActionsPanelOpen(false);
 }
 
@@ -2223,6 +2225,7 @@ function populateUI() {
     renderInventory();
     renderMyStoryBoard();
     updateAll();
+    renderRosterLinkControls();
     setMode(data.rollMode || 'norm');
     isPopulating = false;
 }
@@ -3638,6 +3641,181 @@ function getComputedDefences() {
         out[stat] = Math.max(0, Math.min(99, 11 + saveBonus));
         return out;
     }, {});
+}
+
+function getRosterLinkPlayers() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.getPlayers !== 'function') return [];
+    const players = store.getPlayers();
+    return Array.isArray(players) ? players.filter((player) => player && typeof player === 'object') : [];
+}
+
+function findRosterLinkBySheetKey(sheetKey) {
+    const cleanSheetKey = sanitizeString(String(sheetKey ?? ''), '', 120).trim();
+    if (!cleanSheetKey) return null;
+    const matches = getRosterLinkPlayers().filter((player) =>
+        sanitizeString(String((player && player.sheetKey) ?? ''), '', 120).trim() === cleanSheetKey
+    );
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function findRosterLinkNameSuggestion() {
+    const names = [
+        data && data.meta ? data.meta.name : '',
+        data && data.meta ? data.meta.player : ''
+    ].map((entry) => sanitizeString(entry, '', 160).trim().toLowerCase()).filter(Boolean);
+    if (!names.length) return null;
+    const matches = getRosterLinkPlayers().filter((player) => {
+        const playerName = sanitizeString(player && player.name ? player.name : '', '', 160).trim().toLowerCase();
+        return playerName && names.includes(playerName);
+    });
+    return matches.length === 1 ? matches[0] : null;
+}
+
+function getSelectedRosterLinkPlayer() {
+    const select = document.getElementById('rosterLinkSelect');
+    const playerId = sanitizeString(select && select.value ? select.value : '', '', 120).trim();
+    if (!playerId) return null;
+    return getRosterLinkPlayers().find((player) =>
+        sanitizeString(player && player.id ? player.id : '', '', 120).trim() === playerId
+    ) || null;
+}
+
+function setRosterLinkStatus(message, state = '') {
+    const statusEl = document.getElementById('rosterLinkStatus');
+    if (!statusEl) return;
+    statusEl.innerHTML = message;
+    if (state) statusEl.setAttribute('data-state', state);
+    else statusEl.removeAttribute('data-state');
+}
+
+function updateRosterLinkStatus() {
+    const sheetKey = getCurrentSheetIdentity();
+    const selected = getSelectedRosterLinkPlayer();
+    const linked = findRosterLinkBySheetKey(sheetKey);
+    if (!selected) {
+        setRosterLinkStatus('Add a player to the roster first, then link this sheet here.', 'warn');
+        return;
+    }
+    if (linked && selected && linked.id === selected.id) {
+        setRosterLinkStatus(`Linked to <strong>${escapeHtml(linked.name || 'Unnamed roster entry')}</strong>.`, 'ok');
+        return;
+    }
+    const selectedSheetKey = sanitizeString(String((selected && selected.sheetKey) ?? ''), '', 120).trim();
+    if (selectedSheetKey && selectedSheetKey !== sheetKey) {
+        setRosterLinkStatus(`<strong>${escapeHtml(selected.name || 'Selected roster entry')}</strong> is linked to another local sheet. Linking will replace that pointer.`, 'warn');
+        return;
+    }
+    if (linked && selected && linked.id !== selected.id) {
+        setRosterLinkStatus(`This sheet is currently linked to <strong>${escapeHtml(linked.name || 'another roster entry')}</strong>. Linking will move it.`, 'warn');
+        return;
+    }
+    setRosterLinkStatus(`Ready to link this sheet to <strong>${escapeHtml(selected.name || 'selected roster entry')}</strong>.`);
+}
+
+function renderRosterLinkControls() {
+    const select = document.getElementById('rosterLinkSelect');
+    if (!select) return;
+    const players = getRosterLinkPlayers();
+    if (!players.length) {
+        select.innerHTML = '<option value="">No roster entries found</option>';
+        select.disabled = true;
+        updateRosterLinkStatus();
+        return;
+    }
+
+    const previousValue = sanitizeString(select.value || '', '', 120).trim();
+    const sheetKey = getCurrentSheetIdentity();
+    const linked = findRosterLinkBySheetKey(sheetKey);
+    const suggestion = linked || findRosterLinkNameSuggestion();
+    const selectedId = previousValue
+        || (suggestion && sanitizeString(suggestion.id || '', '', 120).trim())
+        || sanitizeString(players[0].id || '', '', 120).trim();
+
+    select.disabled = false;
+    select.innerHTML = players.map((player) => {
+        const playerId = sanitizeString(player && player.id ? player.id : '', '', 120).trim();
+        const linkedSheetKey = sanitizeString(String((player && player.sheetKey) ?? ''), '', 120).trim();
+        const suffix = linkedSheetKey === sheetKey ? ' (linked)' : (linkedSheetKey ? ' (other sheet)' : '');
+        return `<option value="${escapeHtml(playerId)}"${playerId === selectedId ? ' selected' : ''}>${escapeHtml(player.name || 'Unnamed roster entry')}${suffix}</option>`;
+    }).join('');
+    updateRosterLinkStatus();
+}
+
+function linkSelectedRosterPlayer(silent = false) {
+    const store = window.RTF_STORE;
+    const selected = getSelectedRosterLinkPlayer();
+    if (!store || typeof store.updatePlayer !== 'function' || !selected) {
+        if (!silent) setRosterLinkStatus('Roster store is not available yet.', 'warn');
+        return null;
+    }
+
+    const sheetKey = getCurrentSheetIdentity();
+    const selectedSheetKey = sanitizeString(String((selected && selected.sheetKey) ?? ''), '', 120).trim();
+    const linked = findRosterLinkBySheetKey(sheetKey);
+    if (selectedSheetKey && selectedSheetKey !== sheetKey && !confirm('Replace the sheet already linked to this roster entry?')) {
+        return null;
+    }
+    if (linked && linked.id !== selected.id && !confirm(`Move this sheet link from ${linked.name || 'the current roster entry'} to ${selected.name || 'the selected roster entry'}?`)) {
+        return null;
+    }
+
+    if (linked && linked.id !== selected.id) {
+        store.updatePlayer(linked.id, { sheetKey: '' });
+    }
+    const updated = store.updatePlayer(selected.id, { sheetKey });
+    renderRosterLinkControls();
+    if (!silent) setRosterLinkStatus(`Linked to <strong>${escapeHtml(updated && updated.name ? updated.name : selected.name || 'selected roster entry')}</strong>.`, 'ok');
+    return updated || selected;
+}
+
+function buildSheetRosterSummary() {
+    save();
+    updateSpellcastingDisplays();
+    const acEl = document.getElementById('acTotalDisplay');
+    const acValue = parseInt(acEl ? String(acEl.textContent || '').trim() : '', 10);
+    const currHp = Number.isFinite(Number(data && data.vitals ? data.vitals.curr : null))
+        ? Math.max(0, Math.round(Number(data.vitals.curr)))
+        : 0;
+    const maxHp = Number.isFinite(Number(data && data.vitals ? data.vitals.max : null))
+        ? Math.max(0, Math.round(Number(data.vitals.max)))
+        : 0;
+    const initBonus = parseComplexBonus(data && data.meta ? data.meta.init : '');
+    const dexScore = Number.isFinite(Number(data && data.stats && data.stats.dex ? data.stats.dex.val : null))
+        ? Number(data.stats.dex.val)
+        : 10;
+    const initiative = getMod(dexScore) + initBonus.total;
+
+    return {
+        name: sanitizeString(data && data.meta ? data.meta.name : '', 'New Agent', 160),
+        sheetKey: getCurrentSheetIdentity(),
+        ac: Number.isFinite(acValue) ? Math.max(0, Math.min(999, acValue)) : 10,
+        init: Math.max(-99, Math.min(999, Math.round(initiative))),
+        hp: maxHp > 0 ? `${maxHp} / ${currHp}` : String(currHp),
+        pp: Math.max(0, Math.min(999, Math.round(10 + getComputedSkillBonus('perception')))),
+        dc: Math.max(0, Math.min(999, Math.round(getSpellSaveDC())))
+    };
+}
+
+function publishSheetSummaryToRoster() {
+    const store = window.RTF_STORE;
+    if (!store || typeof store.updatePlayer !== 'function') {
+        setRosterLinkStatus('Roster store is not available yet.', 'warn');
+        return;
+    }
+    const linked = linkSelectedRosterPlayer(true);
+    if (!linked) return;
+    const summary = buildSheetRosterSummary();
+    const updated = store.updatePlayer(linked.id, summary);
+    renderRosterLinkControls();
+    setRosterLinkStatus(`Published sheet stats to <strong>${escapeHtml(updated && updated.name ? updated.name : linked.name || 'selected roster entry')}</strong>.`, 'ok');
+}
+
+function bindRosterLinkStoreEvents() {
+    if (rosterLinkStoreEventsBound) return;
+    rosterLinkStoreEventsBound = true;
+    window.addEventListener('rtf-store-updated', renderRosterLinkControls);
+    window.addEventListener('rtf-sync-status', renderRosterLinkControls);
 }
 
 function rollInitiative() {
@@ -8017,3 +8195,7 @@ window.runQuickAction = runQuickAction;
 window.runQuickActionSearchResult = runQuickActionSearchResult;
 window.pinQuickActionSearchResult = pinQuickActionSearchResult;
 window.removeQuickAction = removeQuickAction;
+window.renderRosterLinkControls = renderRosterLinkControls;
+window.updateRosterLinkStatus = updateRosterLinkStatus;
+window.linkSelectedRosterPlayer = linkSelectedRosterPlayer;
+window.publishSheetSummaryToRoster = publishSheetSummaryToRoster;

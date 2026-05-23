@@ -1312,6 +1312,35 @@ textarea:focus {
     outline: none;
 }
 
+.roster-link-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roster-link-status {
+    min-height: 34px;
+    border: 1px solid #333;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #aeb8c7;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    padding: 9px 10px;
+}
+
+.roster-link-status strong {
+    color: var(--accent);
+}
+
+.roster-link-status[data-state="warn"] {
+    border-color: rgba(255, 193, 7, 0.35);
+    color: #e6c66d;
+}
+
+.roster-link-status[data-state="ok"] {
+    border-color: color-mix(in srgb, var(--accent) 45%, #333);
+    color: #d7e3f3;
+}
+
 #charSelect {
     flex: 1;
     font-weight: bold;

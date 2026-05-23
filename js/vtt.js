@@ -330,6 +330,12 @@
         if (clean === 'dis' || clean === 'disadvantage') return 'dis';
         return 'norm';
     };
+    const getRollModeLabel = (mode = localRollMode) => {
+        const clean = normalizeRollMode(mode);
+        if (clean === 'adv') return 'Adv';
+        if (clean === 'dis') return 'Dis';
+        return 'Normal';
+    };
     const hasValue = (value) => value !== null && value !== undefined && value !== '';
     const clampMapScale = (value, fallback = 1) => {
         const parsed = Number(value);
@@ -481,6 +487,7 @@
             formula: String(source.formula || '').slice(0, 160),
             label: String(source.label || getProximitySkillLabel(trigger && trigger.skill)).slice(0, 120),
             success: rawSuccess === true ? true : (rawSuccess === false ? false : null),
+            rollMode: normalizeRollMode(source.rollMode),
             persisted: source.persisted !== undefined ? !!source.persisted : true
         };
     };
@@ -5701,6 +5708,27 @@
             isFail: result.isFail
         };
     };
+    const rollRawD20WithMode = (mode = localRollMode) => {
+        const cleanMode = normalizeRollMode(mode);
+        if (cleanMode === 'adv' || cleanMode === 'dis') {
+            const first = randomIntInclusive(1, 20);
+            const second = randomIntInclusive(1, 20);
+            const total = cleanMode === 'adv' ? Math.max(first, second) : Math.min(first, second);
+            return {
+                total,
+                formula: `[${first}, ${second}] (${cleanMode.toUpperCase()})`,
+                isCrit: total === 20,
+                isFail: total === 1
+            };
+        }
+        const roll = randomIntInclusive(1, 20);
+        return {
+            total: roll,
+            formula: `[${roll}]`,
+            isCrit: roll === 20,
+            isFail: roll === 1
+        };
+    };
     const rollSheetDie = (character, sides, bonus, label, options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
         if (Number(sides) === 20) return rollSheetD20(character, bonus, label, opts);
@@ -6282,6 +6310,8 @@
         const skillLabel = getProximitySkillLabel(trigger.skill);
         const dcLabel = isSkillRoll && trigger.dc !== null && trigger.dcVisible ? `DC ${trigger.dc}` : '';
         const narratorLabel = `Narrator${dcLabel ? ` - ${dcLabel}` : ''}`;
+        const rollMode = normalizeRollMode(localRollMode);
+        const rollModeLabel = getRollModeLabel(rollMode);
         const result = prompt.result || null;
         const resultText = result
             ? `${result.total} - ${result.formula || skillLabel}`
@@ -6308,7 +6338,14 @@
                     </div>
                 ` : ''}
                 <div class="vtt-proximity-prompt-actions">
-                    ${isSkillRoll && !result ? `<button class="vtt-chip-btn strong" type="button" data-action="resolve-proximity-roll">Roll ${escapeHtml(skillLabel)}</button>` : ''}
+                    ${isSkillRoll && !result ? `
+                        <div class="vtt-roll-mode-toggle vtt-proximity-roll-mode-toggle" role="group" aria-label="Roll mode">
+                            ${['adv', 'norm', 'dis'].map((mode) => `
+                                <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="${escapeHtml(mode)}" aria-pressed="${mode === rollMode ? 'true' : 'false'}">${escapeHtml(getRollModeLabel(mode))}</button>
+                            `).join('')}
+                        </div>
+                        <button class="vtt-chip-btn strong" type="button" data-action="resolve-proximity-roll">Roll ${escapeHtml(skillLabel)}${rollMode === 'norm' ? '' : ` (${escapeHtml(rollModeLabel)})`}</button>
+                    ` : ''}
                     <button class="vtt-chip-btn" type="button" data-action="dismiss-proximity-prompt">${result || !isSkillRoll ? 'Done' : 'Skip'}</button>
                 </div>
             </div>
@@ -6329,15 +6366,16 @@
         activeProximityPrompt = null;
         renderProximityPrompt();
     };
-    const rollProximitySkillCheck = (token, trigger) => {
+    const rollProximitySkillCheck = (token, trigger, rollMode = localRollMode) => {
         const normalized = normalizeProximityTrigger(trigger);
+        const cleanRollMode = normalizeRollMode(rollMode);
         const skill = normalizeProximityTriggerSkill(normalized.skill);
         const skillLabel = getProximitySkillLabel(skill);
         const rosterPlayer = getRosterPlayerForRecord(token);
         const bundle = getActiveSheetBundle(rosterPlayer && rosterPlayer.sheetKey);
         const character = bundle && bundle.character ? bundle.character : null;
         if (!character) {
-            const roll = gmCoreRoll(1, 20);
+            const roll = rollRawD20WithMode(cleanRollMode);
             return {
                 ok: true,
                 character: null,
@@ -6345,13 +6383,14 @@
                 total: roll.total,
                 formula: roll.formula,
                 type: 'check',
-                detail: ''
+                detail: '',
+                rollMode: cleanRollMode
             };
         }
         const stat = character.skillOverrides && character.skillOverrides[skill] ? character.skillOverrides[skill] : sheetSkillsMap[skill];
         const profLevel = character.skills && Number.isFinite(Number(character.skills[skill])) ? Number(character.skills[skill]) : 0;
         const bonus = getSheetMod(character, stat) + (profLevel * getSheetPB(character)) + getSheetSkillMiscBonus(character, skill);
-        return rollSheetD20(character, bonus, `${skillLabel} (${String(stat || '').toUpperCase()})`, { type: 'check' });
+        return rollSheetD20(character, bonus, `${skillLabel} (${String(stat || '').toUpperCase()})`, { type: 'check', rollMode: cleanRollMode });
     };
     const applyProximityResolutionEffects = (prompt, trigger, result) => {
         const normalized = normalizeProximityTrigger(trigger);
@@ -6383,7 +6422,8 @@
         const trigger = normalizeProximityTrigger(activeProximityPrompt.trigger);
         if (trigger.kind !== 'skillRoll') return false;
         const token = getTokenById(activeProximityPrompt.tokenId);
-        const result = rollProximitySkillCheck(token, trigger);
+        const rollMode = normalizeRollMode(localRollMode);
+        const result = rollProximitySkillCheck(token, trigger, rollMode);
         const hasDc = trigger.dc !== null && trigger.dc !== undefined;
         activeProximityPrompt = {
             ...activeProximityPrompt,
@@ -6392,7 +6432,8 @@
                 total: result && result.ok ? result.total : 'VTT',
                 formula: result && result.ok ? result.formula : 'No roll available',
                 label: result && result.label ? result.label : getProximitySkillLabel(trigger.skill),
-                success: result && result.ok && hasDc ? result.total >= trigger.dc : null
+                success: result && result.ok && hasDc ? result.total >= trigger.dc : null,
+                rollMode
             }
         };
         persistProximityPromptResult(activeProximityPrompt, activeProximityPrompt.result, trigger);
@@ -8595,6 +8636,7 @@
         if (action === 'set-roll-mode') {
             localRollMode = normalizeRollMode(actionEl.dataset.rollMode);
             renderPlayerRollMenu();
+            renderProximityPrompt();
             return;
         }
         if (action === 'player-roll-from-sheet') {
