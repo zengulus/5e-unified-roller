@@ -2862,6 +2862,56 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
     font-size: 0.82rem;
 }
 
+.vtt-roster-self-card {
+    width: min(34rem, calc(100vw - 2rem));
+}
+
+.vtt-roster-self-list {
+    display: grid;
+    gap: 0.55rem;
+    max-height: min(45vh, 24rem);
+    overflow: auto;
+    padding-right: 0.15rem;
+}
+
+.vtt-roster-self-option {
+    display: grid;
+    gap: 0.18rem;
+    width: 100%;
+    min-height: 4rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.7rem;
+    background: rgba(255, 255, 255, 0.045);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.vtt-roster-self-option:hover,
+.vtt-roster-self-option:focus-visible {
+    border-color: rgba(122, 162, 247, 0.62);
+    background: rgba(122, 162, 247, 0.14);
+    outline: none;
+}
+
+.vtt-roster-self-option[aria-pressed="true"] {
+    border-color: rgba(95, 211, 141, 0.74);
+    background: rgba(95, 211, 141, 0.14);
+}
+
+.vtt-roster-self-name {
+    font-size: 0.95rem;
+    font-weight: 800;
+}
+
+.vtt-roster-self-meta,
+.vtt-roster-self-status {
+    color: rgba(235, 240, 255, 0.74);
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
 body[data-vtt-role="player"] [data-dm-only="1"] {
     display: none;
 }

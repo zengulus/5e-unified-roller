@@ -212,6 +212,9 @@
     let viewMenuOpen = false;
     let toolsMenuOpen = false;
     let dmUnlockReturnFocusEl = null;
+    let rosterSelfModalReturnFocusEl = null;
+    let rosterSelfModalSelectedId = '';
+    let rosterSelfModalError = '';
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
     let lastStageToolPointerDownState = null;
@@ -306,6 +309,11 @@
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
     const topbarTabEl = document.getElementById('vtt-topbar-tab');
     const sidebarEl = document.getElementById('vtt-settings-panel');
+    const rosterSelfModalEl = document.getElementById('vtt-roster-self-modal');
+    const rosterSelfDetailEl = document.getElementById('vtt-roster-self-detail');
+    const rosterSelfListEl = document.getElementById('vtt-roster-self-list');
+    const rosterSelfErrorEl = document.getElementById('vtt-roster-self-error');
+    const rosterSelfConfirmEl = document.getElementById('vtt-roster-self-confirm');
     const dmUnlockModalEl = document.getElementById('vtt-dm-unlock-modal');
     const dmUnlockFormEl = document.getElementById('vtt-dm-unlock-form');
     const dmUnlockInputEl = document.getElementById('vtt-dm-unlock-input');
@@ -4497,7 +4505,7 @@
 
     const isDMUnlockModalOpen = () => !!(dmUnlockModalEl && !dmUnlockModalEl.hidden);
 
-    const closeDMUnlockModal = ({ restoreFocus = true } = {}) => {
+    const closeDMUnlockModal = ({ restoreFocus = true, refreshRosterSelf = true } = {}) => {
         if (!dmUnlockModalEl) return false;
         if (dmUnlockInputEl) dmUnlockInputEl.value = '';
         if (dmUnlockErrorEl) {
@@ -4510,6 +4518,9 @@
             dmUnlockReturnFocusEl.focus();
         }
         dmUnlockReturnFocusEl = null;
+        if (refreshRosterSelf && localRole !== 'dm') {
+            window.requestAnimationFrame(renderRosterSelfModal);
+        }
         return true;
     };
 
@@ -4548,7 +4559,7 @@
             dmUnlockInputEl.select();
             return false;
         }
-        closeDMUnlockModal({ restoreFocus: false });
+        closeDMUnlockModal({ restoreFocus: false, refreshRosterSelf: false });
         setRolePreference('dm');
         return true;
     };
@@ -5715,6 +5726,197 @@
         if (!cleanSheetKey) return null;
         const matches = getPlayers().filter((player) => String(player && player.sheetKey || '').trim() === cleanSheetKey);
         return matches.length === 1 ? matches[0] : null;
+    };
+    const getLocalSheetIdentity = () => {
+        const bundle = getActiveSheetBundle();
+        const character = bundle && bundle.character && typeof bundle.character === 'object' ? bundle.character : null;
+        const meta = character && character.meta && typeof character.meta === 'object' ? character.meta : {};
+        const sheetKey = String(meta.sheetKey || '').trim();
+        const characterName = String(meta.name || meta.player || '').trim() || 'your character';
+        return { bundle, character, sheetKey, characterName };
+    };
+
+    const getRosterSelfPromptContext = () => {
+        if (isDM()) return { shouldPrompt: false };
+        const players = getPlayers().filter((player) => player && typeof player === 'object' && String(player.id || '').trim());
+        if (!players.length) return { shouldPrompt: false };
+        const identity = getLocalSheetIdentity();
+        if (!identity.sheetKey) return { shouldPrompt: false };
+        const linked = findRosterPlayerBySheetKey(identity.sheetKey);
+        if (linked) return { shouldPrompt: false, players, identity, linked };
+        return { shouldPrompt: true, players, identity };
+    };
+
+    const getRosterSelfSuggestedPlayer = (players, identity) => {
+        const cleanSheetKey = String(identity && identity.sheetKey || '').trim();
+        const sheetMatches = players.filter((player) => String(player && player.sheetKey || '').trim() === cleanSheetKey);
+        if (sheetMatches.length) return sheetMatches[0];
+
+        const names = new Set([
+            identity && identity.character && identity.character.meta ? identity.character.meta.name : '',
+            identity && identity.character && identity.character.meta ? identity.character.meta.player : ''
+        ].map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean));
+        if (names.size) {
+            const nameMatches = players.filter((player) => names.has(String(player && player.name || '').trim().toLowerCase()));
+            if (nameMatches.length === 1) return nameMatches[0];
+        }
+
+        return players.find((player) => !String(player && player.sheetKey || '').trim()) || players[0] || null;
+    };
+
+    const closeRosterSelfModal = ({ restoreFocus = false } = {}) => {
+        if (!rosterSelfModalEl) return false;
+        const wasOpen = !rosterSelfModalEl.hidden;
+        rosterSelfModalEl.hidden = true;
+        rosterSelfModalError = '';
+        if (rosterSelfErrorEl) {
+            rosterSelfErrorEl.hidden = true;
+            rosterSelfErrorEl.textContent = '';
+        }
+        if (restoreFocus && rosterSelfModalReturnFocusEl && typeof rosterSelfModalReturnFocusEl.focus === 'function') {
+            rosterSelfModalReturnFocusEl.focus();
+        }
+        rosterSelfModalReturnFocusEl = null;
+        return wasOpen;
+    };
+
+    const isRosterSelfModalOpen = () => !!(rosterSelfModalEl && !rosterSelfModalEl.hidden);
+
+    const renderRosterSelfModal = () => {
+        if (!rosterSelfModalEl) return;
+        const context = getRosterSelfPromptContext();
+        if (!context.shouldPrompt) {
+            closeRosterSelfModal();
+            rosterSelfModalSelectedId = '';
+            return;
+        }
+
+        const players = context.players || [];
+        const identity = context.identity || getLocalSheetIdentity();
+        const selectedStillValid = players.some((player) => String(player && player.id || '').trim() === rosterSelfModalSelectedId);
+        if (!selectedStillValid) {
+            const suggested = getRosterSelfSuggestedPlayer(players, identity);
+            rosterSelfModalSelectedId = String(suggested && suggested.id || players[0] && players[0].id || '').trim();
+        }
+
+        const wasHidden = rosterSelfModalEl.hidden;
+        if (wasHidden) {
+            closeNPCSearch();
+            closeViewMenu();
+            closeToolsMenu();
+            closeQuickSpawnMenu();
+            closeTokenInspectorPopover();
+            closeInitiativeDetail();
+            closeSheetActionPopover();
+            closeNPCRollPopover();
+            clearSpawnDrag();
+            clearTemplatePlacementState();
+            rosterSelfModalReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        }
+
+        if (rosterSelfDetailEl) {
+            rosterSelfDetailEl.textContent = `Link ${identity.characterName} to your player roster entry so the VTT can resolve your token and sheet rolls.`;
+        }
+        if (rosterSelfListEl) {
+            rosterSelfListEl.innerHTML = players.map((player) => {
+                const playerId = String(player && player.id || '').trim();
+                const playerSheetKey = String(player && player.sheetKey || '').trim();
+                const selected = playerId && playerId === rosterSelfModalSelectedId;
+                const status = playerSheetKey === identity.sheetKey
+                    ? 'Already linked to this sheet'
+                    : (playerSheetKey ? 'Linked to another local sheet' : 'Available');
+                const meta = [
+                    player && player.hp ? `HP ${player.hp}` : '',
+                    player && player.ac !== undefined ? `AC ${player.ac}` : '',
+                    player && player.pp !== undefined ? `PP ${player.pp}` : ''
+                ].filter(Boolean).join(' · ');
+                return `
+                    <button class="vtt-roster-self-option" type="button" data-action="select-roster-self"
+                        data-id="${escapeHtml(playerId)}" aria-pressed="${selected ? 'true' : 'false'}">
+                        <span class="vtt-roster-self-name">${escapeHtml(player && player.name || 'Unnamed Player')}</span>
+                        ${meta ? `<span class="vtt-roster-self-meta">${escapeHtml(meta)}</span>` : ''}
+                        <span class="vtt-roster-self-status">${escapeHtml(status)}</span>
+                    </button>
+                `;
+            }).join('');
+        }
+        if (rosterSelfErrorEl) {
+            rosterSelfErrorEl.hidden = !rosterSelfModalError;
+            rosterSelfErrorEl.textContent = rosterSelfModalError;
+        }
+        if (rosterSelfConfirmEl) {
+            rosterSelfConfirmEl.disabled = !rosterSelfModalSelectedId;
+        }
+        rosterSelfModalEl.hidden = false;
+
+        if (wasHidden) {
+            window.requestAnimationFrame(() => {
+                const selectedButton = rosterSelfListEl ? rosterSelfListEl.querySelector('[aria-pressed="true"]') : null;
+                const focusTarget = selectedButton || rosterSelfConfirmEl;
+                if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+            });
+        }
+    };
+
+    const selectRosterSelfPlayer = (playerId) => {
+        const cleanPlayerId = String(playerId || '').trim();
+        const players = getPlayers();
+        if (!players.some((player) => String(player && player.id || '').trim() === cleanPlayerId)) return false;
+        rosterSelfModalSelectedId = cleanPlayerId;
+        rosterSelfModalError = '';
+        renderRosterSelfModal();
+        return true;
+    };
+
+    const linkRosterSelfSelection = () => {
+        const store = getStore();
+        const identity = getLocalSheetIdentity();
+        const playerId = String(rosterSelfModalSelectedId || '').trim();
+        if (!identity.sheetKey) {
+            rosterSelfModalError = 'Open or create a local character sheet first, then return to the VTT.';
+            renderRosterSelfModal();
+            return false;
+        }
+        if (!store || typeof store.updatePlayer !== 'function') {
+            rosterSelfModalError = 'The roster store is not available yet.';
+            renderRosterSelfModal();
+            return false;
+        }
+        const players = getPlayers();
+        const selected = players.find((player) => String(player && player.id || '').trim() === playerId);
+        if (!selected) {
+            rosterSelfModalError = 'Choose a player roster entry.';
+            renderRosterSelfModal();
+            return false;
+        }
+        const selectedSheetKey = String(selected && selected.sheetKey || '').trim();
+        if (selectedSheetKey && selectedSheetKey !== identity.sheetKey) {
+            const selectedName = String(selected && selected.name || 'that roster entry').trim() || 'that roster entry';
+            if (!window.confirm(`Replace the sheet already linked to ${selectedName}?`)) return false;
+        }
+
+        players.forEach((player) => {
+            const otherId = String(player && player.id || '').trim();
+            if (!otherId || otherId === playerId) return;
+            if (String(player && player.sheetKey || '').trim() === identity.sheetKey) {
+                store.updatePlayer(otherId, { sheetKey: '' });
+            }
+        });
+        const updated = store.updatePlayer(playerId, { sheetKey: identity.sheetKey });
+        if (!updated) {
+            rosterSelfModalError = 'Could not update that roster entry.';
+            renderRosterSelfModal();
+            return false;
+        }
+
+        rosterSelfModalSelectedId = '';
+        closeRosterSelfModal({ restoreFocus: true });
+        refreshPlayerImageCache();
+        if (vttState && syncRosterLinkedPlayerPresentation(vttState)) {
+            normalizeSelections();
+        }
+        render();
+        return true;
     };
     const rollSheetD20 = (character, bonus, label, options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
@@ -8318,6 +8520,7 @@
         renderSpawnGhost();
         evaluateProximityTriggers();
         renderProximityPrompt();
+        renderRosterSelfModal();
     };
 
     const updateSelectedEvidenceNote = (mutator) => {
@@ -8818,6 +9021,19 @@
         }
         if (action === 'close-dm-unlock') {
             closeDMUnlockModal();
+            return;
+        }
+        if (action === 'select-roster-self') {
+            selectRosterSelfPlayer(id);
+            return;
+        }
+        if (action === 'confirm-roster-self-link') {
+            linkRosterSelfSelection();
+            return;
+        }
+        if (action === 'roster-self-dm-mode') {
+            closeRosterSelfModal({ restoreFocus: false });
+            promptForDMMode();
             return;
         }
         if (action === 'close-initiative-detail') {
@@ -10224,6 +10440,10 @@
         if (event.key && event.key === getRolePrefsStorageKey()) {
             loadRolePreference();
             render();
+            return;
+        }
+        if (event.key === SHEET_STORAGE_KEY) {
+            render();
         }
     };
 
@@ -10985,6 +11205,10 @@
                 closeDMUnlockModal();
                 event.preventDefault();
             }
+            return;
+        }
+        if (isRosterSelfModalOpen()) {
+            if (event.key === 'Escape') event.preventDefault();
             return;
         }
         const target = event.target;
