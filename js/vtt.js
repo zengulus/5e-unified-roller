@@ -31,6 +31,9 @@
     const TEMPLATE_HOLD_PERSIST_MS = 1000;
     const TEMPLATE_SHARED_LIFETIME_MS = 5000;
     const PING_SHARED_LIFETIME_MS = 4200;
+    const TOKEN_DROP_PULSE_MS = 720;
+    const TOKEN_HP_FLASH_MS = 680;
+    const FOG_REVEAL_SHIMMER_MS = 900;
     const LIVE_STATUS_DROPOUT_GRACE_MS = 5000;
     const TOUCH_CONTEXT_HOLD_MS = 420;
     const TOUCH_CONTEXT_MOVE_PX = 14;
@@ -230,6 +233,10 @@
     let pendingTouchContextState = null;
     let templateExpiryTimer = 0;
     let pingExpiryTimer = 0;
+    let visualEffectTimer = 0;
+    let fogRevealBursts = [];
+    const tokenVisualEffects = new Map();
+    const tokenHpSnapshot = new Map();
     const tokenImageRetryKeys = new Map();
     const playerImageUrlsAtLoad = new Map();
 
@@ -1002,6 +1009,51 @@
         if (!scene || !Array.isArray(scene.pings)) return [];
         return scene.pings.filter((ping) => toNumber(ping && ping.expiresAt, 0) > now);
     };
+    const scheduleVisualEffectRender = (delayMs = 760) => {
+        if (visualEffectTimer) return;
+        visualEffectTimer = window.setTimeout(() => {
+            visualEffectTimer = 0;
+            renderStage();
+        }, Math.max(120, toNumber(delayMs, 760)));
+    };
+    const pruneVisualEffects = (now = Date.now()) => {
+        tokenVisualEffects.forEach((effect, tokenId) => {
+            if (!effect || toNumber(effect.expiresAt, 0) <= now) tokenVisualEffects.delete(tokenId);
+        });
+        fogRevealBursts = fogRevealBursts.filter((burst) => toNumber(burst && burst.expiresAt, 0) > now);
+        const nextTokenExpiry = Array.from(tokenVisualEffects.values())
+            .map((effect) => toNumber(effect && effect.expiresAt, 0))
+            .filter((expiresAt) => expiresAt > now);
+        const nextFogExpiry = fogRevealBursts
+            .map((burst) => toNumber(burst && burst.expiresAt, 0))
+            .filter((expiresAt) => expiresAt > now);
+        const nextExpiry = Math.min(...nextTokenExpiry, ...nextFogExpiry);
+        if (Number.isFinite(nextExpiry)) scheduleVisualEffectRender(nextExpiry - now + 40);
+    };
+    const markTokenVisualEffect = (tokenId, kind, durationMs = TOKEN_HP_FLASH_MS) => {
+        const cleanTokenId = String(tokenId || '').trim();
+        const cleanKind = String(kind || '').trim();
+        if (!cleanTokenId || !cleanKind) return;
+        tokenVisualEffects.set(cleanTokenId, {
+            kind: cleanKind,
+            expiresAt: Date.now() + Math.max(120, toNumber(durationMs, TOKEN_HP_FLASH_MS))
+        });
+        scheduleVisualEffectRender(durationMs + 40);
+    };
+    const getTokenVisualEffectKind = (tokenId, now = Date.now()) => {
+        const effect = tokenVisualEffects.get(String(tokenId || '').trim());
+        if (!effect) return '';
+        if (toNumber(effect.expiresAt, 0) <= now) {
+            tokenVisualEffects.delete(String(tokenId || '').trim());
+            return '';
+        }
+        return String(effect.kind || '').trim();
+    };
+    const getPingVariantOptions = (event = null) => {
+        if (event && event.altKey) return { label: 'Danger', color: '#ff6b6b', variant: 'danger' };
+        if (event && event.shiftKey) return { label: 'Regroup', color: '#5fd38d', variant: 'regroup' };
+        return { label: 'Ping', color: '#4f8dff', variant: 'attention' };
+    };
     const schedulePingExpiryRender = (scene) => {
         if (pingExpiryTimer) {
             window.clearTimeout(pingExpiryTimer);
@@ -1020,6 +1072,7 @@
     const queueSharedPing = (scene, worldPoint, options = {}) => {
         if (!scene || !worldPoint) return false;
         const now = Date.now();
+        const variant = String(options.variant || 'attention').trim().slice(0, 40) || 'attention';
         const label = String(options.label || 'Ping').trim().slice(0, 80) || 'Ping';
         const color = normalizeHexColor(options.color, '#4f8dff');
         const ping = {
@@ -1028,6 +1081,7 @@
             y: Math.round(toNumber(worldPoint.y, 0)),
             label,
             color,
+            variant,
             createdAt: now,
             expiresAt: now + PING_SHARED_LIFETIME_MS
         };
@@ -1572,6 +1626,32 @@
                 data-world-width="${escapeHtml(String(rect.w + overdraw * 2))}"
                 data-world-height="${escapeHtml(String(rect.h + overdraw * 2))}"></div>
         `;
+    };
+    const addFogRevealBurst = (scene, mask) => {
+        const rect = getFogEntryWorldRect(scene, mask);
+        if (!rect) return;
+        fogRevealBursts.push({
+            id: buildId('fogburst'),
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+            expiresAt: Date.now() + FOG_REVEAL_SHIMMER_MS
+        });
+        fogRevealBursts = fogRevealBursts.slice(-12);
+        scheduleVisualEffectRender(FOG_REVEAL_SHIMMER_MS + 40);
+    };
+    const buildFogRevealShimmerMarkup = (now = Date.now()) => {
+        if (!fogRevealBursts.length) return '';
+        return fogRevealBursts
+            .filter((burst) => toNumber(burst && burst.expiresAt, 0) > now)
+            .map((burst) => `
+                <div class="vtt-fog-reveal-shimmer"
+                    data-world-left="${escapeHtml(String(burst.x))}"
+                    data-world-top="${escapeHtml(String(burst.y))}"
+                    data-world-width="${escapeHtml(String(burst.w))}"
+                    data-world-height="${escapeHtml(String(burst.h))}"></div>
+            `).join('');
     };
     const getEvidenceNoteCategoryConfig = (category) => {
         const key = String(category || '').trim().toLowerCase();
@@ -4140,7 +4220,7 @@
         worldEl.style.width = `${scaleForZoom(worldSize.width)}px`;
         worldEl.style.height = `${scaleForZoom(worldSize.height)}px`;
 
-        fogLayerEl.querySelectorAll('.vtt-fog-mask').forEach((maskEl) => {
+        fogLayerEl.querySelectorAll('.vtt-fog-mask, .vtt-fog-reveal-shimmer').forEach((maskEl) => {
             if (!(maskEl instanceof HTMLElement)) return;
             const worldLeft = toNumber(maskEl.dataset.worldLeft, 0);
             const worldTop = toNumber(maskEl.dataset.worldTop, 0);
@@ -4148,6 +4228,7 @@
             maskEl.style.top = `${scaleForZoom(worldTop)}px`;
             maskEl.style.width = `${scaleForZoom(toNumber(maskEl.dataset.worldWidth, 0))}px`;
             maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
+            if (maskEl.classList.contains('vtt-fog-reveal-shimmer')) return;
             maskEl.style.setProperty('--vtt-fog-texture-x', `${-scaleForZoom(worldLeft)}px`);
             maskEl.style.setProperty('--vtt-fog-texture-y', `${-scaleForZoom(worldTop)}px`);
         });
@@ -6712,6 +6793,7 @@
         return candidates.sort((left, right) => left.distance - right.distance);
     };
     const evaluateProximityTriggers = () => {
+        if (dragState) return;
         if (initialVTTLoadPending || isDM()) {
             activeProximityPrompt = null;
             return;
@@ -6736,6 +6818,7 @@
     };
     const renderProximityPrompt = () => {
         if (!proximityPromptStackEl) return;
+        if (dragState) return;
         if (!activeProximityPrompt || isDM()) {
             proximityPromptStackEl.innerHTML = '';
             proximityPromptStackEl.hidden = true;
@@ -8185,8 +8268,9 @@
         const color = normalizeHexColor(ping.color, '#4f8dff');
         const rgb = getHexColorRgbString(color, '#4f8dff');
         const label = String(ping.label || 'Ping').trim().slice(0, 80) || 'Ping';
+        const variant = String(ping.variant || 'attention').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'attention';
         return `
-            <div class="vtt-overlay-item vtt-ping"
+            <div class="vtt-overlay-item vtt-ping is-${escapeHtml(variant)}"
                 data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - size / 2))}"
                 data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - size / 2))}"
                 data-world-width="${escapeHtml(String(size))}"
@@ -8205,6 +8289,9 @@
         if (selected) classes.push('is-selected');
         if (note.hidden) classes.push('is-hidden');
         if (isEvidenceNotePin(note)) classes.push('is-pin', 'is-icon-only');
+        if (activeProximityPrompt && activeProximityPrompt.sourceKind === 'note' && String(activeProximityPrompt.sourceId || '').trim() === String(note.id || '').trim()) {
+            classes.push('is-proximity-source');
+        }
         const category = normalizeEvidenceNoteCategory(note.category);
         const categoryLabel = getEvidenceNoteCategoryLabel(category);
         const displayTitle = getEvidenceNoteDisplayTitle(note);
@@ -8305,6 +8392,10 @@
         if (token && token.id === options.activeTurnTokenId) classes.push('is-active-turn');
         if (options.isHiddenToPlayers) classes.push('is-hidden');
         if (token && token.id === previewTokenId) classes.push('is-preview-open');
+        if (activeProximityPrompt && activeProximityPrompt.sourceKind === 'token' && token && String(activeProximityPrompt.sourceId || '').trim() === String(token.id || '').trim()) {
+            classes.push('is-proximity-source');
+        }
+        if (options.visualEffectKind) classes.push(`is-${options.visualEffectKind}`);
         if (stealthStatus === STEALTH_STATUS_DETECTED) classes.push('is-stealth-detected');
         if (stealthStatus === STEALTH_STATUS_UNSEEN) classes.push('is-stealth-unseen');
         return classes.join(' ');
@@ -8361,6 +8452,17 @@
             const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
             const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
             const moodText = getTokenMoodText(token);
+            const currentHp = Number(token && token.hpCurrent);
+            const previousHp = tokenHpSnapshot.get(tokenId);
+            if (Number.isFinite(currentHp)) {
+                if (Number.isFinite(previousHp) && currentHp !== previousHp) {
+                    markTokenVisualEffect(tokenId, currentHp < previousHp ? 'damage-flash' : 'heal-flash', TOKEN_HP_FLASH_MS);
+                }
+                tokenHpSnapshot.set(tokenId, currentHp);
+            } else {
+                tokenHpSnapshot.delete(tokenId);
+            }
+            const visualEffectKind = getTokenVisualEffectKind(tokenId, renderTime);
             const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(tokenId) : tokenId.replace(/"/g, '\\"');
             let tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
             if (!tokenEl) {
@@ -8374,7 +8476,8 @@
                 focusedEntryTokenId,
                 activeTurnTokenId,
                 isHiddenToPlayers,
-                stealthStatus
+                stealthStatus,
+                visualEffectKind
             });
             tokenEl.dataset.tokenId = tokenId;
             tokenEl.dataset.id = tokenId;
@@ -8393,6 +8496,8 @@
 
     const renderStage = () => {
         if (initialVTTLoadPending) return;
+        const renderTime = Date.now();
+        pruneVisualEffects(renderTime);
         const scene = getActiveScene();
         if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !noteLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
 
@@ -8411,8 +8516,9 @@
         const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
             ? buildFogMaskMarkup(scene, fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
             : '';
+        const fogRevealMarkup = buildFogRevealShimmerMarkup(renderTime);
 
-        fogLayerEl.innerHTML = `${fogMarkup}${fogEdgeMarkup}${fogPreviewMarkup}`;
+        fogLayerEl.innerHTML = `${fogMarkup}${fogEdgeMarkup}${fogPreviewMarkup}${fogRevealMarkup}`;
 
         const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
         const evidenceMarkup = visibleEvidenceNotes
@@ -8430,7 +8536,6 @@
         const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
         const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
         const stealthStatusMap = buildStealthStatusMap(scene, vttState);
-        const renderTime = Date.now();
 
         renderTemplateLayer(scene, visibleTokens, worldSize, renderTime);
 
@@ -9236,8 +9341,9 @@
         if (action === 'context-ping') {
             const scene = getActiveScene();
             const worldPoint = getStageContextWorldPoint();
+            const pingOptions = getPingVariantOptions(lastContextPointerState);
             closeStageContextMenu();
-            if (scene && worldPoint) queueSharedPing(scene, worldPoint);
+            if (scene && worldPoint) queueSharedPing(scene, worldPoint, pingOptions);
             render();
             return;
         }
@@ -10486,7 +10592,7 @@
             lastStageToolPointerDownState = null;
         }
         if (localToolState.mode === TOOL_MODE_PING) {
-            queueSharedPing(scene, worldPoint);
+            queueSharedPing(scene, worldPoint, getPingVariantOptions(event));
             event.preventDefault();
             return;
         }
@@ -10921,6 +11027,7 @@
                     pendingFog.mask && pendingFog.mask.id
                 );
                 if (!mask) return;
+                if (pendingFog.mode === 'remove') addFogRevealBurst(scene, mask);
                 scene.fog = applyFogMaskMutation(scene, mask, pendingFog.mode === 'remove' ? 'remove' : 'add');
             });
             return;
@@ -11009,6 +11116,7 @@
         }
         let appliedRemoteSnapshot = false;
         if (dragState) {
+            markTokenVisualEffect(dragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
             syncDraggedState(true);
             lastDragSyncAt = 0;
             dragState = null;
@@ -11033,6 +11141,7 @@
             const tokenEl = targetEl.closest('.vtt-token');
             lastContextPointerState = {
                 altKey: !!(event.altKey || (typeof event.getModifierState === 'function' && event.getModifierState('Alt'))),
+                shiftKey: !!(event.shiftKey || (typeof event.getModifierState === 'function' && event.getModifierState('Shift'))),
                 clientX: Math.round(toNumber(event.clientX, 0)),
                 clientY: Math.round(toNumber(event.clientY, 0)),
                 tokenId: tokenEl ? String(tokenEl.getAttribute('data-token-id') || '').trim() : '',

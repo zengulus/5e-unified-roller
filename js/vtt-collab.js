@@ -572,9 +572,10 @@ const syncYPingRecord = (record, ping) => {
     setYScalar(record, 'y', source.y);
     setYScalar(record, 'label', source.label || '');
     setYScalar(record, 'color', source.color || '');
+    setYScalar(record, 'variant', source.variant || '');
     setYScalar(record, 'createdAt', source.createdAt);
     setYScalar(record, 'expiresAt', source.expiresAt);
-    removeExtraneousMapKeys(record, new Set(['id', 'x', 'y', 'label', 'color', 'createdAt', 'expiresAt']));
+    removeExtraneousMapKeys(record, new Set(['id', 'x', 'y', 'label', 'color', 'variant', 'createdAt', 'expiresAt']));
 };
 
 const serializeYPingRecord = (record, pingId) => ({
@@ -583,6 +584,7 @@ const serializeYPingRecord = (record, pingId) => ({
     y: record.get('y'),
     label: toTrimmedString(record.get('label'), '', 80),
     color: toTrimmedString(record.get('color'), '', 20),
+    variant: toTrimmedString(record.get('variant'), '', 40),
     createdAt: record.get('createdAt'),
     expiresAt: record.get('expiresAt')
 });
@@ -878,6 +880,7 @@ const patchYPingRecord = (record, basePing = {}, nextPing = {}) => {
     mutated = patchYScalar(record, 'y', basePing.y, nextPing.y) || mutated;
     mutated = patchYScalar(record, 'label', basePing.label, nextPing.label) || mutated;
     mutated = patchYScalar(record, 'color', basePing.color, nextPing.color) || mutated;
+    mutated = patchYScalar(record, 'variant', basePing.variant, nextPing.variant) || mutated;
     mutated = patchYScalar(record, 'createdAt', basePing.createdAt, nextPing.createdAt) || mutated;
     mutated = patchYScalar(record, 'expiresAt', basePing.expiresAt, nextPing.expiresAt) || mutated;
     return mutated;

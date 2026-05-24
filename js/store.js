@@ -983,6 +983,7 @@
             y: Math.round(toNumber(source.y, 0)),
             label: toTrimmedString(source.label, 'Ping', 80).trim() || 'Ping',
             color: sanitizeVTTColor(source.color, '#4f8dff'),
+            variant: toTrimmedString(source.variant, 'attention', 40).trim() || 'attention',
             createdAt: Math.max(0, Math.round(toNumber(source.createdAt, 0))),
             expiresAt: Math.max(0, Math.round(toNumber(source.expiresAt, 0)))
         };
