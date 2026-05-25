@@ -6454,11 +6454,28 @@
         const dy = Math.max(0, right.top - left.bottom, left.top - right.bottom);
         return Math.hypot(dx, dy);
     };
+    const getCellRectCenter = (rect) => {
+        if (!rect) return null;
+        return {
+            x: toNumber(rect.left, 0) + Math.max(1, toNumber(rect.width, 1)) / 2,
+            y: toNumber(rect.top, 0) + Math.max(1, toNumber(rect.height, 1)) / 2
+        };
+    };
+    const getCellRectCenterDistance = (left, right) => {
+        const leftCenter = getCellRectCenter(left);
+        const rightCenter = getCellRectCenter(right);
+        if (!leftCenter || !rightCenter) return Infinity;
+        return Math.hypot(rightCenter.x - leftCenter.x, rightCenter.y - leftCenter.y);
+    };
     const isWithinProximityRadius = (sourceRect, targetRect, radiusCells = 0) => {
         const radius = Math.max(0, Math.round(toNumber(radiusCells, 0)));
         return radius <= 0
             ? doCellRectsOverlap(sourceRect, targetRect)
             : getCellRectDistance(sourceRect, targetRect) <= radius;
+    };
+    const isWithinTokenProximityRadius = (sourceRect, targetRect, radiusCells = 0) => {
+        const radius = Math.max(0, Math.round(toNumber(radiusCells, 0)));
+        return getCellRectCenterDistance(sourceRect, targetRect) <= radius;
     };
     const isPlayerFacingToken = (token) => {
         const side = String(token && token.side || '').trim().toLowerCase();
@@ -6760,7 +6777,7 @@
                 .forEach((trigger) => {
                     getProximityTargetTokens(scene, trigger, sourceToken).forEach((token) => {
                         const tokenRect = getTokenCellRect(token);
-                        if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
+                        if (!isWithinTokenProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
                         const key = getProximityPromptSeenKey(scene, 'token', sourceToken.id, trigger, token);
                         if (suppressedProximityPromptKeys.has(key)) return;
                         const persistedResult = getPersistedProximityResult(sourceToken, seenMap, key, trigger);
@@ -6772,7 +6789,7 @@
                                 sourceRect,
                                 trigger,
                                 token,
-                                distance: getCellRectDistance(sourceRect, tokenRect),
+                                distance: getCellRectCenterDistance(sourceRect, tokenRect),
                                 result: persistedResult
                             }));
                             return;
@@ -6785,7 +6802,7 @@
                             sourceRect,
                             trigger,
                             token,
-                            distance: getCellRectDistance(sourceRect, tokenRect)
+                            distance: getCellRectCenterDistance(sourceRect, tokenRect)
                         }));
                     });
                 });
