@@ -236,6 +236,13 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     right: 1rem;
 }
 
+.vtt-sidebar-scroll,
+.vtt-initiative-scroll {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+}
+
 body[data-vtt-role="player"] .vtt-sidebar {
     display: none;
 }
@@ -2948,6 +2955,12 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
     color: #fff7e8;
     pointer-events: auto;
     backdrop-filter: blur(14px);
+    transform-origin: 50% calc(100% + 0.5rem);
+    animation: vtt-proximity-prompt-enter 0.24s ease-out both;
+}
+
+.vtt-proximity-prompt-stack[data-placement="below"] .vtt-proximity-prompt-card {
+    transform-origin: 50% -0.5rem;
 }
 
 .vtt-proximity-prompt-card::after {
@@ -2969,6 +2982,23 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
     border: 0;
     border-left: 1px solid rgba(229, 194, 122, 0.42);
     border-top: 1px solid rgba(229, 194, 122, 0.42);
+}
+
+@keyframes vtt-proximity-prompt-enter {
+    0% {
+        opacity: 0;
+        transform: translateY(0.45rem) scale(0.965);
+    }
+
+    70% {
+        opacity: 1;
+        transform: translateY(-0.05rem) scale(1.01);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 .vtt-proximity-prompt-top {
@@ -3382,9 +3412,6 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
 
     .vtt-sidebar {
         left: 0.5rem;
-        overflow-y: auto;
-        overflow-x: hidden;
-        pointer-events: auto;
     }
 
     .vtt-player-roll-rail {
@@ -3395,68 +3422,57 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
         right: 0.5rem;
     }
 
-    body[data-initiative-collapsed="0"] .vtt-initiative-panel,
-    body[data-initiative-preview="1"] .vtt-initiative-panel {
-        overflow-y: auto;
-        overflow-x: hidden;
-        overscroll-behavior: contain;
-        scrollbar-gutter: stable;
-        pointer-events: auto;
-    }
-
     .vtt-sidebar > .vtt-side-rail-tab,
     .vtt-player-roll-rail > .vtt-side-rail-tab,
     .vtt-initiative-panel > .vtt-side-rail-tab,
-    .vtt-sidebar > .vtt-panel,
+    .vtt-sidebar > .vtt-sidebar-scroll,
     .vtt-player-roll-rail > .vtt-panel,
-    .vtt-initiative-panel > .vtt-panel {
+    .vtt-initiative-panel > .vtt-initiative-scroll {
         pointer-events: auto;
     }
 
-    .vtt-sidebar > .vtt-panel,
+    .vtt-sidebar > .vtt-sidebar-scroll,
     .vtt-player-roll-rail > .vtt-panel,
-    .vtt-initiative-panel > .vtt-panel {
+    .vtt-initiative-panel > .vtt-initiative-scroll {
         box-sizing: border-box;
         width: var(--vtt-rail-width);
         transition: transform 160ms ease, max-height 160ms ease;
     }
 
-    body[data-settings-collapsed="1"] .vtt-sidebar > .vtt-panel,
+    body[data-settings-collapsed="1"] .vtt-sidebar > .vtt-sidebar-scroll,
     body[data-player-roll-rail-collapsed="1"] .vtt-player-roll-rail > .vtt-panel {
         transform: translateX(calc(-100% - 1rem));
     }
 
-    body[data-initiative-collapsed="1"] .vtt-initiative-panel > .vtt-panel {
+    body[data-initiative-collapsed="1"] .vtt-initiative-panel > .vtt-initiative-scroll {
         transform: translateX(calc(100% + 1rem));
     }
 
-    body[data-settings-collapsed="0"] .vtt-sidebar > .vtt-panel,
+    body[data-settings-collapsed="0"] .vtt-sidebar > .vtt-sidebar-scroll,
     body[data-player-roll-rail-collapsed="0"] .vtt-player-roll-rail > .vtt-panel,
-    body[data-initiative-collapsed="0"] .vtt-initiative-panel > .vtt-panel,
-    body[data-settings-preview="1"] .vtt-sidebar > .vtt-panel,
+    body[data-initiative-collapsed="0"] .vtt-initiative-panel > .vtt-initiative-scroll,
+    body[data-settings-preview="1"] .vtt-sidebar > .vtt-sidebar-scroll,
     body[data-player-roll-preview="1"] .vtt-player-roll-rail > .vtt-panel,
-    body[data-initiative-preview="1"] .vtt-initiative-panel > .vtt-panel {
+    body[data-initiative-preview="1"] .vtt-initiative-panel > .vtt-initiative-scroll {
         transform: translateX(0);
     }
 
-    .vtt-sidebar > .vtt-panel,
+    .vtt-sidebar > .vtt-sidebar-scroll,
     .vtt-player-roll-rail > .vtt-panel,
-    .vtt-initiative-panel > .vtt-panel {
+    .vtt-initiative-panel > .vtt-initiative-scroll {
         max-height: calc(var(--vtt-shell-height) - var(--vtt-overlay-top) - 1rem);
-        overflow: auto;
-    }
-
-    .vtt-sidebar > .vtt-panel {
-        max-height: none;
-        overflow: visible;
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
     }
 
     .vtt-panel {
         padding: 1.08rem;
     }
 
-    body[data-vtt-role="dm"] .vtt-sidebar > .vtt-panel,
-    body[data-vtt-role="dm"] .vtt-initiative-panel > .vtt-panel {
+    body[data-vtt-role="dm"] .vtt-sidebar-scroll > .vtt-panel,
+    body[data-vtt-role="dm"] .vtt-initiative-scroll > .vtt-panel {
         padding: 0.82rem;
         border-radius: 0.9rem;
     }

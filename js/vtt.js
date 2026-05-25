@@ -8510,6 +8510,8 @@
             ? collectFogCellSet(scene, scene.fog)
             : new Set();
 
+        evaluateProximityTriggers();
+
         const fogMarkup = '';
         const fogEdgeMarkup = buildFogEdgeMarkup(scene, fogCellSet);
 
@@ -8551,7 +8553,6 @@
         } else {
             applyWorldTransform(scene);
         }
-        evaluateProximityTriggers();
         renderProximityPrompt();
     };
 
