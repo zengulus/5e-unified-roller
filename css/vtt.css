@@ -243,15 +243,18 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     min-width: 0;
 }
 
-body[data-vtt-role="player"] .vtt-sidebar {
+body[data-vtt-role="player"] .vtt-sidebar,
+body[data-vtt-role="spectator"] .vtt-sidebar {
     display: none;
 }
 
-body[data-vtt-role="player"] #vtt-settings-toggle {
+body[data-vtt-role="player"] #vtt-settings-toggle,
+body[data-vtt-role="spectator"] #vtt-settings-toggle {
     display: none;
 }
 
-body[data-vtt-role="player"] [data-vtt-menu-dm-only="1"] {
+body[data-vtt-role="player"] [data-vtt-menu-dm-only="1"],
+body[data-vtt-role="spectator"] [data-vtt-menu-dm-only="1"] {
     display: none;
 }
 
@@ -2934,8 +2937,7 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     transform: translate(-50%, 0.9rem);
 }
 
-.vtt-proximity-prompt-stack[hidden],
-body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
+.vtt-proximity-prompt-stack[hidden] {
     display: none;
 }
 
@@ -3039,6 +3041,15 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
     font-style: italic;
 }
 
+.vtt-proximity-prompt-note {
+    padding: 0.5rem 0.6rem;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(251, 240, 218, 0.72);
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
 .vtt-proximity-prompt-result {
     display: flex;
     align-items: baseline;
@@ -3099,7 +3110,8 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
 }
 
 .vtt-proximity-prompt-body,
-.vtt-proximity-prompt-outcome {
+.vtt-proximity-prompt-outcome,
+.vtt-proximity-prompt-note {
     font-size: 0.76rem;
     line-height: 1.34;
 }
@@ -3235,11 +3247,13 @@ body[data-vtt-role="dm"] .vtt-proximity-prompt-stack {
     line-height: 1.35;
 }
 
-body[data-vtt-role="player"] [data-dm-only="1"] {
+body[data-vtt-role="player"] [data-dm-only="1"],
+body[data-vtt-role="spectator"] [data-dm-only="1"] {
     display: none;
 }
 
-body[data-vtt-role="dm"] [data-player-only="1"] {
+body[data-vtt-role="dm"] [data-player-only="1"],
+body[data-vtt-role="spectator"] [data-player-only="1"] {
     display: none;
 }
 
@@ -3616,7 +3630,7 @@ body[data-vtt-role="dm"] [data-player-only="1"] {
         margin-top: 0.75rem;
     }
 
-    body[data-settings-collapsed="0"]:not([data-vtt-role="player"]) .vtt-stage-panel {
+    body[data-settings-collapsed="0"][data-vtt-role="dm"] .vtt-stage-panel {
         padding-top: min(46vh, 460px);
     }
 }

@@ -1642,6 +1642,7 @@ class VTTCollabSession {
             roomId: this.roomId,
             caseId: this.caseId,
             activeSceneId: snapshot && snapshot.activeSceneId ? String(snapshot.activeSceneId) : '',
+            canSaveRoom: this.canCheckpointRoom(),
             ts: Date.now()
         };
     }
@@ -2547,6 +2548,7 @@ class VTTCollabSession {
     }
 
     isCloudSaveLeader() {
+        if (this.canCheckpointRoom()) return true;
         if (!this.connected) return true;
         const ownId = toTrimmedString(this.instanceId, '', 120).trim();
         if (!ownId) return true;
@@ -2832,7 +2834,7 @@ class VTTCollabSession {
     handleVisibilityChange() {
         if (document.hidden) {
             if (this.isDirty && this.canCheckpointRoom()) {
-                this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+                this.scheduleCloudFlush({ forceCompatibilityMirror: true, forceNow: true });
             }
             return;
         } else if (!this.connected) {
@@ -2845,7 +2847,9 @@ class VTTCollabSession {
 
     handleBeforeUnload(event) {
         if (!this.isDirty || !this.canCheckpointRoom()) return;
-        this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+        this.flushSnapshotNow({ forceCompatibilityMirror: true }).catch((err) => {
+            console.warn('RTF_VTT_COLLAB: Before-unload flush failed', err);
+        });
         if (event && typeof event.preventDefault === 'function') {
             event.preventDefault();
             event.returnValue = 'You have unsaved live VTT room changes. Hard save the DM room before closing.';
@@ -2856,6 +2860,13 @@ class VTTCollabSession {
 
     async destroy() {
         if (this.destroyed) return;
+        if ((this.isDirty || this.pendingReadyFlush) && this.canCheckpointRoom()) {
+            try {
+                await this.flushSnapshotNow({ forceCompatibilityMirror: true });
+            } catch (err) {
+                console.warn('RTF_VTT_COLLAB: Final VTT room flush failed', err);
+            }
+        }
         this.destroyed = true;
         document.removeEventListener('visibilitychange', this.handleVisibilityChange);
         window.removeEventListener('beforeunload', this.handleBeforeUnload);

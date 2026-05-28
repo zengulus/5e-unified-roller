@@ -1279,7 +1279,11 @@
         if (!raw) return '';
         return sanitizeCaseId(raw, 'case_primary');
     };
-    const sanitizeVTTRolePreference = (value) => value === 'dm' ? 'dm' : 'player';
+    const sanitizeVTTRolePreference = (value) => {
+        if (value === 'dm') return 'dm';
+        if (value === 'spectator') return 'spectator';
+        return 'player';
+    };
     const sanitizeVTTLocalPrefsEntry = (source) => {
         const base = source && typeof source === 'object' ? source : {};
         return {
