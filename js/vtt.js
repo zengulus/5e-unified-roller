@@ -209,6 +209,7 @@
     let sheetActionQuery = '';
     let npcRollState = null;
     let playerRollMenuOpen = true;
+    let playerFocusLastResult = null;
     let activeProximityPrompt = null;
     let suppressedProximityPromptKeys = new Set();
     let localRollMode = 'norm';
@@ -4398,6 +4399,20 @@
         applyWorldTransform();
     };
 
+    const focusViewOnToken = (token, scene = getActiveScene()) => {
+        if (!stageEl || !token || !scene || !scene.grid) return false;
+        const rect = stageEl.getBoundingClientRect();
+        if (!rect.width || !rect.height) return false;
+        const cellPx = getSceneCellPx(scene);
+        const centerX = toNumber(scene.grid.offsetX, 0) + (toNumber(token.x, 0) + Math.max(1, toNumber(token.w, 1)) / 2) * cellPx;
+        const centerY = toNumber(scene.grid.offsetY, 0) + (toNumber(token.y, 0) + Math.max(1, toNumber(token.h, 1)) / 2) * cellPx;
+        localView.x = Math.round(rect.width / 2 - centerX * localView.zoom);
+        localView.y = Math.round(rect.height / 2 - centerY * localView.zoom);
+        applyRenderedWorldGeometry(scene);
+        applyWorldTransform(scene);
+        return true;
+    };
+
     const screenToWorld = (clientX, clientY) => {
         const rect = stageEl.getBoundingClientRect();
         return {
@@ -5787,7 +5802,9 @@
                 ...(sheetActionState || {}),
                 lastResult: directResult
             };
+            playerFocusLastResult = directResult;
             renderSheetActionPopover();
+            renderPlayerRollMenu();
             postSheetDiscordRoll(directResult.character, directResult.label, directResult.total, directResult.formula, directResult.type, directResult.detail).catch((err) => {
                 console.warn('VTT sheet roll Discord post failed', err);
             });
@@ -5805,7 +5822,9 @@
                 formula: message
             }
         };
+        playerFocusLastResult = sheetActionState.lastResult;
         renderSheetActionPopover();
+        renderPlayerRollMenu();
         return false;
     };
 
@@ -5879,6 +5898,35 @@
         const linked = findRosterPlayerBySheetKey(identity.sheetKey);
         if (linked) return { shouldPrompt: false, players, identity, linked };
         return { shouldPrompt: true, players, identity };
+    };
+
+    const getLocalPlayerFocusContext = () => {
+        const identity = getLocalSheetIdentity();
+        const linkedPlayer = identity.sheetKey ? findRosterPlayerBySheetKey(identity.sheetKey) : null;
+        const playerId = String(linkedPlayer && linkedPlayer.id || '').trim();
+        const scene = getActiveScene();
+        const token = playerId && scene && Array.isArray(scene.tokens)
+            ? scene.tokens.find((entry) =>
+                String(entry && entry.sourceType || '').trim() === 'player'
+                && String(entry && entry.sourceId || '').trim() === playerId
+                && !isTokenHiddenForRole(entry, scene, 'player')
+            ) || null
+            : null;
+        const entry = token ? findEntryForToken(token.id) : (playerId && vttState && vttState.initiative && Array.isArray(vttState.initiative.entries)
+            ? vttState.initiative.entries.find((candidate) =>
+                String(candidate && candidate.sourceType || '').trim() === 'player'
+                && String(candidate && candidate.sourceId || '').trim() === playerId
+            ) || null
+            : null);
+        const activeEntryId = String(vttState && vttState.initiative && vttState.initiative.activeEntryId || '').trim();
+        return {
+            identity,
+            linkedPlayer,
+            playerId,
+            token,
+            entry,
+            isTurn: !!(entry && String(entry.id || '').trim() === activeEntryId)
+        };
     };
 
     const getRosterSelfSuggestedPlayer = (players, identity) => {
@@ -6947,14 +6995,14 @@
                 ${canInteract ? `
                     <div class="vtt-proximity-prompt-actions">
                         ${isSkillRoll && !result ? `
+                        <button class="vtt-chip-btn strong" type="button" data-action="resolve-proximity-roll">Roll ${escapeHtml(skillLabel)}${rollMode === 'norm' ? '' : ` (${escapeHtml(rollModeLabel)})`}</button>
                         <div class="vtt-roll-mode-toggle vtt-proximity-roll-mode-toggle" role="group" aria-label="Roll mode">
                             ${['adv', 'norm', 'dis'].map((mode) => `
                                 <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="${escapeHtml(mode)}" aria-pressed="${mode === rollMode ? 'true' : 'false'}">${escapeHtml(getRollModeLabel(mode))}</button>
                             `).join('')}
                         </div>
-                        <button class="vtt-chip-btn strong" type="button" data-action="resolve-proximity-roll">Roll ${escapeHtml(skillLabel)}${rollMode === 'norm' ? '' : ` (${escapeHtml(rollModeLabel)})`}</button>
                         ` : ''}
-                        <button class="vtt-chip-btn" type="button" data-action="dismiss-proximity-prompt">${result || !isSkillRoll ? 'Done' : 'Skip'}</button>
+                        <button class="vtt-chip-btn" type="button" data-action="dismiss-proximity-prompt">${result || !isSkillRoll ? 'Done' : 'Pass'}</button>
                     </div>
                 ` : (observerNote ? `<div class="vtt-proximity-prompt-note">${escapeHtml(observerNote)}</div>` : '')}
             </div>
@@ -8079,13 +8127,23 @@
 
         initiativeListEl.innerHTML = visibleEntries.map((entry) => {
             const isHiddenToPlayers = isEntryHiddenForRole(entry, vttState, 'player');
+            const entryIdx = visibleEntries.findIndex((candidate) => candidate && candidate.id === entry.id);
+            const activeVisibleIdx = visibleEntries.findIndex((candidate) => candidate && candidate.id === initiative.activeEntryId);
+            const isActive = entry.id === initiative.activeEntryId;
+            const isNext = !isActive && activeVisibleIdx >= 0 && entryIdx === ((activeVisibleIdx + 1) % visibleEntries.length);
+            const rosterPlayer = getRosterPlayerForRecord(entry);
+            const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
+            const isMine = !!(isPlayer() && localContext && localContext.playerId && rosterPlayer && String(rosterPlayer.id || '').trim() === localContext.playerId);
             return `
-            <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${entry.id === initiative.activeEntryId ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
+            <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${isActive ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${isMine ? ' is-mine' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
                 <div class="vtt-entry-line">
                     <div class="vtt-entry-primary">
                         <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
                         <div class="vtt-entry-meta vtt-entry-meta-inline">
-                            <span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>
+                            ${isPlayer() && isActive ? '<span class="vtt-entry-tag strong">Now</span>' : ''}
+                            ${isPlayer() && isNext ? '<span class="vtt-entry-tag">Next</span>' : ''}
+                            ${isPlayer() && isMine ? '<span class="vtt-entry-tag">You</span>' : ''}
+                            ${isDM() ? `<span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>` : ''}
                             ${isHiddenToPlayers ? '<span class="vtt-entry-tag">Hidden</span>' : ''}
                             ${entry.reactionUsed ? '<span class="vtt-entry-tag">Reaction Used</span>' : ''}
                             ${entry.concentrating ? '<span class="vtt-entry-tag">Concentrating</span>' : ''}
@@ -8101,6 +8159,67 @@
         }).join('');
     };
 
+    const getFocusQuickRollKeys = () => {
+        const catalog = buildSheetActionCatalog();
+        const hasKey = (key) => catalog.some((item) => item && item.key === key);
+        const attack = catalog.find((item) => item && item.category === 'Attack');
+        const damage = catalog.find((item) => item && item.category === 'Damage');
+        return [
+            hasKey('core:initiative') ? 'core:initiative' : '',
+            hasKey('skill:perception') ? 'skill:perception' : '',
+            hasKey('skill:stealth') ? 'skill:stealth' : '',
+            attack ? attack.key : '',
+            damage ? damage.key : ''
+        ].filter(Boolean);
+    };
+
+    const renderPlayerFocusPanelMarkup = () => {
+        const context = getLocalPlayerFocusContext();
+        const linkedName = context.linkedPlayer && context.linkedPlayer.name
+            ? context.linkedPlayer.name
+            : (context.identity && context.identity.characterName ? context.identity.characterName : 'Unlinked');
+        const statusText = context.linkedPlayer
+            ? (context.token ? `${linkedName} ready${context.isTurn ? ' - your turn' : ''}` : `${linkedName} linked - no visible token`)
+            : 'Link a roster entry to enable sheet-aware focus';
+        const tokenActionLabel = context.token ? (context.isTurn ? 'Your Token' : 'Find Token') : 'No Token';
+        const rollMode = normalizeRollMode(localRollMode);
+        const quickRollItems = getFocusQuickRollKeys()
+            .map((key) => buildSheetActionCatalog().find((item) => item && item.key === key))
+            .filter(Boolean);
+        return `
+            <div class="vtt-player-focus-status${context.isTurn ? ' is-turn' : ''}">
+                <span class="vtt-player-focus-kicker">${escapeHtml(context.isTurn ? 'Your Turn' : 'Player Focus')}</span>
+                <strong>${escapeHtml(statusText)}</strong>
+            </div>
+            <div class="vtt-player-focus-actions">
+                <button class="vtt-chip-btn strong" type="button" data-action="focus-own-token"${context.token ? '' : ' disabled'}>${escapeHtml(tokenActionLabel)}</button>
+                <button class="vtt-chip-btn" type="button" data-action="set-tool-mode" data-tool-mode="ping">Ping</button>
+                <button class="vtt-chip-btn" type="button" data-action="toggle-ruler-mode" aria-pressed="${localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false'}">Measure</button>
+                <button class="vtt-chip-btn" type="button" data-action="player-custom-roll">Any Dice</button>
+            </div>
+            ${playerFocusLastResult ? `
+                <div class="vtt-player-focus-result${playerFocusLastResult.ok ? '' : ' is-muted'}">
+                    <strong>${escapeHtml(String(playerFocusLastResult.total))}</strong>
+                    <span>${escapeHtml(`${playerFocusLastResult.label || 'Roll'} - ${playerFocusLastResult.formula || ''}`)}</span>
+                </div>
+            ` : ''}
+            <div class="vtt-roll-mode-toggle" role="group" aria-label="Roll mode">
+                ${['adv', 'norm', 'dis'].map((mode) => `
+                    <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="${escapeHtml(mode)}" aria-pressed="${mode === rollMode ? 'true' : 'false'}">${escapeHtml(getRollModeLabel(mode))}</button>
+                `).join('')}
+            </div>
+            <div class="vtt-player-focus-quick-rolls">
+                ${quickRollItems.length ? quickRollItems.map((item) => `
+                    <button class="vtt-stage-context-item" type="button" data-action="quick-sheet-action" data-id="${escapeHtml(item.key)}">
+                        <span class="vtt-action-search-kind">${escapeHtml(item.category)}</span>
+                        <span class="vtt-action-search-label">${escapeHtml(item.label)}</span>
+                    </button>
+                `).join('') : '<div class="vtt-empty">Open or link a Character Sheet to show quick rolls.</div>'}
+            </div>
+            <button class="vtt-stage-context-item" type="button" data-action="player-roll-from-sheet">More Sheet Rolls</button>
+        `;
+    };
+
     const renderPlayerRollMenu = () => {
         if (playerRollToggleEl) {
             playerRollToggleEl.setAttribute('aria-expanded', playerRollMenuOpen ? 'true' : 'false');
@@ -8108,6 +8227,7 @@
         }
         if (playerRollMenuEl) {
             playerRollMenuEl.hidden = !isPlayer() || !playerRollMenuOpen;
+            if (isPlayer()) playerRollMenuEl.innerHTML = renderPlayerFocusPanelMarkup();
             playerRollMenuEl.querySelectorAll('[data-roll-mode]').forEach((button) => {
                 if (!(button instanceof HTMLElement)) return;
                 const mode = normalizeRollMode(button.dataset.rollMode);
@@ -9245,6 +9365,11 @@
             promptForDMMode();
             return;
         }
+        if (action === 'roster-self-spectator-mode') {
+            closeRosterSelfModal({ restoreFocus: false });
+            setRolePreference('spectator');
+            return;
+        }
         if (action === 'close-initiative-detail') {
             closeInitiativeDetail();
             return;
@@ -9313,6 +9438,26 @@
             if (!isPlayer()) return;
             const point = getPlayerRollAnchorPoint();
             openCustomRollPopover(null, point.x, point.y);
+            render();
+            return;
+        }
+        if (action === 'focus-own-token') {
+            if (!isPlayer()) return;
+            const context = getLocalPlayerFocusContext();
+            if (!context.token) return;
+            activateTokenSelection(context.token.id);
+            focusViewOnToken(context.token);
+            renderInitiativeList();
+            renderInitiativeDetail();
+            renderTokenInspector();
+            renderStage();
+            return;
+        }
+        if (action === 'quick-sheet-action') {
+            if (!isPlayer()) return;
+            const point = getPlayerRollAnchorPoint();
+            openSheetActionPopover(null, point.x, point.y);
+            runSheetActionByKey(id);
             render();
             return;
         }

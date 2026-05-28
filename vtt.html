@@ -172,24 +172,15 @@
             </div>
         </aside>
 
-        <aside class="vtt-player-roll-rail" id="vtt-player-roll-rail" data-player-only="1">
+        <aside class="vtt-player-roll-rail vtt-player-focus-rail" id="vtt-player-roll-rail" data-player-only="1">
             <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="toggle-player-roll-rail"
                 id="vtt-player-roll-rail-tab"
-                aria-controls="vtt-player-roll-panel" aria-label="Pin dice rolls rail">Dice Rolls 📌</button>
-            <section class="vtt-panel vtt-player-roll-panel" id="vtt-player-roll-panel">
+                aria-controls="vtt-player-roll-panel" aria-label="Pin player focus panel">Focus</button>
+            <section class="vtt-panel vtt-player-roll-panel vtt-player-focus-panel" id="vtt-player-roll-panel">
                 <div class="vtt-panel-head">
-                    <h2>Roll</h2>
+                    <h2>Focus</h2>
                 </div>
                 <div class="vtt-player-roll-menu" id="vtt-player-roll-menu">
-                    <div class="vtt-roll-mode-toggle" role="group" aria-label="Roll mode">
-                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="adv">Adv</button>
-                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="norm">Normal</button>
-                        <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="dis">Dis</button>
-                    </div>
-                    <div class="vtt-stage-context-list">
-                        <button class="vtt-stage-context-item strong" type="button" data-action="player-roll-from-sheet">Character Sheet</button>
-                        <button class="vtt-stage-context-item" type="button" data-action="player-custom-roll">Custom Roll</button>
-                    </div>
                 </div>
             </section>
         </aside>
@@ -286,6 +277,7 @@
                 <div class="vtt-modal-error" id="vtt-roster-self-error" hidden></div>
             </div>
             <div class="vtt-modal-actions">
+                <button class="vtt-inline-btn" type="button" data-action="roster-self-spectator-mode">Spectator</button>
                 <button class="vtt-inline-btn" type="button" data-action="roster-self-dm-mode">DM Mode</button>
                 <button class="vtt-inline-btn strong" type="button" data-action="confirm-roster-self-link"
                     id="vtt-roster-self-confirm">Link Roster Entry</button>
