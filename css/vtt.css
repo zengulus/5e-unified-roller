@@ -1608,18 +1608,35 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-ping-actions {
     position: absolute;
-    top: calc(100% + 2rem);
-    left: 50%;
+    top: 50%;
+    left: calc(100% + 0.55rem);
     z-index: 4;
-    display: flex;
-    gap: 0.35rem;
-    padding: 0.35rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.38rem;
+    width: max-content;
+    min-width: 10rem;
+    max-width: min(18rem, 42vw);
+    padding: 0.48rem;
     border: 1px solid rgba(var(--vtt-ping-rgb), 0.62);
     border-radius: 0.5rem;
     background: rgba(5, 9, 16, 0.94);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
-    transform: translateX(-50%);
+    transform: translateY(-50%);
     pointer-events: auto;
+}
+
+.vtt-ask-roll-chip-label {
+    min-width: 0;
+    color: rgba(247, 252, 255, 0.96);
+    font-size: 0.78rem;
+    font-weight: 900;
+    line-height: 1.15;
+}
+
+.vtt-ask-roll-chip-actions {
+    display: flex;
+    gap: 0.35rem;
 }
 
 .vtt-ping-actions .vtt-chip-btn {

@@ -1060,7 +1060,7 @@
         attention: { label: 'Attention', color: '#4f8dff', variant: 'attention', icon: '!' },
         danger: { label: 'Danger', color: '#ff5f5f', variant: 'danger', icon: '!' },
         question: { label: 'Question', color: '#ffd35f', variant: 'question', icon: '?' },
-        askRoll: { label: 'Ask To Roll', color: '#7ee787', variant: 'ask-roll', icon: '20', pickable: false }
+        askRoll: { label: 'Ask To Roll', color: '#7ee787', variant: 'ask-roll', icon: '?', pickable: false }
     };
     const normalizePingVariant = (value) => {
         const clean = String(value || '').trim().toLowerCase();
@@ -8698,9 +8698,12 @@
                 <div class="vtt-ping-core">${escapeHtml(icon)}</div>
                 <div class="vtt-ping-label">${escapeHtml(label)}</div>
                 ${isAskRoll ? `
-                    <div class="vtt-ping-actions" aria-label="Ask to roll ${escapeHtml(requestLabel || 'request')}">
-                        <button class="vtt-chip-btn strong" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}">Roll</button>
-                        <button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-ping" data-id="${escapeHtml(pingId)}">Cancel</button>
+                    <div class="vtt-ping-actions vtt-ask-roll-chip" aria-label="Ask to roll ${escapeHtml(requestLabel || 'request')}">
+                        <span class="vtt-ask-roll-chip-label">${escapeHtml(requestLabel || 'Roll?')}</span>
+                        <span class="vtt-ask-roll-chip-actions">
+                            <button class="vtt-chip-btn strong" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}">Roll</button>
+                            <button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-ping" data-id="${escapeHtml(pingId)}">Cancel</button>
+                        </span>
                     </div>
                 ` : ''}
             </div>
@@ -8779,7 +8782,9 @@
                 .map((token) => buildVisionConeHandleMarkup(token, scene, sceneSize, now))
                 .join('')
             : '';
-        visionLayerEl.innerHTML = handleMarkup;
+        const pingMarkup = getRenderableScenePings(scene, now).map((ping) => buildPingMarkup(ping, scene)).join('');
+        visionLayerEl.innerHTML = `${handleMarkup}${pingMarkup}`;
+        schedulePingExpiryRender(scene);
     };
 
     const renderTemplateLayer = (scene, visibleTokens, sceneSize = worldSize, now = Date.now()) => {
@@ -8799,11 +8804,9 @@
         const previewMarkup = templatePlacementState && templatePlacementState.sceneId === scene.id && templatePlacementState.template
             ? buildAreaTemplateMarkup(templatePlacementState.template, scene, { preview: true })
             : '';
-        const pingMarkup = getRenderableScenePings(scene, now).map((ping) => buildPingMarkup(ping, scene)).join('');
         const rulerMarkup = buildRulerMarkup(scene);
-        templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${pingMarkup}${rulerMarkup}`;
+        templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`;
         scheduleTemplateExpiryRender(scene);
-        schedulePingExpiryRender(scene);
     };
 
     const buildTokenClassName = (options = {}) => {
