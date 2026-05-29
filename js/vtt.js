@@ -226,6 +226,7 @@
     let remoteTokenTweens = new Map();
     let remoteTokenTweenFrame = 0;
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
+    let localPingVariant = 'attention';
     let templatePlacementState = null;
     let templateRotateState = null;
     let visionConeRotateState = null;
@@ -1053,10 +1054,19 @@
         }
         return String(effect.kind || '').trim();
     };
-    const getPingVariantOptions = (event = null) => {
-        if (event && event.altKey) return { label: 'Danger', color: '#ff6b6b', variant: 'danger' };
-        if (event && event.shiftKey) return { label: 'Regroup', color: '#5fd38d', variant: 'regroup' };
-        return { label: 'Ping', color: '#4f8dff', variant: 'attention' };
+    const PING_VARIANT_OPTIONS = {
+        attention: { label: 'Attention', color: '#4f8dff', variant: 'attention', icon: '!' },
+        danger: { label: 'Danger', color: '#ff5f5f', variant: 'danger', icon: '!' },
+        question: { label: 'Question', color: '#ffd35f', variant: 'question', icon: '?' }
+    };
+    const normalizePingVariant = (value) => {
+        const clean = String(value || '').trim().toLowerCase();
+        return PING_VARIANT_OPTIONS[clean] ? clean : 'attention';
+    };
+    const getPingVariantOptions = (event = null, variant = localPingVariant) => {
+        if (event && event.altKey) return PING_VARIANT_OPTIONS.danger;
+        if (event && event.shiftKey) return PING_VARIANT_OPTIONS.question;
+        return PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || PING_VARIANT_OPTIONS.attention;
     };
     const schedulePingExpiryRender = (scene) => {
         if (pingExpiryTimer) {
@@ -2472,6 +2482,10 @@
         modeChipEl.hidden = !showChip;
         if (!showChip) {
             modeChipEl.textContent = '';
+            return;
+        }
+        if (activeMode === TOOL_MODE_PING) {
+            modeChipEl.textContent = `${getPingVariantOptions().label} ping - click the map, double click or tap to go back`;
             return;
         }
         modeChipEl.textContent = `Now in ${getToolModeLabel(activeMode)} - double click or tap to go back to normal`;
@@ -8193,9 +8207,19 @@
             </div>
             <div class="vtt-player-focus-actions">
                 <button class="vtt-chip-btn strong" type="button" data-action="focus-own-token"${context.token ? '' : ' disabled'}>${escapeHtml(tokenActionLabel)}</button>
-                <button class="vtt-chip-btn" type="button" data-action="set-tool-mode" data-tool-mode="ping">Ping</button>
                 <button class="vtt-chip-btn" type="button" data-action="toggle-ruler-mode" aria-pressed="${localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false'}">Measure</button>
                 <button class="vtt-chip-btn" type="button" data-action="player-custom-roll">Any Dice</button>
+            </div>
+            <div class="vtt-player-focus-ping-picker" role="group" aria-label="Ping type">
+                ${Object.values(PING_VARIANT_OPTIONS).map((option) => `
+                    <button class="vtt-ping-option is-${escapeHtml(option.variant)}" type="button"
+                        data-action="set-ping-mode"
+                        data-ping-variant="${escapeHtml(option.variant)}"
+                        aria-pressed="${normalizePingVariant(localPingVariant) === option.variant && localToolState.mode === TOOL_MODE_PING ? 'true' : 'false'}">
+                        <span class="vtt-ping-option-icon">${escapeHtml(option.icon)}</span>
+                        <span>${escapeHtml(option.label)}</span>
+                    </button>
+                `).join('')}
             </div>
             ${playerFocusLastResult ? `
                 <div class="vtt-player-focus-result${playerFocusLastResult.ok ? '' : ' is-muted'}">
@@ -8475,11 +8499,12 @@
     const buildPingMarkup = (ping, scene) => {
         if (!ping || !scene) return '';
         const cellPx = getSceneCellPx(scene);
-        const size = Math.max(44, cellPx * 1.6);
+        const size = Math.max(72, cellPx * 2.25);
         const color = normalizeHexColor(ping.color, '#4f8dff');
         const rgb = getHexColorRgbString(color, '#4f8dff');
         const label = String(ping.label || 'Ping').trim().slice(0, 80) || 'Ping';
         const variant = String(ping.variant || 'attention').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'attention';
+        const icon = (PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || PING_VARIANT_OPTIONS.attention).icon;
         return `
             <div class="vtt-overlay-item vtt-ping is-${escapeHtml(variant)}"
                 data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - size / 2))}"
@@ -8488,6 +8513,7 @@
                 data-world-height="${escapeHtml(String(size))}"
                 style="--vtt-ping-color:${escapeHtml(color)};--vtt-ping-rgb:${escapeHtml(rgb)};">
                 <div class="vtt-ping-ring"></div>
+                <div class="vtt-ping-core">${escapeHtml(icon)}</div>
                 <div class="vtt-ping-label">${escapeHtml(label)}</div>
             </div>
         `;
@@ -8772,7 +8798,7 @@
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
         const toolMeta = localToolState.mode === TOOL_MODE_PING
-            ? 'Ping active: click the map to show every connected player a short-lived ping.'
+            ? `${getPingVariantOptions().label} ping active: click the map to show every connected player a short-lived marker.`
             : (localToolState.mode === TOOL_MODE_RULER
             ? 'Ruler active: click and hold on the stage to measure squares and feet.'
             : (localToolState.mode === TOOL_MODE_CIRCLE
@@ -9689,6 +9715,13 @@
         }
         if (action === 'toggle-ruler-mode') {
             setToolMode(localToolState.mode === TOOL_MODE_RULER ? TOOL_MODE_NAVIGATE : TOOL_MODE_RULER);
+            render();
+            return;
+        }
+        if (action === 'set-ping-mode') {
+            if (isSpectator()) return;
+            localPingVariant = normalizePingVariant(actionEl.dataset.pingVariant);
+            setToolMode(TOOL_MODE_PING);
             render();
             return;
         }

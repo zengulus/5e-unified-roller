@@ -1513,21 +1513,40 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-ping-ring {
     position: absolute;
-    inset: 12%;
-    border: 3px solid rgba(var(--vtt-ping-rgb), 0.96);
+    inset: 8%;
+    border: 5px solid rgba(var(--vtt-ping-rgb), 0.98);
     border-radius: 999px;
     box-shadow:
-        0 0 0 0 rgba(var(--vtt-ping-rgb), 0.42),
-        0 0 28px rgba(var(--vtt-ping-rgb), 0.42);
-    animation: vtt-ping-ring 1.05s ease-out infinite;
+        0 0 0 0 rgba(var(--vtt-ping-rgb), 0.56),
+        0 0 42px rgba(var(--vtt-ping-rgb), 0.62);
+    animation: vtt-ping-ring 0.92s ease-out infinite;
 }
 
 .vtt-ping-ring::after {
     content: "";
     position: absolute;
-    inset: 24%;
+    inset: 22%;
     border-radius: inherit;
-    background: rgba(var(--vtt-ping-rgb), 0.28);
+    background: rgba(var(--vtt-ping-rgb), 0.36);
+}
+
+.vtt-ping-core {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border: 2px solid rgba(255, 255, 255, 0.86);
+    border-radius: 999px;
+    background: rgba(var(--vtt-ping-rgb), 0.94);
+    color: rgba(4, 8, 14, 0.98);
+    font-size: 1.35rem;
+    font-weight: 1000;
+    line-height: 1;
+    box-shadow:
+        0 0 0 0.35rem rgba(var(--vtt-ping-rgb), 0.18),
+        0 12px 28px rgba(0, 0, 0, 0.38);
 }
 
 .vtt-ping.is-danger .vtt-ping-ring {
@@ -1541,12 +1560,12 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     transform: rotate(45deg);
 }
 
-.vtt-ping.is-regroup .vtt-ping-ring {
+.vtt-ping.is-question .vtt-ping-ring {
     border-style: dashed;
-    animation-name: vtt-ping-regroup-ring;
+    animation-name: vtt-ping-question-ring;
 }
 
-.vtt-ping.is-regroup .vtt-ping-ring::after {
+.vtt-ping.is-question .vtt-ping-ring::after {
     inset: 30%;
     background: transparent;
     border: 2px solid rgba(var(--vtt-ping-rgb), 0.46);
@@ -1554,19 +1573,21 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-ping-label {
     position: absolute;
-    top: calc(100% + 0.15rem);
+    top: calc(100% + 0.28rem);
     left: 50%;
     transform: translateX(-50%);
-    padding: 0.18rem 0.5rem;
-    border: 1px solid rgba(var(--vtt-ping-rgb), 0.46);
+    padding: 0.28rem 0.68rem;
+    border: 1px solid rgba(var(--vtt-ping-rgb), 0.72);
     border-radius: 999px;
     background: rgba(5, 9, 16, 0.94);
     color: rgba(247, 252, 255, 0.98);
-    font-size: 0.68rem;
+    font-size: 0.76rem;
+    font-weight: 900;
     line-height: 1.1;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     white-space: nowrap;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34);
 }
 
 @keyframes vtt-ping-ring {
@@ -1597,7 +1618,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     }
 }
 
-@keyframes vtt-ping-regroup-ring {
+@keyframes vtt-ping-question-ring {
     0% {
         opacity: 0.95;
         transform: scale(0.64);
@@ -3351,6 +3372,60 @@ body[data-vtt-role="spectator"] [data-player-only="1"] {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.48rem;
+}
+
+.vtt-player-focus-ping-picker {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.42rem;
+}
+
+.vtt-ping-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.38rem;
+    min-height: 2.55rem;
+    padding: 0.42rem 0.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.58rem;
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(236, 244, 255, 0.9);
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.1;
+    cursor: pointer;
+}
+
+.vtt-ping-option-icon {
+    display: grid;
+    place-items: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 999px;
+    background: rgba(79, 141, 255, 0.9);
+    color: rgba(4, 8, 14, 0.98);
+    font-size: 0.95rem;
+    font-weight: 1000;
+    line-height: 1;
+}
+
+.vtt-ping-option.is-danger .vtt-ping-option-icon {
+    border-radius: 0.28rem;
+    background: rgba(255, 95, 95, 0.94);
+}
+
+.vtt-ping-option.is-question .vtt-ping-option-icon {
+    background: rgba(255, 211, 95, 0.94);
+}
+
+.vtt-ping-option[aria-pressed="true"],
+.vtt-ping-option:hover,
+.vtt-ping-option:focus-visible {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.52);
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.13);
+    color: rgba(248, 252, 255, 0.98);
 }
 
 .vtt-player-focus-actions .vtt-chip-btn,
