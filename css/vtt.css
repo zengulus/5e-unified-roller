@@ -1634,6 +1634,11 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     box-shadow: 0 0 0 0.28rem rgba(5, 9, 16, 0.92);
 }
 
+.vtt-ask-roll-pin:disabled {
+    cursor: default;
+    opacity: 0.72;
+}
+
 .vtt-ask-roll-card {
     position: absolute;
     top: 50%;
@@ -1672,6 +1677,13 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-ask-roll-actions {
     display: flex;
     gap: 0.35rem;
+}
+
+.vtt-ask-roll-note {
+    color: rgba(213, 224, 239, 0.68);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.15;
 }
 
 .vtt-ask-roll-actions .vtt-chip-btn {

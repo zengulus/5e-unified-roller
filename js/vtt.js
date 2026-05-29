@@ -1099,7 +1099,10 @@
         const askRoll = options.askRoll && typeof options.askRoll === 'object'
             ? {
                 label: String(options.askRoll.label || '').trim().replace(/\s+/g, ' ').slice(0, 48),
-                actionKey: String(options.askRoll.actionKey || '').trim().slice(0, 120)
+                actionKey: String(options.askRoll.actionKey || '').trim().slice(0, 120),
+                ownerPlayerId: String(options.askRoll.ownerPlayerId || '').trim().slice(0, 120),
+                ownerSheetKey: String(options.askRoll.ownerSheetKey || '').trim().slice(0, 160),
+                ownerName: String(options.askRoll.ownerName || '').trim().replace(/\s+/g, ' ').slice(0, 80)
             }
             : null;
         const ping = {
@@ -5919,6 +5922,7 @@
     };
 
     const openAskRollSearchFromPing = (ping, request) => {
+        if (!canLocalRollAskRollRequest(request)) return false;
         const point = worldToScreen({ x: ping && ping.x, y: ping && ping.y });
         openSheetActionPopover(null, point.x, point.y, { mode: 'roll' });
         sheetActionQuery = String(request && request.label || '').trim();
@@ -5931,6 +5935,7 @@
         const ping = getScenePingById(pingId);
         const request = getAskRollRequestFromPing(ping);
         if (!request) return false;
+        if (!canLocalRollAskRollRequest(request)) return false;
         const actionKey = getRollRequestActionKey(request);
         if (!actionKey) return openAskRollSearchFromPing(ping, request);
         const context = getLocalPlayerFocusContext();
@@ -5948,6 +5953,15 @@
             render();
         }
         return rolled;
+    };
+
+    const cancelAskRollPingById = (pingId) => {
+        const ping = getScenePingById(pingId);
+        const request = getAskRollRequestFromPing(ping);
+        if (!request || !canLocalCancelAskRollRequest(request)) return false;
+        const removed = removeSharedPingById(pingId);
+        if (removed) render();
+        return removed;
     };
 
     const getSheetMod = (character, stat) => Math.floor(((character && character.stats && character.stats[stat] ? Number(character.stats[stat].val) : 10) - 10) / 2);
@@ -8406,7 +8420,10 @@
             if (!label) return null;
             return {
                 label,
-                actionKey: String(ping.askRoll.actionKey || '').trim().slice(0, 120)
+                actionKey: String(ping.askRoll.actionKey || '').trim().slice(0, 120),
+                ownerPlayerId: String(ping.askRoll.ownerPlayerId || '').trim().slice(0, 120),
+                ownerSheetKey: String(ping.askRoll.ownerSheetKey || '').trim().slice(0, 160),
+                ownerName: String(ping.askRoll.ownerName || '').trim().replace(/\s+/g, ' ').slice(0, 80)
             };
         }
         const variant = String(ping.variant || '').trim().toLowerCase();
@@ -8416,6 +8433,8 @@
             || /\basks:\s*/i.test(rawLabel)
             || /\broll\s+/i.test(rawLabel);
         if (!looksLikeLegacyAskRoll) return null;
+        const ownerMatch = rawLabel.match(/^(.*?)\basks:\s*/i);
+        const ownerName = ownerMatch ? String(ownerMatch[1] || '').trim().replace(/\s+/g, ' ').slice(0, 80) : '';
         const label = rawLabel
             .replace(/^.*?\basks:\s*/i, '')
             .replace(/^.*?\broll\s+/i, '')
@@ -8425,9 +8444,31 @@
             .slice(0, 48);
         return {
             label: label || 'Roll?',
-            actionKey: ''
+            actionKey: '',
+            ownerPlayerId: '',
+            ownerSheetKey: '',
+            ownerName
         };
     };
+
+    const normalizeOwnerName = (value) => normalizeSearchText(String(value || '').replace(/\s+/g, ' ').trim());
+    const isLocalAskRollOwner = (request = {}) => {
+        if (!isPlayer()) return false;
+        const context = getLocalPlayerFocusContext();
+        const ownerPlayerId = String(request && request.ownerPlayerId || '').trim();
+        if (ownerPlayerId) return ownerPlayerId === String(context && context.playerId || '').trim();
+        const ownerSheetKey = String(request && request.ownerSheetKey || '').trim();
+        if (ownerSheetKey) return ownerSheetKey === String(context && context.identity && context.identity.sheetKey || '').trim();
+        const ownerName = normalizeOwnerName(request && request.ownerName);
+        if (!ownerName) return false;
+        const localNames = [
+            context && context.linkedPlayer && context.linkedPlayer.name,
+            context && context.identity && context.identity.characterName
+        ].map(normalizeOwnerName).filter(Boolean);
+        return localNames.includes(ownerName);
+    };
+    const canLocalRollAskRollRequest = (request = {}) => isLocalAskRollOwner(request);
+    const canLocalCancelAskRollRequest = (request = {}) => isDM() || isLocalAskRollOwner(request);
 
     const queueRollRequest = (label, options = {}) => {
         if (!isPlayer() || !canUseSharedPlayerTools()) return false;
@@ -8438,9 +8479,16 @@
         }
         rollLabel = rollLabel.replace(/\s+/g, ' ').slice(0, 48);
         if (!rollLabel) return false;
+        const context = getLocalPlayerFocusContext();
+        const ownerName = context.linkedPlayer && context.linkedPlayer.name
+            ? String(context.linkedPlayer.name).trim()
+            : String(context.identity && context.identity.characterName || '').trim();
         pendingAskRollRequest = {
             label: rollLabel,
-            actionKey: String(opts.actionKey || getQuickRollRequestActionKey(rollLabel) || '').trim()
+            actionKey: String(opts.actionKey || getQuickRollRequestActionKey(rollLabel) || '').trim(),
+            ownerPlayerId: String(context.playerId || '').trim(),
+            ownerSheetKey: String(context.identity && context.identity.sheetKey || '').trim(),
+            ownerName
         };
         askRollPickMode = false;
         localPingVariant = 'question';
@@ -8741,6 +8789,8 @@
         const pingId = String(ping.id || '').trim();
         const cleanRequest = request || getAskRollRequestFromPing(ping);
         const requestLabel = String(cleanRequest && cleanRequest.label || '').trim().slice(0, 48) || 'Roll?';
+        const canRoll = canLocalRollAskRollRequest(cleanRequest);
+        const canCancel = canLocalCancelAskRollRequest(cleanRequest);
         const color = normalizeHexColor(ping.color, '#7ee787');
         const rgb = getHexColorRgbString(color, '#7ee787');
         return `
@@ -8751,16 +8801,18 @@
                 data-world-width="${escapeHtml(String(boxWidth))}"
                 data-world-height="${escapeHtml(String(boxHeight))}"
                 style="--vtt-ask-roll-color:${escapeHtml(color)};--vtt-ask-roll-rgb:${escapeHtml(rgb)};--vtt-ask-roll-pin-size:${escapeHtml(String(markerSize))}px;">
-                <button class="vtt-ask-roll-pin" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}" title="Roll ${escapeHtml(requestLabel)}">
+                <button class="vtt-ask-roll-pin" type="button"${canRoll ? ` data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}" title="Roll ${escapeHtml(requestLabel)}"` : ' disabled aria-disabled="true" title="Waiting for the owner to roll"'} >
                     <span class="vtt-ask-roll-pin-dot"></span>
                 </button>
                 <div class="vtt-ask-roll-card" aria-label="Ask to roll ${escapeHtml(requestLabel)}" style="left:${escapeHtml(String(markerSize + gap))}px;width:${escapeHtml(String(panelWidth))}px;">
                     <span class="vtt-ask-roll-title">Ask To Roll</span>
                     <strong>${escapeHtml(requestLabel)}</strong>
-                    <span class="vtt-ask-roll-actions">
-                        <button class="vtt-chip-btn strong" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}">Roll</button>
-                        <button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-ping" data-id="${escapeHtml(pingId)}">Cancel</button>
-                    </span>
+                    ${canRoll || canCancel ? `
+                        <span class="vtt-ask-roll-actions">
+                            ${canRoll ? `<button class="vtt-chip-btn strong" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}">Roll</button>` : ''}
+                            ${canCancel ? `<button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-ping" data-id="${escapeHtml(pingId)}">Cancel</button>` : ''}
+                        </span>
+                    ` : '<span class="vtt-ask-roll-note">Waiting for owner</span>'}
                 </div>
             </div>
         `;
@@ -9771,8 +9823,7 @@
         }
         if (action === 'cancel-ask-roll-ping') {
             if (!canUseSharedPlayerTools()) return;
-            removeSharedPingById(id);
-            render();
+            cancelAskRollPingById(id);
             return;
         }
         if (action === 'set-sheet-action-mode') {
