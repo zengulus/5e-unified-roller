@@ -8675,39 +8675,61 @@
 
     const buildPingMarkup = (ping, scene) => {
         if (!ping || !scene) return '';
+        if (ping.askRoll && typeof ping.askRoll === 'object') return buildAskRollMarkup(ping, scene);
         const cellPx = getSceneCellPx(scene);
-        const isAskRoll = !!(ping.askRoll && typeof ping.askRoll === 'object');
-        const markerSize = Math.max(isAskRoll ? 92 : 72, cellPx * (isAskRoll ? 2.35 : 2.25));
-        const boxWidth = isAskRoll ? markerSize * 3.65 : markerSize;
+        const markerSize = Math.max(72, cellPx * 2.25);
         const color = normalizeHexColor(ping.color, '#4f8dff');
         const rgb = getHexColorRgbString(color, '#4f8dff');
         const label = String(ping.label || 'Ping').trim().slice(0, 80) || 'Ping';
         const variant = String(ping.variant || 'attention').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'attention';
         const icon = (PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || PING_VARIANT_OPTIONS.attention).icon;
         const pingId = String(ping.id || '').trim();
-        const requestLabel = isAskRoll ? String(ping.askRoll.label || '').trim().slice(0, 48) : '';
         return `
-            <div class="vtt-overlay-item vtt-ping is-${escapeHtml(variant)}${isAskRoll ? ' is-ask-roll' : ''}"
+            <div class="vtt-overlay-item vtt-ping is-${escapeHtml(variant)}"
                 data-ping-id="${escapeHtml(pingId)}"
                 data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - markerSize / 2))}"
                 data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - markerSize / 2))}"
-                data-world-width="${escapeHtml(String(boxWidth))}"
+                data-world-width="${escapeHtml(String(markerSize))}"
                 data-world-height="${escapeHtml(String(markerSize))}"
                 style="--vtt-ping-color:${escapeHtml(color)};--vtt-ping-rgb:${escapeHtml(rgb)};">
-                <div class="vtt-ping-marker"${isAskRoll ? ` data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}" title="Roll ${escapeHtml(requestLabel || 'request')}"` : ''}>
-                    <div class="vtt-ping-ring"></div>
-                    <div class="vtt-ping-core">${escapeHtml(icon)}</div>
-                    ${isAskRoll ? '' : `<div class="vtt-ping-label">${escapeHtml(label)}</div>`}
+                <div class="vtt-ping-ring"></div>
+                <div class="vtt-ping-core">${escapeHtml(icon)}</div>
+                <div class="vtt-ping-label">${escapeHtml(label)}</div>
+            </div>
+        `;
+    };
+
+    const buildAskRollMarkup = (ping, scene) => {
+        if (!ping || !scene) return '';
+        const cellPx = getSceneCellPx(scene);
+        const markerSize = Math.max(54, cellPx * 1.45);
+        const panelWidth = Math.max(184, markerSize * 3.25);
+        const gap = Math.max(10, markerSize * 0.2);
+        const boxWidth = markerSize + gap + panelWidth;
+        const boxHeight = Math.max(markerSize, 82);
+        const pingId = String(ping.id || '').trim();
+        const requestLabel = String(ping.askRoll && ping.askRoll.label || '').trim().slice(0, 48) || 'Roll?';
+        const color = normalizeHexColor(ping.color, '#7ee787');
+        const rgb = getHexColorRgbString(color, '#7ee787');
+        return `
+            <div class="vtt-overlay-item vtt-ask-roll-marker"
+                data-ping-id="${escapeHtml(pingId)}"
+                data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - markerSize / 2))}"
+                data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - boxHeight / 2))}"
+                data-world-width="${escapeHtml(String(boxWidth))}"
+                data-world-height="${escapeHtml(String(boxHeight))}"
+                style="--vtt-ask-roll-color:${escapeHtml(color)};--vtt-ask-roll-rgb:${escapeHtml(rgb)};--vtt-ask-roll-pin-size:${escapeHtml(String(markerSize))}px;">
+                <button class="vtt-ask-roll-pin" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}" title="Roll ${escapeHtml(requestLabel)}">
+                    <span class="vtt-ask-roll-pin-dot"></span>
+                </button>
+                <div class="vtt-ask-roll-card" aria-label="Ask to roll ${escapeHtml(requestLabel)}" style="left:${escapeHtml(String(markerSize + gap))}px;width:${escapeHtml(String(panelWidth))}px;">
+                    <span class="vtt-ask-roll-title">Ask To Roll</span>
+                    <strong>${escapeHtml(requestLabel)}</strong>
+                    <span class="vtt-ask-roll-actions">
+                        <button class="vtt-chip-btn strong" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}">Roll</button>
+                        <button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-ping" data-id="${escapeHtml(pingId)}">Cancel</button>
+                    </span>
                 </div>
-                ${isAskRoll ? `
-                    <div class="vtt-ping-actions vtt-ask-roll-chip" aria-label="Ask to roll ${escapeHtml(requestLabel || 'request')}">
-                        <span class="vtt-ask-roll-chip-label">${escapeHtml(requestLabel || 'Roll?')}</span>
-                        <span class="vtt-ask-roll-chip-actions">
-                            <button class="vtt-chip-btn strong" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}">Roll</button>
-                            <button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-ping" data-id="${escapeHtml(pingId)}">Cancel</button>
-                        </span>
-                    </div>
-                ` : ''}
             </div>
         `;
     };
@@ -11090,8 +11112,8 @@
         if (event.button !== 0) return;
         if (targetEl.closest('#vtt-quick-spawn-menu')) return;
         if (targetEl.closest('#vtt-stage-context-menu')) return;
+        if (targetEl.closest('.vtt-ask-roll-marker')) return;
         if (targetEl.closest('.vtt-ping')) return;
-        if (targetEl.closest('.vtt-ping-actions')) return;
         closeQuickSpawnMenu();
         closeStageContextMenu();
         closeTokenInspectorPopover();
