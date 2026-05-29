@@ -1110,7 +1110,7 @@
             color,
             variant,
             createdAt: now,
-            expiresAt: now + (askRoll ? 10 * 60 * 1000 : PING_SHARED_LIFETIME_MS)
+            expiresAt: now + (askRoll ? 2 * 60 * 1000 : PING_SHARED_LIFETIME_MS)
         };
         if (askRoll && askRoll.label) ping.askRoll = askRoll;
         withDraft((draft) => {
@@ -8677,7 +8677,8 @@
         if (!ping || !scene) return '';
         const cellPx = getSceneCellPx(scene);
         const isAskRoll = !!(ping.askRoll && typeof ping.askRoll === 'object');
-        const size = Math.max(isAskRoll ? 104 : 72, cellPx * (isAskRoll ? 2.7 : 2.25));
+        const markerSize = Math.max(isAskRoll ? 92 : 72, cellPx * (isAskRoll ? 2.35 : 2.25));
+        const boxWidth = isAskRoll ? markerSize * 3.65 : markerSize;
         const color = normalizeHexColor(ping.color, '#4f8dff');
         const rgb = getHexColorRgbString(color, '#4f8dff');
         const label = String(ping.label || 'Ping').trim().slice(0, 80) || 'Ping';
@@ -8688,15 +8689,16 @@
         return `
             <div class="vtt-overlay-item vtt-ping is-${escapeHtml(variant)}${isAskRoll ? ' is-ask-roll' : ''}"
                 data-ping-id="${escapeHtml(pingId)}"
-                ${isAskRoll ? `data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}" title="Roll ${escapeHtml(requestLabel || 'request')}"` : ''}
-                data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - size / 2))}"
-                data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - size / 2))}"
-                data-world-width="${escapeHtml(String(size))}"
-                data-world-height="${escapeHtml(String(size))}"
+                data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - markerSize / 2))}"
+                data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - markerSize / 2))}"
+                data-world-width="${escapeHtml(String(boxWidth))}"
+                data-world-height="${escapeHtml(String(markerSize))}"
                 style="--vtt-ping-color:${escapeHtml(color)};--vtt-ping-rgb:${escapeHtml(rgb)};">
-                <div class="vtt-ping-ring"></div>
-                <div class="vtt-ping-core">${escapeHtml(icon)}</div>
-                <div class="vtt-ping-label">${escapeHtml(label)}</div>
+                <div class="vtt-ping-marker"${isAskRoll ? ` data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}" title="Roll ${escapeHtml(requestLabel || 'request')}"` : ''}>
+                    <div class="vtt-ping-ring"></div>
+                    <div class="vtt-ping-core">${escapeHtml(icon)}</div>
+                    ${isAskRoll ? '' : `<div class="vtt-ping-label">${escapeHtml(label)}</div>`}
+                </div>
                 ${isAskRoll ? `
                     <div class="vtt-ping-actions vtt-ask-roll-chip" aria-label="Ask to roll ${escapeHtml(requestLabel || 'request')}">
                         <span class="vtt-ask-roll-chip-label">${escapeHtml(requestLabel || 'Roll?')}</span>

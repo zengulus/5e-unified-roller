@@ -1506,14 +1506,26 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-ping {
     pointer-events: none;
-    display: grid;
-    place-items: center;
+    display: block;
     z-index: 7;
 }
 
 .vtt-ping.is-ask-roll {
     pointer-events: auto;
     z-index: 12;
+}
+
+.vtt-ping-marker {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+}
+
+.vtt-ping.is-ask-roll .vtt-ping-marker {
+    width: 27.4%;
+    right: auto;
+    cursor: pointer;
 }
 
 .vtt-ping-ring {
@@ -1609,14 +1621,13 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-ping-actions {
     position: absolute;
     top: 50%;
-    left: calc(100% + 0.55rem);
+    right: 0;
     z-index: 4;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 0.38rem;
-    width: max-content;
-    min-width: 10rem;
-    max-width: min(18rem, 42vw);
+    width: 68%;
+    min-width: 0;
     padding: 0.48rem;
     border: 1px solid rgba(var(--vtt-ping-rgb), 0.62);
     border-radius: 0.5rem;
@@ -1632,6 +1643,9 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     font-size: 0.78rem;
     font-weight: 900;
     line-height: 1.15;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .vtt-ask-roll-chip-actions {
