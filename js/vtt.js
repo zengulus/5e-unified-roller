@@ -5929,7 +5929,7 @@
     const rollAskRollPingById = (pingId) => {
         if (!canUseSharedPlayerTools()) return false;
         const ping = getScenePingById(pingId);
-        const request = ping && ping.askRoll && typeof ping.askRoll === 'object' ? ping.askRoll : null;
+        const request = getAskRollRequestFromPing(ping);
         if (!request) return false;
         const actionKey = getRollRequestActionKey(request);
         if (!actionKey) return openAskRollSearchFromPing(ping, request);
@@ -8399,6 +8399,36 @@
         return contained ? contained.key : '';
     };
 
+    const getAskRollRequestFromPing = (ping) => {
+        if (!ping || typeof ping !== 'object') return null;
+        if (ping.askRoll && typeof ping.askRoll === 'object') {
+            const label = String(ping.askRoll.label || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+            if (!label) return null;
+            return {
+                label,
+                actionKey: String(ping.askRoll.actionKey || '').trim().slice(0, 120)
+            };
+        }
+        const variant = String(ping.variant || '').trim().toLowerCase();
+        const rawLabel = String(ping.label || '').trim();
+        const looksLikeLegacyAskRoll = variant === 'ask-roll'
+            || variant === 'roll-request'
+            || /\basks:\s*/i.test(rawLabel)
+            || /\broll\s+/i.test(rawLabel);
+        if (!looksLikeLegacyAskRoll) return null;
+        const label = rawLabel
+            .replace(/^.*?\basks:\s*/i, '')
+            .replace(/^.*?\broll\s+/i, '')
+            .replace(/\?+$/g, '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .slice(0, 48);
+        return {
+            label: label || 'Roll?',
+            actionKey: ''
+        };
+    };
+
     const queueRollRequest = (label, options = {}) => {
         if (!isPlayer() || !canUseSharedPlayerTools()) return false;
         const opts = options && typeof options === 'object' ? options : {};
@@ -8675,7 +8705,8 @@
 
     const buildPingMarkup = (ping, scene) => {
         if (!ping || !scene) return '';
-        if (ping.askRoll && typeof ping.askRoll === 'object') return buildAskRollMarkup(ping, scene);
+        const askRollRequest = getAskRollRequestFromPing(ping);
+        if (askRollRequest) return buildAskRollMarkup(ping, scene, askRollRequest);
         const cellPx = getSceneCellPx(scene);
         const markerSize = Math.max(72, cellPx * 2.25);
         const color = normalizeHexColor(ping.color, '#4f8dff');
@@ -8699,7 +8730,7 @@
         `;
     };
 
-    const buildAskRollMarkup = (ping, scene) => {
+    const buildAskRollMarkup = (ping, scene, request = null) => {
         if (!ping || !scene) return '';
         const cellPx = getSceneCellPx(scene);
         const markerSize = Math.max(54, cellPx * 1.45);
@@ -8708,7 +8739,8 @@
         const boxWidth = markerSize + gap + panelWidth;
         const boxHeight = Math.max(markerSize, 82);
         const pingId = String(ping.id || '').trim();
-        const requestLabel = String(ping.askRoll && ping.askRoll.label || '').trim().slice(0, 48) || 'Roll?';
+        const cleanRequest = request || getAskRollRequestFromPing(ping);
+        const requestLabel = String(cleanRequest && cleanRequest.label || '').trim().slice(0, 48) || 'Roll?';
         const color = normalizeHexColor(ping.color, '#7ee787');
         const rgb = getHexColorRgbString(color, '#7ee787');
         return `
