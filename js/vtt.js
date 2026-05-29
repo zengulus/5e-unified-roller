@@ -1057,17 +1057,22 @@
     const PING_VARIANT_OPTIONS = {
         attention: { label: 'Attention', color: '#4f8dff', variant: 'attention', icon: '!' },
         danger: { label: 'Danger', color: '#ff5f5f', variant: 'danger', icon: '!' },
-        question: { label: 'Question', color: '#ffd35f', variant: 'question', icon: '?' }
+        question: { label: 'Question', color: '#ffd35f', variant: 'question', icon: '?' },
+        rollRequest: { label: 'Roll Request', color: '#7ee787', variant: 'roll-request', icon: '20', pickable: false }
     };
     const normalizePingVariant = (value) => {
         const clean = String(value || '').trim().toLowerCase();
-        return PING_VARIANT_OPTIONS[clean] ? clean : 'attention';
+        if (PING_VARIANT_OPTIONS[clean]) return clean;
+        const matched = Object.entries(PING_VARIANT_OPTIONS)
+            .find(([, option]) => String(option && option.variant || '').trim().toLowerCase() === clean);
+        return matched ? matched[0] : 'attention';
     };
     const getPingVariantOptions = (event = null, variant = localPingVariant) => {
         if (event && event.altKey) return PING_VARIANT_OPTIONS.danger;
         if (event && event.shiftKey) return PING_VARIANT_OPTIONS.question;
         return PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || PING_VARIANT_OPTIONS.attention;
     };
+    const ROLL_REQUEST_OPTIONS = ['Perception', 'Investigation', 'Insight', 'Arcana', 'Stealth'];
     const schedulePingExpiryRender = (scene) => {
         if (pingExpiryTimer) {
             window.clearTimeout(pingExpiryTimer);
@@ -2675,9 +2680,9 @@
             settingsRailTabEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
         }
         if (playerRollRailTabEl) {
-            playerRollRailTabEl.textContent = 'Dice Rolls 📌';
-            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Pin dice rolls open' : 'Unpin dice rolls';
-            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Pin dice rolls open' : 'Unpin dice rolls');
+            playerRollRailTabEl.textContent = 'Controls';
+            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Pin player controls open' : 'Unpin player controls';
+            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Pin player controls open' : 'Unpin player controls');
             playerRollRailTabEl.setAttribute('aria-pressed', uiState.playerRollRailCollapsed ? 'false' : 'true');
         }
         if (initiativeRailTabEl) {
@@ -5751,11 +5756,12 @@
         const bundle = getActiveSheetBundle(sheetActionState && sheetActionState.sheetKey);
         const character = bundle && bundle.character ? bundle.character : null;
         const results = character ? getSheetActionSearchResults() : [];
+        const isRequestMode = String(sheetActionState.mode || '').trim() === 'request';
         sheetActionPopoverEl.hidden = false;
         sheetActionPopoverEl.innerHTML = `
             <div class="vtt-popover-head">
                 <div>
-                    <strong>Sheet Actions</strong>
+                    <strong>${isRequestMode ? 'Ask Roll' : 'Sheet Actions'}</strong>
                     <span>${escapeHtml(character && character.meta && character.meta.name ? character.meta.name : 'Open a sheet first')}</span>
                 </div>
                 <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-sheet-actions" aria-label="Close sheet actions">X</button>
@@ -5766,10 +5772,10 @@
             </label>
             <div class="vtt-popover-results vtt-action-search-results">
                 ${results.length ? results.map((item) => `
-                    <button type="button" class="vtt-action-search-item" data-action="run-sheet-action" data-id="${escapeHtml(item.key)}">
+                    <button type="button" class="vtt-action-search-item" data-action="${isRequestMode ? 'ask-roll-from-sheet-action' : 'run-sheet-action'}" data-id="${escapeHtml(item.key)}">
                         <span class="vtt-action-search-kind">${escapeHtml(item.category)}</span>
                         <span class="vtt-action-search-label">${escapeHtml(item.label)}</span>
-                        <span class="vtt-action-search-summary">${escapeHtml(item.summary || item.detail || 'Run from sheet')}</span>
+                        <span class="vtt-action-search-summary">${escapeHtml(item.summary || item.detail || (isRequestMode ? 'Ask to roll this' : 'Run from sheet'))}</span>
                     </button>
                 `).join('') : `<div class="vtt-empty">${character ? 'No matching sheet actions.' : 'No local character sheet data found.'}</div>`}
             </div>
@@ -5790,11 +5796,13 @@
         requestAnimationFrame(positionSheetActionPopover);
     };
 
-    const openSheetActionPopover = (token = null, clientX, clientY) => {
+    const openSheetActionPopover = (token = null, clientX, clientY, options = {}) => {
+        const opts = options && typeof options === 'object' ? options : {};
         const rosterPlayer = token ? getRosterPlayerForRecord(token) : null;
         sheetActionState = {
             tokenId: token && token.id ? token.id : '',
             sheetKey: String(rosterPlayer && rosterPlayer.sheetKey || '').trim(),
+            mode: opts.mode === 'request' ? 'request' : 'roll',
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
         };
@@ -5840,6 +5848,19 @@
         renderSheetActionPopover();
         renderPlayerRollMenu();
         return false;
+    };
+
+    const askRollFromSheetActionByKey = (key) => {
+        const item = buildSheetActionCatalog().find((entry) => entry && entry.key === key);
+        if (!item) return false;
+        const label = String(item.label || '').replace(/^(Atk|Dmg):\s*/i, '').trim() || 'that';
+        const category = String(item.category || '').trim();
+        const requestLabel = category && !/^core$/i.test(category)
+            ? `${category}: ${label}`
+            : label;
+        const queued = queueRollRequest(requestLabel);
+        if (queued) closeSheetActionPopover();
+        return queued;
     };
 
     const getSheetMod = (character, stat) => Math.floor(((character && character.stats && character.stats[stat] ? Number(character.stats[stat].val) : 10) - 10) / 2);
@@ -8202,8 +8223,11 @@
             .filter(Boolean);
         return `
             <div class="vtt-player-focus-status${context.isTurn ? ' is-turn' : ''}">
-                <span class="vtt-player-focus-kicker">${escapeHtml(context.isTurn ? 'Your Turn' : 'Player Focus')}</span>
+                <span class="vtt-player-focus-kicker">${escapeHtml(context.isTurn ? 'Your Turn' : 'Player Controls')}</span>
                 <strong>${escapeHtml(statusText)}</strong>
+            </div>
+            <div class="vtt-player-focus-section">
+                <span class="vtt-player-focus-minihead">Map</span>
             </div>
             <div class="vtt-player-focus-actions">
                 <button class="vtt-chip-btn strong" type="button" data-action="focus-own-token"${context.token ? '' : ' disabled'}>${escapeHtml(tokenActionLabel)}</button>
@@ -8211,7 +8235,7 @@
                 <button class="vtt-chip-btn" type="button" data-action="player-custom-roll">Any Dice</button>
             </div>
             <div class="vtt-player-focus-ping-picker" role="group" aria-label="Ping type">
-                ${Object.values(PING_VARIANT_OPTIONS).map((option) => `
+                ${Object.values(PING_VARIANT_OPTIONS).filter((option) => option.pickable !== false).map((option) => `
                     <button class="vtt-ping-option is-${escapeHtml(option.variant)}" type="button"
                         data-action="set-ping-mode"
                         data-ping-variant="${escapeHtml(option.variant)}"
@@ -8221,12 +8245,25 @@
                     </button>
                 `).join('')}
             </div>
+            <div class="vtt-player-focus-request">
+                <span class="vtt-player-focus-minihead">Ask To Roll</span>
+                <div class="vtt-player-focus-request-grid">
+                    ${ROLL_REQUEST_OPTIONS.map((label) => `
+                        <button class="vtt-chip-btn" type="button" data-action="ask-roll-request" data-roll-label="${escapeHtml(label)}">${escapeHtml(label)}</button>
+                    `).join('')}
+                    <button class="vtt-chip-btn" type="button" data-action="ask-roll-request" data-roll-label="other">Other...</button>
+                    <button class="vtt-chip-btn strong" type="button" data-action="ask-roll-search">Search Sheet...</button>
+                </div>
+            </div>
             ${playerFocusLastResult ? `
                 <div class="vtt-player-focus-result${playerFocusLastResult.ok ? '' : ' is-muted'}">
                     <strong>${escapeHtml(String(playerFocusLastResult.total))}</strong>
                     <span>${escapeHtml(`${playerFocusLastResult.label || 'Roll'} - ${playerFocusLastResult.formula || ''}`)}</span>
                 </div>
             ` : ''}
+            <div class="vtt-player-focus-section">
+                <span class="vtt-player-focus-minihead">Dice Rolls</span>
+            </div>
             <div class="vtt-roll-mode-toggle" role="group" aria-label="Roll mode">
                 ${['adv', 'norm', 'dis'].map((mode) => `
                     <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="${escapeHtml(mode)}" aria-pressed="${mode === rollMode ? 'true' : 'false'}">${escapeHtml(getRollModeLabel(mode))}</button>
@@ -8242,6 +8279,51 @@
             </div>
             <button class="vtt-stage-context-item" type="button" data-action="player-roll-from-sheet">More Sheet Rolls</button>
         `;
+    };
+
+    const getPlayerRollRequestAnchorWorldPoint = () => {
+        const scene = getActiveScene();
+        if (!scene || !scene.grid) return null;
+        const context = getLocalPlayerFocusContext();
+        const token = context.token || getTokenById(selectedTokenId);
+        if (token) {
+            const cellPx = getSceneCellPx(scene);
+            return {
+                x: toNumber(scene.grid.offsetX, 0) + (toNumber(token.x, 0) + Math.max(1, toNumber(token.w, 1)) / 2) * cellPx,
+                y: toNumber(scene.grid.offsetY, 0) + (toNumber(token.y, 0) + Math.max(1, toNumber(token.h, 1)) / 2) * cellPx
+            };
+        }
+        if (stageEl) {
+            const rect = stageEl.getBoundingClientRect();
+            if (rect.width && rect.height) return screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        }
+        return null;
+    };
+
+    const queueRollRequest = (label) => {
+        if (!isPlayer() || !canUseSharedPlayerTools()) return false;
+        let rollLabel = String(label || '').trim();
+        if (!rollLabel || ['custom', 'other'].includes(rollLabel.toLowerCase())) {
+            rollLabel = String(window.prompt('What do you want to roll?', '') || '').trim();
+        }
+        rollLabel = rollLabel.replace(/\s+/g, ' ').slice(0, 48);
+        if (!rollLabel) return false;
+        const scene = getActiveScene();
+        const worldPoint = getPlayerRollRequestAnchorWorldPoint();
+        const context = getLocalPlayerFocusContext();
+        const name = context.linkedPlayer && context.linkedPlayer.name
+            ? String(context.linkedPlayer.name).trim()
+            : 'Player';
+        const labelText = `${name}: roll ${rollLabel}`.slice(0, 80);
+        const queued = queueSharedPing(scene, worldPoint, {
+            ...PING_VARIANT_OPTIONS.rollRequest,
+            label: labelText
+        });
+        if (queued) {
+            localToolState.mode = TOOL_MODE_NAVIGATE;
+            render();
+        }
+        return queued;
     };
 
     const renderPlayerRollMenu = () => {
@@ -9484,6 +9566,24 @@
             const point = getPlayerRollAnchorPoint();
             openSheetActionPopover(null, point.x, point.y);
             runSheetActionByKey(id);
+            render();
+            return;
+        }
+        if (action === 'ask-roll-request') {
+            if (!isPlayer()) return;
+            queueRollRequest(actionEl.dataset.rollLabel);
+            return;
+        }
+        if (action === 'ask-roll-search') {
+            if (!isPlayer()) return;
+            const point = getPlayerRollAnchorPoint();
+            openSheetActionPopover(null, point.x, point.y, { mode: 'request' });
+            render();
+            return;
+        }
+        if (action === 'ask-roll-from-sheet-action') {
+            if (!isPlayer()) return;
+            askRollFromSheetActionByKey(id);
             render();
             return;
         }
