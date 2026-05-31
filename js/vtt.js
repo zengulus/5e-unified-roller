@@ -10,6 +10,8 @@
     const DRAG_SYNC_INTERVAL_MS = 120;
     const REMOTE_TOKEN_TWEEN_MS = 180;
     const TOKEN_DOUBLE_CLICK_MS = 320;
+    const TOKEN_PORTRAIT_PREVIEW_MS = 3000;
+    const TOKEN_CLICK_MOVE_PX = 5;
     const STAGE_TOOL_DOUBLE_PRESS_PX = 18;
     const FOG_EDGE_POINT_COUNT = 11;
     const FOG_EDGE_OVERDRAW_PX = 0;
@@ -159,6 +161,9 @@
     let selectedTemplateId = '';
     let selectedEvidenceNoteId = '';
     let selectedClockId = '';
+    let previewTokenTimer = 0;
+    let suppressedTokenPreviewClickId = '';
+    let suppressedTokenPreviewClickUntil = 0;
     let localRole = 'player';
     let initialVTTLoadPending = true;
     let uiState = {
@@ -1933,6 +1938,41 @@
         const linkedEntry = findEntryForToken(token.id);
         selectedEntryId = linkedEntry ? linkedEntry.id : '';
         return token;
+    };
+    const isLocalPlayerOwnToken = (token) => {
+        if (!isPlayer() || !token) return false;
+        const context = getLocalPlayerFocusContext();
+        return !!(context && context.token && String(context.token.id || '').trim() === String(token.id || '').trim());
+    };
+    const canPreviewTokenPortrait = (token) => {
+        if (!token || !getCanonicalTokenImageUrl(token)) return false;
+        return !isLocalPlayerOwnToken(token);
+    };
+    const clearTokenPortraitPreview = ({ render = false } = {}) => {
+        if (previewTokenTimer) {
+            window.clearTimeout(previewTokenTimer);
+            previewTokenTimer = 0;
+        }
+        if (!previewTokenId) return false;
+        previewTokenId = '';
+        if (render) renderStage();
+        return true;
+    };
+    const showTokenPortraitPreview = (tokenId, durationMs = TOKEN_PORTRAIT_PREVIEW_MS) => {
+        const token = getTokenById(tokenId);
+        if (!canPreviewTokenPortrait(token)) {
+            clearTokenPortraitPreview();
+            return false;
+        }
+        if (previewTokenTimer) window.clearTimeout(previewTokenTimer);
+        previewTokenId = token.id;
+        previewTokenTimer = window.setTimeout(() => {
+            if (previewTokenId !== token.id) return;
+            previewTokenTimer = 0;
+            previewTokenId = '';
+            renderStage();
+        }, Math.max(1, Math.round(toNumber(durationMs, TOKEN_PORTRAIT_PREVIEW_MS))));
+        return true;
     };
     const activateEvidenceNoteSelection = (noteId) => {
         const note = getEvidenceNoteById(noteId);
@@ -5673,7 +5713,7 @@
         const canRollFromSheet = isDM() && tokenSourceType === 'player';
         const canRollStatBlock = !!(token && isDM() && isNPCRollTarget(token));
         const canCustomRoll = isDM();
-        const canPreview = !!getCanonicalTokenImageUrl(token);
+        const canPreview = canPreviewTokenPortrait(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
         const activeScene = getActiveScene();
@@ -10019,8 +10059,11 @@
         if (action === 'context-preview-token') {
             const tokenId = stageContextMenuState ? String(stageContextMenuState.tokenId || '').trim() : '';
             closeStageContextMenu();
-            const token = tokenId ? getTokenById(tokenId) : null;
-            previewTokenId = token && getCanonicalTokenImageUrl(token) && previewTokenId !== token.id ? token.id : '';
+            if (previewTokenId === tokenId) {
+                clearTokenPortraitPreview();
+            } else {
+                showTokenPortraitPreview(tokenId);
+            }
             render();
             return;
         }
@@ -10574,7 +10617,15 @@
         }
 
         if (action === 'select-token') {
-            activateTokenSelection(id);
+            const token = activateTokenSelection(id);
+            const suppressPreview = token
+                && String(token.id || '').trim() === suppressedTokenPreviewClickId
+                && Date.now() <= suppressedTokenPreviewClickUntil;
+            if (token && !suppressPreview) showTokenPortraitPreview(token.id);
+            if (suppressPreview) {
+                suppressedTokenPreviewClickId = '';
+                suppressedTokenPreviewClickUntil = 0;
+            }
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
@@ -11458,6 +11509,7 @@
                 return;
             }
             if (!canMoveToken) {
+                showTokenPortraitPreview(token.id);
                 renderStage();
                 event.preventDefault();
                 return;
@@ -11473,7 +11525,10 @@
             dragState = {
                 tokenId: token.id,
                 anchorX,
-                anchorY
+                anchorY,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                moved: false
             };
             lastDragSyncAt = 0;
             renderStage();
@@ -11532,7 +11587,10 @@
                 dragState = {
                     tokenId: pending.tokenId,
                     anchorX: pending.anchorX,
-                    anchorY: pending.anchorY
+                    anchorY: pending.anchorY,
+                    startClientX: pending.clientX,
+                    startClientY: pending.clientY,
+                    moved: true
                 };
                 const scene = getActiveScene();
                 if (scene) remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, pending.tokenId));
@@ -11637,6 +11695,13 @@
             lastTokenPointerDownId = '';
             lastTokenPointerDownAt = 0;
             const worldPoint = screenToWorld(event.clientX, event.clientY);
+            if (!dragState.moved) {
+                const moveDistance = Math.hypot(
+                    event.clientX - toNumber(dragState.startClientX, event.clientX),
+                    event.clientY - toNumber(dragState.startClientY, event.clientY)
+                );
+                if (moveDistance > TOKEN_CLICK_MOVE_PX) dragState.moved = true;
+            }
             token.x = normalizeTokenCoordinate((worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - dragState.anchorX, token.x);
             token.y = normalizeTokenCoordinate((worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - dragState.anchorY, token.y);
             renderStage();
@@ -11780,10 +11845,25 @@
         }
         let appliedRemoteSnapshot = false;
         if (dragState) {
-            markTokenVisualEffect(dragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
+            const completedDragState = { ...dragState };
+            if (event && !completedDragState.moved) {
+                const moveDistance = Math.hypot(
+                    event.clientX - toNumber(completedDragState.startClientX, event.clientX),
+                    event.clientY - toNumber(completedDragState.startClientY, event.clientY)
+                );
+                completedDragState.moved = moveDistance > TOKEN_CLICK_MOVE_PX;
+            }
+            markTokenVisualEffect(completedDragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
             syncDraggedState(true);
             lastDragSyncAt = 0;
             dragState = null;
+            if (!completedDragState.moved) {
+                showTokenPortraitPreview(completedDragState.tokenId);
+            } else {
+                suppressedTokenPreviewClickId = String(completedDragState.tokenId || '').trim();
+                suppressedTokenPreviewClickUntil = Date.now() + 500;
+                clearTokenPortraitPreview();
+            }
             appliedRemoteSnapshot = applyPendingRemoteVTTSnapshot();
             if (!appliedRemoteSnapshot) render();
         }

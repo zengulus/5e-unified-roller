@@ -2270,7 +2270,6 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 }
 
 .vtt-token:hover,
-.vtt-token.is-selected,
 .vtt-token.is-preview-open {
     z-index: 6;
 }
@@ -2338,8 +2337,6 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     transition: opacity 120ms ease, transform 120ms ease;
 }
 
-.vtt-token:not(.is-dragging):hover .vtt-token-hover-card,
-.vtt-token:not(.is-dragging).is-selected .vtt-token-hover-card,
 .vtt-token:not(.is-dragging).is-preview-open .vtt-token-hover-card {
     opacity: 1;
     transform: translateY(-50%) scale(1);
