@@ -2900,6 +2900,35 @@
             : String(state.scenes[0] && state.scenes[0].id || '').trim();
     };
 
+    const getSnapshotChangedSceneIds = (previousSnapshot, nextSnapshot) => {
+        const changedSceneIds = new Set();
+        const previousScenes = Array.isArray(previousSnapshot && previousSnapshot.scenes) ? previousSnapshot.scenes : [];
+        const nextScenes = Array.isArray(nextSnapshot && nextSnapshot.scenes) ? nextSnapshot.scenes : [];
+        const previousSceneMap = new Map(previousScenes.map((scene) => [String(scene && scene.id || '').trim(), scene]));
+        const nextSceneMap = new Map(nextScenes.map((scene) => [String(scene && scene.id || '').trim(), scene]));
+        const allSceneIds = new Set([...previousSceneMap.keys(), ...nextSceneMap.keys()].filter(Boolean));
+
+        allSceneIds.forEach((sceneId) => {
+            const previousScene = previousSceneMap.get(sceneId) || null;
+            const nextScene = nextSceneMap.get(sceneId) || null;
+            if (JSON.stringify(previousScene) !== JSON.stringify(nextScene)) changedSceneIds.add(sceneId);
+        });
+
+        const previousSharedSceneId = getSharedSceneId(previousSnapshot);
+        const nextSharedSceneId = getSharedSceneId(nextSnapshot);
+        if (previousSharedSceneId !== nextSharedSceneId && nextSharedSceneId) {
+            changedSceneIds.add(nextSharedSceneId);
+        }
+
+        const previousInitiative = previousSnapshot && previousSnapshot.initiative ? previousSnapshot.initiative : null;
+        const nextInitiative = nextSnapshot && nextSnapshot.initiative ? nextSnapshot.initiative : null;
+        if (JSON.stringify(previousInitiative) !== JSON.stringify(nextInitiative) && nextSharedSceneId) {
+            changedSceneIds.add(nextSharedSceneId);
+        }
+
+        return changedSceneIds;
+    };
+
     const isUsingLocalSceneView = (state = vttState, role = localRole) => {
         if (role !== 'dm') return false;
         if (uiState.sceneViewMode !== SCENE_VIEW_LOCAL) return false;
@@ -3139,6 +3168,57 @@
         if (!store || typeof store.getActiveCase !== 'function') return 'Primary Case';
         const active = store.getActiveCase();
         return active && active.name ? active.name : 'Primary Case';
+    };
+
+    const getCaseSwitcherEntries = () => {
+        const store = getStore();
+        if (!store || typeof store.getCases !== 'function') return [];
+        return store.getCases()
+            .map((entry) => ({
+                id: String(entry && entry.id || '').trim(),
+                name: String(entry && entry.name || entry && entry.id || '').trim()
+            }))
+            .filter((entry) => entry.id);
+    };
+
+    const switchVTTCase = (caseId) => {
+        const store = getStore();
+        const targetId = String(caseId || '').trim();
+        if (!targetId || !store || typeof store.setActiveCase !== 'function') return false;
+        if (targetId === getActiveCaseId()) return true;
+        if (!store.setActiveCase(targetId)) return false;
+
+        clearTokenPortraitPreview();
+        closeQuickSpawnMenu();
+        closeStageContextMenu();
+        closeTokenInspectorPopover();
+        closeSheetActionPopover();
+        closeNPCRollPopover();
+        selectedTokenId = '';
+        selectedEntryId = '';
+        selectedTemplateId = '';
+        selectedEvidenceNoteId = '';
+        selectedClockId = '';
+        pendingRemoteVTTSnapshot = null;
+        dragState = null;
+        panState = null;
+        fitViewOnNextMapLoad = true;
+
+        loadUIPreferences();
+        loadRolePreference();
+
+        const nextSnapshot = deepClone(store.getVTTState(targetId));
+        vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, {
+            persist: false,
+            reason: 'case-switch'
+        }).snapshot;
+        normalizeSelections();
+        render();
+
+        refreshVTTCollabRoomIfNeeded().catch((err) => {
+            console.warn('VTT case room switch failed', err);
+        });
+        return true;
     };
 
     const readProcessedRollIds = () => {
@@ -5091,6 +5171,7 @@
         const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
             ? store.normalizeVTTStateSnapshot(payload)
             : deepClone(payload);
+        const changedSceneIds = getSnapshotChangedSceneIds(vttState, clean);
         if (initialVTTLoadPending) {
             initialVTTLoadPending = false;
         }
@@ -5103,7 +5184,7 @@
         queueRemoteTweensFromSnapshots(vttState, clean);
         pendingRemoteVTTSnapshot = null;
         vttState = deepClone(synced.snapshot);
-        maybeFollowRemoteActivityForDM(new Set([getSharedSceneId(vttState)]), vttState);
+        maybeFollowRemoteActivityForDM(changedSceneIds, vttState);
         normalizeSelections();
         render();
     };
@@ -5114,11 +5195,12 @@
             ? vttCollabSession.getSnapshot()
             : null;
         const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : pendingRemoteVTTSnapshot;
+        const changedSceneIds = getSnapshotChangedSceneIds(vttState, nextSnapshot);
         queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
         const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
         vttState = deepClone(synced.snapshot);
         pendingRemoteVTTSnapshot = null;
-        maybeFollowRemoteActivityForDM(new Set([getSharedSceneId(vttState)]), vttState);
+        maybeFollowRemoteActivityForDM(changedSceneIds, vttState);
         normalizeSelections();
         render();
         return true;
@@ -7632,6 +7714,8 @@
     const renderSceneList = () => {
         if (!sceneListEl) return;
         const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
+        const cases = getCaseSwitcherEntries();
+        const activeCaseId = getActiveCaseId();
         const sharedSceneId = getSharedSceneId(vttState);
         const viewedSceneId = getViewedSceneId(vttState, localRole);
         const sharedScene = getSceneById(sharedSceneId, vttState);
@@ -7643,6 +7727,16 @@
         sceneListEl.innerHTML = scenes.length
             ? `
                 <div class="vtt-scene-manager">
+                    <div class="vtt-scene-select-grid vtt-case-select-grid">
+                        <label class="vtt-field vtt-field-tight vtt-scene-select-field">
+                            <span>DM Case</span>
+                            <select data-case-picker="active"${cases.length ? '' : ' disabled'}>
+                                ${cases.length ? cases.map((entry) => `
+                                    <option value="${escapeHtml(entry.id)}"${entry.id === activeCaseId ? ' selected' : ''}>${escapeHtml(entry.name || entry.id)}</option>
+                                `).join('') : '<option>No cases available</option>'}
+                            </select>
+                        </label>
+                    </div>
                     <div class="vtt-scene-select-grid">
                         <label class="vtt-field vtt-field-tight vtt-scene-select-field">
                             <span>DM View</span>
@@ -10760,6 +10854,14 @@
         }
         if (event.type === 'input' && target instanceof HTMLInputElement) return;
         if (event.type === 'input' && target instanceof HTMLTextAreaElement) return;
+
+        if (target instanceof HTMLSelectElement && target.dataset.casePicker) {
+            if (event.type !== 'change') return;
+            if (!isDM()) return;
+            const caseId = String(target.value || '').trim();
+            if (!switchVTTCase(caseId)) renderSceneList();
+            return;
+        }
 
         if (target instanceof HTMLSelectElement && target.dataset.scenePicker) {
             if (event.type !== 'change') return;
