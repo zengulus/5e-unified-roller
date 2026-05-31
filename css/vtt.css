@@ -990,10 +990,6 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-note-layer {
     pointer-events: none;
-    z-index: 2;
-}
-
-.vtt-note-layer:has(.vtt-map-note:hover) {
     z-index: 6;
 }
 

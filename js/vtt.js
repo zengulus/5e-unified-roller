@@ -8,7 +8,8 @@
     const STORE_UPDATED_EVENT = 'rtf-store-updated';
     const DEFAULT_WORLD_SIZE = { width: 2400, height: 1600 };
     const DRAG_SYNC_INTERVAL_MS = 120;
-    const REMOTE_TOKEN_TWEEN_MS = 180;
+    const REMOTE_TOKEN_TWEEN_MS = 240;
+    const LOCAL_DRAG_TWEEN_SUPPRESS_MS = 1200;
     const TOKEN_DOUBLE_CLICK_MS = 320;
     const TOKEN_PORTRAIT_PREVIEW_MS = 3000;
     const TOKEN_CLICK_MOVE_PX = 5;
@@ -229,6 +230,7 @@
     let lastTokenPointerDownAt = 0;
     let lastStageToolPointerDownState = null;
     let remoteTokenTweens = new Map();
+    let localDragTweenSuppressions = new Map();
     let remoteTokenTweenFrame = 0;
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
     let localPingVariant = 'attention';
@@ -2253,6 +2255,22 @@
     };
     const buildRemoteTokenTweenKey = (sceneId, tokenId) => `${String(sceneId || '').trim()}::${String(tokenId || '').trim()}`;
     const easeRemoteTokenTween = (progress) => 1 - Math.pow(1 - clamp(progress, 0, 1), 3);
+    const suppressLocalDragTween = (sceneId, tokenId, durationMs = LOCAL_DRAG_TWEEN_SUPPRESS_MS) => {
+        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
+        if (!key || key === '::') return;
+        localDragTweenSuppressions.set(key, Date.now() + Math.max(1, Math.round(toNumber(durationMs, LOCAL_DRAG_TWEEN_SUPPRESS_MS))));
+        remoteTokenTweens.delete(key);
+    };
+    const isLocalDragTweenSuppressed = (sceneId, tokenId, now = Date.now()) => {
+        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
+        const expiresAt = localDragTweenSuppressions.get(key);
+        if (!expiresAt) return false;
+        if (now > expiresAt) {
+            localDragTweenSuppressions.delete(key);
+            return false;
+        }
+        return true;
+    };
     const normalizeRemoteTokenFacingDeg = (value) => {
         if (value === null || value === undefined || value === '') return null;
         const parsed = Number(value);
@@ -2292,28 +2310,56 @@
             if (hasActiveSceneRemoteTweens()) scheduleRemoteTokenTweenRender();
         });
     };
+    const getRemoteTokenTweenProgress = (tween, now = Date.now()) => {
+        if (!tween || !Number.isFinite(tween.startedAt) || !Number.isFinite(tween.durationMs) || tween.durationMs <= 0) return 1;
+        return easeRemoteTokenTween((now - tween.startedAt) / tween.durationMs);
+    };
+    const getRemoteTokenTweenCurrentPosition = (tween, now = Date.now()) => {
+        if (!tween) return null;
+        const progress = getRemoteTokenTweenProgress(tween, now);
+        return {
+            x: Math.round((tween.fromX + (tween.toX - tween.fromX) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION,
+            y: Math.round((tween.fromY + (tween.toY - tween.fromY) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION
+        };
+    };
+    const getRemoteTokenTweenCurrentFacingDeg = (tween, now = Date.now()) => {
+        if (!tween || tween.fromFacingDeg === null || tween.toFacingDeg === null) return null;
+        const progress = getRemoteTokenTweenProgress(tween, now);
+        return normalizeAngleDeg(tween.fromFacingDeg + getAngleTweenDeltaDeg(tween.fromFacingDeg, tween.toFacingDeg) * progress);
+    };
     const queueRemoteTokenTween = (sceneId, tokenId, fromX, fromY, toX, toY, fromFacingDegRaw = null, toFacingDegRaw = null) => {
         const cleanSceneId = String(sceneId || '').trim();
         const cleanTokenId = String(tokenId || '').trim();
         if (!cleanSceneId || !cleanTokenId) return;
         const tweenKey = buildRemoteTokenTweenKey(cleanSceneId, cleanTokenId);
+        const now = Date.now();
+        if (isLocalDragTweenSuppressed(cleanSceneId, cleanTokenId, now)) {
+            remoteTokenTweens.delete(tweenKey);
+            return;
+        }
+        const previousTween = remoteTokenTweens.get(tweenKey);
+        const currentPosition = previousTween ? getRemoteTokenTweenCurrentPosition(previousTween, now) : null;
         const fromFacingDeg = normalizeRemoteTokenFacingDeg(fromFacingDegRaw);
         const toFacingDeg = normalizeRemoteTokenFacingDeg(toFacingDegRaw);
-        const facingDelta = Math.abs(getAngleTweenDeltaDeg(fromFacingDeg, toFacingDeg));
-        if (fromX === toX && fromY === toY && facingDelta <= 0.001) {
+        const currentFacingDeg = previousTween ? getRemoteTokenTweenCurrentFacingDeg(previousTween, now) : null;
+        const startX = currentPosition ? currentPosition.x : fromX;
+        const startY = currentPosition ? currentPosition.y : fromY;
+        const startFacingDeg = currentFacingDeg === null ? fromFacingDeg : currentFacingDeg;
+        const facingDelta = Math.abs(getAngleTweenDeltaDeg(startFacingDeg, toFacingDeg));
+        if (startX === toX && startY === toY && facingDelta <= 0.001) {
             remoteTokenTweens.delete(tweenKey);
             return;
         }
         remoteTokenTweens.set(tweenKey, {
             sceneId: cleanSceneId,
             tokenId: cleanTokenId,
-            fromX,
-            fromY,
+            fromX: startX,
+            fromY: startY,
             toX,
             toY,
-            fromFacingDeg,
+            fromFacingDeg: startFacingDeg,
             toFacingDeg,
-            startedAt: Date.now(),
+            startedAt: now,
             durationMs: REMOTE_TOKEN_TWEEN_MS
         });
         scheduleRemoteTokenTweenRender();
@@ -2357,11 +2403,7 @@
                 y: normalizeTokenCoordinate(token.y, 0)
             };
         }
-        const progress = easeRemoteTokenTween((now - tween.startedAt) / tween.durationMs);
-        return {
-            x: Math.round((tween.fromX + (tween.toX - tween.fromX) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION,
-            y: Math.round((tween.fromY + (tween.toY - tween.fromY) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION
-        };
+        return getRemoteTokenTweenCurrentPosition(tween, now);
     };
     const getRenderableTokenFacingDeg = (token, scene, now = Date.now()) => {
         if (!token || !scene || !token.vision) return getTokenVisionFacingDeg(token);
@@ -2370,8 +2412,7 @@
         if (!tween || now >= tween.startedAt + tween.durationMs || tween.fromFacingDeg === null || tween.toFacingDeg === null) {
             return getTokenVisionFacingDeg(token);
         }
-        const progress = easeRemoteTokenTween((now - tween.startedAt) / tween.durationMs);
-        return normalizeAngleDeg(tween.fromFacingDeg + getAngleTweenDeltaDeg(tween.fromFacingDeg, tween.toFacingDeg) * progress);
+        return getRemoteTokenTweenCurrentFacingDeg(tween, now);
     };
     const getRenderableVisionToken = (token, scene, now = Date.now()) => {
         if (!token || !token.vision) return token;
@@ -11965,6 +12006,7 @@
         let appliedRemoteSnapshot = false;
         if (dragState) {
             const completedDragState = { ...dragState };
+            const completedDragSceneId = getActiveScene(vttState) ? getActiveScene(vttState).id : '';
             if (event && !completedDragState.moved) {
                 const moveDistance = Math.hypot(
                     event.clientX - toNumber(completedDragState.startClientX, event.clientX),
@@ -11972,6 +12014,7 @@
                 );
                 completedDragState.moved = moveDistance > TOKEN_CLICK_MOVE_PX;
             }
+            suppressLocalDragTween(completedDragSceneId, completedDragState.tokenId);
             markTokenVisualEffect(completedDragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
             syncDraggedState(true);
             lastDragSyncAt = 0;
