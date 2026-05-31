@@ -8935,6 +8935,7 @@
         if (token && token.id === options.activeTurnTokenId) classes.push('is-active-turn');
         if (options.isHiddenToPlayers) classes.push('is-hidden');
         if (token && token.id === previewTokenId) classes.push('is-preview-open');
+        if (token && dragState && String(dragState.tokenId || '').trim() === String(token.id || '').trim()) classes.push('is-dragging');
         if (activeProximityPrompt && activeProximityPrompt.sourceKind === 'token' && token && String(activeProximityPrompt.sourceId || '').trim() === String(token.id || '').trim()) {
             classes.push('is-proximity-source');
         }
