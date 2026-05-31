@@ -2412,6 +2412,20 @@
         }
         return null;
     };
+    const getTokenElementAtClientPoint = (clientX, clientY, target = null) => {
+        if (target instanceof Element) {
+            const directMatch = target.closest('.vtt-token');
+            if (directMatch) return directMatch;
+        }
+        if (typeof document.elementsFromPoint !== 'function') return null;
+        const hitElements = document.elementsFromPoint(clientX, clientY);
+        for (const hitEl of hitElements) {
+            if (!(hitEl instanceof Element)) continue;
+            const tokenEl = hitEl.closest('.vtt-token');
+            if (tokenEl) return tokenEl;
+        }
+        return null;
+    };
     const getTemplateElementAtClientPoint = (clientX, clientY, target = null) => {
         if (target instanceof Element) {
             const directMatch = target.closest('.vtt-area-template');
@@ -11350,6 +11364,51 @@
         }
     };
 
+    const beginTokenPointerInteraction = (event, scene, worldPoint, tokenEl) => {
+        if (!tokenEl) return false;
+        const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
+        if (!token) return false;
+        const canMoveToken = canRoleMoveToken(token, localRole);
+        const now = Date.now();
+        const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
+        lastTokenPointerDownId = token.id;
+        lastTokenPointerDownAt = now;
+        activateTokenSelection(token.id);
+        renderInitiativeList();
+        renderInitiativeDetail();
+        renderTokenInspector();
+        renderToolsMenu();
+        if (isDoublePress && canMoveToken) {
+            lastTokenPointerDownId = '';
+            lastTokenPointerDownAt = 0;
+            snapTokenToGrid(token.id);
+            return true;
+        }
+        if (!canMoveToken) {
+            showTokenPortraitPreview(token.id);
+            renderStage();
+            return true;
+        }
+        if (!canMutateLiveVTTState('token-drag-start')) {
+            renderStage();
+            return true;
+        }
+        const anchorX = (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x;
+        const anchorY = (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y;
+        remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, token.id));
+        dragState = {
+            tokenId: token.id,
+            anchorX,
+            anchorY,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            moved: false
+        };
+        lastDragSyncAt = 0;
+        renderStage();
+        return true;
+    };
+
     const handleStagePointerDown = (event) => {
         const targetEl = getEventTargetElement(event);
         if (!targetEl) return;
@@ -11408,6 +11467,13 @@
             } else {
                 queueSharedPing(scene, worldPoint, getPingVariantOptions(event));
             }
+            event.preventDefault();
+            return;
+        }
+        const tokenElAtPoint = localToolState.mode === TOOL_MODE_NAVIGATE
+            ? getTokenElementAtClientPoint(event.clientX, event.clientY, targetEl)
+            : null;
+        if (tokenElAtPoint && beginTokenPointerInteraction(event, scene, worldPoint, tokenElAtPoint)) {
             event.preventDefault();
             return;
         }
@@ -11584,55 +11650,6 @@
             templateRotateState = null;
             visionConeRotateState = null;
             renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        const tokenEl = targetEl.closest('.vtt-token');
-        if (tokenEl) {
-            const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
-            if (!token) return;
-            const canMoveToken = canRoleMoveToken(token, localRole);
-            const now = Date.now();
-            const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
-            lastTokenPointerDownId = token.id;
-            lastTokenPointerDownAt = now;
-            activateTokenSelection(token.id);
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderToolsMenu();
-            if (isDoublePress && canMoveToken) {
-                lastTokenPointerDownId = '';
-                lastTokenPointerDownAt = 0;
-                event.preventDefault();
-                snapTokenToGrid(token.id);
-                return;
-            }
-            if (!canMoveToken) {
-                showTokenPortraitPreview(token.id);
-                renderStage();
-                event.preventDefault();
-                return;
-            }
-            if (!canMutateLiveVTTState('token-drag-start')) {
-                renderStage();
-                event.preventDefault();
-                return;
-            }
-            const anchorX = (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x;
-            const anchorY = (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y;
-            remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, token.id));
-            dragState = {
-                tokenId: token.id,
-                anchorX,
-                anchorY,
-                startClientX: event.clientX,
-                startClientY: event.clientY,
-                moved: false
-            };
-            lastDragSyncAt = 0;
             renderStage();
             event.preventDefault();
             return;
