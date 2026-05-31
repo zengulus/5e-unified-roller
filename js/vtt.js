@@ -8836,16 +8836,23 @@
         const highlightColor = getEvidenceNoteHighlightColor(note);
         const highlightRgb = getEvidenceNoteHighlightRgb(note);
         const kicker = note.hidden ? `DM Only · ${categoryLabel}` : categoryLabel;
+        const isPin = isEvidenceNotePin(note);
+        const noteX = toNumber(note.x, 0);
+        const noteY = toNumber(note.y, 0);
+        const noteW = Math.max(1, toNumber(note.w, 1));
+        const noteH = Math.max(1, toNumber(note.h, 1));
+        const worldLeft = isPin ? noteX - noteW / 2 : noteX;
+        const worldTop = isPin ? noteY - noteH / 2 : noteY;
         return `
             <div class="${classes.join(' ')}"
                 data-note-id="${escapeHtml(String(note.id || ''))}"
                 data-note-shape="${escapeHtml(normalizeEvidenceNoteShape(note.shape, EVIDENCE_NOTE_SHAPE_ZONE))}"
                 data-note-category="${escapeHtml(category)}"
                 data-note-title="${escapeHtml(displayTitle)}"
-                data-world-left="${escapeHtml(String(note.x || 0))}"
-                data-world-top="${escapeHtml(String(note.y || 0))}"
-                data-world-width="${escapeHtml(String(note.w || 1))}"
-                data-world-height="${escapeHtml(String(note.h || 1))}"
+                data-world-left="${escapeHtml(String(worldLeft))}"
+                data-world-top="${escapeHtml(String(worldTop))}"
+                data-world-width="${escapeHtml(String(noteW))}"
+                data-world-height="${escapeHtml(String(noteH))}"
                 style="--vtt-note-color:${escapeHtml(highlightColor)};--vtt-note-rgb:${escapeHtml(highlightRgb)};">
                 <div class="vtt-map-note-chip">
                     <span class="vtt-map-note-kicker">${escapeHtml(kicker)}</span>
