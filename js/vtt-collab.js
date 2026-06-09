@@ -177,6 +177,11 @@ const fallbackSnapshot = () => ({
                     passive: '',
                     tense: '',
                     active: ''
+                },
+                titles: {
+                    passive: '',
+                    tense: '',
+                    active: ''
                 }
             },
             tokens: [],
@@ -433,11 +438,15 @@ const serializeYGridMap = (record, key) => {
 const syncYMusicMap = (record, key, music) => {
     const musicMap = ensureYMapEntry(record, key);
     const tracks = music && music.tracks && typeof music.tracks === 'object' ? music.tracks : {};
+    const titles = music && music.titles && typeof music.titles === 'object' ? music.titles : {};
     setYScalar(musicMap, 'tension', toTrimmedString(music && music.tension, 'passive', 20).trim() || 'passive');
     setYScalar(musicMap, 'passive', toTrimmedString(tracks.passive || music && music.passive, '', 4000));
     setYScalar(musicMap, 'tense', toTrimmedString(tracks.tense || music && music.tense, '', 4000));
     setYScalar(musicMap, 'active', toTrimmedString(tracks.active || music && music.active, '', 4000));
-    removeExtraneousMapKeys(musicMap, new Set(['tension', 'passive', 'tense', 'active']));
+    setYScalar(musicMap, 'passiveTitle', toTrimmedString(titles.passive || music && music.passiveTitle, '', 160));
+    setYScalar(musicMap, 'tenseTitle', toTrimmedString(titles.tense || music && music.tenseTitle, '', 160));
+    setYScalar(musicMap, 'activeTitle', toTrimmedString(titles.active || music && music.activeTitle, '', 160));
+    removeExtraneousMapKeys(musicMap, new Set(['tension', 'passive', 'tense', 'active', 'passiveTitle', 'tenseTitle', 'activeTitle']));
 };
 
 const serializeYMusicMap = (record, key) => {
@@ -448,6 +457,11 @@ const serializeYMusicMap = (record, key) => {
             passive: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('passive') : '', '', 4000),
             tense: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('tense') : '', '', 4000),
             active: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('active') : '', '', 4000)
+        },
+        titles: {
+            passive: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('passiveTitle') : '', '', 160),
+            tense: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('tenseTitle') : '', '', 160),
+            active: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('activeTitle') : '', '', 160)
         }
     };
 };

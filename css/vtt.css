@@ -246,6 +246,53 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     white-space: nowrap;
 }
 
+.vtt-audio-copy small {
+    overflow: hidden;
+    color: rgba(188, 203, 222, 0.82);
+    font-size: 0.68rem;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-audio-play-btn,
+.vtt-audio-stop-btn {
+    min-height: 34px;
+    padding: 0.45rem 0.72rem;
+    border: 1px solid rgba(var(--accent-rgb, 78, 205, 196), 0.38);
+    border-radius: 7px;
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.14);
+    color: rgba(244, 250, 255, 0.96);
+    font: inherit;
+    font-size: 0.76rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.vtt-audio-stop-btn {
+    width: max-content;
+    min-height: 28px;
+    padding: 0.32rem 0.58rem;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.vtt-audio-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.vtt-audio-play-btn:hover,
+.vtt-audio-play-btn:focus-visible,
+.vtt-audio-stop-btn:hover,
+.vtt-audio-stop-btn:focus-visible {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.62);
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.22);
+}
+
 .vtt-youtube-embed-crop {
     position: relative;
     overflow: hidden;
@@ -262,6 +309,25 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     width: 100%;
     height: 122px;
     border: 0;
+    pointer-events: none;
+}
+
+.vtt-youtube-hidden-frame {
+    position: fixed;
+    left: -2px;
+    bottom: -2px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.vtt-youtube-hidden-frame iframe {
+    width: 1px;
+    height: 1px;
+    border: 0;
+    pointer-events: none;
 }
 
 .vtt-shell {

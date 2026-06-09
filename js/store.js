@@ -227,6 +227,11 @@
                             passive: '',
                             tense: '',
                             active: ''
+                        },
+                        titles: {
+                            passive: '',
+                            tense: '',
+                            active: ''
                         }
                     },
                     tokens: [],
@@ -714,12 +719,18 @@
     const sanitizeVTTMusic = (music) => {
         const source = music && typeof music === 'object' ? music : {};
         const tracksSource = source.tracks && typeof source.tracks === 'object' ? source.tracks : {};
+        const titlesSource = source.titles && typeof source.titles === 'object' ? source.titles : {};
         return {
             tension: sanitizeVTTMusicTension(source.tension),
             tracks: {
                 passive: sanitizeYouTubeTrackUrl(tracksSource.passive || source.passive),
                 tense: sanitizeYouTubeTrackUrl(tracksSource.tense || source.tense),
                 active: sanitizeYouTubeTrackUrl(tracksSource.active || source.active)
+            },
+            titles: {
+                passive: toTrimmedString(titlesSource.passive || source.passiveTitle, '', 160).trim(),
+                tense: toTrimmedString(titlesSource.tense || source.tenseTitle, '', 160).trim(),
+                active: toTrimmedString(titlesSource.active || source.activeTitle, '', 160).trim()
             }
         };
     };
@@ -1841,6 +1852,9 @@
             || !!toTrimmedString(scene && scene.music && scene.music.tracks && scene.music.tracks.passive, '', 4000).trim()
             || !!toTrimmedString(scene && scene.music && scene.music.tracks && scene.music.tracks.tense, '', 4000).trim()
             || !!toTrimmedString(scene && scene.music && scene.music.tracks && scene.music.tracks.active, '', 4000).trim()
+            || !!toTrimmedString(scene && scene.music && scene.music.titles && scene.music.titles.passive, '', 160).trim()
+            || !!toTrimmedString(scene && scene.music && scene.music.titles && scene.music.titles.tense, '', 160).trim()
+            || !!toTrimmedString(scene && scene.music && scene.music.titles && scene.music.titles.active, '', 160).trim()
             || !!toTrimmedString(scene && scene.name, '', 160).trim()
         ));
         const initiative = vtt && vtt.initiative && typeof vtt.initiative === 'object' ? vtt.initiative : {};
