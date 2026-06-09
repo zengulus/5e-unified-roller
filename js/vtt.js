@@ -503,7 +503,7 @@
         const tracks = {};
         const titles = {};
         MUSIC_TENSION_LEVELS.forEach((level) => {
-            tracks[level] = normalizeYouTubeUrl(sourceTracks[level] || source[level]);
+            tracks[level] = String(sourceTracks[level] || source[level] || '').trim().slice(0, 4000);
             titles[level] = String(sourceTitles[level] || source[`${level}Title`] || '').trim().slice(0, 160);
         });
         return {
@@ -11193,10 +11193,7 @@
                     return;
                 }
                 if (trackLevel && target instanceof HTMLInputElement) {
-                    const rawValue = String(target.value || '').trim();
-                    const nextUrl = normalizeYouTubeUrl(rawValue);
-                    if (event.type === 'input' && rawValue && !nextUrl) return;
-                    scene.music.tracks[trackLevel] = nextUrl;
+                    scene.music.tracks[trackLevel] = String(target.value || '').trim().slice(0, 4000);
                     return;
                 }
                 if (titleLevel && target instanceof HTMLInputElement) {
