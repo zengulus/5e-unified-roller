@@ -246,6 +246,7 @@
     let lastStageToolPointerDownState = null;
     let remoteTokenTweens = new Map();
     let localDragTweenSuppressions = new Map();
+    let recentLocalDragDrops = new Map();
     let remoteTokenTweenFrame = 0;
     let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
     let localPingVariant = 'attention';
@@ -318,6 +319,7 @@
     const initiativeListEl = document.getElementById('vtt-initiative-list');
     const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
     const sceneListEl = document.getElementById('vtt-scene-list');
+    const sceneMusicEditorEl = document.querySelector('.vtt-scene-music-editor');
     const playerSpawnListEl = document.getElementById('vtt-player-spawn-list');
     const npcSearchToggleEl = document.getElementById('vtt-npc-search-toggle');
     const npcSearchPopoverEl = document.getElementById('vtt-npc-search-popover');
@@ -482,6 +484,10 @@
         const clean = String(value || '').trim().toLowerCase();
         if (MUSIC_TENSION_LEVELS.includes(clean)) return clean;
         return MUSIC_TENSION_LEVELS.includes(fallback) ? fallback : 'passive';
+    };
+    const normalizeOptionalMusicTension = (value) => {
+        const clean = String(value || '').trim().toLowerCase();
+        return MUSIC_TENSION_LEVELS.includes(clean) ? clean : '';
     };
     const normalizeYouTubeUrl = (value) => {
         const raw = String(value || '').trim();
@@ -2360,6 +2366,47 @@
             return false;
         }
         return true;
+    };
+    const rememberRecentLocalDragDrop = (sceneId, tokenId, x, y, durationMs = LOCAL_DRAG_TWEEN_SUPPRESS_MS) => {
+        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
+        if (!key) return;
+        recentLocalDragDrops.set(key, {
+            sceneId: String(sceneId || '').trim(),
+            tokenId: String(tokenId || '').trim(),
+            x: normalizeTokenCoordinate(x, 0),
+            y: normalizeTokenCoordinate(y, 0),
+            expiresAt: Date.now() + Math.max(1, Math.round(toNumber(durationMs, LOCAL_DRAG_TWEEN_SUPPRESS_MS)))
+        });
+    };
+    const getRecentLocalDragDrop = (sceneId, tokenId, now = Date.now()) => {
+        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
+        if (!key) return null;
+        const entry = recentLocalDragDrops.get(key);
+        if (!entry) return null;
+        if (now > entry.expiresAt) {
+            recentLocalDragDrops.delete(key);
+            return null;
+        }
+        return entry;
+    };
+    const reconcileSnapshotWithRecentLocalDragDrops = (snapshot) => {
+        if (!snapshot || !Array.isArray(snapshot.scenes) || !recentLocalDragDrops.size) return snapshot;
+        const now = Date.now();
+        snapshot.scenes.forEach((scene) => {
+            const sceneId = String(scene && scene.id || '').trim();
+            if (!sceneId || !Array.isArray(scene.tokens)) return;
+            scene.tokens.forEach((token) => {
+                const tokenId = String(token && token.id || '').trim();
+                const drop = getRecentLocalDragDrop(sceneId, tokenId, now);
+                if (!drop || !token) return;
+                const tokenX = normalizeTokenCoordinate(token.x, drop.x);
+                const tokenY = normalizeTokenCoordinate(token.y, drop.y);
+                if (tokenX === drop.x && tokenY === drop.y) return;
+                token.x = drop.x;
+                token.y = drop.y;
+            });
+        });
+        return snapshot;
     };
     const normalizeRemoteTokenFacingDeg = (value) => {
         if (value === null || value === undefined || value === '') return null;
@@ -5316,6 +5363,7 @@
         const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
             ? store.normalizeVTTStateSnapshot(payload)
             : deepClone(payload);
+        reconcileSnapshotWithRecentLocalDragDrops(clean);
         const changedSceneIds = getSnapshotChangedSceneIds(vttState, clean);
         if (initialVTTLoadPending) {
             initialVTTLoadPending = false;
@@ -5340,6 +5388,7 @@
             ? vttCollabSession.getSnapshot()
             : null;
         const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : pendingRemoteVTTSnapshot;
+        reconcileSnapshotWithRecentLocalDragDrops(nextSnapshot);
         const changedSceneIds = getSnapshotChangedSceneIds(vttState, nextSnapshot);
         queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
         const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
@@ -5367,6 +5416,7 @@
             const nextSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
                 ? store.normalizeVTTStateSnapshot(meta.snapshot)
                 : meta.snapshot;
+            reconcileSnapshotWithRecentLocalDragDrops(nextSnapshot);
             if (initialVTTLoadPending) {
                 initialVTTLoadPending = false;
             }
@@ -5404,6 +5454,10 @@
             const fromY = normalizeTokenCoordinate(token.y, token.y);
             const nextX = normalizeTokenCoordinate(change.x, token.x);
             const nextY = normalizeTokenCoordinate(change.y, token.y);
+            const recentDrop = getRecentLocalDragDrop(scene.id, token.id);
+            if (recentDrop && (nextX !== recentDrop.x || nextY !== recentDrop.y)) {
+                return;
+            }
             if (token.x === nextX && token.y === nextY) return;
             token.x = nextX;
             token.y = nextY;
@@ -11155,6 +11209,50 @@
         renderNPCSearchPopover();
     };
 
+    const commitSceneMusicField = (target) => {
+        if (!target || !(target instanceof HTMLElement)) return false;
+        if (!isDM()) return false;
+        if (!(target.dataset.sceneMusicField || target.dataset.sceneMusicTrack || target.dataset.sceneMusicTitle)) return false;
+        const field = String(target.dataset.sceneMusicField || '').trim();
+        const trackLevel = normalizeOptionalMusicTension(target.dataset.sceneMusicTrack);
+        const titleLevel = normalizeOptionalMusicTension(target.dataset.sceneMusicTitle);
+        return withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene) return;
+            scene.music = normalizeSceneMusic(scene.music);
+            if (field === 'tension' && target instanceof HTMLSelectElement) {
+                scene.music.tension = normalizeMusicTension(target.value, scene.music.tension);
+                return;
+            }
+            if (trackLevel && target instanceof HTMLInputElement) {
+                scene.music.tracks[trackLevel] = String(target.value || '').trim().slice(0, 4000);
+                return;
+            }
+            if (titleLevel && target instanceof HTMLInputElement) {
+                scene.music.titles[titleLevel] = String(target.value || '').trim().slice(0, 160);
+            }
+        }, { reason: 'scene-music-edit' });
+    };
+
+    const handleSceneMusicEditorInput = (event) => {
+        event.stopPropagation();
+    };
+
+    const handleSceneMusicEditorChange = (event) => {
+        event.stopPropagation();
+        commitSceneMusicField(event.target);
+    };
+
+    const handleSceneMusicEditorKeyDown = (event) => {
+        if (event.key !== 'Enter') return;
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+        if (!(target.dataset.sceneMusicField || target.dataset.sceneMusicTrack || target.dataset.sceneMusicTitle)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        commitSceneMusicField(target);
+    };
+
     const handleFieldChange = (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
@@ -11176,30 +11274,6 @@
         if (target.dataset.proximityTriggerField !== undefined) {
             if (event.type === 'input' && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
             handleProximityTriggerFieldChange(target);
-            return;
-        }
-
-        if (target.dataset.sceneMusicField || target.dataset.sceneMusicTrack || target.dataset.sceneMusicTitle) {
-            if (!isDM()) return;
-            const field = String(target.dataset.sceneMusicField || '').trim();
-            const trackLevel = normalizeMusicTension(target.dataset.sceneMusicTrack || '', '');
-            const titleLevel = normalizeMusicTension(target.dataset.sceneMusicTitle || '', '');
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.music = normalizeSceneMusic(scene.music);
-                if (field === 'tension' && target instanceof HTMLSelectElement) {
-                    scene.music.tension = normalizeMusicTension(target.value, scene.music.tension);
-                    return;
-                }
-                if (trackLevel && target instanceof HTMLInputElement) {
-                    scene.music.tracks[trackLevel] = String(target.value || '').trim().slice(0, 4000);
-                    return;
-                }
-                if (titleLevel && target instanceof HTMLInputElement) {
-                    scene.music.titles[titleLevel] = String(target.value || '').trim().slice(0, 160);
-                }
-            });
             return;
         }
 
@@ -12311,6 +12385,10 @@
                 completedDragState.moved = moveDistance > TOKEN_CLICK_MOVE_PX;
             }
             suppressLocalDragTween(completedDragSceneId, completedDragState.tokenId);
+            const completedToken = getTokenById(completedDragState.tokenId, vttState);
+            if (completedToken) {
+                rememberRecentLocalDragDrop(completedDragSceneId, completedDragState.tokenId, completedToken.x, completedToken.y);
+            }
             markTokenVisualEffect(completedDragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
             syncDraggedState(true);
             lastDragSyncAt = 0;
@@ -12584,6 +12662,11 @@
         document.addEventListener('keydown', handleDocumentKeyDown);
         document.addEventListener('input', handleFieldChange);
         document.addEventListener('change', handleFieldChange);
+        if (sceneMusicEditorEl) {
+            sceneMusicEditorEl.addEventListener('input', handleSceneMusicEditorInput, true);
+            sceneMusicEditorEl.addEventListener('change', handleSceneMusicEditorChange, true);
+            sceneMusicEditorEl.addEventListener('keydown', handleSceneMusicEditorKeyDown, true);
+        }
         if (dmUnlockFormEl) {
             dmUnlockFormEl.addEventListener('submit', (event) => {
                 event.preventDefault();

@@ -703,19 +703,7 @@
         const token = String(value || '').trim().toLowerCase();
         return VTT_MUSIC_TENSIONS.has(token) ? token : (VTT_MUSIC_TENSIONS.has(fallback) ? fallback : 'passive');
     };
-    const sanitizeYouTubeTrackUrl = (value) => {
-        const candidate = toSharedVTTMediaUrl(value);
-        if (!candidate) return '';
-        try {
-            const parsed = new URL(candidate);
-            const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
-            if (host === 'youtu.be' || host.endsWith('.youtu.be')) return parsed.href;
-            if (host === 'youtube.com' || host.endsWith('.youtube.com')) return parsed.href;
-        } catch (err) {
-            return '';
-        }
-        return '';
-    };
+    const sanitizeVTTMusicTrack = (value) => toTrimmedString(value, '', 4000).trim();
     const sanitizeVTTMusic = (music) => {
         const source = music && typeof music === 'object' ? music : {};
         const tracksSource = source.tracks && typeof source.tracks === 'object' ? source.tracks : {};
@@ -723,9 +711,9 @@
         return {
             tension: sanitizeVTTMusicTension(source.tension),
             tracks: {
-                passive: sanitizeYouTubeTrackUrl(tracksSource.passive || source.passive),
-                tense: sanitizeYouTubeTrackUrl(tracksSource.tense || source.tense),
-                active: sanitizeYouTubeTrackUrl(tracksSource.active || source.active)
+                passive: sanitizeVTTMusicTrack(tracksSource.passive || source.passive),
+                tense: sanitizeVTTMusicTrack(tracksSource.tense || source.tense),
+                active: sanitizeVTTMusicTrack(tracksSource.active || source.active)
             },
             titles: {
                 passive: toTrimmedString(titlesSource.passive || source.passiveTitle, '', 160).trim(),
