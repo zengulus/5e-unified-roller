@@ -221,6 +221,14 @@
                         cellDistance: 5
                     },
                     stealthMode: false,
+                    music: {
+                        tension: 'passive',
+                        tracks: {
+                            passive: '',
+                            tense: '',
+                            active: ''
+                        }
+                    },
                     tokens: [],
                     templates: [],
                     evidenceNotes: [],
@@ -685,6 +693,36 @@
 
     const sanitizeVTTTokenMoodEmoji = (value) => toTrimmedString(value, '', 16).trim();
     const sanitizeVTTTokenMoodLabel = (value) => toTrimmedString(value, '', 40).trim();
+    const VTT_MUSIC_TENSIONS = new Set(['passive', 'tense', 'active']);
+    const sanitizeVTTMusicTension = (value, fallback = 'passive') => {
+        const token = String(value || '').trim().toLowerCase();
+        return VTT_MUSIC_TENSIONS.has(token) ? token : (VTT_MUSIC_TENSIONS.has(fallback) ? fallback : 'passive');
+    };
+    const sanitizeYouTubeTrackUrl = (value) => {
+        const candidate = toSharedVTTMediaUrl(value);
+        if (!candidate) return '';
+        try {
+            const parsed = new URL(candidate);
+            const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+            if (host === 'youtu.be' || host.endsWith('.youtu.be')) return parsed.href;
+            if (host === 'youtube.com' || host.endsWith('.youtube.com')) return parsed.href;
+        } catch (err) {
+            return '';
+        }
+        return '';
+    };
+    const sanitizeVTTMusic = (music) => {
+        const source = music && typeof music === 'object' ? music : {};
+        const tracksSource = source.tracks && typeof source.tracks === 'object' ? source.tracks : {};
+        return {
+            tension: sanitizeVTTMusicTension(source.tension),
+            tracks: {
+                passive: sanitizeYouTubeTrackUrl(tracksSource.passive || source.passive),
+                tense: sanitizeYouTubeTrackUrl(tracksSource.tense || source.tense),
+                active: sanitizeYouTubeTrackUrl(tracksSource.active || source.active)
+            }
+        };
+    };
     const VTT_PROXIMITY_TRIGGER_KINDS = new Set(['fiction', 'skillRoll']);
     const VTT_PROXIMITY_TRIGGER_TYPES = new Set(['enter', 'startTurnNear', 'click', 'reveal']);
     const VTT_PROXIMITY_TRIGGER_TARGETS = new Set(['playerTokens', 'anyVisibleToken']);
@@ -1007,6 +1045,7 @@
                 cellDistance: legacyGrid.cellDistance
             },
             stealthMode: !!source.stealthMode,
+            music: sanitizeVTTMusic(source.music),
             tokens: Array.isArray(source.tokens) ? source.tokens.map((tokenEntry, tokenIdx) => sanitizeVTTToken(tokenEntry, tokenIdx)) : [],
             templates: Array.isArray(source.templates) ? source.templates.map((templateEntry, templateIdx) => sanitizeVTTTemplate(templateEntry, templateIdx)) : [],
             evidenceNotes: Array.isArray(source.evidenceNotes)
@@ -1799,6 +1838,9 @@
             || (Array.isArray(scene && scene.clocks) && scene.clocks.length)
             || (Array.isArray(scene && scene.fog) && scene.fog.length)
             || !!toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim()
+            || !!toTrimmedString(scene && scene.music && scene.music.tracks && scene.music.tracks.passive, '', 4000).trim()
+            || !!toTrimmedString(scene && scene.music && scene.music.tracks && scene.music.tracks.tense, '', 4000).trim()
+            || !!toTrimmedString(scene && scene.music && scene.music.tracks && scene.music.tracks.active, '', 4000).trim()
             || !!toTrimmedString(scene && scene.name, '', 160).trim()
         ));
         const initiative = vtt && vtt.initiative && typeof vtt.initiative === 'object' ? vtt.initiative : {};

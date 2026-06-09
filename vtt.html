@@ -22,6 +22,7 @@
                     <span class="vtt-topbar-scene" id="vtt-active-scene-label">Scene: Scene 1</span>
                 </span>
                 <span class="vtt-sync-chip" id="vtt-sync-chip">Local</span>
+                <div class="vtt-audio-player" id="vtt-youtube-audio-player" aria-live="polite"></div>
             </div>
         </div>
         <div class="vtt-topbar-toolbar">
@@ -106,6 +107,28 @@
                             <span>Map Image URL</span>
                             <input type="text" id="scene-map-url" data-scene-field="mapImageUrl" placeholder="https://...">
                         </label>
+                        <div class="vtt-scene-music-editor">
+                            <label class="vtt-field">
+                                <span>Music Level</span>
+                                <select id="scene-music-tension" data-scene-music-field="tension">
+                                    <option value="passive">Passive</option>
+                                    <option value="tense">Tense</option>
+                                    <option value="active">Active</option>
+                                </select>
+                            </label>
+                            <label class="vtt-field">
+                                <span>Passive Track</span>
+                                <input type="url" id="scene-music-passive" data-scene-music-track="passive" placeholder="YouTube link">
+                            </label>
+                            <label class="vtt-field">
+                                <span>Tense Track</span>
+                                <input type="url" id="scene-music-tense" data-scene-music-track="tense" placeholder="YouTube link">
+                            </label>
+                            <label class="vtt-field">
+                                <span>Active Track</span>
+                                <input type="url" id="scene-music-active" data-scene-music-track="active" placeholder="YouTube link">
+                            </label>
+                        </div>
                         <div class="vtt-field-grid">
                             <label class="vtt-field">
                                 <span>Map Scale</span>

@@ -44,6 +44,7 @@
     const STEALTH_STATUS_UNSEEN = 'unseen';
     const SCENE_VIEW_SHARED = 'shared';
     const SCENE_VIEW_LOCAL = 'local';
+    const MUSIC_TENSION_LEVELS = ['passive', 'tense', 'active'];
     const QUICK_ACTION_SEARCH_DICE = [20, 12, 10, 8, 6, 4, 100];
     const QUICK_ACTION_SEARCH_RESULT_LIMIT = 18;
     const SRD_MONSTER_DATA_URL = 'monsters/dnd_srd_5_2_1__monsters.json';
@@ -141,6 +142,14 @@
                     cellDistance: 5
                 },
                 stealthMode: false,
+                music: {
+                    tension: 'passive',
+                    tracks: {
+                        passive: '',
+                        tense: '',
+                        active: ''
+                    }
+                },
                 tokens: [],
                 templates: [],
                 evidenceNotes: [],
@@ -267,6 +276,7 @@
     const visionLayerEl = document.getElementById('vtt-vision-layer');
     const caseNameEl = document.getElementById('vtt-case-name');
     const syncChipEl = document.getElementById('vtt-sync-chip');
+    const youtubeAudioPlayerEl = document.getElementById('vtt-youtube-audio-player');
     const settingsToggleEl = document.getElementById('vtt-settings-toggle');
     const initiativeToggleEl = document.getElementById('vtt-initiative-toggle');
     const scenePanelToggleEl = document.getElementById('vtt-scene-panel-toggle');
@@ -462,6 +472,69 @@
         word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     );
     const normalizeSearchText = (value = '') => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const normalizeMusicTension = (value, fallback = 'passive') => {
+        const clean = String(value || '').trim().toLowerCase();
+        if (MUSIC_TENSION_LEVELS.includes(clean)) return clean;
+        return MUSIC_TENSION_LEVELS.includes(fallback) ? fallback : 'passive';
+    };
+    const normalizeYouTubeUrl = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        try {
+            const parsed = new URL(raw, window.location.href);
+            const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+            if (host === 'youtu.be' || host.endsWith('.youtu.be')) return parsed.toString();
+            if (host === 'youtube.com' || host.endsWith('.youtube.com')) return parsed.toString();
+        } catch (err) {
+            return '';
+        }
+        return '';
+    };
+    const normalizeSceneMusic = (music) => {
+        const source = music && typeof music === 'object' ? music : {};
+        const sourceTracks = source.tracks && typeof source.tracks === 'object' ? source.tracks : {};
+        const tracks = {};
+        MUSIC_TENSION_LEVELS.forEach((level) => {
+            tracks[level] = normalizeYouTubeUrl(sourceTracks[level] || source[level]);
+        });
+        return {
+            tension: normalizeMusicTension(source.tension),
+            tracks
+        };
+    };
+    const getYouTubeVideoId = (value) => {
+        const raw = normalizeYouTubeUrl(value);
+        if (!raw) return '';
+        try {
+            const parsed = new URL(raw, window.location.href);
+            const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+            if (host === 'youtu.be' || host.endsWith('.youtu.be')) {
+                return parsed.pathname.split('/').filter(Boolean)[0] || '';
+            }
+            if (parsed.pathname.startsWith('/shorts/')) {
+                return parsed.pathname.split('/').filter(Boolean)[1] || '';
+            }
+            if (parsed.pathname.startsWith('/embed/')) {
+                return parsed.pathname.split('/').filter(Boolean)[1] || '';
+            }
+            return parsed.searchParams.get('v') || '';
+        } catch (err) {
+            return '';
+        }
+    };
+    const getYouTubeEmbedUrl = (value) => {
+        const videoId = getYouTubeVideoId(value).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+        if (!videoId) return '';
+        const params = new URLSearchParams({
+            controls: '1',
+            loop: '1',
+            modestbranding: '1',
+            playlist: videoId,
+            rel: '0',
+            playsinline: '1'
+        });
+        return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`;
+    };
     const normalizeProximityTriggerSkill = (value) => {
         const clean = String(value || '').trim().toLowerCase();
         if (PROXIMITY_TRIGGER_SKILL_OPTIONS.includes(clean)) return clean;
@@ -813,6 +886,7 @@
                 cellDistance: 5
             }),
             stealthMode: !!(source && source.stealthMode),
+            music: normalizeSceneMusic(source && source.music),
             tokens: clonedTokens,
             templates: clonedTemplates,
             evidenceNotes: clonedEvidenceNotes,
@@ -7827,6 +7901,56 @@
             : '<div class="vtt-empty">No scenes yet.</div>';
     };
 
+    const getSceneMusicSummary = (scene) => {
+        const music = normalizeSceneMusic(scene && scene.music);
+        const tension = normalizeMusicTension(music.tension);
+        const trackUrl = music.tracks[tension] || '';
+        return {
+            music,
+            tension,
+            label: tension.charAt(0).toUpperCase() + tension.slice(1),
+            trackUrl,
+            embedUrl: getYouTubeEmbedUrl(trackUrl)
+        };
+    };
+
+    const renderYouTubeAudioPlayer = (scene) => {
+        if (!youtubeAudioPlayerEl) return;
+        const summary = getSceneMusicSummary(scene);
+        const playerKey = `${summary.tension}:${summary.embedUrl || 'empty'}`;
+        if (youtubeAudioPlayerEl.dataset.musicKey === playerKey) return;
+        youtubeAudioPlayerEl.querySelectorAll('iframe').forEach((frame) => {
+            frame.src = 'about:blank';
+            frame.remove();
+        });
+        youtubeAudioPlayerEl.dataset.musicKey = playerKey;
+        if (!summary.trackUrl || !summary.embedUrl) {
+            youtubeAudioPlayerEl.innerHTML = `
+                <div class="vtt-audio-empty">
+                    <span>${escapeHtml(summary.label)}</span>
+                    <strong>No track assigned</strong>
+                </div>
+            `;
+            return;
+        }
+        youtubeAudioPlayerEl.innerHTML = `
+            <div class="vtt-audio-shell" data-tension="${escapeHtml(summary.tension)}">
+                <div class="vtt-audio-copy">
+                    <span>${escapeHtml(summary.label)}</span>
+                    <strong>Scene Track</strong>
+                </div>
+                <div class="vtt-youtube-embed-crop">
+                    <iframe
+                        title="${escapeHtml(summary.label)} scene music"
+                        src="${escapeHtml(summary.embedUrl)}"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        referrerpolicy="strict-origin-when-cross-origin"
+                        allowfullscreen></iframe>
+                </div>
+            </div>
+        `;
+    };
+
     const buildProximityTriggerSeedButtons = (ownerKind, ownerId) => `
         <div class="vtt-chip-row vtt-proximity-seeds">
             ${['perception', 'investigation', 'insight', 'arcana', 'stealth'].map((skill) => `
@@ -9331,14 +9455,24 @@
         if (stageMetaEl) {
             stageMetaEl.textContent = `${toolMeta} ${stealthMeta}`;
         }
+        renderYouTubeAudioPlayer(sharedScene);
         const sceneNameEl = document.getElementById('scene-name');
         const mapUrlEl = document.getElementById('scene-map-url');
+        const musicTensionEl = document.getElementById('scene-music-tension');
+        const musicPassiveEl = document.getElementById('scene-music-passive');
+        const musicTenseEl = document.getElementById('scene-music-tense');
+        const musicActiveEl = document.getElementById('scene-music-active');
         const scaleEl = document.getElementById('scene-map-scale');
         const distanceEl = document.getElementById('scene-grid-distance');
         const offsetXEl = document.getElementById('scene-grid-offset-x');
         const offsetYEl = document.getElementById('scene-grid-offset-y');
+        const music = normalizeSceneMusic(scene.music);
         if (sceneNameEl && document.activeElement !== sceneNameEl) sceneNameEl.value = scene.name || '';
         if (mapUrlEl && document.activeElement !== mapUrlEl) mapUrlEl.value = scene.mapImageUrl || '';
+        if (musicTensionEl && document.activeElement !== musicTensionEl) musicTensionEl.value = music.tension;
+        if (musicPassiveEl && document.activeElement !== musicPassiveEl) musicPassiveEl.value = music.tracks.passive || '';
+        if (musicTenseEl && document.activeElement !== musicTenseEl) musicTenseEl.value = music.tracks.tense || '';
+        if (musicActiveEl && document.activeElement !== musicActiveEl) musicActiveEl.value = music.tracks.active || '';
         if (scaleEl && document.activeElement !== scaleEl) scaleEl.value = String(Math.round(getSceneMapScale(scene) * 100));
         if (distanceEl && document.activeElement !== distanceEl) distanceEl.value = String(scene.grid.cellDistance || 5);
         if (offsetXEl && document.activeElement !== offsetXEl) offsetXEl.value = String(scene.grid.offsetX || 0);
@@ -10979,6 +11113,25 @@
                 }
                 scene[field] = target.value;
             }, { fitView: field === 'mapImageUrl' });
+            return;
+        }
+
+        if (target.dataset.sceneMusicField || target.dataset.sceneMusicTrack) {
+            if (!isDM()) return;
+            const field = String(target.dataset.sceneMusicField || '').trim();
+            const trackLevel = normalizeMusicTension(target.dataset.sceneMusicTrack || '', '');
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene) return;
+                scene.music = normalizeSceneMusic(scene.music);
+                if (field === 'tension' && target instanceof HTMLSelectElement) {
+                    scene.music.tension = normalizeMusicTension(target.value, scene.music.tension);
+                    return;
+                }
+                if (trackLevel && target instanceof HTMLInputElement) {
+                    scene.music.tracks[trackLevel] = normalizeYouTubeUrl(target.value);
+                }
+            });
             return;
         }
 

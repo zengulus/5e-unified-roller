@@ -171,6 +171,14 @@ const fallbackSnapshot = () => ({
                 cellDistance: 5
             },
             stealthMode: false,
+            music: {
+                tension: 'passive',
+                tracks: {
+                    passive: '',
+                    tense: '',
+                    active: ''
+                }
+            },
             tokens: [],
             evidenceNotes: [],
             clocks: [],
@@ -422,6 +430,28 @@ const serializeYGridMap = (record, key) => {
     };
 };
 
+const syncYMusicMap = (record, key, music) => {
+    const musicMap = ensureYMapEntry(record, key);
+    const tracks = music && music.tracks && typeof music.tracks === 'object' ? music.tracks : {};
+    setYScalar(musicMap, 'tension', toTrimmedString(music && music.tension, 'passive', 20).trim() || 'passive');
+    setYScalar(musicMap, 'passive', toTrimmedString(tracks.passive || music && music.passive, '', 4000));
+    setYScalar(musicMap, 'tense', toTrimmedString(tracks.tense || music && music.tense, '', 4000));
+    setYScalar(musicMap, 'active', toTrimmedString(tracks.active || music && music.active, '', 4000));
+    removeExtraneousMapKeys(musicMap, new Set(['tension', 'passive', 'tense', 'active']));
+};
+
+const serializeYMusicMap = (record, key) => {
+    const musicMap = getYMapEntry(record, key);
+    return {
+        tension: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('tension') : 'passive', 'passive', 20),
+        tracks: {
+            passive: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('passive') : '', '', 4000),
+            tense: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('tense') : '', '', 4000),
+            active: toTrimmedString(musicMap instanceof Y.Map ? musicMap.get('active') : '', '', 4000)
+        }
+    };
+};
+
 const syncYTokenRecord = (record, token) => {
     const source = token && typeof token === 'object' ? token : {};
     setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
@@ -638,6 +668,7 @@ const syncYSceneRecord = (record, scene) => {
     setYScalar(record, 'mapScale', source.mapScale);
     setYScalar(record, 'stealthMode', !!source.stealthMode);
     syncYGridMap(record, 'grid', source.grid || {});
+    syncYMusicMap(record, 'music', source.music || {});
     syncOrderedEntityCollection(
         ensureYMapEntry(record, 'tokens'),
         ensureYArrayEntry(record, 'tokenOrder'),
@@ -676,7 +707,7 @@ const syncYSceneRecord = (record, scene) => {
     );
     removeExtraneousMapKeys(record, new Set([
         'id', 'name', 'mapImageUrl', 'mapScale', 'stealthMode',
-        'grid', 'tokens', 'tokenOrder', 'templates', 'templateOrder',
+        'grid', 'music', 'tokens', 'tokenOrder', 'templates', 'templateOrder',
         'evidenceNotes', 'evidenceOrder', 'clocks', 'clockOrder',
         'pings', 'pingOrder', 'fog', 'fogOrder'
     ]));
@@ -689,6 +720,7 @@ const serializeYSceneRecord = (record, sceneId) => ({
     mapScale: record.get('mapScale'),
     grid: serializeYGridMap(record, 'grid'),
     stealthMode: !!record.get('stealthMode'),
+    music: serializeYMusicMap(record, 'music'),
     tokens: serializeOrderedEntityCollection(getYMapEntry(record, 'tokens'), getYArrayEntry(record, 'tokenOrder'), serializeYTokenRecord),
     templates: serializeOrderedEntityCollection(getYMapEntry(record, 'templates'), getYArrayEntry(record, 'templateOrder'), serializeYTemplateRecord),
     evidenceNotes: serializeOrderedEntityCollection(getYMapEntry(record, 'evidenceNotes'), getYArrayEntry(record, 'evidenceOrder'), serializeYEvidenceNoteRecord),
@@ -1411,7 +1443,8 @@ const diffVTTSnapshots = (previousSnapshot, nextSnapshot, coerceSnapshot) => {
             mapImageUrl: scene && scene.mapImageUrl,
             mapScale: scene && scene.mapScale,
             grid: scene && scene.grid,
-            stealthMode: !!(scene && scene.stealthMode)
+            stealthMode: !!(scene && scene.stealthMode),
+            music: scene && scene.music
         };
         const previousSceneComparable = {
             id: sceneId,
@@ -1419,7 +1452,8 @@ const diffVTTSnapshots = (previousSnapshot, nextSnapshot, coerceSnapshot) => {
             mapImageUrl: previousScene && previousScene.mapImageUrl,
             mapScale: previousScene && previousScene.mapScale,
             grid: previousScene && previousScene.grid,
-            stealthMode: !!(previousScene && previousScene.stealthMode)
+            stealthMode: !!(previousScene && previousScene.stealthMode),
+            music: previousScene && previousScene.music
         };
         if (stableStringify(previousSceneComparable) !== stableStringify(sceneComparable)) {
             return { structural: true, positions: [] };
