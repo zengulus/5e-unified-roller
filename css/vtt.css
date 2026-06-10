@@ -205,7 +205,7 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
 .vtt-audio-shell,
 .vtt-audio-empty {
     display: grid;
-    grid-template-columns: minmax(5rem, 7rem) minmax(10rem, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.5rem;
     min-height: 46px;
@@ -257,6 +257,8 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
 
 .vtt-audio-play-btn,
 .vtt-audio-stop-btn {
+    justify-self: end;
+    width: max-content;
     min-height: 34px;
     padding: 0.45rem 0.72rem;
     border: 1px solid rgba(var(--accent-rgb, 78, 205, 196), 0.38);
@@ -283,6 +285,22 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     justify-content: flex-end;
     gap: 0.4rem;
     min-width: 0;
+}
+
+.vtt-audio-volume {
+    display: grid;
+    grid-template-columns: auto 4.5rem;
+    align-items: center;
+    gap: 0.28rem;
+    color: rgba(188, 203, 222, 0.82);
+    font-size: 0.68rem;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.vtt-audio-volume input {
+    width: 4.5rem;
+    accent-color: rgb(var(--accent-rgb, 78, 205, 196));
 }
 
 .vtt-audio-play-btn:hover,
@@ -4074,7 +4092,7 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     }
 
     .vtt-audio-shell {
-        grid-template-columns: minmax(4.5rem, 6rem) minmax(8rem, 1fr);
+        grid-template-columns: minmax(0, 1fr) auto;
     }
 
     .vtt-shell {

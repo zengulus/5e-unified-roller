@@ -231,6 +231,7 @@
     let playerRollMenuOpen = true;
     let playerFocusLastResult = null;
     let youtubeMusicState = { key: '', status: 'stopped' };
+    let youtubeMusicVolume = 70;
     let activeProximityPrompt = null;
     let suppressedProximityPromptKeys = new Set();
     let localRollMode = 'norm';
@@ -8001,18 +8002,29 @@
             : null
     );
 
-    const sendYouTubeMusicCommand = (command) => {
+    const sendYouTubeMusicCommand = (command, args = []) => {
         const frame = getYouTubeMusicFrame();
         if (!frame || !frame.contentWindow) return false;
         try {
             frame.contentWindow.postMessage(JSON.stringify({
                 event: 'command',
                 func: command,
-                args: []
+                args: Array.isArray(args) ? args : []
             }), '*');
             return true;
         } catch (err) {
             return false;
+        }
+    };
+
+    const setYouTubeMusicVolume = (volume) => {
+        youtubeMusicVolume = Math.max(0, Math.min(100, Math.round(Number(volume) || 0)));
+        sendYouTubeMusicCommand('setVolume', [youtubeMusicVolume]);
+        const volumeEl = youtubeAudioPlayerEl
+            ? youtubeAudioPlayerEl.querySelector('[data-youtube-volume]')
+            : null;
+        if (volumeEl instanceof HTMLInputElement && document.activeElement !== volumeEl) {
+            volumeEl.value = String(youtubeMusicVolume);
         }
     };
 
@@ -8024,6 +8036,24 @@
             frame.remove();
         });
     };
+
+    const renderYouTubeAudioControls = (status, playerKey) => `
+        ${status === 'paused' ? `
+            <button class="vtt-audio-play-btn" type="button"
+                data-action="play-scene-music"
+                data-music-key="${escapeHtml(playerKey)}">Play</button>
+        ` : `
+            <button class="vtt-audio-stop-btn" type="button" data-action="pause-scene-music">Pause</button>
+        `}
+        <button class="vtt-audio-stop-btn" type="button" data-action="stop-scene-music">Stop</button>
+        <label class="vtt-audio-volume">
+            <span>Vol</span>
+            <input type="range" min="0" max="100" step="1"
+                value="${escapeHtml(String(youtubeMusicVolume))}"
+                data-youtube-volume="1"
+                aria-label="Scene music volume">
+        </label>
+    `;
 
     const renderYouTubeAudioPlayer = (scene) => {
         if (!youtubeAudioPlayerEl) return;
@@ -8040,6 +8070,23 @@
             && existingFrame.dataset.musicKey === playerKey
             ? existingFrame
             : null;
+        if (reusableFrame) {
+            const shell = youtubeAudioPlayerEl.querySelector('.vtt-audio-shell');
+            const copyEl = shell ? shell.querySelector('.vtt-audio-copy') : null;
+            const controlsEl = shell ? shell.querySelector('.vtt-audio-controls') : null;
+            if (shell && copyEl && controlsEl) {
+                shell.dataset.tension = summary.tension;
+                copyEl.innerHTML = `
+                    <span>${escapeHtml(summary.label)}</span>
+                    <strong>${escapeHtml(summary.title)}</strong>
+                    <small>${status === 'paused' ? 'Paused' : 'Playing'}</small>
+                `;
+                controlsEl.innerHTML = renderYouTubeAudioControls(status, playerKey);
+                youtubeAudioPlayerEl.dataset.musicKey = renderKey;
+                setYouTubeMusicVolume(youtubeMusicVolume);
+                return;
+            }
+        }
         if (youtubeMusicState.key && youtubeMusicState.key !== playerKey) {
             stopYouTubeMusicFrame();
             youtubeMusicState = { key: '', status: 'stopped' };
@@ -8090,14 +8137,7 @@
                     <small>${status === 'paused' ? 'Paused' : 'Playing'}</small>
                 </div>
                 <div class="vtt-audio-controls">
-                    ${status === 'paused' ? `
-                        <button class="vtt-audio-play-btn" type="button"
-                            data-action="play-scene-music"
-                            data-music-key="${escapeHtml(playerKey)}">Play</button>
-                    ` : `
-                        <button class="vtt-audio-stop-btn" type="button" data-action="pause-scene-music">Pause</button>
-                    `}
-                    <button class="vtt-audio-stop-btn" type="button" data-action="stop-scene-music">Stop</button>
+                    ${renderYouTubeAudioControls(status, playerKey)}
                 </div>
                 <div class="vtt-youtube-hidden-frame">
                     ${iframeMarkup}
@@ -8107,6 +8147,8 @@
         if (reusableFrame) {
             const frameHost = youtubeAudioPlayerEl.querySelector('.vtt-youtube-hidden-frame');
             if (frameHost) frameHost.appendChild(reusableFrame);
+        } else {
+            window.setTimeout(() => setYouTubeMusicVolume(youtubeMusicVolume), 250);
         }
     };
 
@@ -11262,6 +11304,10 @@
     const handleFieldChange = (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
+        if (target instanceof HTMLInputElement && target.dataset.youtubeVolume !== undefined) {
+            setYouTubeMusicVolume(target.value);
+            return;
+        }
         if (target instanceof HTMLInputElement && target.dataset.toolSizeField) {
             const nextSize = normalizeToolSizeCells(target.value, localToolState.sizeCells);
             localToolState.sizeCells = nextSize;
