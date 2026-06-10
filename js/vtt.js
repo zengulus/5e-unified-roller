@@ -509,8 +509,14 @@
         const tracks = {};
         const titles = {};
         MUSIC_TENSION_LEVELS.forEach((level) => {
-            tracks[level] = String(sourceTracks[level] || source[level] || '').trim().slice(0, 4000);
-            titles[level] = String(sourceTitles[level] || source[`${level}Title`] || '').trim().slice(0, 160);
+            const trackValue = Object.prototype.hasOwnProperty.call(sourceTracks, level)
+                ? sourceTracks[level]
+                : source[level];
+            const titleValue = Object.prototype.hasOwnProperty.call(sourceTitles, level)
+                ? sourceTitles[level]
+                : source[`${level}Title`];
+            tracks[level] = String(trackValue || '').trim().slice(0, 4000);
+            titles[level] = String(titleValue || '').trim().slice(0, 160);
         });
         return {
             tension: normalizeMusicTension(source.tension),

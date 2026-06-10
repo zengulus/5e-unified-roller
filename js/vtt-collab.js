@@ -439,13 +439,19 @@ const syncYMusicMap = (record, key, music) => {
     const musicMap = ensureYMapEntry(record, key);
     const tracks = music && music.tracks && typeof music.tracks === 'object' ? music.tracks : {};
     const titles = music && music.titles && typeof music.titles === 'object' ? music.titles : {};
+    const readTrack = (level) => (
+        Object.prototype.hasOwnProperty.call(tracks, level) ? tracks[level] : music && music[level]
+    );
+    const readTitle = (level) => (
+        Object.prototype.hasOwnProperty.call(titles, level) ? titles[level] : music && music[`${level}Title`]
+    );
     setYScalar(musicMap, 'tension', toTrimmedString(music && music.tension, 'passive', 20).trim() || 'passive');
-    setYScalar(musicMap, 'passive', toTrimmedString(tracks.passive || music && music.passive, '', 4000));
-    setYScalar(musicMap, 'tense', toTrimmedString(tracks.tense || music && music.tense, '', 4000));
-    setYScalar(musicMap, 'active', toTrimmedString(tracks.active || music && music.active, '', 4000));
-    setYScalar(musicMap, 'passiveTitle', toTrimmedString(titles.passive || music && music.passiveTitle, '', 160));
-    setYScalar(musicMap, 'tenseTitle', toTrimmedString(titles.tense || music && music.tenseTitle, '', 160));
-    setYScalar(musicMap, 'activeTitle', toTrimmedString(titles.active || music && music.activeTitle, '', 160));
+    setYScalar(musicMap, 'passive', toTrimmedString(readTrack('passive'), '', 4000));
+    setYScalar(musicMap, 'tense', toTrimmedString(readTrack('tense'), '', 4000));
+    setYScalar(musicMap, 'active', toTrimmedString(readTrack('active'), '', 4000));
+    setYScalar(musicMap, 'passiveTitle', toTrimmedString(readTitle('passive'), '', 160));
+    setYScalar(musicMap, 'tenseTitle', toTrimmedString(readTitle('tense'), '', 160));
+    setYScalar(musicMap, 'activeTitle', toTrimmedString(readTitle('active'), '', 160));
     removeExtraneousMapKeys(musicMap, new Set(['tension', 'passive', 'tense', 'active', 'passiveTitle', 'tenseTitle', 'activeTitle']));
 };
 
@@ -842,6 +848,12 @@ const patchYGridMap = (record, key, baseGrid = {}, nextGrid = {}) => {
     return true;
 };
 
+const patchYMusicMap = (record, key, baseMusic = {}, nextMusic = {}) => {
+    if (stableStringify(baseMusic || {}) === stableStringify(nextMusic || {})) return false;
+    syncYMusicMap(record, key, nextMusic || {});
+    return true;
+};
+
 const patchYTokenRecord = (record, baseToken = {}, nextToken = {}) => {
     let mutated = false;
     mutated = patchYScalar(record, 'id', baseToken.id, nextToken.id) || mutated;
@@ -1046,6 +1058,7 @@ const patchYSceneRecord = (record, baseScene = {}, nextScene = {}) => {
     mutated = patchYScalar(record, 'mapScale', baseScene.mapScale, nextScene.mapScale) || mutated;
     mutated = patchYScalar(record, 'stealthMode', !!baseScene.stealthMode, !!nextScene.stealthMode) || mutated;
     mutated = patchYGridMap(record, 'grid', baseScene.grid || {}, nextScene.grid || {}) || mutated;
+    mutated = patchYMusicMap(record, 'music', baseScene.music || {}, nextScene.music || {}) || mutated;
     mutated = patchOrderedEntityCollection({
         containerMap: ensureYMapEntry(record, 'tokens'),
         orderArray: ensureYArrayEntry(record, 'tokenOrder'),

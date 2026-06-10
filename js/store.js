@@ -708,17 +708,23 @@
         const source = music && typeof music === 'object' ? music : {};
         const tracksSource = source.tracks && typeof source.tracks === 'object' ? source.tracks : {};
         const titlesSource = source.titles && typeof source.titles === 'object' ? source.titles : {};
+        const readTrack = (level) => (
+            Object.prototype.hasOwnProperty.call(tracksSource, level) ? tracksSource[level] : source[level]
+        );
+        const readTitle = (level) => (
+            Object.prototype.hasOwnProperty.call(titlesSource, level) ? titlesSource[level] : source[`${level}Title`]
+        );
         return {
             tension: sanitizeVTTMusicTension(source.tension),
             tracks: {
-                passive: sanitizeVTTMusicTrack(tracksSource.passive || source.passive),
-                tense: sanitizeVTTMusicTrack(tracksSource.tense || source.tense),
-                active: sanitizeVTTMusicTrack(tracksSource.active || source.active)
+                passive: sanitizeVTTMusicTrack(readTrack('passive')),
+                tense: sanitizeVTTMusicTrack(readTrack('tense')),
+                active: sanitizeVTTMusicTrack(readTrack('active'))
             },
             titles: {
-                passive: toTrimmedString(titlesSource.passive || source.passiveTitle, '', 160).trim(),
-                tense: toTrimmedString(titlesSource.tense || source.tenseTitle, '', 160).trim(),
-                active: toTrimmedString(titlesSource.active || source.activeTitle, '', 160).trim()
+                passive: toTrimmedString(readTitle('passive'), '', 160).trim(),
+                tense: toTrimmedString(readTitle('tense'), '', 160).trim(),
+                active: toTrimmedString(readTitle('active'), '', 160).trim()
             }
         };
     };
