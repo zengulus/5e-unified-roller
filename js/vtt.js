@@ -4314,8 +4314,9 @@
             record.sourceId = '';
             mutated = true;
         }
-        if (record.imageUrl === '') {
-            record.imageUrl = String(record.label || record.name || '').trim() ? record.imageUrl : '';
+        if (record.moveAccess && normalizeMoveAccess(record.moveAccess, 'dm') === 'player') {
+            record.moveAccess = 'dm';
+            mutated = true;
         }
         return mutated;
     };
@@ -4331,7 +4332,8 @@
             const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
             const entry = entries.find((candidate) => String(candidate && candidate.id || '').trim() === cleanEntryId);
             if (!entry) return;
-            const linkedToken = findTokenByIdAcrossScenes(draft, entry.linkedTokenId);
+            const linkedToken = findTokenByIdAcrossScenes(draft, entry.linkedTokenId)
+                || getAssignedTokenForEntry(entry, draft);
             if (player) {
                 if (linkedToken) {
                     linkedToken.sourceType = 'player';
@@ -4349,6 +4351,52 @@
             sortInitiativeEntries(entries);
         });
         return changed;
+    };
+
+    const bustAllVTTRosterAssociations = () => {
+        if (!canEditInitiative()) return false;
+        const ok = confirm(
+            'Bust all VTT roster associations?\n\n'
+            + 'This clears player roster ownership from every VTT token and initiative entry in this case, and clears roster sheet links so players are prompted to select themselves again. Tokens and entries stay on the board, but player-linked names and ownership stop being enforced.'
+        );
+        if (!ok) return false;
+        let changedCount = 0;
+        let rosterLinkCount = 0;
+        withDraft((draft) => {
+            if (draft && Array.isArray(draft.scenes)) {
+                draft.scenes.forEach((scene) => {
+                    if (!scene || !Array.isArray(scene.tokens)) return;
+                    scene.tokens.forEach((token) => {
+                        if (clearPlayerRosterIdentityFromRecord(token)) changedCount += 1;
+                    });
+                });
+            }
+            const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
+            entries.forEach((entry) => {
+                if (clearPlayerRosterIdentityFromRecord(entry)) changedCount += 1;
+            });
+            sortInitiativeEntries(entries);
+        }, { reason: 'bust-vtt-roster-associations' });
+        const store = getStore();
+        const players = store && typeof store.getPlayers === 'function' ? store.getPlayers() : [];
+        if (store && typeof store.updatePlayer === 'function' && Array.isArray(players)) {
+            players.forEach((player) => {
+                const playerId = String(player && player.id || '').trim();
+                if (!playerId || !String(player && player.sheetKey || '').trim()) return;
+                const updated = store.updatePlayer(playerId, { sheetKey: '' });
+                if (updated) rosterLinkCount += 1;
+            });
+        }
+        closeInitiativeDetail();
+        closeTokenInspectorPopover();
+        selectedEntryId = '';
+        selectedTokenId = '';
+        normalizeSelections();
+        render();
+        alert(changedCount
+            ? `Cleared ${changedCount} VTT roster association${changedCount === 1 ? '' : 's'} and ${rosterLinkCount} roster sheet link${rosterLinkCount === 1 ? '' : 's'}.`
+            : `No VTT roster associations were found. Cleared ${rosterLinkCount} roster sheet link${rosterLinkCount === 1 ? '' : 's'}.`);
+        return true;
     };
 
     const getTokenWorldRect = (token, scene) => {
@@ -6076,9 +6124,10 @@
         const token = stageContextMenuState.tokenId ? getTokenById(stageContextMenuState.tokenId) : null;
         const note = stageContextMenuState.noteId ? getEvidenceNoteById(stageContextMenuState.noteId) : null;
         const tokenSourceType = String(token && token.sourceType || '').trim().toLowerCase();
-        const canRollFromSheet = isDM() && tokenSourceType === 'player';
+        const canRollFromSheet = (isDM() && tokenSourceType === 'player')
+            || (isPlayer() && canUseSharedPlayerTools());
         const canRollStatBlock = !!(token && isDM() && isNPCRollTarget(token));
-        const canCustomRoll = isDM();
+        const canCustomRoll = isDM() || (isPlayer() && canUseSharedPlayerTools());
         const canPreview = canPreviewTokenPortrait(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
@@ -10637,18 +10686,30 @@
             return;
         }
         if (action === 'context-roll-from-sheet') {
+            if (!isDM() && !(isPlayer() && canUseSharedPlayerTools())) return;
             const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
             const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
+            const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
+            const tokenPlayerId = String(getRosterPlayerForRecord(token) && getRosterPlayerForRecord(token).id || '').trim();
+            const isOwnToken = !!(localContext && localContext.playerId && tokenPlayerId && tokenPlayerId === localContext.playerId);
+            const rollToken = isDM()
+                ? (token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null)
+                : (isOwnToken ? token : null);
             closeStageContextMenu();
-            openSheetActionPopover(token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
+            openSheetActionPopover(rollToken, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
             render();
             return;
         }
         if (action === 'context-custom-roll') {
+            if (!isDM() && !(isPlayer() && canUseSharedPlayerTools())) return;
             const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
             const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
+            const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
+            const tokenPlayerId = String(getRosterPlayerForRecord(token) && getRosterPlayerForRecord(token).id || '').trim();
+            const isOwnToken = !!(localContext && localContext.playerId && tokenPlayerId && tokenPlayerId === localContext.playerId);
+            const rollToken = isDM() ? token : (isOwnToken ? token : null);
             closeStageContextMenu();
-            openCustomRollPopover(token, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
+            openCustomRollPopover(rollToken, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
             render();
             return;
         }
@@ -10792,6 +10853,11 @@
         }
         if (action === 'force-vtt-authoritative') {
             forceDMVTTAuthoritative().catch((err) => reportVTTAdminActionError(err, 'Failed to force the DM VTT snapshot.'));
+            return;
+        }
+        if (action === 'bust-vtt-roster-associations') {
+            if (!isDM()) return;
+            bustAllVTTRosterAssociations();
             return;
         }
         if (action === 'bust-vtt-cache') {
