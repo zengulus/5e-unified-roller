@@ -5,7 +5,6 @@ import {
     applyAwarenessUpdate,
     encodeAwarenessUpdate
 } from './vendor/y-protocols/awareness.js';
-import { IndexeddbPersistence } from './vendor/y-indexeddb/y-indexeddb.js';
 import * as encoding from './vendor/lib0/encoding.js';
 import * as decoding from './vendor/lib0/decoding.js';
 import { createCollabRelayChannel } from './collab-relay-client.js?v=20260504b';
@@ -220,34 +219,6 @@ const buildSnapshotSignature = (snapshot, coerceSnapshot) => {
 const hasVTTContent = (snapshot, coerceSnapshot) => (
     buildSnapshotSignature(snapshot, coerceSnapshot) !== buildSnapshotSignature(fallbackSnapshot(), coerceSnapshot)
 );
-
-const chooseCanonicalSnapshot = (entries = [], fallbackEntry = null, coerceSnapshot = (value) => value) => {
-    const candidates = Array.isArray(entries)
-        ? entries.filter((entry) => entry && entry.snapshot)
-        : [];
-    if (!candidates.length) return fallbackEntry;
-
-    let best = candidates[0];
-    for (let i = 1; i < candidates.length; i += 1) {
-        const next = candidates[i];
-        const bestHasContent = hasVTTContent(best.snapshot, coerceSnapshot);
-        const nextHasContent = hasVTTContent(next.snapshot, coerceSnapshot);
-        if (nextHasContent && !bestHasContent) {
-            best = next;
-            continue;
-        }
-        if (bestHasContent && !nextHasContent) continue;
-        if ((next.stamp || 0) > (best.stamp || 0)) {
-            best = next;
-            continue;
-        }
-        if ((next.stamp || 0) === (best.stamp || 0) && (next.priority || 0) > (best.priority || 0)) {
-            best = next;
-        }
-    }
-
-    return best;
-};
 
 const sanitizePositionChange = (entry) => {
     const source = entry && typeof entry === 'object' ? entry : {};
@@ -1557,7 +1528,6 @@ class VTTCollabSession {
         this.profileName = '';
         this.peerColor = '';
         this.instanceRevisionSeed = 0;
-        this.indexedDbName = '';
         this.canLoadColdSnapshot = false;
         this.canSeedRelayRoom = false;
         this.lastSavedRevision = 0;
@@ -1741,7 +1711,6 @@ class VTTCollabSession {
         this.profileName = toTrimmedString(ensured.profileName, '', 120).trim();
         this.peerColor = pickPeerColor(this.instanceId || this.profileName || this.roomId);
         this.instanceRevisionSeed = pickRevisionSeed(this.instanceId || this.userId || this.profileName || this.roomId);
-        this.indexedDbName = `rtf-vtt-room-${ensured.config.campaignId}-${this.roomId}`;
         this.canLoadColdSnapshot = typeof this.options.canLoadColdSnapshot === 'function'
             ? !!this.options.canLoadColdSnapshot()
             : false;
@@ -1757,31 +1726,9 @@ class VTTCollabSession {
             user: this.buildLocalPresence()
         });
 
-        if (this.canLoadColdSnapshot) {
-            this.persistence = new IndexeddbPersistence(this.indexedDbName, this.doc);
-            try {
-                await this.persistence.whenSynced;
-            } catch (err) {
-                console.warn('RTF_VTT_COLLAB: IndexedDB sync failed', err);
-            }
-        }
-
-        const localDocPayload = this.canLoadColdSnapshot
-            ? serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this))
-            : fallbackSnapshot();
-        const localDocStamp = this.canLoadColdSnapshot ? getDocUpdatedAt(this.doc) : 0;
-        const seedPayload = this.coerceSnapshot(
-            this.canLoadColdSnapshot && typeof this.options.getSeedPayload === 'function'
-                ? this.options.getSeedPayload()
-                : fallbackSnapshot()
-        );
-        const currentPayload = this.coerceSnapshot(
-            this.canLoadColdSnapshot && typeof this.options.getCurrentPayload === 'function'
-                ? this.options.getCurrentPayload()
-                : seedPayload
-        );
-        const livePayloadSig = buildSnapshotSignature(currentPayload, this.coerceSnapshot.bind(this));
-        this.lastSharedStoreSignature = livePayloadSig;
+        const seedPayload = this.coerceSnapshot(fallbackSnapshot());
+        const livePayloadSig = buildSnapshotSignature(seedPayload, this.coerceSnapshot.bind(this));
+        this.lastSharedStoreSignature = '';
 
         let roomSnapshotSource = '';
         const cloudRow = this.canLoadColdSnapshot && typeof this.store.loadVTTRoomSnapshot === 'function'
@@ -1794,63 +1741,31 @@ class VTTCollabSession {
         if (this.canLoadColdSnapshot && cloudRow && cloudRow.ok && cloudRow.snapshot) {
             const roomPayload = this.coerceSnapshot(cloudRow.snapshot.payload);
             const roomPayloadSig = buildSnapshotSignature(roomPayload, this.coerceSnapshot.bind(this));
-            const localDocSig = buildSnapshotSignature(localDocPayload, this.coerceSnapshot.bind(this));
             const cloudStamp = Date.parse(cloudRow.snapshot.updatedAt || '') || toNonNegativeInt(cloudRow.snapshot.revision, 0);
-            const liveStoreStamp = this.getSharedStoreUpdatedAt();
-            const cloudRoomEntry = {
-                kind: 'cloud-room',
-                snapshot: roomPayload,
-                stamp: cloudStamp,
-                priority: 40
-            };
-            const canonicalSeed = this.options.preferCloudRoomSnapshot
-                ? cloudRoomEntry
-                : chooseCanonicalSnapshot([
-                    cloudRoomEntry,
-                    { kind: 'live-store', snapshot: currentPayload, stamp: liveStoreStamp, priority: 30 },
-                    { kind: 'local-doc', snapshot: localDocPayload, stamp: localDocStamp, priority: 20 },
-                    { kind: 'seed', snapshot: seedPayload, stamp: 0, priority: 10 }
-                ], cloudRoomEntry, this.coerceSnapshot.bind(this));
-            const canonicalPayload = this.coerceSnapshot(canonicalSeed && canonicalSeed.snapshot ? canonicalSeed.snapshot : roomPayload);
+            const canonicalPayload = this.coerceSnapshot(roomPayload);
             const canonicalSig = buildSnapshotSignature(canonicalPayload, this.coerceSnapshot.bind(this));
-            const canonicalStamp = Math.max(Date.now(), canonicalSeed && canonicalSeed.stamp ? canonicalSeed.stamp : 0);
+            const canonicalStamp = Math.max(Date.now(), cloudStamp || 0);
             this.lastSavedRevision = Math.max(0, toNonNegativeInt(cloudRow.snapshot.revision, 0));
             roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
             this.lastCloudSnapshotSignature = roomPayloadSig;
 
-            if (!hasVTTContent(localDocPayload, this.coerceSnapshot.bind(this)) || localDocSig !== canonicalSig) {
-                applySnapshotToDoc(
-                    this.doc,
-                    canonicalPayload,
-                    this.coerceSnapshot.bind(this),
-                    canonicalSeed && canonicalSeed.kind === 'cloud-room' ? this.originRemoteRestore : this.originBootstrap,
-                    canonicalStamp
-                );
-            }
-            this.pendingReadyFlush = canonicalSig && canonicalSig !== roomPayloadSig;
+            applySnapshotToDoc(
+                this.doc,
+                canonicalPayload,
+                this.coerceSnapshot.bind(this),
+                this.originRemoteRestore,
+                canonicalStamp
+            );
+            this.pendingReadyFlush = false;
             this.persistSnapshotToSharedState(canonicalPayload, canonicalSig);
         } else if (this.canLoadColdSnapshot) {
-            const liveStoreStamp = this.getSharedStoreUpdatedAt();
-            const canonicalSeed = chooseCanonicalSnapshot([
-                { kind: 'live-store', snapshot: currentPayload, stamp: liveStoreStamp, priority: 30 },
-                { kind: 'local-doc', snapshot: localDocPayload, stamp: localDocStamp, priority: 20 },
-                { kind: 'seed', snapshot: seedPayload, stamp: 0, priority: 10 }
-            ], {
-                kind: 'seed',
-                snapshot: seedPayload,
-                stamp: 0,
-                priority: 10
-            }, this.coerceSnapshot.bind(this));
-            const canonicalPayload = this.coerceSnapshot(canonicalSeed && canonicalSeed.snapshot ? canonicalSeed.snapshot : seedPayload);
-            const canonicalSig = buildSnapshotSignature(canonicalPayload, this.coerceSnapshot.bind(this));
-            const localDocSig = buildSnapshotSignature(localDocPayload, this.coerceSnapshot.bind(this));
-            const seedStamp = Math.max(Date.now(), canonicalSeed && canonicalSeed.stamp ? canonicalSeed.stamp : 0);
-
-            if (!hasVTTContent(localDocPayload, this.coerceSnapshot.bind(this)) || localDocSig !== canonicalSig) {
-                applySnapshotToDoc(this.doc, canonicalPayload, this.coerceSnapshot.bind(this), this.originBootstrap, seedStamp);
-            }
-
-            this.persistSnapshotToSharedState(canonicalPayload, canonicalSig);
+            this.updateStatus({
+                state: 'degraded',
+                detail: cloudRow && !cloudRow.ok
+                    ? (cloudRow.error || 'PostgreSQL VTT snapshot could not be loaded.')
+                    : 'No PostgreSQL VTT snapshot exists for this room yet.',
+                peerCount: this.remotePresence.size
+            });
         }
 
         this.lastSnapshot = serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
@@ -2141,12 +2056,14 @@ class VTTCollabSession {
 
     computeLiveDetail() {
         const state = this.computeLiveState();
+        const hasRemoteRoomSaver = Array.from(this.remotePresence.values()).some((peer) => peer && peer.canSaveRoom);
         if (state === 'live') {
             return this.remotePresence.size
                 ? `Live VTT synced with ${this.remotePresence.size} other ${this.remotePresence.size === 1 ? 'player' : 'players'}.`
                 : 'Live VTT document sync confirmed.';
         }
         if (state === 'reconnecting') return 'Reconnecting live VTT relay...';
+        if (hasRemoteRoomSaver && this.transportConnected && !this.renderRoomSeeded) return 'DM is live; confirming VTT document sync...';
         if (this.transportConnected && !this.renderRoomSeeded) return 'Waiting for GM to seed live VTT room.';
         if (state === 'connecting') return 'Connected to relay; confirming VTT document sync...';
         if (this.transportConnected) return 'Relay connected, but VTT document sync is stale.';
@@ -2235,7 +2152,8 @@ class VTTCollabSession {
     handleSyncStatusMessage(payload) {
         const source = payload && typeof payload === 'object' ? payload : {};
         const room = source.room && typeof source.room === 'object' ? source.room : {};
-        this.renderRoomSeeded = !!room.seeded;
+        const serverSeeded = !!room.seeded;
+        this.renderRoomSeeded = serverSeeded || this.renderRoomSeeded;
         if (this.renderRoomSeeded) {
             this.lastYSyncAt = Date.now();
             this.docSyncConfirmed = true;
@@ -2250,6 +2168,10 @@ class VTTCollabSession {
         const encoded = payload.update;
         const room = payload.room && typeof payload.room === 'object' ? payload.room : {};
         const serverSeeded = !!room.seeded;
+        const beforeSig = buildSnapshotSignature(
+            this.lastSnapshot || serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this)),
+            this.coerceSnapshot.bind(this)
+        );
         let update;
         try {
             update = decodeBase64(encoded);
@@ -2268,9 +2190,15 @@ class VTTCollabSession {
             });
             if (applyFailed) return;
             this.lastYSyncAt = Date.now();
-            this.renderRoomSeeded = serverSeeded || this.renderRoomSeeded;
-            this.docSyncConfirmed = !!this.renderRoomSeeded;
-            if (messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2) {
+            const nextSnapshot = serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
+            const afterSig = buildSnapshotSignature(nextSnapshot, this.coerceSnapshot.bind(this));
+            const documentBearingMessage = messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2;
+            const inferredSeed = messageType === syncProtocol.messageYjsUpdate
+                || (messageType === syncProtocol.messageYjsSyncStep2
+                    && (hasVTTContent(nextSnapshot, this.coerceSnapshot.bind(this)) || beforeSig !== afterSig));
+            this.renderRoomSeeded = serverSeeded || inferredSeed || this.renderRoomSeeded;
+            this.docSyncConfirmed = documentBearingMessage || !!this.renderRoomSeeded;
+            if (documentBearingMessage) {
                 this.lastYUpdateAt = this.lastYSyncAt;
             }
         } catch (err) {
@@ -2391,6 +2319,7 @@ class VTTCollabSession {
                     profileName: toTrimmedString(entry.profileName, '', 120).trim() || 'Player',
                     color: toTrimmedString(entry.color, '', 40).trim() || pickPeerColor(instanceId),
                     activeSceneId: toTrimmedString(entry.activeSceneId, '', 120).trim(),
+                    canSaveRoom: !!entry.canSaveRoom,
                     ts: Math.max(0, parseInt(entry.ts, 10) || 0)
                 });
             });

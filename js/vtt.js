@@ -3380,7 +3380,7 @@
             .filter((entry) => entry.id);
     };
 
-    const switchVTTCase = (caseId) => {
+    const switchVTTCase = async (caseId) => {
         const store = getStore();
         const targetId = String(caseId || '').trim();
         if (!targetId || !store || typeof store.setActiveCase !== 'function') return false;
@@ -3405,18 +3405,22 @@
 
         loadUIPreferences();
         loadRolePreference();
-
-        const nextSnapshot = deepClone(store.getVTTState(targetId));
+        initialVTTLoadPending = true;
+        const nextSnapshot = await loadInitialVTTSnapshot(store);
+        if (!nextSnapshot) {
+            vttState = null;
+            normalizeSelections();
+            return true;
+        }
         vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, {
             persist: false,
             reason: 'case-switch'
         }).snapshot;
+        initialVTTLoadPending = false;
         normalizeSelections();
         render();
 
-        refreshVTTCollabRoomIfNeeded().catch((err) => {
-            console.warn('VTT case room switch failed', err);
-        });
+        await refreshVTTCollabRoomIfNeeded();
         return true;
     };
 
@@ -4441,6 +4445,7 @@
             if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
             return snapshot;
         }
+        if (initialVTTLoadPending || !vttState) return null;
         const snapshot = deepClone(store.getVTTState(getActiveCaseId()));
         if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
         return snapshot;
@@ -5215,27 +5220,18 @@
             && config.campaignId);
     };
 
-    const readLocalInitialVTTSnapshot = (store, caseId) => {
-        if (!store || typeof store.getVTTState !== 'function') return deepClone(DEFAULT_VTT_STATE);
-        return deepClone(store.getVTTState(caseId) || DEFAULT_VTT_STATE);
-    };
-
     const loadInitialVTTSnapshot = async (store) => {
         const activeCaseId = getActiveCaseId();
-        if (!store) return deepClone(DEFAULT_VTT_STATE);
-
-        if (hasLiveVTTConfig() && !isDM()) {
-            setVTTCollabStatus({
-                state: 'connecting',
-                detail: 'Waiting for GM live VTT room. Local and Supabase snapshots are not used for player boot.',
-                peerCount: 0
-            });
-            if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: Waiting for GM live room...';
-            return deepClone(DEFAULT_VTT_STATE);
-        }
+        if (!store) return null;
 
         if (!hasSupabaseVTTConfig() || typeof store.loadVTTRoomSnapshot !== 'function') {
-            return readLocalInitialVTTSnapshot(store, activeCaseId);
+            setVTTCollabStatus({
+                state: 'degraded',
+                detail: 'PostgreSQL sync is not configured. VTT state was not loaded.',
+                peerCount: 0
+            });
+            if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: PostgreSQL sync required';
+            return null;
         }
 
         const roomId = getVTTCollabRoomId(activeCaseId);
@@ -5269,13 +5265,20 @@
                 }
                 return payload;
             }
+            if (result && result.ok && !result.snapshot) {
+                setVTTCollabStatus({
+                    state: 'degraded',
+                    detail: 'No PostgreSQL VTT snapshot exists for this room yet.',
+                    peerCount: 0
+                });
+                if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: No PostgreSQL VTT snapshot';
+                return null;
+            }
             if (result && !result.ok) {
                 console.warn('VTT Supabase preflight failed', result.error || result.reason || result);
                 setVTTCollabStatus({
                     state: 'degraded',
-                    detail: result.error || (isDM()
-                        ? 'Saved VTT check failed. GM is loading local fallback.'
-                        : 'Saved VTT check failed.'),
+                    detail: result.error || 'PostgreSQL VTT snapshot check failed. VTT state was not loaded.',
                     peerCount: 0
                 });
             }
@@ -5283,14 +5286,12 @@
             console.warn('VTT Supabase preflight failed', err);
             setVTTCollabStatus({
                 state: 'degraded',
-                detail: err && err.message ? err.message : (isDM()
-                    ? 'Saved VTT check failed. GM is loading local fallback.'
-                    : 'Saved VTT check failed.'),
+                detail: err && err.message ? err.message : 'PostgreSQL VTT snapshot check failed. VTT state was not loaded.',
                 peerCount: 0
             });
         }
 
-        return isDM() ? readLocalInitialVTTSnapshot(store, activeCaseId) : deepClone(DEFAULT_VTT_STATE);
+        return null;
     };
 
     const handleVTTAuthorityRoleChange = async (previousRole, nextRole, transitionId = vttAuthorityTransitionId) => {
@@ -5323,6 +5324,13 @@
         if (nextRole === 'dm') {
             const snapshot = await loadInitialVTTSnapshot(store);
             if (!isCurrentTransition()) return null;
+            if (!snapshot) {
+                vttState = null;
+                initialVTTLoadPending = true;
+                normalizeSelections();
+                render();
+                return null;
+            }
             const fogMigrated = coerceSnapshotFogToCellMasks(snapshot);
             let synced = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
                 persist: true,
@@ -5594,10 +5602,17 @@
         pendingRemoteVTTSnapshot = null;
         const store = getStore();
         if (store) {
-            const nextSnapshot = readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(expectedCaseId));
-            vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' }).snapshot;
-            normalizeSelections();
-            render();
+            const nextSnapshot = await loadInitialVTTSnapshot(store);
+            if (nextSnapshot) {
+                vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' }).snapshot;
+                normalizeSelections();
+                render();
+            } else {
+                vttState = null;
+                initialVTTLoadPending = true;
+                normalizeSelections();
+                return null;
+            }
         }
         return initVTTCollab();
     };
@@ -5633,6 +5648,19 @@
         vttCollabInitPromise = null;
         pendingRemoteVTTSnapshot = null;
 
+        if (initialVTTLoadPending || !vttState) {
+            const store = getStore();
+            const snapshot = await loadInitialVTTSnapshot(store);
+            if (!snapshot) return null;
+            vttState = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
+                persist: isDM(),
+                reason: 'roster-player-presentation-sync'
+            }).snapshot;
+            initialVTTLoadPending = false;
+            normalizeSelections();
+            render();
+        }
+
         return initVTTCollab();
     };
 
@@ -5658,7 +5686,8 @@
 
         const activeCaseId = getActiveCaseId();
         const roomId = getVTTCollabRoomId(activeCaseId);
-        const snapshot = deepClone(vttState || (store.getVTTState && store.getVTTState(activeCaseId)) || DEFAULT_VTT_STATE);
+        if (!vttState) throw new Error('VTT has not loaded a PostgreSQL snapshot yet.');
+        const snapshot = deepClone(vttState);
         syncRosterLinkedPlayerPresentation(snapshot);
         coerceSnapshotFogToCellMasks(snapshot);
         snapshot.updatedAt = Date.now();
@@ -11336,7 +11365,12 @@
             if (event.type !== 'change') return;
             if (!isDM()) return;
             const caseId = String(target.value || '').trim();
-            if (!switchVTTCase(caseId)) renderSceneList();
+            switchVTTCase(caseId).then((switched) => {
+                if (!switched) renderSceneList();
+            }).catch((err) => {
+                console.warn('VTT case switch failed', err);
+                renderSceneList();
+            });
             return;
         }
 
@@ -12792,7 +12826,17 @@
         loadUIPreferences();
         capturePlayerImagesAtLoad();
         const initialSnapshot = await loadInitialVTTSnapshot(store);
-        const blockUntilRelaySnapshot = hasLiveVTTConfig() && !isDM();
+        if (!initialSnapshot) {
+            vttState = null;
+            initialVTTLoadPending = true;
+            normalizeSelections();
+            if (typeof store.onSyncStatus === 'function') {
+                unsubscribeSyncStatus = store.onSyncStatus(updateStoreSyncChip);
+            } else {
+                updateStoreSyncChip({ connected: false });
+            }
+            return;
+        }
 
         const fogMigrated = coerceSnapshotFogToCellMasks(initialSnapshot);
 
@@ -12811,10 +12855,8 @@
 
         vttState = initialSynced;
         normalizeSelections();
-        if (!blockUntilRelaySnapshot) {
-            initialVTTLoadPending = false;
-            render();
-        }
+        initialVTTLoadPending = false;
+        render();
         initVTTCollab().catch((err) => {
             console.warn('VTT collaboration init failed', err);
         }).finally(() => {
