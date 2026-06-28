@@ -3339,7 +3339,8 @@
         });
 
         state.initiative.entries.forEach((entry) => {
-            const linkedPlayer = playersById.get(String(entry && entry.sourceId || '').trim())
+            const isPlayerEntry = String(entry && entry.sourceType || '').trim() === 'player';
+            const linkedPlayer = (isPlayerEntry ? playersById.get(String(entry && entry.sourceId || '').trim()) : null)
                 || playerByTokenId.get(String(entry && entry.linkedTokenId || '').trim())
                 || null;
             if (!linkedPlayer) return;
@@ -4300,6 +4301,54 @@
         if (Array.isArray(next.conditions) && next.conditions.length) token.conditions = next.conditions.slice(0, 24);
 
         return next;
+    };
+
+    const clearPlayerRosterIdentityFromRecord = (record) => {
+        if (!record || String(record.sourceType || '').trim() !== 'player') return false;
+        let mutated = false;
+        if (record.sourceType) {
+            record.sourceType = '';
+            mutated = true;
+        }
+        if (record.sourceId) {
+            record.sourceId = '';
+            mutated = true;
+        }
+        if (record.imageUrl === '') {
+            record.imageUrl = String(record.label || record.name || '').trim() ? record.imageUrl : '';
+        }
+        return mutated;
+    };
+
+    const setInitiativeEntryRosterOwner = (entryId, playerId) => {
+        if (!canEditInitiative()) return false;
+        const cleanEntryId = String(entryId || '').trim();
+        const cleanPlayerId = String(playerId || '').trim();
+        if (!cleanEntryId) return false;
+        const player = cleanPlayerId ? findPlayerById(cleanPlayerId) : null;
+        let changed = false;
+        withDraft((draft) => {
+            const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
+            const entry = entries.find((candidate) => String(candidate && candidate.id || '').trim() === cleanEntryId);
+            if (!entry) return;
+            const linkedToken = findTokenByIdAcrossScenes(draft, entry.linkedTokenId);
+            if (player) {
+                if (linkedToken) {
+                    linkedToken.sourceType = 'player';
+                    linkedToken.sourceId = String(player.id || '').trim();
+                    syncTokenRosterIdentity(linkedToken, player);
+                }
+                if (syncEntryRosterIdentity(entry, player)) changed = true;
+                changed = true;
+            } else {
+                if (clearPlayerRosterIdentityFromRecord(entry)) changed = true;
+                if (linkedToken && clearPlayerRosterIdentityFromRecord(linkedToken)) changed = true;
+            }
+            selectedEntryId = entry.id;
+            if (linkedToken) selectedTokenId = linkedToken.id;
+            sortInitiativeEntries(entries);
+        });
+        return changed;
     };
 
     const getTokenWorldRect = (token, scene) => {
@@ -8830,7 +8879,10 @@
                     </div>
                     <div class="vtt-entry-top-actions">
                         <div class="vtt-entry-score">${escapeHtml(String(entry.total ?? 0))}</div>
-                        ${isDM() ? `<button class="vtt-inline-btn vtt-inline-btn-icon danger" data-action="remove-entry" data-id="${escapeHtml(entry.id)}" aria-label="Remove from initiative" title="Remove from initiative">X</button>` : ''}
+                        ${isDM() ? `
+                            <button class="vtt-inline-btn vtt-inline-btn-icon" data-action="edit-entry" data-id="${escapeHtml(entry.id)}" aria-label="Edit initiative entry" title="Edit initiative entry">Edit</button>
+                            <button class="vtt-inline-btn vtt-inline-btn-icon danger" data-action="remove-entry" data-id="${escapeHtml(entry.id)}" aria-label="Remove from initiative" title="Remove from initiative">X</button>
+                        ` : ''}
                     </div>
                 </div>
             </div>
@@ -9071,6 +9123,8 @@
         const tokenAssignmentOptions = getInitiativeTokenAssignmentOptions(vttState);
         const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
         const isRosterManagedPlayer = !!rosterPlayer;
+        const players = getPlayers();
+        const rosterPlayerId = rosterPlayer ? String(rosterPlayer.id || '').trim() : '';
         if (!entry || !initiativeDetailState || !isDM()) {
             initiativeDetailPanelEl.hidden = true;
             return;
@@ -9126,9 +9180,22 @@
                             `).join('')}
                         </select>
                     </label>
+                    <label class="vtt-field">
+                        <span>Roster Owner</span>
+                        <select class="vtt-entry-input" data-entry-player-link="1">
+                            <option value="">Not roster-managed</option>
+                            ${players.map((player) => {
+                                const playerId = String(player && player.id || '').trim();
+                                if (!playerId) return '';
+                                const label = String(player && player.name || playerId).trim() || playerId;
+                                return `<option value="${escapeHtml(playerId)}"${playerId === rosterPlayerId ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+                            }).join('')}
+                        </select>
+                    </label>
                 </div>
                 <div class="vtt-entry-actions">
                     <button class="vtt-inline-btn" data-action="assign-entry-selected-token" data-id="${escapeHtml(entry.id)}"${selectedTokenId ? '' : ' disabled'}>${selectedTokenId ? 'Assign Selected Token' : 'Select A Token On The Map'}</button>
+                    ${isRosterManagedPlayer ? `<button class="vtt-inline-btn" data-action="clear-entry-roster-owner" data-id="${escapeHtml(entry.id)}">Clear Roster Owner</button>` : ''}
                 </div>
                 <div>
                     <div class="vtt-subhead">Defences</div>
@@ -11241,6 +11308,21 @@
             return;
         }
 
+        if (action === 'edit-entry') {
+            if (!isDM()) return;
+            selectedEntryId = id || selectedEntryId;
+            if (!selectedEntryId) return;
+            const rect = actionEl.getBoundingClientRect ? actionEl.getBoundingClientRect() : null;
+            openInitiativeDetail(
+                selectedEntryId,
+                rect ? Math.round(rect.right) : window.innerWidth / 2,
+                rect ? Math.round(rect.top) : window.innerHeight / 2
+            );
+            renderInitiativeList();
+            renderInitiativeDetail();
+            return;
+        }
+
         if (action === 'remove-entry') {
             removeEntry(id);
             return;
@@ -11276,6 +11358,13 @@
             selectedEntryId = id || selectedEntryId;
             if (!selectedEntryId || !selectedTokenId) return;
             assignSelectedEntryToToken(selectedTokenId);
+            return;
+        }
+
+        if (action === 'clear-entry-roster-owner') {
+            selectedEntryId = id || selectedEntryId;
+            if (!selectedEntryId) return;
+            setInitiativeEntryRosterOwner(selectedEntryId, '');
         }
     };
 
@@ -11493,6 +11582,13 @@
             const tokenId = String(target.value || '').trim();
             if (!tokenId) return;
             assignSelectedEntryToToken(tokenId);
+            return;
+        }
+
+        if (selectedEntryId && target instanceof HTMLSelectElement && target.dataset.entryPlayerLink) {
+            if (!canEditInitiative()) return;
+            if (event.type !== 'change') return;
+            setInitiativeEntryRosterOwner(selectedEntryId, String(target.value || '').trim());
             return;
         }
 
