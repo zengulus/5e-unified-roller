@@ -393,6 +393,14 @@
         const parsed = toNumber(value, fallback);
         return Math.max(0, Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION);
     };
+    const normalizeGridCoordinate = (value, fallback = 0) => {
+        const parsed = toNumber(value, fallback);
+        return Math.max(0, Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION);
+    };
+    const normalizeWorldCoordinate = (value, fallback = 0) => {
+        const parsed = toNumber(value, fallback);
+        return Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION;
+    };
     const snapTokenCoordinate = (value, fallback = 0) => {
         const safe = normalizeTokenCoordinate(value, fallback);
         const base = Math.floor(safe);
@@ -1854,8 +1862,9 @@
         const category = normalizeEvidenceNoteCategory(source.category);
         const shape = normalizeEvidenceNoteShape(source.shape, EVIDENCE_NOTE_SHAPE_ZONE);
         const defaultTitle = getDefaultEvidenceNoteTitle(category);
-        const left = Math.round(toNumber(bounds.left, 0));
-        const top = Math.round(toNumber(bounds.top, 0));
+        const isPin = shape === EVIDENCE_NOTE_SHAPE_PIN;
+        const left = isPin ? normalizeGridCoordinate(bounds.left, 0) : Math.round(toNumber(bounds.left, 0));
+        const top = isPin ? normalizeGridCoordinate(bounds.top, 0) : Math.round(toNumber(bounds.top, 0));
         const widthCells = shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, Math.round(toNumber(bounds.widthCells, 1)));
         const heightCells = shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, Math.round(toNumber(bounds.heightCells, 1)));
         return {
@@ -1868,8 +1877,8 @@
             highlightColor: getDefaultEvidenceNoteHighlightColor(category),
             triggers: normalizeProximityTriggers(source.triggers),
             proximityPromptStates: normalizeProximityPromptStates(source.proximityPromptStates),
-            x: Math.round(offsetX + left * cellPx),
-            y: Math.round(offsetY + top * cellPx),
+            x: normalizeWorldCoordinate(offsetX + left * cellPx),
+            y: normalizeWorldCoordinate(offsetY + top * cellPx),
             w: Math.max(1, Math.round(widthCells * cellPx)),
             h: Math.max(1, Math.round(heightCells * cellPx))
         };
@@ -1879,21 +1888,39 @@
         const cellPx = getSceneCellPx(scene);
         const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
         const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const start = snapWorldPointToFogCorner(scene, startWorldPoint);
-        const end = snapWorldPointToFogCorner(scene, endWorldPoint);
-        const startCol = Math.round((start.x - offsetX) / cellPx);
-        const startRow = Math.round((start.y - offsetY) / cellPx);
-        const endCol = Math.round((end.x - offsetX) / cellPx);
-        const endRow = Math.round((end.y - offsetY) / cellPx);
+        const startCell = getFogCellAtWorldPoint(scene, startWorldPoint);
+        const endCell = getFogCellAtWorldPoint(scene, endWorldPoint);
+        const startCol = startCell.col;
+        const startRow = startCell.row;
+        const endCol = endCell.col;
+        const endRow = endCell.row;
         const hasDraggedArea = Math.abs(endCol - startCol) > 0 || Math.abs(endRow - startRow) > 0;
         const shape = hasDraggedArea
             ? EVIDENCE_NOTE_SHAPE_ZONE
             : normalizeEvidenceNoteShape(source.shape, EVIDENCE_NOTE_SHAPE_PIN);
+        if (shape === EVIDENCE_NOTE_SHAPE_PIN) {
+            return buildEvidenceNoteFromCellBounds(scene, {
+                left: (toNumber(endWorldPoint.x, offsetX) - offsetX) / cellPx,
+                top: (toNumber(endWorldPoint.y, offsetY) - offsetY) / cellPx,
+                widthCells: 1,
+                heightCells: 1
+            }, {
+                ...source,
+                shape,
+                id
+            });
+        }
+        const start = snapWorldPointToFogCorner(scene, startWorldPoint);
+        const end = snapWorldPointToFogCorner(scene, endWorldPoint);
+        const snappedStartCol = Math.round((start.x - offsetX) / cellPx);
+        const snappedStartRow = Math.round((start.y - offsetY) / cellPx);
+        const snappedEndCol = Math.round((end.x - offsetX) / cellPx);
+        const snappedEndRow = Math.round((end.y - offsetY) / cellPx);
         return buildEvidenceNoteFromCellBounds(scene, {
-            left: Math.min(startCol, endCol),
-            top: Math.min(startRow, endRow),
-            widthCells: Math.max(1, Math.abs(endCol - startCol)),
-            heightCells: Math.max(1, Math.abs(endRow - startRow))
+            left: Math.min(snappedStartCol, snappedEndCol),
+            top: Math.min(snappedStartRow, snappedEndRow),
+            widthCells: Math.max(1, Math.abs(snappedEndCol - snappedStartCol)),
+            heightCells: Math.max(1, Math.abs(snappedEndRow - snappedStartRow))
         }, {
             ...source,
             shape,
@@ -1905,8 +1932,10 @@
         const cellPx = getSceneCellPx(scene);
         const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
         const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const left = Math.round((toNumber(note.x, offsetX) - offsetX) / cellPx);
-        const top = Math.round((toNumber(note.y, offsetY) - offsetY) / cellPx);
+        const rawLeft = (toNumber(note.x, offsetX) - offsetX) / cellPx;
+        const rawTop = (toNumber(note.y, offsetY) - offsetY) / cellPx;
+        const left = isEvidenceNotePin(note) ? Math.floor(rawLeft) : Math.round(rawLeft);
+        const top = isEvidenceNotePin(note) ? Math.floor(rawTop) : Math.round(rawTop);
         const widthCells = Math.max(1, Math.round(Math.max(1, toNumber(note.w, cellPx)) / cellPx));
         const heightCells = Math.max(1, Math.round(Math.max(1, toNumber(note.h, cellPx)) / cellPx));
         return {
@@ -1916,6 +1945,16 @@
             heightCells,
             right: left + widthCells,
             bottom: top + heightCells
+        };
+    };
+    const getEvidenceNoteCellPoint = (scene, note) => {
+        if (!scene || !note) return null;
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
+        return {
+            x: normalizeGridCoordinate((toNumber(note.x, offsetX) - offsetX) / cellPx),
+            y: normalizeGridCoordinate((toNumber(note.y, offsetY) - offsetY) / cellPx)
         };
     };
     const isEvidenceNoteCoveredByFog = (scene, note, fogCellSet = null) => {
@@ -1984,8 +2023,9 @@
     const buildEvidenceNoteAreaLabel = (note, scene) => {
         const bounds = getEvidenceNoteCellBounds(scene, note);
         if (isEvidenceNotePin(note)) {
-            if (!bounds) return 'Pin';
-            return `Pin ${bounds.left}, ${bounds.top}`;
+            const point = getEvidenceNoteCellPoint(scene, note);
+            if (!point) return 'Pin';
+            return `Pin ${point.x}, ${point.y}`;
         }
         if (!bounds) return '1 x 1 sq';
         return `${bounds.widthCells} x ${bounds.heightCells} sq`;
@@ -8626,6 +8666,9 @@
         };
         const category = normalizeEvidenceNoteCategory(note && note.category);
         const shape = normalizeEvidenceNoteShape(note && note.shape, EVIDENCE_NOTE_SHAPE_ZONE);
+        const pinPoint = shape === EVIDENCE_NOTE_SHAPE_PIN ? getEvidenceNoteCellPoint(scene, note) : null;
+        const displayGridX = pinPoint ? pinPoint.x : bounds.left;
+        const displayGridY = pinPoint ? pinPoint.y : bounds.top;
         const shapeLabel = getEvidenceNoteShapeLabel(note);
         return `
             <div class="vtt-inspector-stack">
@@ -8651,11 +8694,11 @@
                     </label>
                     <label class="vtt-field">
                         <span>Grid X</span>
-                        <input class="vtt-inspector-input" type="number" data-note-field="gridX" value="${escapeHtml(String(bounds.left))}">
+                        <input class="vtt-inspector-input" type="number" ${shape === EVIDENCE_NOTE_SHAPE_PIN ? 'step="0.001"' : 'step="1"'} data-note-field="gridX" value="${escapeHtml(String(displayGridX))}">
                     </label>
                     <label class="vtt-field">
                         <span>Grid Y</span>
-                        <input class="vtt-inspector-input" type="number" data-note-field="gridY" value="${escapeHtml(String(bounds.top))}">
+                        <input class="vtt-inspector-input" type="number" ${shape === EVIDENCE_NOTE_SHAPE_PIN ? 'step="0.001"' : 'step="1"'} data-note-field="gridY" value="${escapeHtml(String(displayGridY))}">
                     </label>
                     ${shape === EVIDENCE_NOTE_SHAPE_ZONE ? `
                         <label class="vtt-field">
@@ -11787,7 +11830,10 @@
                     widthCells: 1,
                     heightCells: 1
                 };
-                const nextValue = Math.round(toNumber(target.value, 0));
+                const rawNextValue = toNumber(target.value, 0);
+                const nextValue = note.shape === EVIDENCE_NOTE_SHAPE_PIN
+                    ? normalizeGridCoordinate(rawNextValue, 0)
+                    : Math.round(rawNextValue);
                 if (field === 'gridX') bounds.left = Math.max(0, nextValue);
                 else if (field === 'gridY') bounds.top = Math.max(0, nextValue);
                 else if (field === 'cellsWide') bounds.widthCells = note.shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, nextValue);
