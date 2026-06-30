@@ -30,7 +30,7 @@ body[data-player-nav="vtt"] .vtt-topbar {
     left: 0.75rem;
     right: 0.75rem;
     top: 0.5rem;
-    z-index: 30;
+    z-index: 90;
     flex-wrap: nowrap;
     padding: 0.42rem 0.56rem;
     margin: 0;
@@ -72,7 +72,7 @@ body[data-player-nav="vtt"] .vtt-topbar-local-controls {
 }
 
 body[data-player-nav="vtt"] .vtt-topbar-actions {
-    display: none;
+    display: flex;
 }
 
 .vtt-topbar-brand .hero-eyebrow {
@@ -449,6 +449,15 @@ body[data-player-nav="vtt"] .vtt-audio-player {
 
 .vtt-initiative-panel {
     right: 1rem;
+    --vtt-rail-width: min(300px, calc(100vw - 2rem));
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+    transition: width 160ms ease, max-height 160ms ease;
+}
+
+.vtt-initiative-panel > .vtt-side-rail-tab {
+    display: none;
 }
 
 .vtt-admin-panel {
@@ -460,6 +469,43 @@ body[data-player-nav="vtt"] .vtt-audio-player {
     display: grid;
     gap: 1rem;
     min-width: 0;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel {
+    --vtt-rail-width: min(280px, calc(100vw - 1rem));
+    top: calc(var(--vtt-overlay-top) + 0.35rem);
+    right: 0.5rem;
+    max-height: min(56vh, calc(100vh - var(--vtt-overlay-top) - 5.6rem));
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-initiative-scroll {
+    gap: 0.5rem;
+    max-height: inherit;
+    overflow: hidden auto;
+    scrollbar-width: thin;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-panel {
+    padding: 0.5rem;
+    border-radius: 8px;
+    background: rgba(7, 11, 19, 0.78);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3);
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-panel-head {
+    margin-bottom: 0.4rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-panel-head h2 {
+    font-size: 0.82rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-panel-head-actions,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-initiative-toolbar,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-controls,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-edit-grid,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-top-actions .vtt-inline-btn {
+    display: none;
 }
 
 body[data-vtt-role="player"] .vtt-sidebar,
@@ -491,7 +537,7 @@ body[data-vtt-role="spectator"] [data-vtt-menu-dm-only="1"] {
 .vtt-table-hud {
     position: absolute;
     inset: auto 1rem 1rem 1rem;
-    z-index: 16;
+    z-index: 42;
     display: grid;
     justify-items: center;
     pointer-events: none;
@@ -605,7 +651,7 @@ body[data-vtt-role="spectator"] [data-vtt-menu-dm-only="1"] {
     position: absolute;
     top: calc(var(--vtt-overlay-top, 4.35rem) + 0.35rem);
     right: 0.9rem;
-    z-index: 15;
+    z-index: 44;
     display: inline-flex;
     align-items: center;
     gap: 0.24rem;
@@ -653,18 +699,15 @@ body[data-vtt-role="spectator"] .vtt-player-dock {
 
 body[data-active-vtt-panel=""] .vtt-sidebar,
 body[data-active-vtt-panel=""] .vtt-player-roll-rail,
-body[data-active-vtt-panel=""] .vtt-initiative-panel,
 body[data-active-vtt-panel=""] .vtt-admin-panel,
 body:not([data-active-vtt-panel]) .vtt-sidebar,
 body:not([data-active-vtt-panel]) .vtt-player-roll-rail,
-body:not([data-active-vtt-panel]) .vtt-initiative-panel,
 body:not([data-active-vtt-panel]) .vtt-admin-panel {
     pointer-events: none;
 }
 
 .vtt-sidebar,
 .vtt-player-roll-rail,
-.vtt-initiative-panel,
 .vtt-admin-panel {
     opacity: 0;
     pointer-events: none;
@@ -676,11 +719,19 @@ body[data-active-vtt-panel="setup"] .vtt-sidebar,
 body[data-active-vtt-panel="spawn"] .vtt-sidebar,
 body[data-active-vtt-panel="inspector"] .vtt-sidebar,
 body[data-active-vtt-panel="player-rolls"] .vtt-player-roll-rail,
-body[data-active-vtt-panel="combat"] .vtt-initiative-panel,
 body[data-active-vtt-panel="admin"] .vtt-admin-panel {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
+}
+
+body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
+    --vtt-rail-width: min(360px, calc(100vw - 2rem));
+    max-height: calc(100vh - var(--vtt-overlay-top) - 0.75rem);
+}
+
+body[data-active-vtt-panel="combat"] .vtt-initiative-panel > .vtt-side-rail-tab {
+    display: inline-flex;
 }
 
 body[data-active-vtt-panel="setup"] #vtt-spawn-panel,
@@ -3258,6 +3309,75 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     justify-content: flex-end;
 }
 
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-list,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-initiative-list {
+    gap: 0.35rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock {
+    gap: 0.35rem;
+    padding: 0.42rem 0.46rem;
+    border-radius: 8px;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-layout {
+    gap: 0.42rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-pie {
+    width: 2.25rem;
+    height: 2.25rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-pie span {
+    padding: 0.08rem 0.22rem;
+    font-size: 0.62rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-main {
+    gap: 0.18rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-title {
+    font-size: 0.82rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-note {
+    display: none;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry {
+    padding: 0.42rem 0.48rem;
+    border-radius: 8px;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-line {
+    align-items: center;
+    gap: 0.45rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-primary {
+    gap: 0.18rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-name {
+    font-size: 0.82rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-score {
+    padding: 0.16rem 0.42rem;
+    font-size: 0.72rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-meta {
+    gap: 0.22rem;
+    font-size: 0.66rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag {
+    padding: 0.1rem 0.32rem;
+}
+
 .vtt-inline-btn-icon {
     min-width: 2.1rem;
     padding: 0.5rem 0.6rem;
@@ -4210,7 +4330,7 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         top: 0.5rem;
         width: auto;
         max-width: none;
-        z-index: 30;
+        z-index: 90;
         margin: 0;
         padding: 0.42rem 0.56rem;
         border-radius: 8px;
@@ -4303,6 +4423,17 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     .vtt-initiative-panel,
     .vtt-admin-panel {
         right: 0.5rem;
+    }
+
+    .vtt-initiative-panel {
+        --vtt-rail-width: min(300px, calc(100vw - 1rem));
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+    }
+
+    body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
+        --vtt-rail-width: clamp(398px, calc(32vw + 1rem), 446px);
     }
 
     .vtt-sidebar > .vtt-side-rail-tab,
@@ -4586,6 +4717,31 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         bottom: 5.8rem;
         max-width: calc(100vw - 1.1rem);
         overflow-x: auto;
+    }
+
+    body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel {
+        left: auto;
+        right: 0.45rem;
+        top: calc(var(--vtt-overlay-top) + 0.35rem);
+        bottom: auto;
+        width: min(240px, calc(100vw - 0.9rem));
+        max-height: min(42vh, calc(100vh - var(--vtt-overlay-top) - 6rem));
+        padding: 0;
+        opacity: 1;
+        pointer-events: auto;
+        transform: none;
+        z-index: 46;
+    }
+
+    body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
+        left: 0;
+        right: 0;
+        top: auto;
+        bottom: 0;
+        width: 100vw;
+        max-height: min(78vh, 42rem);
+        padding: 0.75rem;
+        transform: translateY(0);
     }
 }
 
