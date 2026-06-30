@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260610a">
+    <link rel="stylesheet" href="css/vtt.css?v=20260630a">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
@@ -264,24 +264,35 @@
                             <span id="vtt-stage-meta">Table controls</span>
                         </div>
                         <div class="vtt-dock-actions">
-                            <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
-                                data-tool-mode="navigate" id="vtt-tool-mode-navigate" aria-pressed="true">Select</button>
-                            <button class="vtt-dock-btn" type="button" data-action="set-ping-mode"
-                                data-ping-variant="attention" id="vtt-tool-mode-ping" aria-pressed="false">Ping</button>
-                            <button class="vtt-dock-btn" type="button" data-action="toggle-ruler-mode"
-                                id="vtt-ruler-toggle" aria-pressed="false">Measure</button>
-                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
-                                data-panel="dm-tools" id="vtt-tools-menu-toggle"
-                                aria-controls="vtt-tools-menu" aria-expanded="false">Templates</button>
-                            <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
-                                data-tool-mode="fog" id="vtt-tool-mode-fog" aria-pressed="false">Fog</button>
-                            <button class="vtt-dock-btn strong" type="button" data-action="open-quick-spawn">Spawn</button>
-                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
-                                data-panel="inspector" aria-controls="vtt-settings-panel">Inspector</button>
-                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
-                                data-panel="combat" aria-controls="vtt-initiative-panel">Combat</button>
-                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
-                                data-panel="setup" aria-controls="vtt-settings-panel">Setup</button>
+                            <div class="vtt-dock-group" role="group" aria-label="Map tools">
+                                <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
+                                    data-tool-mode="navigate" id="vtt-tool-mode-navigate" aria-pressed="true"
+                                    title="Select and move tokens">Select</button>
+                                <button class="vtt-dock-btn" type="button" data-action="set-ping-mode"
+                                    data-ping-variant="attention" id="vtt-tool-mode-ping" aria-pressed="false"
+                                    title="Ping the map">Ping</button>
+                                <button class="vtt-dock-btn" type="button" data-action="toggle-ruler-mode"
+                                    id="vtt-ruler-toggle" aria-pressed="false" title="Measure distance">Measure</button>
+                            </div>
+                            <div class="vtt-dock-group" role="group" aria-label="Drawing and visibility">
+                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                    data-panel="dm-tools" id="vtt-tools-menu-toggle"
+                                    aria-controls="vtt-tools-menu" aria-expanded="false" title="Templates and pins">Draw</button>
+                                <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
+                                    data-tool-mode="fog" id="vtt-tool-mode-fog" aria-pressed="false" title="Paint fog">Fog</button>
+                            </div>
+                            <div class="vtt-dock-group" role="group" aria-label="Content">
+                                <button class="vtt-dock-btn strong" type="button" data-action="open-quick-spawn"
+                                    title="Spawn tokens and notes">Spawn</button>
+                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                    data-panel="inspector" aria-controls="vtt-settings-panel" title="Open inspector">Inspect</button>
+                            </div>
+                            <div class="vtt-dock-group" role="group" aria-label="Drawers">
+                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                    data-panel="combat" aria-controls="vtt-initiative-panel" title="Open clocks and initiative">Combat</button>
+                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                    data-panel="setup" aria-controls="vtt-settings-panel" title="Open setup">Setup</button>
+                            </div>
                         </div>
                         <div class="vtt-popover vtt-tools-menu" id="vtt-tools-menu" hidden>
                             <div class="vtt-menu-section">
@@ -310,6 +321,13 @@
                             </div>
                         </div>
                     </section>
+                </div>
+                <div class="vtt-zoom-dock" aria-label="Map zoom controls">
+                    <button class="vtt-zoom-btn" type="button" data-action="zoom-out" aria-label="Zoom out">-</button>
+                    <button class="vtt-zoom-btn" type="button" data-action="fit-view" aria-label="Fit map to view">Fit</button>
+                    <button class="vtt-zoom-btn strong" type="button" data-action="zoom-reset" id="vtt-stage-zoom-reset"
+                        aria-label="Reset zoom">100%</button>
+                    <button class="vtt-zoom-btn" type="button" data-action="zoom-in" aria-label="Zoom in">+</button>
                 </div>
                 <div class="vtt-map-world" id="vtt-map-world">
                     <img id="vtt-map-image" class="vtt-map-image" alt="" draggable="false">
@@ -456,7 +474,7 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260610a"></script>
+    <script src="js/vtt.js?v=20260630a"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

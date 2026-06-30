@@ -297,7 +297,7 @@
     const roleToggleEl = document.getElementById('vtt-role-toggle');
     const spectatorToggleEl = document.getElementById('vtt-spectator-toggle');
     const tokenNamesToggleEl = document.getElementById('vtt-token-names-toggle');
-    const zoomResetEl = document.querySelector('[data-action="zoom-reset"]');
+    const zoomResetEls = Array.from(document.querySelectorAll('[data-action="zoom-reset"]'));
     const activeSceneLabelEl = document.getElementById('vtt-active-scene-label');
     const scenePanelSceneLabelEl = document.getElementById('vtt-scene-panel-scene-label');
     const stageTitleEl = document.getElementById('vtt-stage-title');
@@ -4968,9 +4968,9 @@
     };
 
     const applyWorldTransform = (scene = getActiveScene()) => {
-        if (zoomResetEl) {
-            zoomResetEl.textContent = `${Math.round(localView.zoom * 100)}%`;
-        }
+        zoomResetEls.forEach((zoomEl) => {
+            if (zoomEl) zoomEl.textContent = `${Math.round(localView.zoom * 100)}%`;
+        });
         if (mapWorldEl) {
             mapWorldEl.style.transform = `translate(${localView.x}px, ${localView.y}px)`;
         }
@@ -8249,6 +8249,8 @@
         const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
         const cases = getCaseSwitcherEntries();
         const activeCaseId = getActiveCaseId();
+        const activeCaseName = getActiveCaseName();
+        const caseOptions = cases.length ? cases : [{ id: activeCaseId, name: activeCaseName }];
         const sharedSceneId = getSharedSceneId(vttState);
         const viewedSceneId = getViewedSceneId(vttState, localRole);
         const sharedScene = getSceneById(sharedSceneId, vttState);
@@ -8257,29 +8259,20 @@
         const routeNote = isLocalView
             ? `DM previewing ${viewedScene && viewedScene.name ? viewedScene.name : 'a scene'}. Players remain on ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}.`
             : `Players are following ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}. Use Show Everyone when the table should move.`;
-        sceneListEl.innerHTML = scenes.length
-            ? `
-                <div class="vtt-scene-manager">
-                    <div class="vtt-scene-select-grid vtt-case-select-grid">
-                        <label class="vtt-field vtt-field-tight vtt-scene-select-field">
-                            <span>DM Case</span>
-                            <select data-case-picker="active"${cases.length ? '' : ' disabled'}>
-                                ${cases.length ? cases.map((entry) => `
-                                    <option value="${escapeHtml(entry.id)}"${entry.id === activeCaseId ? ' selected' : ''}>${escapeHtml(entry.name || entry.id)}</option>
-                                `).join('') : '<option>No cases available</option>'}
-                            </select>
-                        </label>
-                    </div>
-                    <div class="vtt-scene-select-grid">
-                        <label class="vtt-field vtt-field-tight vtt-scene-select-field">
-                            <span>DM View</span>
-                            <select data-scene-picker="local">
-                                ${scenes.map((scene) => `
-                                    <option value="${escapeHtml(scene.id)}"${scene.id === viewedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
-                                `).join('')}
-                            </select>
-                        </label>
-                    </div>
+        sceneListEl.innerHTML = `
+            <div class="vtt-scene-manager" data-active-case-id="${escapeHtml(activeCaseId)}">
+                <div class="vtt-scene-select-grid vtt-case-select-grid">
+                    <label class="vtt-field vtt-field-tight vtt-scene-select-field">
+                        <span>Case</span>
+                        <select data-case-picker="active"${caseOptions.length ? '' : ' disabled'}>
+                            ${caseOptions.map((entry) => `
+                                <option value="${escapeHtml(entry.id)}"${entry.id === activeCaseId ? ' selected' : ''}>${escapeHtml(entry.name || entry.id)}</option>
+                            `).join('')}
+                        </select>
+                    </label>
+                </div>
+                ${scenes.length
+                    ? `
                     <div class="vtt-scene-summary-card">
                         <div class="vtt-scene-summary-top">
                             <div class="vtt-scene-summary-copy">
@@ -8296,13 +8289,30 @@
                         <div class="vtt-scene-action-row">
                             <button class="vtt-chip-btn" data-action="view-scene-local" data-id="${escapeHtml(viewedSceneId)}"${viewedScene ? '' : ' disabled'}>DM Preview</button>
                             <button class="vtt-chip-btn strong" data-action="show-scene-everyone" data-id="${escapeHtml(viewedSceneId)}"${viewedScene ? '' : ' disabled'}>Show Everyone</button>
-                            <button class="vtt-chip-btn" data-action="clone-current-scene"${viewedScene ? '' : ' disabled'}>Clone Current</button>
-                            <button class="vtt-chip-btn danger" data-action="delete-current-scene"${scenes.length <= 1 || !viewedScene ? ' disabled' : ''}>Delete Current</button>
                         </div>
                     </div>
-                </div>
-            `
-            : '<div class="vtt-empty">No scenes yet.</div>';
+                    <details class="vtt-scene-manage-disclosure">
+                        <summary>Manage scenes in this case</summary>
+                        <div class="vtt-scene-manage-body">
+                            <label class="vtt-field vtt-field-tight vtt-scene-select-field">
+                                <span>DM Preview</span>
+                                <select data-scene-picker="local">
+                                    ${scenes.map((scene) => `
+                                        <option value="${escapeHtml(scene.id)}"${scene.id === viewedSceneId ? ' selected' : ''}>${escapeHtml(scene.name || 'Scene')}</option>
+                                    `).join('')}
+                                </select>
+                            </label>
+                            <div class="vtt-scene-action-row">
+                                <button class="vtt-chip-btn" data-action="create-scene">New</button>
+                                <button class="vtt-chip-btn" data-action="clone-current-scene"${viewedScene ? '' : ' disabled'}>Clone</button>
+                                <button class="vtt-chip-btn danger" data-action="delete-current-scene"${scenes.length <= 1 || !viewedScene ? ' disabled' : ''}>Delete</button>
+                            </div>
+                        </div>
+                    </details>
+                `
+                    : '<div class="vtt-empty">No scenes in this case yet.</div>'}
+            </div>
+        `;
     };
 
     const getSceneMusicSummary = (scene) => {
@@ -10028,6 +10038,21 @@
                             ? 'Spectator mode: drag empty space to pan, scroll or pinch to zoom, and click visible pins or zones to read them.'
                             : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click pins or zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
+        const dockToolStatus = localToolState.mode === TOOL_MODE_PING
+            ? (pendingAskRollRequest ? 'Ask roll' : 'Ping')
+            : (localToolState.mode === TOOL_MODE_RULER
+                ? 'Measure'
+                : (localToolState.mode === TOOL_MODE_CIRCLE
+                    ? `Circle ${localToolState.sizeCells}`
+                    : (localToolState.mode === TOOL_MODE_CONE
+                        ? `Cone ${localToolState.sizeCells}`
+                        : (localToolState.mode === TOOL_MODE_NOTE
+                            ? 'Pins'
+                            : (localToolState.mode === TOOL_MODE_FOG
+                                ? 'Fog'
+                                : (localToolState.mode === TOOL_MODE_FOG_REMOVE
+                                    ? 'Unfog'
+                                    : (isSpectator() ? 'View' : 'Select')))))));
         applyUIPreferences();
         renderToolsMenu();
         renderModeChip();
@@ -10042,8 +10067,11 @@
         if (scenePanelSceneLabelEl) scenePanelSceneLabelEl.textContent = scene.name || 'Scene';
         if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
         if (stageMetaEl) {
-            stageMetaEl.textContent = `${toolMeta} ${stealthMeta}`;
+            const metaParts = [dockToolStatus, `${Math.round(localView.zoom * 100)}%`];
+            if (scene.stealthMode) metaParts.push('Sight cones');
+            stageMetaEl.textContent = metaParts.join(' / ');
         }
+        if (stageEl) stageEl.title = `${toolMeta} ${stealthMeta}`;
         renderTableDocks();
         renderYouTubeAudioPlayer(sharedScene);
         const sceneNameEl = document.getElementById('scene-name');
@@ -13038,10 +13066,14 @@
     const handleStageWheel = (event) => {
         if (!stageEl) return;
         if (event.target instanceof Element && event.target.closest('#vtt-quick-spawn-menu')) return;
-        event.preventDefault();
-        const dominantDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+        const absX = Math.abs(event.deltaX);
+        const absY = Math.abs(event.deltaY);
+        if (absX > absY * 1.2 && !event.ctrlKey) return;
+        const dominantDelta = absY >= absX ? event.deltaY : event.deltaX;
         if (!Number.isFinite(dominantDelta) || dominantDelta === 0) return;
-        const factor = Math.exp(-dominantDelta * 0.0015);
+        event.preventDefault();
+        const sensitivity = event.ctrlKey ? 0.0016 : 0.00085;
+        const factor = Math.exp(-dominantDelta * sensitivity);
         const nextZoom = clampZoom(localView.zoom * factor);
         if (nextZoom === localView.zoom) return;
         setZoomAtPoint(nextZoom, event.clientX, event.clientY);
