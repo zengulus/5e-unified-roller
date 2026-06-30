@@ -473,9 +473,9 @@ body[data-player-nav="vtt"] .vtt-audio-player {
 
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel {
     --vtt-rail-width: min(280px, calc(100vw - 1rem));
-    top: calc(var(--vtt-overlay-top) + 0.35rem);
+    top: calc(var(--vtt-overlay-top) + 3.15rem);
     right: 0.5rem;
-    max-height: min(56vh, calc(100vh - var(--vtt-overlay-top) - 5.6rem));
+    max-height: min(52vh, calc(100vh - var(--vtt-overlay-top) - 8.4rem));
 }
 
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-initiative-scroll {
@@ -4045,7 +4045,7 @@ body[data-vtt-role="spectator"] [data-player-only="1"] {
 
 .vtt-side-rail-tab {
     position: absolute;
-    top: 0.85rem;
+    top: -2.55rem;
     z-index: 3;
     display: inline-grid;
     place-items: center;
@@ -4069,12 +4069,12 @@ body[data-vtt-role="spectator"] [data-player-only="1"] {
 
 .vtt-side-rail-tab-left {
     left: 0;
-    border-radius: 0 0.7rem 0.7rem 0;
+    border-radius: 0.7rem;
 }
 
 .vtt-side-rail-tab-right {
     right: 0;
-    border-radius: 0.7rem 0 0 0.7rem;
+    border-radius: 0.7rem;
 }
 
 .vtt-side-rail-tab:hover,
@@ -4722,10 +4722,10 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel {
         left: auto;
         right: 0.45rem;
-        top: calc(var(--vtt-overlay-top) + 0.35rem);
+        top: calc(var(--vtt-overlay-top) + 3rem);
         bottom: auto;
         width: min(240px, calc(100vw - 0.9rem));
-        max-height: min(42vh, calc(100vh - var(--vtt-overlay-top) - 6rem));
+        max-height: min(38vh, calc(100vh - var(--vtt-overlay-top) - 8.6rem));
         padding: 0;
         opacity: 1;
         pointer-events: auto;

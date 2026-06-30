@@ -2101,8 +2101,7 @@
         return !!(context && context.token && String(context.token.id || '').trim() === String(token.id || '').trim());
     };
     const canPreviewTokenPortrait = (token) => {
-        if (!token || !getCanonicalTokenImageUrl(token)) return false;
-        return !isLocalPlayerOwnToken(token);
+        return false;
     };
     const clearTokenPortraitPreview = ({ render = false } = {}) => {
         if (previewTokenTimer) {
@@ -8978,7 +8977,7 @@
                         <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
                         <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
                     </div>
-                    <div class="vtt-detail-note">Right-click ${escapeHtml(token.label)} on the map to edit it at your cursor. Shift-right-click still previews token art.</div>
+                    <div class="vtt-detail-note">Double-click ${escapeHtml(token.label)} on the map to edit it at your cursor.</div>
                 </div>
             `;
     };
@@ -9844,19 +9843,12 @@
             moodText: moodText || ''
         });
         if (tokenEl.dataset.renderSignature === signature) return;
-        const hasHoverCard = !!(usableImageUrl || moodText);
         tokenEl.innerHTML = `
             <div class="vtt-token-corona"></div>
             <div class="vtt-token-face">
                 ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(label)}" draggable="false" decoding="async">` : `<div class="vtt-token-initials">${escapeHtml(initials)}</div>`}
             </div>
-            ${moodEmoji ? `<div class="vtt-token-mood-corner" title="${escapeHtml(moodText || moodEmoji)}">${escapeHtml(moodEmoji)}</div>` : ''}
-            ${hasHoverCard ? `
-                <div class="vtt-token-hover-card${usableImageUrl ? '' : ' has-mood-only'}">
-                    ${usableImageUrl ? `<img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(label)} portrait" draggable="false" loading="lazy" decoding="async">` : ''}
-                    ${moodText ? `<div class="vtt-token-mood-badge">${escapeHtml(moodText)}</div>` : ''}
-                </div>
-            ` : ''}
+            ${moodEmoji ? `<div class="vtt-token-mood-corner">${escapeHtml(moodEmoji)}</div>` : ''}
             <div class="vtt-token-subtitle">${escapeHtml(label)}</div>
         `;
         tokenEl.dataset.renderSignature = signature;
@@ -10033,7 +10025,7 @@
                         : (localToolState.mode === TOOL_MODE_FOG_REMOVE
                             ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
                     : (isDM()
-                        ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Right-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Shift-right-click a token image to preview it. Double-click a token to snap it to the grid. Arrow keys move the selected token by one cell.'
+                        ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Double-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Arrow keys move the selected token by one cell.'
                         : (isSpectator()
                             ? 'Spectator mode: drag empty space to pan, scroll or pinch to zoom, and click visible pins or zones to read them.'
                             : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click pins or zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))))));
@@ -12352,6 +12344,15 @@
         renderInitiativeDetail();
         renderTokenInspector();
         renderToolsMenu();
+        if (isDoublePress && isDM()) {
+            lastTokenPointerDownId = '';
+            lastTokenPointerDownAt = 0;
+            previewTokenId = '';
+            openTokenInspectorPopover(token.id, event.clientX, event.clientY);
+            renderTokenInspectorPopover();
+            renderStage();
+            return true;
+        }
         if (isDoublePress && canMoveToken) {
             lastTokenPointerDownId = '';
             lastTokenPointerDownAt = 0;
@@ -12440,6 +12441,8 @@
                 render();
             } else {
                 queueSharedPing(scene, worldPoint, getPingVariantOptions(event));
+                setToolMode(TOOL_MODE_NAVIGATE);
+                render();
             }
             event.preventDefault();
             return;
