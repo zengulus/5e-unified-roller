@@ -2797,7 +2797,9 @@
     };
 
     const closeActiveVTTPanel = () => {
-        if (!uiState.activeVttPanel && !toolsMenuOpen) return false;
+        const clearedTransient = clearTransientDrawerState();
+        const cancelledAskRollPick = cancelAskRollPickMode();
+        if (!uiState.activeVttPanel && !toolsMenuOpen && !clearedTransient && !cancelledAskRollPick) return false;
         const previousPanel = uiState.activeVttPanel || '';
         uiState.activeVttPanel = '';
         toolsMenuOpen = false;
@@ -3218,6 +3220,35 @@
     const clearHoverSuppression = (suppressDatasetKey = '') => {
         if (!body || !suppressDatasetKey) return;
         body.dataset[suppressDatasetKey] = '0';
+    };
+
+    const clearTransientDrawerState = () => {
+        if (!body) return false;
+        const keys = [
+            'topbarPreview',
+            'settingsPreview',
+            'playerRollPreview',
+            'initiativePreview',
+            'topbarHoverSuppressed',
+            'settingsHoverSuppressed',
+            'playerRollHoverSuppressed',
+            'initiativeHoverSuppressed'
+        ];
+        let changed = false;
+        keys.forEach((key) => {
+            if (body.dataset[key] === '0') return;
+            body.dataset[key] = '0';
+            changed = true;
+        });
+        return changed;
+    };
+
+    const cancelAskRollPickMode = () => {
+        const wasActive = !!(askRollPickMode || pendingAskRollRequest);
+        askRollPickMode = false;
+        pendingAskRollRequest = null;
+        if (wasActive && localToolState.mode === TOOL_MODE_PING) setToolMode(TOOL_MODE_NAVIGATE);
+        return wasActive;
     };
 
     const setDrawerPreview = (previewDatasetKey = '', suppressDatasetKey = '', active = false) => {
@@ -10764,9 +10795,7 @@
         }
         if (action === 'cancel-ask-roll-pick') {
             if (!isPlayer()) return;
-            askRollPickMode = false;
-            pendingAskRollRequest = null;
-            if (localToolState.mode === TOOL_MODE_PING) setToolMode(TOOL_MODE_NAVIGATE);
+            cancelAskRollPickMode();
             render();
             return;
         }
@@ -13178,6 +13207,8 @@
             || (target instanceof HTMLElement && target.isContentEditable)
         );
         if (event.key === 'Escape') {
+            const clearedTransientDrawerState = clearTransientDrawerState();
+            const cancelledAskRollPick = cancelAskRollPickMode();
             const closedMenu = closeQuickSpawnMenu();
             const closedNavMenu = closeNavMenu();
             const closedViewMenu = closeViewMenu();
@@ -13196,7 +13227,7 @@
                 previewTokenId = '';
                 renderStage();
                 event.preventDefault();
-            } else if (closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedVTTPanel || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll || closedPlayerRollMenu) {
+            } else if (clearedTransientDrawerState || cancelledAskRollPick || closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedVTTPanel || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll || closedPlayerRollMenu) {
                 render();
                 event.preventDefault();
             }

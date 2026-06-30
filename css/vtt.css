@@ -3392,7 +3392,7 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag 
     width: min(30rem, calc(100vw - 1rem));
     max-height: min(80vh, 38rem);
     overflow: auto;
-    z-index: 26;
+    z-index: 64;
 }
 
 .vtt-token-inspector-popover {
@@ -3403,7 +3403,7 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag 
     width: min(28rem, calc(100vw - 1rem));
     max-height: min(82vh, 42rem);
     overflow: auto;
-    z-index: 27;
+    z-index: 64;
 }
 
 .vtt-sheet-action-popover,
@@ -3419,7 +3419,7 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag 
     width: min(21rem, calc(100vw - 1rem));
     max-height: min(82vh, 34rem);
     overflow: auto;
-    z-index: 29;
+    z-index: 64;
 }
 
 .vtt-stage-context-head {
