@@ -13,7 +13,7 @@
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
-    <header class="hero-header vtt-topbar">
+    <header class="hero-header vtt-topbar" id="vtt-topbar">
         <div class="vtt-topbar-brand">
             <p class="hero-eyebrow">Ravnica Task Force</p>
             <div class="vtt-topbar-meta">
@@ -28,22 +28,26 @@
         <div class="vtt-topbar-toolbar">
             <div class="vtt-topbar-quick-controls">
                 <button class="hero-btn ghost" data-action="toggle-role" id="vtt-role-toggle">DM Mode</button>
-                <button class="hero-btn ghost" data-action="toggle-spectator-role" id="vtt-spectator-toggle"
+                <button class="hero-btn ghost vtt-secondary-topbar-control" data-action="toggle-spectator-role" id="vtt-spectator-toggle"
                     aria-pressed="false">Spectator</button>
-                <button class="hero-btn ghost" data-action="zoom-out">-</button>
+                <button class="hero-btn ghost vtt-secondary-topbar-control" data-action="zoom-out">-</button>
                 <button class="hero-btn ghost" data-action="zoom-reset">100%</button>
-                <button class="hero-btn ghost" data-action="zoom-in">+</button>
+                <button class="hero-btn ghost vtt-secondary-topbar-control" data-action="zoom-in">+</button>
             </div>
             <div class="vtt-topbar-local-controls">
-                <button class="hero-btn ghost" id="vtt-accent-btn" type="button">🎨 Accent</button>
+                <button class="hero-btn ghost vtt-secondary-topbar-control" id="vtt-accent-btn" type="button">Accent</button>
                 <input type="color" id="accent-picker-input" class="vtt-accent-picker-input">
                 <div class="vtt-popover-anchor vtt-topbar-menu">
                     <button class="hero-btn ghost" data-action="toggle-view-menu" id="vtt-view-menu-toggle"
-                        aria-controls="vtt-view-menu" aria-expanded="false">Settings</button>
+                        aria-controls="vtt-view-menu" aria-expanded="false">Menu</button>
                     <div class="vtt-popover vtt-view-menu" id="vtt-view-menu" hidden>
                         <div class="vtt-menu-section">
-                            <div class="vtt-menu-title">Display</div>
+                            <div class="vtt-menu-title">View</div>
                             <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="combat"
+                                    aria-controls="vtt-initiative-panel">Combat Drawer</button>
+                                <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="inspector"
+                                    aria-controls="vtt-settings-panel">Inspector Drawer</button>
                                 <button class="vtt-chip-btn" data-action="toggle-initiative" id="vtt-initiative-toggle"
                                     aria-controls="vtt-initiative-panel" aria-pressed="true">Initiative: On</button>
                                 <button class="vtt-chip-btn" data-action="toggle-token-names" id="vtt-token-names-toggle"
@@ -53,8 +57,14 @@
                             </div>
                         </div>
                         <div class="vtt-menu-section" data-vtt-menu-dm-only="1">
-                            <div class="vtt-menu-title">DM Panels</div>
+                            <div class="vtt-menu-title">DM Drawers</div>
                             <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="setup"
+                                    aria-controls="vtt-settings-panel">Setup Drawer</button>
+                                <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="spawn"
+                                    aria-controls="vtt-settings-panel">Spawn Drawer</button>
+                                <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="admin"
+                                    aria-controls="vtt-admin-panel">Admin Drawer</button>
                                 <button class="vtt-chip-btn" data-action="toggle-settings" id="vtt-settings-toggle"
                                     aria-controls="vtt-settings-panel" aria-pressed="true">Sidebar: On</button>
                                 <button class="vtt-chip-btn" data-action="toggle-scene-panel" id="vtt-scene-panel-toggle"
@@ -66,8 +76,9 @@
                             </div>
                         </div>
                         <div class="vtt-menu-section" data-vtt-menu-dm-only="1">
-                            <div class="vtt-menu-title">Live Room</div>
+                            <div class="vtt-menu-title">Admin</div>
                             <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" id="vtt-admin-accent-btn" data-action="open-accent-panel">Accent</button>
                                 <button class="vtt-chip-btn" data-action="force-vtt-authoritative">Force DM Authoritative</button>
                                 <button class="vtt-chip-btn" data-action="bust-vtt-roster-associations">Bust Roster Associations</button>
                                 <button class="vtt-chip-btn" data-action="bust-vtt-cache">Bust VTT Cache</button>
@@ -86,9 +97,9 @@
 
     <main class="vtt-shell">
         <aside class="vtt-sidebar" id="vtt-settings-panel">
-            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="toggle-settings"
+            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="close-vtt-panel"
                 id="vtt-settings-rail-tab"
-                aria-controls="vtt-settings-panel" aria-label="Open DM rail">DM</button>
+                aria-controls="vtt-settings-panel" aria-label="Close drawer">Close</button>
             <div class="vtt-sidebar-scroll">
                 <section class="vtt-panel" data-dm-only="1" id="vtt-scene-panel">
                     <div class="vtt-panel-head">
@@ -209,12 +220,15 @@
         </aside>
 
         <aside class="vtt-player-roll-rail vtt-player-focus-rail" id="vtt-player-roll-rail" data-player-only="1">
-            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="toggle-player-roll-rail"
+            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="close-vtt-panel"
                 id="vtt-player-roll-rail-tab"
-                aria-controls="vtt-player-roll-panel" aria-label="Pin player controls panel">Controls</button>
+                aria-controls="vtt-player-roll-panel" aria-label="Close player controls">Close</button>
             <section class="vtt-panel vtt-player-roll-panel vtt-player-focus-panel" id="vtt-player-roll-panel">
                 <div class="vtt-panel-head">
                     <h2>Player Controls</h2>
+                    <div class="vtt-panel-head-actions">
+                        <button class="vtt-chip-btn" type="button" data-action="close-vtt-panel">Close</button>
+                    </div>
                 </div>
                 <div class="vtt-player-roll-menu" id="vtt-player-roll-menu">
                 </div>
@@ -223,6 +237,80 @@
 
         <section class="vtt-stage-panel">
             <div class="vtt-stage" id="vtt-stage">
+                <div class="vtt-table-hud" id="vtt-table-hud">
+                    <section class="vtt-command-dock vtt-player-dock" id="vtt-player-dock" data-player-only="1"
+                        aria-label="Player table controls">
+                        <div class="vtt-dock-status" id="vtt-player-dock-status">Player controls</div>
+                        <div class="vtt-dock-actions">
+                            <button class="vtt-dock-btn strong" type="button" data-action="focus-own-token"
+                                id="vtt-player-find-token">Token</button>
+                            <button class="vtt-dock-btn" type="button" data-action="toggle-ruler-mode"
+                                id="vtt-player-measure-btn" aria-pressed="false">Measure</button>
+                            <button class="vtt-dock-btn" type="button" data-action="set-ping-mode"
+                                data-ping-variant="attention" id="vtt-player-ping-btn">Ping</button>
+                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                data-panel="player-rolls" id="vtt-player-rolls-btn"
+                                aria-controls="vtt-player-roll-panel" aria-expanded="false">Roll</button>
+                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                data-panel="combat" id="vtt-player-combat-btn"
+                                aria-controls="vtt-initiative-panel" aria-expanded="false">Combat</button>
+                        </div>
+                    </section>
+
+                    <section class="vtt-command-dock vtt-dm-dock" id="vtt-dm-dock" data-dm-only="1"
+                        aria-label="DM table controls">
+                        <div class="vtt-dock-copy">
+                            <strong id="vtt-stage-title">Scene</strong>
+                            <span id="vtt-stage-meta">Table controls</span>
+                        </div>
+                        <div class="vtt-dock-actions">
+                            <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
+                                data-tool-mode="navigate" id="vtt-tool-mode-navigate" aria-pressed="true">Select</button>
+                            <button class="vtt-dock-btn" type="button" data-action="set-ping-mode"
+                                data-ping-variant="attention" id="vtt-tool-mode-ping" aria-pressed="false">Ping</button>
+                            <button class="vtt-dock-btn" type="button" data-action="toggle-ruler-mode"
+                                id="vtt-ruler-toggle" aria-pressed="false">Measure</button>
+                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                data-panel="dm-tools" id="vtt-tools-menu-toggle"
+                                aria-controls="vtt-tools-menu" aria-expanded="false">Templates</button>
+                            <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
+                                data-tool-mode="fog" id="vtt-tool-mode-fog" aria-pressed="false">Fog</button>
+                            <button class="vtt-dock-btn strong" type="button" data-action="open-quick-spawn">Spawn</button>
+                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                data-panel="inspector" aria-controls="vtt-settings-panel">Inspector</button>
+                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                data-panel="combat" aria-controls="vtt-initiative-panel">Combat</button>
+                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                data-panel="setup" aria-controls="vtt-settings-panel">Setup</button>
+                        </div>
+                        <div class="vtt-popover vtt-tools-menu" id="vtt-tools-menu" hidden>
+                            <div class="vtt-menu-section">
+                                <div class="vtt-menu-title">Templates</div>
+                                <div class="vtt-tool-mode-row">
+                                    <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
+                                        data-tool-mode="circle" id="vtt-tool-mode-circle" aria-pressed="false">Circle</button>
+                                    <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
+                                        data-tool-mode="cone" id="vtt-tool-mode-cone" aria-pressed="false">Cone</button>
+                                    <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
+                                        data-tool-mode="note" id="vtt-tool-mode-note" aria-pressed="false">Pins</button>
+                                    <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
+                                        data-tool-mode="fog-remove" id="vtt-tool-mode-fog-remove" aria-pressed="false">Unfog</button>
+                                </div>
+                            </div>
+                            <label class="vtt-field vtt-stage-tool-size">
+                                <span>Template Size</span>
+                                <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells"
+                                    min="1" max="99" step="1" value="4">
+                            </label>
+                            <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" type="button" data-action="toggle-stealth-mode"
+                                    id="vtt-stealth-mode-toggle" aria-pressed="false">Sight Cones: Off</button>
+                                <button class="vtt-chip-btn danger" type="button" data-action="clear-scene-fog"
+                                    id="vtt-clear-fog" hidden>Clear Fog</button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
                 <div class="vtt-map-world" id="vtt-map-world">
                     <img id="vtt-map-image" class="vtt-map-image" alt="" draggable="false">
                 </div>
@@ -242,9 +330,9 @@
         </section>
 
         <aside class="vtt-initiative-panel" id="vtt-initiative-panel">
-            <button class="vtt-side-rail-tab vtt-side-rail-tab-right" type="button" data-action="toggle-initiative"
+            <button class="vtt-side-rail-tab vtt-side-rail-tab-right" type="button" data-action="close-vtt-panel"
                 id="vtt-initiative-rail-tab"
-                aria-controls="vtt-initiative-panel" aria-label="Pin clocks and initiative rail">Clocks / Init 📌</button>
+                aria-controls="vtt-initiative-panel" aria-label="Close combat drawer">Close</button>
             <div class="vtt-initiative-scroll">
                 <section class="vtt-panel" id="vtt-clock-panel">
                     <div class="vtt-panel-head">
@@ -270,6 +358,34 @@
             </div>
 
             <div class="vtt-popover vtt-initiative-popover" id="vtt-initiative-detail-panel" hidden></div>
+        </aside>
+
+        <aside class="vtt-admin-panel" id="vtt-admin-panel" data-dm-only="1" aria-label="VTT admin drawer">
+            <button class="vtt-side-rail-tab vtt-side-rail-tab-right" type="button" data-action="close-vtt-panel"
+                aria-controls="vtt-admin-panel" aria-label="Close admin drawer">Close</button>
+            <section class="vtt-panel">
+                <div class="vtt-panel-head">
+                    <h2>Admin</h2>
+                    <div class="vtt-panel-head-actions">
+                        <button class="vtt-chip-btn" type="button" data-action="close-vtt-panel">Close</button>
+                    </div>
+                </div>
+                <div class="vtt-menu-section">
+                    <div class="vtt-menu-title">Table Appearance</div>
+                    <div class="vtt-menu-list">
+                        <button class="vtt-chip-btn" type="button" data-action="open-accent-panel">Accent</button>
+                    </div>
+                </div>
+                <div class="vtt-menu-section">
+                    <div class="vtt-menu-title">Live Room</div>
+                    <div class="vtt-menu-list">
+                        <button class="vtt-chip-btn" type="button" data-action="force-vtt-authoritative">Force DM Authoritative</button>
+                        <button class="vtt-chip-btn" type="button" data-action="bust-vtt-roster-associations">Bust Roster Associations</button>
+                        <button class="vtt-chip-btn" type="button" data-action="bust-vtt-cache">Bust VTT Cache</button>
+                    </div>
+                </div>
+                <div class="vtt-detail-note">Use admin actions only when the live room or roster links need repair.</div>
+            </section>
         </aside>
     </main>
 

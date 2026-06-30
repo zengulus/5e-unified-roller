@@ -15,7 +15,7 @@ const DEFAULT_CASE_NAME = 'UNNAMED CASE';
 const DEFAULT_CAMPAIGN_NAME = 'CAMPAIGN META BOARD';
 const CURSOR_PRECISION = 10;
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 60000;
+const CLOUD_FLUSH_DELAY_MS = 3500;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const HISTORY_CAPTURE_MIN_INTERVAL_MS = 300000;
 const BOARD_ADMIN_EVENT_APPLY_SNAPSHOT = 'admin-apply-snapshot';
@@ -197,6 +197,24 @@ const hasBoardContent = (snapshot) => {
         || (clean.name && clean.name !== DEFAULT_CASE_NAME && clean.name !== DEFAULT_CAMPAIGN_NAME);
 };
 
+const getBoardContentScore = (snapshot) => {
+    const clean = sanitizeBoardSnapshot(snapshot);
+    const textWeight = clean.nodes.reduce((total, node) => (
+        total
+        + toTrimmedString(node && node.title, '', 1000).trim().length
+        + toTrimmedString(node && node.body, '', 24000).trim().length
+    ), 0);
+    const namedWeight = clean.name && clean.name !== DEFAULT_CASE_NAME && clean.name !== DEFAULT_CAMPAIGN_NAME ? 10 : 0;
+    return (clean.nodes.length * 1000)
+        + (clean.connections.length * 250)
+        + Math.min(textWeight, 1000)
+        + namedWeight;
+};
+
+const isRicherBoardSnapshot = (candidate, incumbent) => (
+    getBoardContentScore(candidate) > getBoardContentScore(incumbent)
+);
+
 const cloneJson = (value, fallback = null) => {
     try {
         return JSON.parse(JSON.stringify(value));
@@ -262,6 +280,10 @@ const chooseCanonicalSnapshot = (entries = [], fallbackEntry = null) => {
             continue;
         }
         if (bestHasContent && !nextHasContent) continue;
+        if (isRicherBoardSnapshot(next.snapshot, best.snapshot)) {
+            best = next;
+            continue;
+        }
         if ((next.stamp || 0) > (best.stamp || 0)) {
             best = next;
             continue;
@@ -792,23 +814,34 @@ class BoardCollabSession {
                 scope: this.scope,
                 caseId: this.caseId
             }, livePayloadHasContent ? livePayload : localDocPayload);
-            const roomPayloadSig = buildSnapshotSignature(roomPayload);
+            const localCandidate = chooseCanonicalSnapshot([
+                { snapshot: livePayload, stamp: getSnapshotStamp(livePayload), priority: 3 },
+                { snapshot: seedPayload, stamp: getSnapshotStamp(seedPayload), priority: 2 },
+                { snapshot: localDocPayload, stamp: getSnapshotStamp(localDocPayload), priority: 1 }
+            ], { snapshot: livePayload, stamp: getSnapshotStamp(livePayload), priority: 0 });
+            const localRecoveryPayload = localCandidate && localCandidate.snapshot
+                ? sanitizeBoardSnapshot(localCandidate.snapshot, { scope: this.scope, caseId: this.caseId }, roomPayload)
+                : livePayload;
+            const shouldRecoverLocal = hasBoardContent(localRecoveryPayload) && isRicherBoardSnapshot(localRecoveryPayload, roomPayload);
+            const canonicalPayload = shouldRecoverLocal ? localRecoveryPayload : roomPayload;
+            const canonicalPayloadSig = buildSnapshotSignature(canonicalPayload);
             const localDocSig = buildSnapshotSignature(localDocPayload);
             const cloudUpdatedAt = Date.parse(cloudRow.snapshot.updatedAt || '') || cloudRow.snapshot.revision || 0;
             this.lastSavedRevision = Math.max(0, cloudRow.snapshot.revision || 0);
             roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
-            if (!hasBoardContent(localDocPayload) || localDocSig !== roomPayloadSig) {
+            if (!hasBoardContent(localDocPayload) || localDocSig !== canonicalPayloadSig) {
                 applySnapshotToDoc(
                     this.doc,
-                    roomPayload,
+                    canonicalPayload,
                     this.scope,
                     this.caseId,
                     this.originRemoteRestore,
-                    cloudUpdatedAt || Date.now()
+                    shouldRecoverLocal ? Date.now() : (cloudUpdatedAt || Date.now())
                 );
             }
-            this.initialCloudFlushRequired = false;
-            this.persistSnapshotToSharedState(roomPayload, roomPayloadSig);
+            this.initialCloudFlushRequired = shouldRecoverLocal;
+            if (shouldRecoverLocal) this.isDirty = true;
+            this.persistSnapshotToSharedState(canonicalPayload, canonicalPayloadSig);
         } else if (cloudRow.ok) {
             const canonicalSeed = sanitizeBoardSnapshot(
                 hasBoardContent(livePayload)
@@ -1305,8 +1338,7 @@ class BoardCollabSession {
     }
 
     canCheckpointRoom() {
-        if (!this.connected) return true;
-        return this.remotePresence.size === 0;
+        return true;
     }
 
     getCloudSaveParticipantIds() {
@@ -1408,8 +1440,25 @@ class BoardCollabSession {
             }
             if (result && result.reason === 'stale' && result.snapshot) {
                 this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
-                this.isDirty = true;
-                this.scheduleCloudFlush();
+                const remotePayload = sanitizeBoardSnapshot(result.snapshot.payload, {
+                    scope: this.scope,
+                    caseId: this.caseId
+                }, snapshotToSave);
+                if (isRicherBoardSnapshot(remotePayload, snapshotToSave) || (!hasBoardContent(snapshotToSave) && hasBoardContent(remotePayload))) {
+                    applySnapshotToDoc(
+                        this.doc,
+                        remotePayload,
+                        this.scope,
+                        this.caseId,
+                        this.originRemoteRestore,
+                        Date.parse(result.snapshot.updatedAt || '') || result.snapshot.revision || Date.now()
+                    );
+                    this.isDirty = false;
+                    this.persistSnapshotToSharedState(remotePayload, buildSnapshotSignature(remotePayload));
+                } else {
+                    this.isDirty = true;
+                    this.scheduleCloudFlush();
+                }
             }
             if (!result || !result.ok || !shouldCaptureHistory) return result;
             return this.store.appendBoardRoomHistorySnapshot({
@@ -1468,11 +1517,18 @@ class BoardCollabSession {
             scope: this.scope,
             caseId: this.caseId
         }, this.pendingSnapshot || this.lastSnapshot);
+        const currentSnapshot = sanitizeBoardSnapshot(this.pendingSnapshot || this.lastSnapshot, {
+            scope: this.scope,
+            caseId: this.caseId
+        });
+        if (!hasBoardContent(next) && hasBoardContent(currentSnapshot)) {
+            return Promise.resolve({ ok: false, reason: 'blank-refused' });
+        }
         const nextSig = buildSnapshotSignature(next);
         if (opts.sharedStatePersisted && nextSig) {
             this.lastSharedStoreSignature = nextSig;
         }
-        if (nextSig && nextSig === buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot)) {
+        if (nextSig && nextSig === buildSnapshotSignature(currentSnapshot)) {
             if (opts.flushNow) {
                 this.scheduleCloudFlush({
                     forceHistory: !!opts.forceHistory,

@@ -10,7 +10,7 @@ import * as decoding from './vendor/lib0/decoding.js';
 import { createCollabRelayChannel } from './collab-relay-client.js?v=20260504b';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
-const CLOUD_FLUSH_DELAY_MS = 60000;
+const CLOUD_FLUSH_DELAY_MS = 3500;
 const SYNC_RECONCILE_INTERVAL_MS = 15000;
 const LIVE_SYNC_CONFIRM_WINDOW_MS = 45000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
@@ -218,6 +218,39 @@ const buildSnapshotSignature = (snapshot, coerceSnapshot) => {
 
 const hasVTTContent = (snapshot, coerceSnapshot) => (
     buildSnapshotSignature(snapshot, coerceSnapshot) !== buildSnapshotSignature(fallbackSnapshot(), coerceSnapshot)
+);
+
+const getVTTContentScore = (snapshot, coerceSnapshot = (value) => value) => {
+    const clean = coerceSnapshot(snapshot);
+    const scenes = Array.isArray(clean && clean.scenes) ? clean.scenes : [];
+    let score = 0;
+    scenes.forEach((scene, index) => {
+        const sceneName = toTrimmedString(scene && scene.name, '', 160).trim();
+        const defaultSceneName = `Scene ${index + 1}`;
+        const music = scene && scene.music && typeof scene.music === 'object' ? scene.music : {};
+        const tracks = music.tracks && typeof music.tracks === 'object' ? music.tracks : {};
+        const titles = music.titles && typeof music.titles === 'object' ? music.titles : {};
+        score += (Array.isArray(scene && scene.tokens) ? scene.tokens.length : 0) * 1000;
+        score += (Array.isArray(scene && scene.templates) ? scene.templates.length : 0) * 500;
+        score += (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes.length : 0) * 500;
+        score += (Array.isArray(scene && scene.clocks) ? scene.clocks.length : 0) * 400;
+        score += (Array.isArray(scene && scene.fog) ? scene.fog.length : 0) * 200;
+        score += toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim() ? 600 : 0;
+        score += Object.values(tracks).some((value) => toTrimmedString(value, '', 4000).trim()) ? 200 : 0;
+        score += Object.values(titles).some((value) => toTrimmedString(value, '', 160).trim()) ? 80 : 0;
+        score += sceneName && sceneName !== defaultSceneName ? 40 : 0;
+    });
+    const initiative = clean && clean.initiative && typeof clean.initiative === 'object' ? clean.initiative : {};
+    score += (Array.isArray(initiative.entries) ? initiative.entries.length : 0) * 500;
+    score += toTrimmedString(initiative.activeEntryId, '', 120).trim() ? 80 : 0;
+    score += Math.max(1, Math.round(toFiniteNumber(initiative.round, 1))) > 1 ? 40 : 0;
+    return score;
+};
+
+const isBlankVTTSnapshot = (snapshot, coerceSnapshot = (value) => value) => getVTTContentScore(snapshot, coerceSnapshot) <= 0;
+
+const isRicherVTTSnapshot = (candidate, incumbent, coerceSnapshot = (value) => value) => (
+    getVTTContentScore(candidate, coerceSnapshot) > getVTTContentScore(incumbent, coerceSnapshot)
 );
 
 const sanitizePositionChange = (entry) => {
@@ -1726,7 +1759,11 @@ class VTTCollabSession {
             user: this.buildLocalPresence()
         });
 
-        const seedPayload = this.coerceSnapshot(fallbackSnapshot());
+        const seedPayload = this.coerceSnapshot(
+            typeof this.options.getSeedPayload === 'function'
+                ? this.options.getSeedPayload()
+                : fallbackSnapshot()
+        );
         const livePayloadSig = buildSnapshotSignature(seedPayload, this.coerceSnapshot.bind(this));
         this.lastSharedStoreSignature = '';
 
@@ -1742,9 +1779,16 @@ class VTTCollabSession {
             const roomPayload = this.coerceSnapshot(cloudRow.snapshot.payload);
             const roomPayloadSig = buildSnapshotSignature(roomPayload, this.coerceSnapshot.bind(this));
             const cloudStamp = Date.parse(cloudRow.snapshot.updatedAt || '') || toNonNegativeInt(cloudRow.snapshot.revision, 0);
-            const canonicalPayload = this.coerceSnapshot(roomPayload);
+            const localSeedPayload = this.coerceSnapshot(
+                typeof this.options.getSeedPayload === 'function'
+                    ? this.options.getSeedPayload()
+                    : this.lastSnapshot
+            );
+            const shouldRecoverLocal = !isBlankVTTSnapshot(localSeedPayload, this.coerceSnapshot.bind(this))
+                && isRicherVTTSnapshot(localSeedPayload, roomPayload, this.coerceSnapshot.bind(this));
+            const canonicalPayload = this.coerceSnapshot(shouldRecoverLocal ? localSeedPayload : roomPayload);
             const canonicalSig = buildSnapshotSignature(canonicalPayload, this.coerceSnapshot.bind(this));
-            const canonicalStamp = Math.max(Date.now(), cloudStamp || 0);
+            const canonicalStamp = shouldRecoverLocal ? Date.now() : Math.max(Date.now(), cloudStamp || 0);
             this.lastSavedRevision = Math.max(0, toNonNegativeInt(cloudRow.snapshot.revision, 0));
             roomSnapshotSource = toTrimmedString(cloudRow.snapshot.updatedBy, '', 120).trim();
             this.lastCloudSnapshotSignature = roomPayloadSig;
@@ -1756,9 +1800,22 @@ class VTTCollabSession {
                 this.originRemoteRestore,
                 canonicalStamp
             );
-            this.pendingReadyFlush = false;
+            this.pendingReadyFlush = shouldRecoverLocal;
+            if (shouldRecoverLocal) this.isDirty = true;
             this.persistSnapshotToSharedState(canonicalPayload, canonicalSig);
         } else if (this.canLoadColdSnapshot) {
+            if (!isBlankVTTSnapshot(seedPayload, this.coerceSnapshot.bind(this))) {
+                applySnapshotToDoc(
+                    this.doc,
+                    seedPayload,
+                    this.coerceSnapshot.bind(this),
+                    this.originBootstrap,
+                    Date.now()
+                );
+                this.pendingReadyFlush = true;
+                this.isDirty = true;
+                this.persistSnapshotToSharedState(seedPayload, livePayloadSig);
+            }
             this.updateStatus({
                 state: 'degraded',
                 detail: cloudRow && !cloudRow.ok
@@ -2619,7 +2676,20 @@ class VTTCollabSession {
                 const remoteSig = buildSnapshotSignature(remoteSnapshot, this.coerceSnapshot.bind(this));
                 const currentSig = buildSnapshotSignature(this.getSnapshot(), this.coerceSnapshot.bind(this));
                 this.applyRevisionState(result.snapshot.revision, result.snapshot.updatedBy || result.updatedBy || '');
-                if (remoteSig !== currentSig) {
+                if (isRicherVTTSnapshot(remoteSnapshot, this.getSnapshot(), this.coerceSnapshot.bind(this))
+                    || (isBlankVTTSnapshot(this.getSnapshot(), this.coerceSnapshot.bind(this)) && !isBlankVTTSnapshot(remoteSnapshot, this.coerceSnapshot.bind(this)))) {
+                    applySnapshotToDoc(
+                        this.doc,
+                        remoteSnapshot,
+                        this.coerceSnapshot.bind(this),
+                        this.originRemoteRestore,
+                        Date.parse(result.snapshot.updatedAt || '') || result.snapshot.revision || Date.now()
+                    );
+                    if (remoteSig) this.lastCloudSnapshotSignature = remoteSig;
+                    this.persistSnapshotToSharedState(remoteSnapshot, remoteSig);
+                    this.pendingReadyFlush = false;
+                    this.isDirty = false;
+                } else if (remoteSig !== currentSig) {
                     this.flushQueuedWhilePending = true;
                     this.pendingReadyFlush = true;
                     this.isDirty = true;
@@ -2673,6 +2743,10 @@ class VTTCollabSession {
             ? this.coerceSnapshot(opts.baseSnapshot)
             : null;
         const next = this.coerceSnapshot(payload);
+        const currentSnapshot = this.coerceSnapshot(this.pendingSnapshot || this.lastSnapshot);
+        if (isBlankVTTSnapshot(next, this.coerceSnapshot.bind(this)) && !isBlankVTTSnapshot(currentSnapshot, this.coerceSnapshot.bind(this))) {
+            return Promise.resolve({ ok: false, reason: 'blank-refused' });
+        }
         const nextSig = buildSnapshotSignature(next, this.coerceSnapshot.bind(this));
         if (opts.sharedStatePersisted && nextSig) {
             this.lastSharedStoreSignature = nextSig;
@@ -2684,7 +2758,7 @@ class VTTCollabSession {
             }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
-        const currentSig = buildSnapshotSignature(this.pendingSnapshot || this.lastSnapshot, this.coerceSnapshot.bind(this));
+        const currentSig = buildSnapshotSignature(currentSnapshot, this.coerceSnapshot.bind(this));
         if (nextSig === currentSig) {
             if (opts.flushNow) {
                 this.scheduleCloudFlush({ forceCompatibilityMirror: true });

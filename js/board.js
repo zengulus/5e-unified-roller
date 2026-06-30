@@ -1935,6 +1935,10 @@ function hasBoardContent(payload) {
     return payload.name && payload.name !== 'UNNAMED CASE' && payload.name !== 'UNNAMED';
 }
 
+function shouldRejectBlankBoardOverwrite(nextPayload, currentPayload) {
+    return !hasBoardContent(nextPayload) && hasBoardContent(currentPayload);
+}
+
 function getPreferredBoardPayload() {
     const storePayload = readStoreBoardPayload();
     if (hasBoardContent(storePayload)) return storePayload;
@@ -5141,6 +5145,11 @@ function persistBoardPayload(payload, options = {}) {
         updatedAt: Math.max(Date.now(), parseInt(source.updatedAt, 10) || 0)
     });
     const opts = options && typeof options === 'object' ? options : {};
+    const currentSavedPayload = readStoreBoardPayload() || readLegacyBoardPayload();
+    if (shouldRejectBlankBoardOverwrite(clean, currentSavedPayload)) {
+        console.warn('Board save refused: blank board cannot overwrite saved board content.');
+        return currentSavedPayload;
+    }
     if (isBoardCollabReady() && typeof boardCollabSession.syncSnapshot === 'function') {
         boardCollabSession.syncSnapshot(clean, {
             flushNow: !!opts.flushNow,
@@ -5156,6 +5165,8 @@ function persistBoardPayload(payload, options = {}) {
         skipCloud: false
     });
     if (!wroteSharedStore) {
+        const legacyPayload = readLegacyBoardPayload();
+        if (shouldRejectBlankBoardOverwrite(clean, legacyPayload)) return legacyPayload;
         localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(clean));
     }
     return clean;

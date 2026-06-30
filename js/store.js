@@ -397,9 +397,9 @@
         lockTtlMs: 45000
     };
     const AUTO_SYNC_BOOT_DELAY_MS = 180;
-    const NON_YJS_AUTO_SAVE_DELAY_MS = 8000;
-    const NON_YJS_AUTO_SAVE_DELAY_LABEL = '8 seconds idle or 30 seconds active';
-    const NON_YJS_AUTO_SAVE_MAX_WAIT_MS = 30000;
+    const NON_YJS_AUTO_SAVE_DELAY_MS = 3500;
+    const NON_YJS_AUTO_SAVE_DELAY_LABEL = 'about 4 seconds idle or 15 seconds active';
+    const NON_YJS_AUTO_SAVE_MAX_WAIT_MS = 15000;
     const FOREGROUND_PULL_MIN_INTERVAL_MS = 30000;
     const NORMALIZED_REALTIME_PULL_DELAY_MS = 2000;
     const REQUISITION_STATUSES = new Set(['Pending', 'Approved', 'In Transit', 'Delivered', 'Denied']);
@@ -1159,6 +1159,25 @@
         if (caseId) clean.caseId = caseId;
         return clean;
     };
+    const getBoardContentScore = (board) => {
+        const clean = sanitizeBoard(board);
+        const textWeight = (Array.isArray(clean.nodes) ? clean.nodes : []).reduce((total, node) => {
+            const entry = node && typeof node === 'object' ? node : {};
+            return total
+                + toTrimmedString(entry.title, '', 1000).trim().length
+                + toTrimmedString(entry.body, '', 24000).trim().length;
+        }, 0);
+        const cleanName = toTrimmedString(clean.name, '', 240).trim();
+        const namedWeight = cleanName && cleanName !== DEFAULT_BOARD_STATE.name && cleanName !== DEFAULT_CASE_NAME && cleanName !== DEFAULT_CAMPAIGN_META_BOARD_STATE.name ? 10 : 0;
+        return ((Array.isArray(clean.nodes) ? clean.nodes.length : 0) * 1000)
+            + ((Array.isArray(clean.connections) ? clean.connections.length : 0) * 250)
+            + Math.min(textWeight, 1000)
+            + namedWeight;
+    };
+    const isBlankBoardPayload = (board) => getBoardContentScore(board) <= 0;
+    const shouldRejectBlankBoardOverwrite = (nextBoard, currentBoard) => (
+        isBlankBoardPayload(nextBoard) && !isBlankBoardPayload(currentBoard)
+    );
     const sanitizeBoardHistoryReason = (value, fallback = 'snapshot') => {
         const clean = toTrimmedString(value, fallback, 80).trim().toLowerCase();
         return clean || fallback;
@@ -1860,6 +1879,36 @@
             || Math.max(1, Math.round(toNumber(initiative.round, 1))) > 1
         );
     };
+    const getVTTContentScore = (vttState) => {
+        const vtt = sanitizeVTTState(vttState);
+        const scenes = Array.isArray(vtt.scenes) ? vtt.scenes : [];
+        let score = 0;
+        scenes.forEach((scene, index) => {
+            const sceneName = toTrimmedString(scene && scene.name, '', 160).trim();
+            const defaultSceneName = `Scene ${index + 1}`;
+            const music = scene && scene.music && typeof scene.music === 'object' ? scene.music : {};
+            const tracks = music.tracks && typeof music.tracks === 'object' ? music.tracks : {};
+            const titles = music.titles && typeof music.titles === 'object' ? music.titles : {};
+            score += (Array.isArray(scene && scene.tokens) ? scene.tokens.length : 0) * 1000;
+            score += (Array.isArray(scene && scene.templates) ? scene.templates.length : 0) * 500;
+            score += (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes.length : 0) * 500;
+            score += (Array.isArray(scene && scene.clocks) ? scene.clocks.length : 0) * 400;
+            score += (Array.isArray(scene && scene.fog) ? scene.fog.length : 0) * 200;
+            score += toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim() ? 600 : 0;
+            score += Object.values(tracks).some((value) => toTrimmedString(value, '', 4000).trim()) ? 200 : 0;
+            score += Object.values(titles).some((value) => toTrimmedString(value, '', 160).trim()) ? 80 : 0;
+            score += sceneName && sceneName !== defaultSceneName ? 40 : 0;
+        });
+        const initiative = vtt && vtt.initiative && typeof vtt.initiative === 'object' ? vtt.initiative : {};
+        score += (Array.isArray(initiative.entries) ? initiative.entries.length : 0) * 500;
+        score += toTrimmedString(initiative.activeEntryId, '', 120).trim() ? 80 : 0;
+        score += Math.max(1, Math.round(toNumber(initiative.round, 1))) > 1 ? 40 : 0;
+        return score;
+    };
+    const isBlankVTTPayload = (vttState) => getVTTContentScore(vttState) <= 0;
+    const shouldRejectBlankVTTOverwrite = (nextVTT, currentVTT) => (
+        isBlankVTTPayload(nextVTT) && !isBlankVTTPayload(currentVTT)
+    );
 
     const ENTITY_SCOPE_ORDER_TOKEN = '__order';
     const CAMPAIGN_ENTITY_SCOPE_PREFIXES = Object.freeze({
@@ -8733,6 +8782,24 @@
                     snapshot
                 };
             };
+            const buildBlankOverwriteRejection = async (data) => {
+                if (!data || !isBlankVTTPayload(snapshotPayload)) return null;
+                const snapshot = await buildSnapshotFromRow(data);
+                if (isBlankVTTPayload(snapshot.payload)) return null;
+                return {
+                    ok: false,
+                    reason: 'stale',
+                    error: 'Blank VTT snapshot refused; saved live VTT has content.',
+                    roomId: target.roomId,
+                    scope: target.scope,
+                    caseId: target.caseId,
+                    revision: snapshot.revision,
+                    updatedAt: snapshot.updatedAt,
+                    updatedBy: snapshot.updatedBy,
+                    updatedByName: snapshot.updatedByName,
+                    snapshot
+                };
+            };
 
             const row = {
                 campaign_id: ensured.config.campaignId,
@@ -8755,6 +8822,18 @@
                 if (hasPreviousRevision) {
                     let optimisticResult = null;
                     if (previousRevision > 0) {
+                        if (isBlankVTTPayload(snapshotPayload)) {
+                            const latestBeforeBlankWrite = await readCurrentRow();
+                            if (latestBeforeBlankWrite.error) {
+                                return {
+                                    ok: false,
+                                    reason: 'read-failed',
+                                    error: latestBeforeBlankWrite.error.message || `Failed reading ${tableName}.`
+                                };
+                            }
+                            const rejectedBlank = await buildBlankOverwriteRejection(latestBeforeBlankWrite.data);
+                            if (rejectedBlank) return rejectedBlank;
+                        }
                         optimisticResult = await ensured.client
                             .from(tableName)
                             .update(row)
@@ -8864,6 +8943,9 @@
                         error: existing.error.message || `Failed reading ${tableName}.`
                     };
                 }
+
+                const rejectedBlank = await buildBlankOverwriteRejection(existing.data);
+                if (rejectedBlank) return rejectedBlank;
 
                 if (!forceOverwrite && existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
                     return buildStaleResult(existing.data);
@@ -9321,6 +9403,24 @@
 	                    snapshot
 	                };
 	            };
+                const buildBlankOverwriteRejection = async (data) => {
+                    if (!data || !isBlankBoardPayload(snapshotPayload)) return null;
+                    const snapshot = await buildSnapshotFromRow(data);
+                    if (isBlankBoardPayload(snapshot.payload)) return null;
+                    return {
+                        ok: false,
+                        reason: 'stale',
+                        error: 'Blank board snapshot refused; saved live board has content.',
+                        roomId,
+                        scope,
+                        caseId: caseId || '',
+                        revision: snapshot.revision,
+                        updatedAt: snapshot.updatedAt,
+                        updatedBy: snapshot.updatedBy,
+                        updatedByName: snapshot.updatedByName,
+                        snapshot
+                    };
+                };
 
 	            const row = {
 	                campaign_id: ensured.config.campaignId,
@@ -9343,6 +9443,18 @@
                     if (hasPreviousRevision) {
                         let optimisticResult = null;
                         if (previousRevision > 0) {
+                            if (isBlankBoardPayload(snapshotPayload)) {
+                                const latestBeforeBlankWrite = await readCurrentRow();
+                                if (latestBeforeBlankWrite.error) {
+                                    return {
+                                        ok: false,
+                                        reason: 'read-failed',
+                                        error: latestBeforeBlankWrite.error.message || `Failed reading ${tableName}.`
+                                    };
+                                }
+                                const rejectedBlank = await buildBlankOverwriteRejection(latestBeforeBlankWrite.data);
+                                if (rejectedBlank) return rejectedBlank;
+                            }
                             optimisticResult = await ensured.client
                                 .from(tableName)
                                 .update(row)
@@ -9452,6 +9564,9 @@
                         error: existing.error.message || `Failed reading ${tableName}.`
 	                    };
 	                }
+
+                    const rejectedBlank = await buildBlankOverwriteRejection(existing.data);
+                    if (rejectedBlank) return rejectedBlank;
 
 	                if (existing.data && compareRoomSnapshotVersion(existing.data.revision, existing.data.updated_by, revision, row.updated_by) > 0) {
 	                    return buildStaleResult(existing.data);
@@ -12634,7 +12749,9 @@
         updateCampaignMetaBoard(boardState, options = {}) {
             const meta = this.ensureCampaignMetaIntegrity();
             const opts = options && typeof options === 'object' ? options : {};
-            meta.board = sanitizeBoard(boardState);
+            const nextBoard = sanitizeBoard(boardState);
+            if (shouldRejectBlankBoardOverwrite(nextBoard, meta.board)) return;
+            meta.board = nextBoard;
             this.save({
                 scope: 'campaign.meta.board',
                 skipCloud: !!opts.skipCloud,
@@ -12644,6 +12761,7 @@
 
         clearCampaignMetaBoard() {
             const meta = this.ensureCampaignMetaIntegrity();
+            if (!isBlankBoardPayload(meta.board)) return;
             meta.board = sanitizeBoard(DEFAULT_CAMPAIGN_META_BOARD_STATE);
             this.save({ scope: 'campaign.meta.board' });
         }
@@ -12912,10 +13030,12 @@
                     Date.now()
                 ) || Date.now()
             );
-            entry.vtt = sanitizeVTTState({
+            const nextVTT = sanitizeVTTState({
                 ...(vttState && typeof vttState === 'object' ? vttState : {}),
                 updatedAt: nextUpdatedAt
             });
+            if (shouldRejectBlankVTTOverwrite(nextVTT, entry.vtt)) return sanitizeVTTState(entry.vtt);
+            entry.vtt = nextVTT;
             this.save({
                 scope: `cases.${entry.id}.vtt`,
                 skipCloud: !!opts.skipCloud,
@@ -12937,7 +13057,9 @@
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return;
             const opts = options && typeof options === 'object' ? options : {};
-            entry.board = sanitizeBoard(boardState);
+            const nextBoard = sanitizeBoard(boardState);
+            if (shouldRejectBlankBoardOverwrite(nextBoard, entry.board)) return;
+            entry.board = nextBoard;
             this.syncActiveCaseLegacyState();
             this.save({
                 scope: `cases.${entry.id}.board`,
@@ -12949,6 +13071,7 @@
         clearBoard(caseId = null) {
             const entry = this.getCaseEntry(caseId, { createIfMissing: true });
             if (!entry) return;
+            if (!isBlankBoardPayload(entry.board)) return;
             entry.board = sanitizeBoard(null);
             this.syncActiveCaseLegacyState();
             this.save({ scope: `cases.${entry.id}.board` });
@@ -12962,11 +13085,13 @@
 
             if (scope === 'campaign') {
                 const meta = this.ensureCampaignMetaIntegrity();
+                if (shouldRejectBlankBoardOverwrite(clean, meta.board)) return false;
                 meta.board = clean;
                 scopes.push('campaign.meta.board');
             } else {
                 const entry = this.getCaseEntry(opts.caseId, { createIfMissing: true });
                 if (!entry) return false;
+                if (shouldRejectBlankBoardOverwrite(clean, entry.board)) return false;
                 entry.board = clean;
                 scopes.push(`cases.${entry.id}.board`);
             }
@@ -13006,6 +13131,7 @@
             if (!entry) return false;
 
             const current = sanitizeVTTState(entry.vtt);
+            if (shouldRejectBlankVTTOverwrite(clean, current)) return false;
             if (stableStringify(current) === stableStringify(clean)) return false;
 
             entry.vtt = clean;
