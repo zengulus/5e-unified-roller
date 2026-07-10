@@ -1,5 +1,8 @@
 -- Supabase normalized sync schema + legacy backfill
 -- Safe to run multiple times.
+-- SECURITY WARNING — TRUSTED GROUP ONLY: the baseline authenticated-user
+-- policies in this file do not provide campaign membership or tenant isolation.
+-- Use a dedicated project for one trusted campaign group or replace the policies.
 
 begin;
 

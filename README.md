@@ -1,10 +1,13 @@
 # Ravnica Task Force Tools
 
-A suite of lightweight, offline-first HTML tools for 5th Edition tabletop roleplaying games. Zero dependencies—just open the files in your browser.
+This repository is the private, campaign-specific **Ravnica Task Force** platform. It is an offline-first suite of HTML tools for one trusted 5th Edition campaign group, not a generic multi-tenant 5e product. For the reusable toolkit, use [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).
+
+> **Trust boundary:** Supabase policies supplied here grant every authenticated user access to every campaign row. Deploy cloud sync only for a single trusted group.
 
 Campaign management apps (Tools Hub, Campaign Hub, Campaign Board, Case Board, Player Dashboard, NPC Roster, Locations DB, Requisition Vault, Campaign Timeline, Mission Timeline, Ledger, Encounter Recipes, HQ Foundry) share a unified Local Storage object (`RTF_STORE`). Import/export once from the Tools Hub and those pages stay in lockstep. Lead Queue and both clock pages use dedicated local-storage keys; Lead Queue and Prep/Procedure still integrate with board/timeline links.
 
 Optional Supabase cloud sync is available for the shared `RTF_STORE` stack. See **[Supabase Sync Setup](docs/SupabaseSync.md)**.
+The ownership and authority rules for each subsystem are documented in **[Architecture and State Authority](docs/Architecture.md)**.
 
 ## Components
 
@@ -42,7 +45,7 @@ For simpler player onboarding, share/import a `connect.json` profile (also docum
 For a comprehensive guide on using the player tools, see **[Player Guide](player.md)**.
 
 ## Testing
-Run `npm test` to start a temporary local static server and smoke-test the browser entrypoints with Playwright. The suite opens the Tools Hub, campaign tools, boards, VTT, player sheet, trackers, generators, and utility pages, then fails on page exceptions, console warnings/errors, or missing assets.
+Run `npm test` for unit coverage of dice, migrations, and character calculations; service-worker asset validation; Playwright session-workflow interaction tests; and the full browser smoke suite.
 
 `tools.html` is allowed to receive a 404 for `/connect.json`; that file is an optional bundled sync profile for deployments that want automatic player onboarding.
 
@@ -76,9 +79,9 @@ This project is unofficial Fan Content permitted under the Fan Content Policy. N
 
 Live board/VTT transport can now be moved off Supabase and onto a tiny Render websocket relay while still keeping Supabase for room snapshots and recovery.
 
-- Setup guide: [docs/RenderCollabRelay.md](/home/nathm/5e-unified-roller/docs/RenderCollabRelay.md)
-- Hosted relay package notes: [render-collab/README.md](/home/nathm/5e-unified-roller/render-collab/README.md)
-- Starter connect profile: [render-collab/connect.example.json](/home/nathm/5e-unified-roller/render-collab/connect.example.json)
+- Setup guide: [docs/RenderCollabRelay.md](docs/RenderCollabRelay.md)
+- Hosted relay package notes: [render-collab/README.md](render-collab/README.md)
+- Starter connect profile: [render-collab/connect.example.json](render-collab/connect.example.json)
 
 * See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license paths and attribution details.
 

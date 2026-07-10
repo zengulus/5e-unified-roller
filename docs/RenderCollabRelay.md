@@ -1,6 +1,6 @@
 # Render Collab Relay
 
-This repo now includes a minimal websocket relay for live Yjs board/VTT transport under [render-collab/server.js](/home/nathm/5e-unified-roller/render-collab/server.js).
+This repo now includes a minimal websocket relay for live Yjs board/VTT transport under [render-collab/server.js](../render-collab/server.js).
 
 This is meant for the hosted stack:
 
@@ -10,9 +10,9 @@ This is meant for the hosted stack:
 
 If you want the quickest end-to-end path, use these companion files:
 
-- [render-collab/README.md](/home/nathm/5e-unified-roller/render-collab/README.md)
-- [render-collab/.env.example](/home/nathm/5e-unified-roller/render-collab/.env.example)
-- [render-collab/connect.example.json](/home/nathm/5e-unified-roller/render-collab/connect.example.json)
+- [render-collab/README.md](../render-collab/README.md)
+- [render-collab/.env.example](../render-collab/.env.example)
+- [render-collab/connect.example.json](../render-collab/connect.example.json)
 
 ## What it does
 
@@ -42,7 +42,7 @@ Keep that exact origin handy for Render's `ALLOWED_ORIGINS`.
 
 ### 2. Set up Supabase
 
-Follow [docs/SupabaseSync.md](/home/nathm/5e-unified-roller/docs/SupabaseSync.md):
+Follow [SupabaseSync.md](SupabaseSync.md):
 
 - create the required tables
 - enable the baseline auth policies
@@ -63,7 +63,7 @@ You have two valid ways to do that:
 
 #### Option A. Blueprint deploy
 
-Point Render at this repo and let [render-collab/render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) create the service. The relay imports the app's vendored Yjs modules from `js/vendor`, so deploy it from the full repo rather than uploading only the `render-collab` folder.
+Point Render at this repo and let [render-collab/render.yaml](../render-collab/render.yaml) create the service. The relay imports the app's vendored Yjs modules from `js/vendor`, so deploy it from the full repo rather than uploading only the `render-collab` folder.
 
 #### Option B. Manual service creation
 
@@ -153,7 +153,7 @@ That is the intended hosted production flow.
 
 ## Optional Local Smoke Test
 
-If you want to verify the relay before deploying Render, [render-collab/README.md](/home/nathm/5e-unified-roller/render-collab/README.md) includes a small local run path. It is only a smoke test; the intended real deployment is Render.
+If you want to verify the relay before deploying Render, [render-collab/README.md](../render-collab/README.md) includes a small local run path. It is only a smoke test; the intended real deployment is Render.
 
 ## App config
 

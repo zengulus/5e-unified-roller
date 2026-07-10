@@ -1,13 +1,16 @@
 {
-  "name": "5e-unified-roller",
+  "name": "ravnica-task-force-tools",
   "version": "1.0.0",
-  "description": "A suite of lightweight, offline-first HTML tools for 5th Edition tabletop roleplaying games. Zero dependencies—just open the files in your browser.",
+  "description": "Private offline-first campaign platform for the Ravnica Task Force 5e group.",
   "main": "sw.js",
   "directories": {
     "doc": "docs"
   },
   "scripts": {
-    "test": "node scripts/smoke-static.mjs",
+    "test": "npm run test:unit && npm run test:assets && npm run test:interactions && npm run test:smoke",
+    "test:unit": "node --test test/*.test.cjs",
+    "test:assets": "node scripts/check-sw-assets.mjs",
+    "test:interactions": "node scripts/test-interactions.mjs",
     "test:smoke": "node scripts/smoke-static.mjs"
   },
   "repository": {

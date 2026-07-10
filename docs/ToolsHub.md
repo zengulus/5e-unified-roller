@@ -14,7 +14,7 @@ Landing grid for the entire suite. Open it first to import/export the unified da
 - **Customise Seed Panel (Secret Mode)** – Hidden fork helper that loads default/store guild + NPC + location data and exports fork-ready `data-guilds*.js`, `data-npcs*.js`, and `data-locations*.js` files.
 - **Card Grid** – Responsive cards link to every HTML tool (player sheet, dashboards, HQ, timeline, etc.). Icons and short blurbs help the table pick the right door quickly.
 - **Ledger Card** – Dedicated jump into `ledger.html` for pinned immutable facts and source-linked narrative evidence.
-- **Secret Panel** – DM-only cards are tagged with 🔒-red borders; once the secret mode is active they fade in with a light animation.
+- **Hidden Admin Panel** – Campaign-admin convenience cards are tagged with 🔒-red borders; once the hidden mode is active they fade in with a light animation. This client-side hiding is not authentication or authorization.
 
 ## Tips
 - Always import campaign data here first—the Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Case Timeline, Encounters, and HQ pages all read from the same store, so one import primes the entire campaign stack.

@@ -1,5 +1,8 @@
 # Supabase Sync (`RTF_STORE`)
 
+> [!CAUTION]
+> **TRUSTED GROUP ONLY.** The supplied row-level-security policies are not campaign-membership isolation. They allow every authenticated Supabase user—including an anonymous or shared-login user—to read and write every RTF campaign row in the project. Use a dedicated Supabase project for one trusted campaign group. Do not expose it as a public or multi-tenant service without replacing these policies with membership checks.
+
 Optional cloud sync for the shared campaign stack (`hub`, `campaign-board`, `board`, `campaign-timeline`, `timeline`, `roster`, `locations`, `requisitions`, `ledger`, `encounters`, `hq`, `player-dashboard`).
 
 The Character Sheet (`index.html`) is intentionally separate and remains local per browser by default.
@@ -72,9 +75,9 @@ create table if not exists public.rtf_board_room_history (
 alter table public.rtf_board_room_history enable row level security;
 ```
 
-## 2. Add Baseline Policy
+## 2. Add Trusted-Group-Only Baseline Policy
 
-For fast setup (trusted table/users), allow any authenticated user:
+For a dedicated project whose authenticated users are all members of the same trusted campaign group, allow any authenticated user:
 
 ```sql
 drop policy if exists "rtf_campaign_state_auth_rw" on public.rtf_campaign_state;
@@ -103,7 +106,7 @@ using (true)
 with check (true);
 ```
 
-If you need stricter campaign membership policies, add those after initial validation.
+These policies are intentionally unsuitable for unrelated groups, public sign-up, or multi-tenant hosting. Add and test campaign-membership policies **before** inviting untrusted accounts.
 
 ## 3. Enable Realtime Postgres Changes (Free-Tier Friendly)
 
@@ -121,9 +124,9 @@ If the table is already in the publication, Supabase may return a harmless dupli
 
 This project uses Realtime Postgres Changes. It does **not** require the paid/alpha Database Replication pipeline.
 
-## 4. Enable Anonymous Auth (Recommended)
+## 4. Anonymous Auth (Trusted-Group Convenience Only)
 
-This app auto-signs in anonymously for shared tablet/URL use:
+This app can auto-sign in anonymously for shared tablet/URL use. Under the baseline policy, an anonymous session has full access to every RTF campaign row, so enable this only in a dedicated project shared by one trusted group:
 
 1. Go to `Authentication` -> `Providers`.
 2. Enable `Anonymous` provider.
@@ -209,6 +212,8 @@ Accepted aliases are also supported:
 - `loginEmail` / `loginPassword` or top-level `email` / `password` for the shared player login
 
 If `login.email` and `login.password` are present, importing `connect.json` signs in with that shared Supabase Auth account before connecting sync. This is meant for a generic table/player login, not per-player identity.
+
+Treat `connect.json` as a credential-bearing connection profile even though the Supabase anon key is public by design. Do not commit real shared-login passwords or distribute the file outside the trusted campaign group.
 
 ## Notes
 

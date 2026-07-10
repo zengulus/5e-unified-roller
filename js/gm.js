@@ -1,3 +1,6 @@
+const Dice = window.RTF_DICE;
+if (!Dice) throw new Error('Shared dice engine failed to load.');
+
 const DEFAULT_GM_DATA = {
     combatants: [],
     bestiary: [], // [{name, init, dex, hp, count}]
@@ -191,7 +194,21 @@ function syncGMInputsFromData() {
 
 function persistGMData() {
     gmData = sanitizeGMData(gmData);
-    localStorage.setItem('gmDashboardData', JSON.stringify(gmData));
+    try {
+        localStorage.setItem('gmDashboardData', JSON.stringify(gmData));
+        return { ok: true };
+    } catch (error) {
+        const report = {
+            ok: false,
+            operation: 'gm-session-save',
+            category: error && (error.name === 'QuotaExceededError' || error.code === 22) ? 'storage-quota' : 'persistence',
+            message: error && error.message ? error.message : String(error),
+            timestamp: new Date().toISOString()
+        };
+        console.error('RTF_PERSISTENCE_ERROR', report, error);
+        window.dispatchEvent(new CustomEvent('rtf-operation-error', { detail: report }));
+        return report;
+    }
 }
 
 function updateUndoButton() {
@@ -1100,95 +1117,8 @@ function publishRollToDiscord(name, reasonText, total, formula) {
     sendDiscord(name, reasonText, content, isSecret ? 3447003 : color);
 }
 
-function gmParseRollModifiers(str) {
-    const mods = { r: 0, dl: 0, kh: 0 };
-    if (!str) return mods;
-    const rMatch = str.match(/r(\d+)/i);
-    if (rMatch) mods.r = parseInt(rMatch[1], 10) || 0;
-    const dlMatch = str.match(/d[l]?(\d+)/i);
-    if (dlMatch) mods.dl = parseInt(dlMatch[1], 10) || 0;
-    const khMatch = str.match(/k[h]?(\d+)/i);
-    if (khMatch) mods.kh = parseInt(khMatch[1], 10) || 0;
-    return mods;
-}
-
-function gmCoreRoll(count, sides, mods = {}) {
-    let total = 0;
-    const rollObjs = [];
-
-    for (let i = 0; i < count; i++) {
-        let value = Math.floor(Math.random() * sides) + 1;
-        if (mods.r > 0) {
-            let safety = 0;
-            while (value <= mods.r && safety < 50) {
-                value = Math.floor(Math.random() * sides) + 1;
-                safety++;
-            }
-        }
-        rollObjs.push({ value, dropped: false });
-    }
-
-    if (mods.dl > 0 || mods.kh > 0) {
-        const sorted = [...rollObjs].sort((a, b) => a.value - b.value);
-        let dropCount = mods.dl;
-        if (mods.kh > 0) {
-            const calculatedDrop = count - mods.kh;
-            if (calculatedDrop > dropCount) dropCount = calculatedDrop;
-        }
-        for (let i = 0; i < dropCount; i++) {
-            if (sorted[i]) sorted[i].dropped = true;
-        }
-    }
-
-    const formula = `[${rollObjs.map((roll) => {
-        if (!roll.dropped) total += roll.value;
-        return roll.dropped ? `~~${roll.value}~~` : String(roll.value);
-    }).join('+')}]`;
-
-    return { total, formula };
-}
-
 function gmParseComplexFormula(str) {
-    const source = String(str || '').trim();
-    if (!source) return { total: 0, text: '' };
-
-    let total = 0;
-    const parts = [];
-    const diceRegex = /([+-]?)\s*(\d*)d(\d+)\s*([a-z0-9]*)/gi;
-    const pushPart = (sign, text) => {
-        const cleanText = String(text || '').trim();
-        if (!cleanText) return;
-        if (!parts.length) {
-            parts.push(sign === -1 ? `-${cleanText}` : cleanText);
-            return;
-        }
-        parts.push(`${sign === -1 ? '-' : '+'} ${cleanText}`);
-    };
-
-    let match;
-    while ((match = diceRegex.exec(source)) !== null) {
-        const sign = (match[1] || '').trim() === '-' ? -1 : 1;
-        const count = Math.max(1, parseInt(match[2], 10) || 1);
-        const sides = Math.max(2, parseInt(match[3], 10) || 2);
-        const modStr = match[4] || '';
-        const result = gmCoreRoll(count, sides, gmParseRollModifiers(modStr));
-        total += result.total * sign;
-        pushPart(sign, modStr ? `${result.formula}${modStr}` : result.formula);
-    }
-
-    const staticSource = source.replace(diceRegex, ' ');
-    const staticRegex = /([+-]?)\s*(\d+)(?!\s*d)/gi;
-    while ((match = staticRegex.exec(staticSource)) !== null) {
-        const sign = (match[1] || '').trim() === '-' ? -1 : 1;
-        const value = parseInt(match[2], 10) || 0;
-        total += value * sign;
-        pushPart(sign, value);
-    }
-
-    return {
-        total,
-        text: parts.join(' ').trim()
-    };
+    return Dice.parseComplexBonus(str);
 }
 
 // SHARED ROLL FUNCTION
@@ -1258,8 +1188,8 @@ function rollManual() {
     const name = document.getElementById('adhocName').value || "GM";
     const parsed = gmParseComplexFormula(formula);
 
-    if (!parsed.text) {
-        updateRollDisplay(name, reason, 'Invalid', 'Enter a dice formula like 2d6 + 3');
+    if (!parsed.ok || !parsed.text) {
+        updateRollDisplay(name, reason, 'Invalid', parsed.error || 'Enter a dice formula like 2d6 + 3');
         return;
     }
 
@@ -1321,6 +1251,17 @@ function postDiscordWebhook(payload) {
             throw new Error(`Discord webhook failed (${response.status})`);
         }
         return response;
+    }).catch((error) => {
+        const report = {
+            ok: false,
+            operation: 'gm-session-webhook',
+            category: 'network',
+            message: error && error.message ? error.message : String(error),
+            timestamp: new Date().toISOString()
+        };
+        console.error('RTF_WEBHOOK_ERROR', report, error);
+        window.dispatchEvent(new CustomEvent('rtf-operation-error', { detail: report }));
+        throw error;
     });
 }
 

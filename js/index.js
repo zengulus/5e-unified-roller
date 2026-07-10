@@ -1,10 +1,10 @@
+const Dice = window.RTF_DICE;
+const CharacterModel = window.RTF_CHARACTER_MODEL;
+const DataMigrations = window.RTF_DATA_MIGRATIONS;
+if (!Dice || !CharacterModel || !DataMigrations) throw new Error('Character sheet modules failed to load.');
+
 let isPopulating = false; // Guard to prevent saving during initial load
-const stats = ['str',
-    'dex',
-    'con',
-    'int',
-    'wis',
-    'cha'];
+const stats = [...CharacterModel.STATS];
 const attackStats = ['none', ...stats];
 const sheetFaces = ['front', 'inventory', 'spells', 'my-story'];
 const spellcastingAttrOptions = ['auto', ...stats];
@@ -19,25 +19,8 @@ const statFullNames = {
 const QUICK_ACTION_SEARCH_DICE = [20, 12, 10, 8, 6, 4, 100];
 const DEFAULT_TOOL_STAT = 'dex';
 
-const skillsMap = {
-    'acrobatics': 'dex', 'animal handling': 'wis', 'arcana': 'int', 'athletics': 'str',
-    'deception': 'cha', 'history': 'int', 'insight': 'wis', 'intimidation': 'cha',
-    'investigation': 'int', 'medicine': 'wis', 'nature': 'int', 'perception': 'wis',
-    'performance': 'cha', 'persuasion': 'cha', 'religion': 'int', 'sleight of hand': 'dex',
-    'stealth': 'dex', 'survival': 'wis'
-}
-
-    ;
-
-const spellSlotTable = {
-    full: [[2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2], [4, 3, 3, 3, 1], [4, 3, 3, 3, 2],
-    [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1],
-    [4, 3, 3, 3, 2, 1, 1, 1, 1], [4, 3, 3, 3, 3, 1, 1, 1, 1], [4, 3, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 3, 2, 2, 1, 1]],
-    pact: [[1], [2], [2], [2], [2], [2], [2], [2], [2], [2],
-    [3], [3], [3], [3], [3], [3], [4], [4], [4], [4]]
-}
-
-    ;
+const skillsMap = CharacterModel.SKILLS;
+const spellSlotTable = CharacterModel.SPELL_SLOTS;
 
 let allData = {
 
@@ -1945,18 +1928,7 @@ function tryParseLegacyV2(raw) {
     if (!raw) return null;
 
     try {
-        const oldChar = JSON.parse(raw);
-        const id = 'char_imported';
-
-        const bundle = {
-
-            activeId: id,
-            characters: {}
-        }
-
-            ;
-        bundle.characters[id] = oldChar;
-        return sanitizeAllDataBundle(bundle);
+        return sanitizeAllDataBundle(DataMigrations.parseLegacyCharacterV2(raw));
     }
 
     catch (e) {
@@ -2231,7 +2203,24 @@ function populateUI() {
 }
 
 function saveGlobal() {
-    localStorage.setItem(STORAGE_KEYS.current, JSON.stringify(allData));
+    try {
+        const serialized = JSON.stringify(allData);
+        localStorage.setItem(STORAGE_KEYS.current, serialized);
+        return { ok: true, bytes: serialized.length };
+    } catch (error) {
+        const quota = !!(error && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED' || error.code === 22 || error.code === 1014));
+        const report = {
+            ok: false,
+            operation: 'character-sheet-save',
+            category: quota ? 'storage-quota' : (error && error.name === 'TypeError' ? 'serialization' : 'persistence'),
+            message: error && error.message ? error.message : String(error),
+            timestamp: new Date().toISOString()
+        };
+        console.error('RTF_PERSISTENCE_ERROR', report, error);
+        window.dispatchEvent(new CustomEvent('rtf-operation-error', { detail: report }));
+        showIoMsg(quota ? 'Save failed: browser storage is full. Export a backup and free space.' : 'Save failed. Export a backup before closing this page.');
+        return report;
+    }
 }
 
 function save() {
@@ -2301,21 +2290,7 @@ function toggleSecret() {
     }
 }
 
-function parseRollModifiers(str) {
-    let mods = {
-        r: 0, dl: 0, kh: 0
-    }
-
-        ;
-    if (!str) return mods;
-    const rMatch = str.match(/r(\d+)/);
-    if (rMatch) mods.r = parseInt(rMatch[1]);
-    const dlMatch = str.match(/d[l]?(\d+)/);
-    if (dlMatch) mods.dl = parseInt(dlMatch[1]);
-    const khMatch = str.match(/k[h]?(\d+)/);
-    if (khMatch) mods.kh = parseInt(khMatch[1]);
-    return mods;
-}
+const parseRollModifiers = (str, options) => Dice.parseRollModifiers(str, options);
 
 // --- BUFFS & VISIBILITY ---
 function updateBuffs() {
@@ -2392,90 +2367,12 @@ function applyVisibility() {
     document.getElementById('showHiddenCards').checked = ! !data.uiState.showHidden;
 }
 
-function coreRoll(count, sides, mode = 'norm', mods = {}) {
-    let rolls = [];
-    let total = 0;
-    let isCrit = false;
-    let isFail = false;
-    let formula = "";
-
-    if (count === 1 && sides === 20 && mode !== 'norm') {
-        const r1 = Math.floor(Math.random() * sides) + 1;
-        const r2 = Math.floor(Math.random() * sides) + 1;
-        rolls = [r1, r2];
-
-        if (mode === 'adv') {
-            total = Math.max(r1, r2);
-            formula = `[${r1}, ${r2}] (High)`;
-        }
-
-        else {
-            total = Math.min(r1, r2);
-            formula = `[${r1}, ${r2}] (Low)`;
-        }
-
-        if (total === 20) isCrit = true;
-        if (total === 1) isFail = true;
-    }
-
-    else {
-        let rollObjs = [];
-
-        for (let i = 0; i < count; i++) {
-            let r = Math.floor(Math.random() * sides) + 1;
-
-            if (mods.r > 0) {
-                let safety = 0;
-
-                while (r <= mods.r && safety < 50) {
-                    r = Math.floor(Math.random() * sides) + 1;
-                    safety++;
-                }
-            }
-
-            rollObjs.push({
-                val: r, dropped: false, originalIdx: i
-            });
-        }
-
-        if (mods.dl > 0 || mods.kh > 0) {
-            let sorted = [...rollObjs].sort((a, b) => a.val - b.val);
-            let dropCount = mods.dl;
-
-            if (mods.kh > 0) {
-                let calculatedDrop = count - mods.kh;
-                if (calculatedDrop > dropCount) dropCount = calculatedDrop;
-            }
-
-            for (let i = 0; i < dropCount; i++) {
-                if (sorted[i]) sorted[i].dropped = true;
-            }
-        }
-
-        let valList = [];
-
-        rollObjs.forEach(obj => {
-            if (!obj.dropped) total += obj.val;
-            valList.push(obj.dropped ? `~~${obj.val}~~` : obj.val);
-        });
-
-        if (count === 1 && sides === 20 && total === 20) isCrit = true;
-        if (count === 1 && sides === 20 && total === 1) isFail = true;
-
-        formula = `[${valList.join('+')}]`;
-    }
-
-    return {
-        total,
-        rolls: rolls, formula, isCrit, isFail
-    }
-
-        ;
-}
+const coreRoll = (count, sides, mode = 'norm', mods = {}) => Dice.coreRoll(count, sides, mode, mods);
 
 function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check', customDesc = '') {
     const miscStr = document.getElementById('globalMisc').value.trim();
     const parsedMisc = parseComplexBonus(miscStr);
+    if (!parsedMisc.ok) return { ok: false, error: parsedMisc.error };
     let effectiveMode = data.rollMode;
     let consumedInsp = false;
 
@@ -2503,6 +2400,7 @@ function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check', cus
         }
         if (data.buffs.global) {
             const parsed = parseComplexBonus(data.buffs.global);
+            if (!parsed.ok) return { ok: false, error: parsed.error };
             buffTotal += parsed.total;
             if (parsed.text) buffText += ` +${parsed.text}(Global)`;
         }
@@ -2527,71 +2425,22 @@ function rollDie(sides, bonus, label, allowAdvantage = true, type = 'check', cus
 }
 
 function parseComplexBonus(str) {
-    if (!str) return {
-        total: 0, text: ''
+    const parsed = Dice.parseComplexBonus(str);
+    if (!parsed.ok) {
+        const report = { operation: 'dice-formula-parse', category: 'validation', message: parsed.error, formula: String(str || '').slice(0, Dice.LIMITS.maxFormulaLength + 1) };
+        console.warn('RTF_DICE_REJECTED', report);
+        showLog('Invalid dice formula', parsed.error);
     }
-
-        ;
-    let total = 0;
-    let parts = [];
-    const diceRegex = /([+-]?)\s*(\d+)d(\d+)\s*([a-z0-9]*)/gi;
-    let match;
-    let diceMatches = [];
-    const pushPart = (sign, text) => {
-        const cleanText = String(text || '').trim();
-        if (!cleanText) return;
-        if (!parts.length) {
-            parts.push(sign === -1 ? `-${cleanText}` : cleanText);
-            return;
-        }
-        parts.push(`${sign === -1 ? '-' : '+'} ${cleanText}`);
-    };
-
-    while ((match = diceRegex.exec(str)) !== null) {
-        diceMatches.push(match);
-    }
-
-    diceMatches.forEach(m => {
-        const sign = (m[1].trim() === '-') ? -1 : 1;
-        const count = parseInt(m[2]);
-        const sides = parseInt(m[3]);
-        const modStr = m[4] || "";
-
-        const mods = parseRollModifiers(modStr);
-        const res = coreRoll(count, sides, 'norm', mods);
-
-        total += (res.total * sign);
-        let form = res.formula;
-
-        if (modStr) form += modStr;
-        pushPart(sign, form);
-    });
-
-    let cleanStr = str.replace(diceRegex, '');
-    const staticRegex = /([+-]?)\s*(\d+)/gi;
-
-    while ((match = staticRegex.exec(cleanStr)) !== null) {
-        const sign = (match[1].trim() === '-') ? -1 : 1;
-        const val = parseInt(match[2]);
-        total += (val * sign);
-        pushPart(sign, val);
-    }
-
-    return {
-        total,
-        text: parts.join(' ').trim()
-    }
-
-        ;
+    return parsed;
 }
 
 // --- CALCULATION LOGIC ---
 function getMod(score) {
-    return Math.floor((score - 10) / 2);
+    return CharacterModel.getModifier(score);
 }
 
 function getPB(level) {
-    return Math.ceil(level / 4) + 1;
+    return CharacterModel.getProficiencyBonus(level);
 }
 
 function formatSignedNumber(value) {
@@ -2908,18 +2757,11 @@ function toggleAutoHP() {
 }
 
 function parseHitDieSides(value, fallback = 8) {
-    const sides = parseInt(String(value || '').replace(/\D/g, ''), 10) || fallback;
-    return Math.max(1, sides);
+    return CharacterModel.parseHitDieSides(value, fallback);
 }
 
 function calculateAutoHpMaxForLevel(level, hitDieSides, conVal, bonusPerLevel = 0) {
-    const safeLevel = Math.max(1, Math.min(20, parseInt(level, 10) || 1));
-    const safeSides = Math.max(1, parseInt(hitDieSides, 10) || 8);
-    const safeCon = parseInt(conVal, 10) || 10;
-    const safeBonus = parseInt(bonusPerLevel, 10) || 0;
-    const conMod = Math.floor((safeCon - 10) / 2);
-    const avg = (safeSides / 2) + 1;
-    return Math.max(1, (safeSides + conMod + safeBonus) + ((safeLevel - 1) * (avg + conMod + safeBonus)));
+    return CharacterModel.calculateAutoHpMax(level, hitDieSides, conVal, bonusPerLevel);
 }
 
 function updateHP() {
@@ -3354,7 +3196,7 @@ function rollCustom() {
     const label = document.getElementById('customLabel').value.trim() || 'Custom Roll';
     const parsed = parseComplexBonus(formula);
 
-    if (parsed.text === '') {
+    if (!parsed.ok || parsed.text === '') {
         showLog("Error", "Invalid");
         return;
     }
@@ -3377,7 +3219,7 @@ function rollDamage(idx) {
     const dmgBonusStr = typeof atk.dmgBonus === 'string' ? atk.dmgBonus : '';
     const dmgStr = `${atk.dmg || ''} ${dmgBonusStr} ${miscStr}`.trim();
     const parsed = parseComplexBonus(dmgStr);
-    if (parsed.text === '') return;
+    if (!parsed.ok || parsed.text === '') return;
     let total = parsed.total + mod;
     let formulaText = parsed.text;
 
@@ -3827,6 +3669,7 @@ function rollInitiative() {
     const dexMod = getMod(data.stats.dex.val);
     const parsedInit = parseComplexBonus(initStr);
     const parsedMisc = parseComplexBonus(miscStr);
+    if (!parsedInit.ok || !parsedMisc.ok) return;
     const tieBreaker = data.stats.dex.val / 100;
 
     let effectiveMode = data.rollMode;
@@ -4600,6 +4443,7 @@ function rollSpellAttack(name, attackBonus) {
     const miscInput = document.getElementById('globalMisc');
     const miscStr = miscInput ? String(miscInput.value || '').trim() : '';
     const parsedMisc = parseComplexBonus(miscStr);
+    if (!parsedMisc.ok) return { ok: false, error: parsedMisc.error };
 
     let effectiveMode = data.rollMode;
     let consumedInsp = false;
@@ -4619,6 +4463,7 @@ function rollSpellAttack(name, attackBonus) {
         }
         if (data.buffs.global) {
             const parsed = parseComplexBonus(data.buffs.global);
+            if (!parsed.ok) return { ok: false, error: parsed.error };
             buffTotal += parsed.total;
             if (parsed.text) buffText += ` +${parsed.text}(Global)`;
         }
@@ -4645,10 +4490,11 @@ function rollSpellAttack(name, attackBonus) {
 
 function rollSpellDamage(name, damageFormula, spellContext = '', options = {}) {
     const parsed = parseComplexBonus(damageFormula);
-    if (!parsed.text) return { ok: false };
+    if (!parsed.ok || !parsed.text) return { ok: false, error: parsed.error };
     const miscInput = document.getElementById('globalMisc');
     const miscStr = miscInput ? String(miscInput.value || '').trim() : '';
     const parsedMisc = parseComplexBonus(miscStr);
+    if (!parsedMisc.ok) return { ok: false, error: parsedMisc.error };
     const total = parsed.total + parsedMisc.total;
     let formulaText = parsed.text;
     if (parsedMisc.total !== 0) formulaText += ` +${parsedMisc.text}(Misc)`;
@@ -4664,10 +4510,11 @@ function rollSpellDamage(name, damageFormula, spellContext = '', options = {}) {
 
 function rollSpellArbitrary(name, formula, spellContext = '', options = {}) {
     const parsed = parseComplexBonus(formula);
-    if (!parsed.text) return { ok: false };
+    if (!parsed.ok || !parsed.text) return { ok: false, error: parsed.error };
     const miscInput = document.getElementById('globalMisc');
     const miscStr = miscInput ? String(miscInput.value || '').trim() : '';
     const parsedMisc = parseComplexBonus(miscStr);
+    if (!parsedMisc.ok) return { ok: false, error: parsedMisc.error };
     const total = parsed.total + parsedMisc.total;
     let formulaText = parsed.text;
     if (parsedMisc.total !== 0) formulaText += ` +${parsedMisc.text}(Misc)`;
@@ -6914,7 +6761,22 @@ function sendToDiscord(label, formulaStr, result, type = 'check', customDesc = '
         }
 
         , body: JSON.stringify(payload)
-    }).catch(err => console.error(err));
+    }).then((response) => {
+        if (!response.ok) throw new Error(`Discord webhook failed (${response.status}).`);
+        return response;
+    }).catch((error) => {
+        const report = {
+            ok: false,
+            operation: 'character-sheet-webhook',
+            category: 'network',
+            message: error && error.message ? error.message : String(error),
+            timestamp: new Date().toISOString()
+        };
+        console.error('RTF_WEBHOOK_ERROR', report, error);
+        window.dispatchEvent(new CustomEvent('rtf-operation-error', { detail: report }));
+        showIoMsg('Discord post failed. Your roll was kept locally.');
+        return report;
+    });
 }
 
 function sendToDiscordPlain(label, description, type = 'check') {
@@ -6943,11 +6805,27 @@ function sendToDiscordPlain(label, description, type = 'check') {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
-    }).catch(err => console.error(err));
+    }).then((response) => {
+        if (!response.ok) throw new Error(`Discord webhook failed (${response.status}).`);
+        return response;
+    }).catch((error) => {
+        const report = {
+            ok: false,
+            operation: 'character-sheet-webhook',
+            category: 'network',
+            message: error && error.message ? error.message : String(error),
+            timestamp: new Date().toISOString()
+        };
+        console.error('RTF_WEBHOOK_ERROR', report, error);
+        window.dispatchEvent(new CustomEvent('rtf-operation-error', { detail: report }));
+        showIoMsg('Discord post failed. Your action was kept locally.');
+        return report;
+    });
 }
 
 function showIoMsg(txt) {
     const msg = document.getElementById('ioMsg');
+    if (!msg) return;
     msg.innerText = txt;
     setTimeout(() => msg.innerText = "", 3000);
 }

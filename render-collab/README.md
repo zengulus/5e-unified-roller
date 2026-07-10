@@ -14,7 +14,7 @@ Deploy it from this full repository so the relay can import the vendored Yjs mod
 
 You can either:
 
-- use [render.yaml](/home/nathm/5e-unified-roller/render-collab/render.yaml) with Blueprint deploy
+- use [render.yaml](render.yaml) with Blueprint deploy
 - or click `New +` -> `Web Service` in Render and enter the settings below manually
 
 Recommended settings:

@@ -1,4 +1,6 @@
 (function (global) {
+    const SupabaseTransport = global.RTF_SUPABASE_TRANSPORT;
+    if (!SupabaseTransport) throw new Error('Supabase transport must load before RTF_STORE.');
     const STORE_KEY = 'ravnica_unified_v1';
     const LEGACY_HUB_KEY = 'ravnicaHubV3_2';
     const LEGACY_BOARD_KEY = 'invBoardData';
@@ -18,8 +20,6 @@
     const HEAT_SYNC_KEY = 'rtf_timeline_auto_heat';
     const HQ_LOCAL_STORAGE_KEY = 'task_force_hq_v1';
     const AUTO_CONNECT_CANCEL_KEY = 'rtf_sync_autoconnect_cancelled';
-    const SUPABASE_CDN_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-    const SHARED_SUPABASE_CLIENT_CACHE_KEY = '__RTF_SHARED_SUPABASE_CLIENT_CACHE__';
     const STORE_DEBUG = false;
     const BOARD_CODEC_MODULE_CACHE_KEY = '__RTF_BOARD_CODEC_MODULE_CACHE__';
     const VTT_CODEC_MODULE_CACHE_KEY = '__RTF_VTT_CODEC_MODULE_CACHE__';
@@ -61,6 +61,21 @@
         }
         console.warn(label, err);
     };
+    const reportOperationError = (operation, category, error, context = {}) => {
+        const report = {
+            ok: false,
+            operation,
+            category,
+            message: error && error.message ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+            ...context
+        };
+        console.error('RTF_OPERATION_ERROR', report, error);
+        if (typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+            global.dispatchEvent(new global.CustomEvent('rtf-operation-error', { detail: report }));
+        }
+        return report;
+    };
     const stableStringify = (value) => {
         if (value === null || value === undefined) return '';
         try {
@@ -71,27 +86,6 @@
     };
     const isExternalStoreUpdateSource = (value) => value === 'remote' || value === 'storage';
     const AUTH_SESSION_CACHE_MS = 30000;
-    const getSharedSupabaseClientCache = () => {
-        if (global[SHARED_SUPABASE_CLIENT_CACHE_KEY] instanceof Map) return global[SHARED_SUPABASE_CLIENT_CACHE_KEY];
-        const cache = new Map();
-        global[SHARED_SUPABASE_CLIENT_CACHE_KEY] = cache;
-        return cache;
-    };
-    const buildSupabaseClientOptions = () => ({
-        auth: {
-            persistSession: true,
-            autoRefreshToken: true,
-            detectSessionInUrl: true
-        }
-    });
-    const getSharedSupabaseClient = (supabaseLib, supabaseUrl, anonKey) => {
-        const cache = getSharedSupabaseClientCache();
-        const clientKey = `${supabaseUrl}|${anonKey}`;
-        if (cache.has(clientKey)) return cache.get(clientKey);
-        const client = supabaseLib.createClient(supabaseUrl, anonKey, buildSupabaseClientOptions());
-        cache.set(clientKey, client);
-        return client;
-    };
     const importCachedModule = (globalKey, path) => {
         if (global[globalKey] && typeof global[globalKey].then === 'function') return global[globalKey];
         global[globalKey] = import(path).catch((err) => {
@@ -5336,7 +5330,7 @@
             }).catch((err) => {
                 const message = err && err.message ? err.message : String(err);
                 this.sync.rowsV2LocalError = message;
-                console.warn('RTF_STORE: Failed writing rows v2 local rows', err);
+                reportOperationError('campaign-row-save', 'persistence', err, { scopes: normalizeScopeList(scopes) });
                 return { ok: false, error: message };
             });
         }
@@ -5361,7 +5355,7 @@
                         return false;
                     }
                 }
-                console.error('RTF_STORE: Failed writing localStorage mirror', err);
+                reportOperationError('campaign-mirror-save', 'persistence', err, { reason });
                 return false;
             }
         }
@@ -5564,7 +5558,7 @@
                 }
                 if (!skipEvent) this.broadcastStoreUpdate('local', { scopes });
             } catch (e) {
-                console.error("RTF_STORE: Save failed", e);
+                reportOperationError('campaign-store-save', 'persistence', e, { scopes });
             }
         }
 
@@ -8183,44 +8177,10 @@
         }
 
         async loadSupabaseLibrary() {
-            if (global.supabase && typeof global.supabase.createClient === 'function') {
-                return global.supabase;
-            }
             if (this.sync.supabaseLoadPromise) {
                 return this.sync.supabaseLoadPromise;
             }
-
-            this.sync.supabaseLoadPromise = new Promise((resolve, reject) => {
-                if (!global.document || !document.head) {
-                    reject(new Error('Document context unavailable.'));
-                    return;
-                }
-
-                const onReady = () => {
-                    if (global.supabase && typeof global.supabase.createClient === 'function') resolve(global.supabase);
-                    else reject(new Error('Supabase client library not available after load.'));
-                };
-
-                const existing = document.querySelector('script[data-rtf-supabase="1"]');
-                if (existing) {
-                    if (global.supabase && typeof global.supabase.createClient === 'function') {
-                        resolve(global.supabase);
-                    } else {
-                        existing.addEventListener('load', onReady, { once: true });
-                        existing.addEventListener('error', () => reject(new Error('Failed to load Supabase library.')), { once: true });
-                    }
-                    return;
-                }
-
-                const script = document.createElement('script');
-                script.src = SUPABASE_CDN_URL;
-                script.async = true;
-                script.dataset.rtfSupabase = '1';
-                script.onload = onReady;
-                script.onerror = () => reject(new Error('Failed to load Supabase library.'));
-                document.head.appendChild(script);
-            });
-
+            this.sync.supabaseLoadPromise = SupabaseTransport.loadLibrary();
             return this.sync.supabaseLoadPromise;
         }
 
@@ -8521,7 +8481,7 @@
             }
 
             const supabaseLib = await this.loadSupabaseLibrary();
-            this.sync.client = getSharedSupabaseClient(supabaseLib, cleanConfig.supabaseUrl, cleanConfig.anonKey);
+            this.sync.client = SupabaseTransport.getClient(supabaseLib, cleanConfig.supabaseUrl, cleanConfig.anonKey);
             this.sync.clientKey = clientKey;
             if (!this.sync.userId || (previousClientKey && previousClientKey !== clientKey)) this.sync.userId = '';
 

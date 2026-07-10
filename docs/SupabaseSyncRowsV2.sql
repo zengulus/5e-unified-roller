@@ -1,6 +1,12 @@
 -- Supabase row-normalized sync schema v2
 -- Safe to run multiple times.
 --
+-- SECURITY WARNING — TRUSTED GROUP ONLY:
+-- The policies below grant every authenticated user full read/write access to
+-- every RTF campaign row in this Supabase project. They do not enforce campaign
+-- membership or tenant isolation. Use a dedicated project for one trusted group,
+-- or replace the policies before allowing untrusted/public accounts.
+--
 -- This schema is intentionally pragmatic: every independently edited object has
 -- a row, common query/display fields are real columns, and `extra` carries
 -- uncommon legacy/plugin fields during the migration window.

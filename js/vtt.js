@@ -1,5 +1,20 @@
 (function () {
+    const Dice = window.RTF_DICE;
+    if (!Dice) throw new Error('Shared dice engine failed to load.');
     const DM_UNLOCK_PHRASE = 'setDMMode';
+
+    const reportVTTError = (operation, category, error) => {
+        const report = {
+            ok: false,
+            operation,
+            category,
+            message: error && error.message ? error.message : String(error),
+            timestamp: new Date().toISOString()
+        };
+        console.error('RTF_OPERATION_ERROR', report, error);
+        window.dispatchEvent(new CustomEvent('rtf-operation-error', { detail: report }));
+        return report;
+    };
     const UI_PREFS_STORAGE_PREFIX = 'rtf_vtt_ui_';
     const PROCESSED_INIT_STORAGE_PREFIX = 'rtf_vtt_processed_init_';
     const TRACKER_INITIATIVE_QUEUE_KEY = 'rtf_tracker_initiative_queue';
@@ -5367,9 +5382,7 @@
         return true;
     };
 
-    const promptForDMMode = () => {
-        return openDMUnlockModal();
-    };
+    const promptForDMMode = () => openDMUnlockModal();
 
     const setSyncChipState = ({ state = 'local', label = 'Local', detail = '', retryable = false } = {}) => {
         if (!syncChipEl) return;
@@ -6961,6 +6974,7 @@
         }
         if (buffs.global) {
             const parsedGlobal = gmParseComplexFormula(buffs.global);
+            if (!parsedGlobal.ok) return { ok: false, reason: 'invalid-global-buff', error: parsedGlobal.error };
             if (parsedGlobal.text) {
                 extraTotal += parsedGlobal.total;
                 extraText += ` +${parsedGlobal.text}(Global)`;
@@ -7054,6 +7068,7 @@
             const dexScore = character && character.stats && character.stats.dex ? Number(character.stats.dex.val) : 10;
             const dexMod = getSheetMod(character, 'dex');
             const parsedInit = gmParseComplexFormula(character && character.meta ? character.meta.init : '');
+            if (!parsedInit.ok) return { ok: false, reason: 'invalid-initiative', error: parsedInit.error };
             const result = rollSheetD20(character, dexMod + parsedInit.total, 'Initiative', { type: 'check' });
             result.formula = `${result.formula}${parsedInit.text ? ` + ${parsedInit.text}(Init)` : ''}`;
             result.total = Math.round(toNumber(result.total, 0));
@@ -7286,16 +7301,13 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        }).then((response) => !!response.ok);
-    };
-
-    const gmParseRollModifiers = (value = '') => {
-        const source = String(value || '').trim();
-        return {
-            r: Math.max(0, parseInt((source.match(/r(\d+)/i) || [])[1], 10) || 0),
-            dl: Math.max(0, parseInt((source.match(/d[l]?(\d+)/i) || [])[1], 10) || 0),
-            kh: Math.max(0, parseInt((source.match(/k[h]?(\d+)/i) || [])[1], 10) || 0)
-        };
+        }).then((response) => {
+            if (!response.ok) throw new Error(`Discord webhook failed (${response.status})`);
+            return true;
+        }).catch((error) => {
+            reportVTTError('vtt-character-webhook', 'network', error);
+            return false;
+        });
     };
 
     const applyRollModeToD20Formula = (formula, mode = localRollMode) => {
@@ -7306,30 +7318,8 @@
     };
 
     const gmCoreRoll = (count, sides, mods = {}) => {
-        const rolls = [];
-        let total = 0;
-        for (let i = 0; i < Math.max(1, count); i += 1) {
-            let value = randomIntInclusive(1, Math.max(2, sides));
-            let safety = 0;
-            while (mods.r > 0 && value <= mods.r && safety < 50) {
-                value = randomIntInclusive(1, Math.max(2, sides));
-                safety += 1;
-            }
-            rolls.push({ value, dropped: false });
-        }
-        if (mods.dl > 0 || mods.kh > 0) {
-            const sorted = [...rolls].sort((a, b) => a.value - b.value);
-            let dropCount = mods.dl;
-            if (mods.kh > 0) dropCount = Math.max(dropCount, rolls.length - mods.kh);
-            for (let i = 0; i < dropCount; i += 1) {
-                if (sorted[i]) sorted[i].dropped = true;
-            }
-        }
-        const formula = `[${rolls.map((roll) => {
-            if (!roll.dropped) total += roll.value;
-            return roll.dropped ? `~~${roll.value}~~` : String(roll.value);
-        }).join('+')}]`;
-        return { total, formula };
+        const result = Dice.coreRoll(count, sides, 'norm', mods);
+        return { total: result.total, formula: result.formula };
     };
 
     const getProximitySeenStorageKey = () => `${PROXIMITY_PROMPT_STORAGE_PREFIX}${getActiveCaseId() || 'case'}`;
@@ -7929,32 +7919,7 @@
     };
 
     const gmParseComplexFormula = (value = '') => {
-        const source = String(value || '').trim();
-        if (!source) return { total: 0, text: '' };
-        let total = 0;
-        const parts = [];
-        const diceRegex = /([+-]?)\s*(\d*)d(\d+)\s*([a-z0-9]*)/gi;
-        const pushPart = (sign, text) => {
-            const clean = String(text || '').trim();
-            if (!clean) return;
-            parts.push(parts.length ? `${sign === -1 ? '-' : '+'} ${clean}` : `${sign === -1 ? '-' : ''}${clean}`);
-        };
-        let match;
-        while ((match = diceRegex.exec(source)) !== null) {
-            const sign = (match[1] || '').trim() === '-' ? -1 : 1;
-            const result = gmCoreRoll(parseInt(match[2], 10) || 1, parseInt(match[3], 10) || 20, gmParseRollModifiers(match[4] || ''));
-            total += result.total * sign;
-            pushPart(sign, match[4] ? `${result.formula}${match[4]}` : result.formula);
-        }
-        const staticSource = source.replace(diceRegex, ' ');
-        const staticRegex = /([+-]?)\s*(\d+)(?!\s*d)/gi;
-        while ((match = staticRegex.exec(staticSource)) !== null) {
-            const sign = (match[1] || '').trim() === '-' ? -1 : 1;
-            const flat = parseInt(match[2], 10) || 0;
-            total += flat * sign;
-            pushPart(sign, String(flat));
-        }
-        return { total, text: parts.join(' ').trim() };
+        return Dice.parseComplexBonus(value);
     };
 
     const getGMDiscordSettings = () => {
@@ -7988,6 +7953,9 @@
         }).then((response) => {
             if (!response.ok) throw new Error(`Discord webhook failed (${response.status})`);
             return true;
+        }).catch((error) => {
+            reportVTTError('vtt-gm-webhook', 'network', error);
+            throw error;
         });
     };
 
