@@ -266,6 +266,8 @@
     let rosterSelfModalError = '';
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
+    let lastEvidenceNotePointerDownId = '';
+    let lastEvidenceNotePointerDownAt = 0;
     let lastStageToolPointerDownState = null;
     let remoteTokenTweens = new Map();
     let localDragTweenSuppressions = new Map();
@@ -281,6 +283,7 @@
     let rulerState = null;
     let fogPlacementState = null;
     let evidenceNotePlacementState = null;
+    let evidenceNoteDragState = null;
     let pendingTouchContextState = null;
     let templateExpiryTimer = 0;
     let pingExpiryTimer = 0;
@@ -2743,13 +2746,14 @@
         return true;
     };
     const clearTemplatePlacementState = () => {
-        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState && !fogPlacementState && !evidenceNotePlacementState) return false;
+        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState && !fogPlacementState && !evidenceNotePlacementState && !evidenceNoteDragState) return false;
         templatePlacementState = null;
         templateRotateState = null;
         visionConeRotateState = null;
         rulerState = null;
         fogPlacementState = null;
         evidenceNotePlacementState = null;
+        evidenceNoteDragState = null;
         return true;
     };
     const setToolMode = (mode) => {
@@ -3001,7 +3005,7 @@
 
     const positionSheetActionPopover = () => positionAnchoredPopover(sheetActionPopoverEl, sheetActionState, 380, 460);
     const positionNPCRollPopover = () => positionAnchoredPopover(npcRollPopoverEl, npcRollState, 360, 340);
-    const positionStageContextMenu = () => positionAnchoredPopover(stageContextMenuEl, stageContextMenuState, 340, 520);
+    const positionStageContextMenu = () => positionAnchoredPopover(stageContextMenuEl, stageContextMenuState, 340, 360);
 
     const closeSheetActionPopover = () => {
         if (!sheetActionState && (!sheetActionPopoverEl || sheetActionPopoverEl.hidden)) return false;
@@ -3099,22 +3103,22 @@
             initiativeToggleEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
         }
         if (settingsRailTabEl) {
-            settingsRailTabEl.textContent = uiState.settingsCollapsed ? 'DM Pin' : 'DM Unpin';
-            settingsRailTabEl.title = uiState.settingsCollapsed ? 'Open DM rail' : 'Close DM rail';
-            settingsRailTabEl.setAttribute('aria-label', uiState.settingsCollapsed ? 'Open DM rail' : 'Close DM rail');
-            settingsRailTabEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
+            settingsRailTabEl.textContent = 'Close';
+            settingsRailTabEl.title = 'Close drawer';
+            settingsRailTabEl.setAttribute('aria-label', 'Close drawer');
+            settingsRailTabEl.removeAttribute('aria-pressed');
         }
         if (playerRollRailTabEl) {
-            playerRollRailTabEl.textContent = 'Controls';
-            playerRollRailTabEl.title = uiState.playerRollRailCollapsed ? 'Pin player controls open' : 'Unpin player controls';
-            playerRollRailTabEl.setAttribute('aria-label', uiState.playerRollRailCollapsed ? 'Pin player controls open' : 'Unpin player controls');
-            playerRollRailTabEl.setAttribute('aria-pressed', uiState.playerRollRailCollapsed ? 'false' : 'true');
+            playerRollRailTabEl.textContent = 'Close';
+            playerRollRailTabEl.title = 'Close player controls';
+            playerRollRailTabEl.setAttribute('aria-label', 'Close player controls');
+            playerRollRailTabEl.removeAttribute('aria-pressed');
         }
         if (initiativeRailTabEl) {
-            initiativeRailTabEl.textContent = 'Clocks / Init 📌';
-            initiativeRailTabEl.title = uiState.initiativeCollapsed ? 'Pin clocks and initiative open' : 'Unpin clocks and initiative';
-            initiativeRailTabEl.setAttribute('aria-label', uiState.initiativeCollapsed ? 'Pin clocks and initiative open' : 'Unpin clocks and initiative');
-            initiativeRailTabEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
+            initiativeRailTabEl.textContent = 'Close';
+            initiativeRailTabEl.title = 'Close combat drawer';
+            initiativeRailTabEl.setAttribute('aria-label', 'Close combat drawer');
+            initiativeRailTabEl.removeAttribute('aria-pressed');
         }
         if (scenePanelToggleEl) {
             scenePanelToggleEl.textContent = `Scene Panel: ${uiState.scenePanelCollapsed ? 'Off' : 'On'}`;
@@ -3348,7 +3352,7 @@
     };
     const maybeFollowRemoteActivityForDM = (sceneIds = new Set(), state = vttState) => {
         if (!isDM() || !isUsingLocalSceneView(state, localRole)) return false;
-        if (dragState || spawnDragState || fogPlacementState || evidenceNotePlacementState || templatePlacementState || templateRotateState || visionConeRotateState || rulerState) return false;
+        if (dragState || spawnDragState || fogPlacementState || evidenceNotePlacementState || evidenceNoteDragState || templatePlacementState || templateRotateState || visionConeRotateState || rulerState) return false;
         const sharedSceneId = getSharedSceneId(state);
         if (!sharedSceneId || !sceneIds.has(sharedSceneId)) return false;
         const viewedSceneId = getViewedSceneId(state, localRole);
@@ -4872,6 +4876,9 @@
         if (evidenceNotePlacementState && (!scene || evidenceNotePlacementState.sceneId !== scene.id)) {
             evidenceNotePlacementState = null;
         }
+        if (evidenceNoteDragState && (!scene || evidenceNoteDragState.sceneId !== scene.id || !visibleEvidenceNotes.some((note) => note.id === evidenceNoteDragState.noteId))) {
+            evidenceNoteDragState = null;
+        }
         if (body) {
             body.dataset.vttRole = localRole;
             body.dataset.sceneViewMode = isUsingLocalSceneView(vttState, localRole) ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED;
@@ -6370,7 +6377,15 @@
         const menuWidth = quickSpawnMenuEl.offsetWidth || 280;
         const menuHeight = quickSpawnMenuEl.offsetHeight || 0;
         const left = clamp(quickSpawnMenuState.stageX, 12, Math.max(12, stageRect.width - menuWidth - 12));
-        const top = clamp(quickSpawnMenuState.stageY, 12, Math.max(12, stageRect.height - menuHeight - 12));
+        let maxTop = Math.max(12, stageRect.height - menuHeight - 12);
+        if (window.matchMedia('(min-width: 861px)').matches) {
+            const tableHud = document.getElementById('vtt-table-hud');
+            const hudRect = tableHud ? tableHud.getBoundingClientRect() : null;
+            if (hudRect && hudRect.height > 0) {
+                maxTop = Math.min(maxTop, Math.max(12, hudRect.top - stageRect.top - menuHeight - 12));
+            }
+        }
+        const top = clamp(quickSpawnMenuState.stageY, 12, maxTop);
         quickSpawnMenuEl.style.left = `${left}px`;
         quickSpawnMenuEl.style.top = `${top}px`;
     };
@@ -6378,6 +6393,7 @@
     const renderStageContextMenu = () => {
         if (!stageContextMenuEl) return;
         if (!stageContextMenuState || !stageEl) {
+            if (body) delete body.dataset.vttContextTarget;
             stageContextMenuEl.hidden = true;
             stageContextMenuEl.innerHTML = '';
             return;
@@ -6394,11 +6410,26 @@
         const canEditNote = !!(isDM() && note);
         const activeScene = getActiveScene();
         const fogCount = activeScene && Array.isArray(activeScene.fog) ? activeScene.fog.length : 0;
+        const contextLabel = stageContextMenuState.source === 'touch' ? 'Touch actions' : 'Right-click actions';
+        if (body) body.dataset.vttContextTarget = note ? 'note' : (token ? 'token' : 'stage');
         stageContextMenuEl.hidden = false;
-        stageContextMenuEl.innerHTML = `
+        stageContextMenuEl.innerHTML = note ? `
+            <div class="vtt-stage-context-head">
+                <strong>${escapeHtml(getEvidenceNoteDisplayTitle(note))}</strong>
+                <span>${escapeHtml(`${getEvidenceNoteShapeLabel(note)} · ${buildEvidenceNoteAreaLabel(note, activeScene)} · ${note.hidden ? 'DM only' : 'Visible to players'}`)}</span>
+            </div>
+            <div class="vtt-stage-context-list">
+                ${canEditNote ? '<button class="vtt-stage-context-item strong" type="button" data-action="context-note-inspector">Edit zone</button>' : ''}
+                <button class="vtt-stage-context-item" type="button" data-action="context-ping">Ping here</button>
+                ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-toggle-hidden">${note.hidden ? 'Show to players' : 'Make DM only'}</button>` : ''}
+                ${canEditNote ? '<button class="vtt-stage-context-item" type="button" data-action="context-note-duplicate">Duplicate zone</button>' : ''}
+                ${canEditNote ? '<button class="vtt-stage-context-item danger" type="button" data-action="context-note-delete">Delete zone</button>' : ''}
+            </div>
+            ${canEditNote ? '<div class="vtt-stage-context-hint">Drag the highlighted zone to move it. Position and size can also be edited in the inspector.</div>' : ''}
+        ` : `
             <div class="vtt-stage-context-head">
                 <strong>${escapeHtml(token ? (token.label || 'Token') : (note ? getEvidenceNoteDisplayTitle(note) : 'Stage'))}</strong>
-                <span>${escapeHtml(stageContextMenuState.source === 'touch' ? 'Touch actions' : 'Context actions')}</span>
+                <span>${escapeHtml(contextLabel)}</span>
             </div>
             <div class="vtt-stage-context-list">
                 <button class="vtt-stage-context-item strong" type="button" data-action="context-ping">Ping</button>
@@ -6408,8 +6439,11 @@
                 ${canEditToken ? `<button class="vtt-stage-context-item" type="button" data-action="context-token-inspector">Token inspector</button>` : ''}
                 ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-inspector">Zone inspector</button>` : ''}
                 ${canPreview ? `<button class="vtt-stage-context-item" type="button" data-action="context-preview-token">${token.id === previewTokenId ? 'Hide portrait' : 'Preview portrait'}</button>` : ''}
+                ${isDM() && !token ? '<button class="vtt-stage-context-item" type="button" data-action="context-quick-spawn">Quick spawn here</button><button class="vtt-stage-context-item" type="button" data-action="context-npc-search">NPC search here</button>' : ''}
             </div>
-            <div class="vtt-stage-context-section">
+            <details class="vtt-stage-context-details">
+                <summary>Map tools</summary>
+                <div class="vtt-stage-context-section">
                 <div class="vtt-menu-title">Measure & Areas</div>
                 <div class="vtt-stage-context-grid">
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="navigate">Navigate</button>
@@ -6426,7 +6460,7 @@
                 ${isDM() ? `
                     <button class="vtt-stage-context-item" type="button" data-action="toggle-stealth-mode">Sight Cones: ${getActiveScene() && getActiveScene().stealthMode ? 'On' : 'Off'}</button>
                 ` : ''}
-            </div>
+                </div>
             ${isDM() ? `
                 <div class="vtt-stage-context-section">
                     <div class="vtt-menu-title">Fog</div>
@@ -6437,15 +6471,7 @@
                     </div>
                 </div>
             ` : ''}
-            ${isDM() ? `
-                <div class="vtt-stage-context-section">
-                    <div class="vtt-menu-title">Spawn</div>
-                    <div class="vtt-stage-context-list">
-                        <button class="vtt-stage-context-item" type="button" data-action="context-quick-spawn">Quick spawn</button>
-                        <button class="vtt-stage-context-item" type="button" data-action="context-npc-search">NPC search here</button>
-                    </div>
-                </div>
-            ` : ''}
+            </details>
         `;
         requestAnimationFrame(positionStageContextMenu);
     };
@@ -10401,6 +10427,30 @@
         return true;
     };
 
+    const duplicateEvidenceNoteById = (noteId) => {
+        const targetId = String(noteId || '').trim();
+        if (!targetId || !isDM()) return false;
+        let duplicateId = '';
+        withDraft((draft) => {
+            const scene = getActiveScene(draft);
+            if (!scene || !Array.isArray(scene.evidenceNotes)) return;
+            const source = scene.evidenceNotes.find((note) => String(note && note.id || '').trim() === targetId);
+            if (!source) return;
+            const cellPx = getSceneCellPx(scene);
+            const copy = deepClone(source);
+            copy.id = buildId('evidence');
+            copy.title = `${getEvidenceNoteDisplayTitle(source)} Copy`.slice(0, 120);
+            copy.x = toNumber(source.x, 0) + cellPx;
+            copy.y = toNumber(source.y, 0) + cellPx;
+            scene.evidenceNotes.push(copy);
+            duplicateId = copy.id;
+            selectedEvidenceNoteId = copy.id;
+            selectedTokenId = '';
+            selectedEntryId = '';
+        });
+        return !!duplicateId;
+    };
+
     const assignSelectedEntryToToken = (tokenId) => {
         if (!canEditInitiative()) return false;
         const targetTokenId = String(tokenId || '').trim();
@@ -11108,6 +11158,28 @@
             closeStageContextMenu();
             if (menuState && menuState.noteId) openEvidenceNoteInspectorPopover(menuState.noteId, menuState.clientX, menuState.clientY);
             render();
+            return;
+        }
+        if (action === 'context-note-toggle-hidden') {
+            const noteId = stageContextMenuState ? String(stageContextMenuState.noteId || '').trim() : '';
+            closeStageContextMenu();
+            if (!noteId || !isDM()) return;
+            selectedEvidenceNoteId = noteId;
+            updateSelectedEvidenceNote((note) => {
+                note.hidden = !note.hidden;
+            });
+            return;
+        }
+        if (action === 'context-note-duplicate') {
+            const noteId = stageContextMenuState ? String(stageContextMenuState.noteId || '').trim() : '';
+            closeStageContextMenu();
+            if (noteId) duplicateEvidenceNoteById(noteId);
+            return;
+        }
+        if (action === 'context-note-delete') {
+            const noteId = stageContextMenuState ? String(stageContextMenuState.noteId || '').trim() : '';
+            closeStageContextMenu();
+            if (noteId) deleteEvidenceNoteById(noteId);
             return;
         }
         if (action === 'context-preview-token') {
@@ -12575,6 +12647,72 @@
         return true;
     };
 
+    const beginEvidenceNotePointerInteraction = (event, scene, worldPoint, noteEl) => {
+        if (!isDM() || !scene || !noteEl || localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
+        if (window.matchMedia('(max-width: 860px)').matches) return false;
+        const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
+        const note = getEvidenceNoteById(noteId);
+        if (!note) return false;
+        const now = Date.now();
+        const isDoublePress = lastEvidenceNotePointerDownId === note.id
+            && now - lastEvidenceNotePointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
+        lastEvidenceNotePointerDownId = note.id;
+        lastEvidenceNotePointerDownAt = now;
+        if (isDoublePress) {
+            lastEvidenceNotePointerDownId = '';
+            lastEvidenceNotePointerDownAt = 0;
+            evidenceNoteDragState = null;
+            openEvidenceNoteInspectorPopover(note.id, event.clientX, event.clientY);
+            renderTokenInspectorPopover();
+            renderStage();
+            return true;
+        }
+        if (!canMutateLiveVTTState('evidence-note-drag-start')) return false;
+        evidenceNoteDragState = {
+            sceneId: scene.id,
+            noteId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startWorldPoint: { x: worldPoint.x, y: worldPoint.y },
+            originX: toNumber(note.x, 0),
+            originY: toNumber(note.y, 0),
+            previewX: toNumber(note.x, 0),
+            previewY: toNumber(note.y, 0),
+            width: Math.max(1, toNumber(note.w, 1)),
+            height: Math.max(1, toNumber(note.h, 1)),
+            isPin: isEvidenceNotePin(note),
+            moved: false
+        };
+        return true;
+    };
+
+    const previewEvidenceNoteDrag = (event) => {
+        const state = evidenceNoteDragState;
+        const scene = getActiveScene();
+        if (!state || !scene || state.sceneId !== scene.id) return false;
+        const moveDistance = Math.hypot(event.clientX - state.startClientX, event.clientY - state.startClientY);
+        if (!state.moved && moveDistance <= TOKEN_CLICK_MOVE_PX) return true;
+        state.moved = true;
+        const worldPoint = screenToWorld(event.clientX, event.clientY);
+        const cellPx = getSceneCellPx(scene);
+        const offsetX = toNumber(scene.grid && scene.grid.offsetX, 0);
+        const offsetY = toNumber(scene.grid && scene.grid.offsetY, 0);
+        const rawX = state.originX + worldPoint.x - state.startWorldPoint.x;
+        const rawY = state.originY + worldPoint.y - state.startWorldPoint.y;
+        state.previewX = offsetX + Math.round((rawX - offsetX) / cellPx) * cellPx;
+        state.previewY = offsetY + Math.round((rawY - offsetY) / cellPx) * cellPx;
+        const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(state.noteId) : state.noteId.replace(/"/g, '\\"');
+        const currentEl = noteLayerEl ? noteLayerEl.querySelector(`.vtt-map-note[data-note-id="${escapedId}"]`) : null;
+        if (currentEl instanceof HTMLElement) {
+            const worldLeft = state.isPin ? state.previewX - state.width / 2 : state.previewX;
+            const worldTop = state.isPin ? state.previewY - state.height / 2 : state.previewY;
+            currentEl.style.left = `${scaleForZoom(worldLeft)}px`;
+            currentEl.style.top = `${scaleForZoom(worldTop)}px`;
+            currentEl.classList.add('is-dragging');
+        }
+        return true;
+    };
+
     const handleStagePointerDown = (event) => {
         const targetEl = getEventTargetElement(event);
         if (!targetEl) return;
@@ -12654,6 +12792,8 @@
             renderTokenInspector();
             renderToolsMenu();
             renderStage();
+            const renderedNoteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
+            beginEvidenceNotePointerInteraction(event, scene, worldPoint, renderedNoteEl || noteEl);
             event.preventDefault();
             return;
         }
@@ -12856,6 +12996,10 @@
             renderSpawnGhost();
             return;
         }
+        if (evidenceNoteDragState) {
+            previewEvidenceNoteDrag(event);
+            return;
+        }
         if (pendingTouchContextState && event.pointerId === pendingTouchContextState.pointerId) {
             if (pendingTouchContextState.triggered) return;
             const moveDistance = Math.hypot(event.clientX - pendingTouchContextState.clientX, event.clientY - pendingTouchContextState.clientY);
@@ -13012,6 +13156,24 @@
             if (shouldSpawn) {
                 spawnTokenFromDescriptor(descriptor.kind, descriptor.id, nextWorldPoint);
             }
+            return;
+        }
+        if (evidenceNoteDragState) {
+            const completed = { ...evidenceNoteDragState };
+            evidenceNoteDragState = null;
+            if (!event || event.type === 'pointercancel' || !completed.moved) {
+                renderStage();
+                return;
+            }
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || scene.id !== completed.sceneId || !Array.isArray(scene.evidenceNotes)) return;
+                const note = scene.evidenceNotes.find((entry) => String(entry && entry.id || '').trim() === completed.noteId);
+                if (!note) return;
+                note.x = completed.previewX;
+                note.y = completed.previewY;
+                selectedEvidenceNoteId = note.id;
+            });
             return;
         }
         if (pendingTouchContextState && event && event.pointerId === pendingTouchContextState.pointerId) {

@@ -1956,7 +1956,12 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     border-color: rgba(var(--vtt-note-rgb), 0.46);
     box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
     opacity: 1;
-    pointer-events: auto;
+    pointer-events: none;
+}
+
+body[data-vtt-context-target="note"] .vtt-map-note.is-selected .vtt-map-note-chip {
+    opacity: 0;
+    visibility: hidden;
 }
 
 .vtt-map-note.is-pin:hover .vtt-map-note-chip {
@@ -3530,6 +3535,55 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag 
     opacity: 0.42;
 }
 
+.vtt-stage-context-item.danger {
+    border-color: rgba(255, 112, 112, 0.34);
+    color: rgba(255, 216, 216, 0.96);
+}
+
+.vtt-stage-context-details {
+    margin-top: 0.7rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vtt-stage-context-details > summary {
+    padding: 0.7rem 0 0.1rem;
+    color: rgba(220, 229, 241, 0.78);
+    font-size: 0.78rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.vtt-stage-context-details > .vtt-stage-context-section:first-of-type {
+    margin-top: 0.55rem;
+    padding-top: 0;
+    border-top: 0;
+}
+
+.vtt-stage-context-hint {
+    margin-top: 0.7rem;
+    padding: 0.58rem 0.65rem;
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.07);
+    color: rgba(220, 229, 241, 0.72);
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+@media (min-width: 861px) {
+    body[data-vtt-role="dm"] .vtt-map-note.is-selected {
+        cursor: move;
+    }
+
+    body[data-vtt-role="dm"] .vtt-map-note.is-dragging {
+        cursor: grabbing;
+        opacity: 0.86;
+        box-shadow:
+            inset 0 0 0 1px rgba(var(--accent-rgb, 78, 205, 196), 0.28),
+            0 0 0 3px rgba(var(--accent-rgb, 78, 205, 196), 0.4),
+            0 20px 36px rgba(0, 0, 0, 0.34);
+    }
+}
+
 .vtt-popover-head {
     display: flex;
     align-items: flex-start;
@@ -4397,13 +4451,107 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
 
     .vtt-shell {
         --vtt-shell-height: 100vh;
-        --vtt-overlay-top: 4.35rem;
+        --vtt-overlay-top: 4.75rem;
         padding-top: 0;
     }
 
     body[data-topbar-preview="1"] .vtt-shell,
     body[data-topbar-collapsed="0"] .vtt-shell {
-        --vtt-overlay-top: 4.35rem;
+        --vtt-overlay-top: 4.75rem;
+    }
+
+    /* Keep the desktop VTT menu useful without turning it into a page-height curtain. */
+    .vtt-topbar-menu .vtt-view-menu {
+        box-sizing: border-box;
+        width: min(390px, calc(100vw - 2rem));
+        max-height: calc(100vh - 5.5rem);
+        overflow-x: hidden;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+    }
+
+    .vtt-view-menu .vtt-menu-section:nth-child(1) .vtt-menu-list,
+    .vtt-view-menu .vtt-menu-section:nth-child(2) .vtt-menu-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .vtt-view-menu .vtt-chip-btn {
+        min-width: 0;
+        white-space: normal;
+    }
+
+    .vtt-view-menu #vtt-settings-toggle,
+    .vtt-view-menu #vtt-scene-panel-toggle,
+    .vtt-view-menu #vtt-spawn-panel-toggle,
+    .vtt-view-menu #vtt-inspector-panel-toggle {
+        display: none;
+    }
+
+    /* Empty clocks do not need a permanent card over the map; the full combat drawer still explains them. */
+    body:not([data-active-vtt-panel="combat"]) #vtt-clock-panel:has(.vtt-clock-list > .vtt-empty) {
+        display: none;
+    }
+
+    body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-empty {
+        padding: 0.65rem 0.72rem;
+        border-radius: 8px;
+        line-height: 1.3;
+    }
+
+    .vtt-quick-spawn-menu .vtt-token-spawn {
+        align-items: flex-start;
+    }
+
+    .vtt-quick-spawn-menu .vtt-token-spawn-name {
+        flex: 1 1 42%;
+        white-space: normal;
+    }
+
+    .vtt-quick-spawn-menu .vtt-token-spawn-meta {
+        flex: 1 1 54%;
+        max-width: 56%;
+        overflow-wrap: anywhere;
+        text-align: right;
+        white-space: normal;
+    }
+
+    /* Drawers are a focused desktop state: expose a real close handle and remove obscured dock controls. */
+    .vtt-sidebar > .vtt-side-rail-tab,
+    .vtt-player-roll-rail > .vtt-side-rail-tab,
+    .vtt-initiative-panel > .vtt-side-rail-tab,
+    .vtt-admin-panel > .vtt-side-rail-tab {
+        top: 0.65rem;
+    }
+
+    .vtt-sidebar > .vtt-side-rail-tab-left,
+    .vtt-player-roll-rail > .vtt-side-rail-tab-left {
+        left: 100%;
+        border-left: 0;
+        border-radius: 0 0.7rem 0.7rem 0;
+    }
+
+    .vtt-initiative-panel > .vtt-side-rail-tab-right,
+    .vtt-admin-panel > .vtt-side-rail-tab-right {
+        right: 100%;
+        border-right: 0;
+        border-radius: 0.7rem 0 0 0.7rem;
+    }
+
+    body:is(
+        [data-active-vtt-panel="setup"],
+        [data-active-vtt-panel="spawn"],
+        [data-active-vtt-panel="inspector"],
+        [data-active-vtt-panel="player-rolls"],
+        [data-active-vtt-panel="combat"],
+        [data-active-vtt-panel="admin"]
+    ) .vtt-table-hud {
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(0.5rem);
+    }
+
+    .vtt-table-hud {
+        transition: opacity 140ms ease, transform 140ms ease;
     }
 
     .vtt-sidebar,
