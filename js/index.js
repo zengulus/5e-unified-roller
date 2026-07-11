@@ -3422,6 +3422,8 @@ function pushInitiativeToSharedVTT(payload) {
             sourceId: matchedBySource || existingIdx < 0 || shouldPromoteToPacketSource
                 ? sourceId
                 : sanitizeString(base.sourceId, '', 120).trim(),
+            submissionId: sanitizeString(packet.rollId, '', 120).trim(),
+            submittedAt: Math.max(0, Math.round(sanitizeNumber(packet.ts, Date.now(), 0, Number.MAX_SAFE_INTEGER))),
             total,
             tie,
             hpCurrent: hpCurrent !== null ? hpCurrent : (base.hpCurrent ?? null),

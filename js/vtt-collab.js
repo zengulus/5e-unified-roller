@@ -762,6 +762,8 @@ const syncYInitiativeEntryRecord = (record, entry) => {
     setYScalar(record, 'imageUrl', source.imageUrl || '');
     setYScalar(record, 'sourceType', source.sourceType || '');
     setYScalar(record, 'sourceId', source.sourceId || '');
+    setYScalar(record, 'submissionId', source.submissionId || '');
+    setYScalar(record, 'submittedAt', source.submittedAt || 0);
     setYScalar(record, 'total', source.total);
     setYScalar(record, 'tie', source.tie);
     setYScalar(record, 'hpCurrent', source.hpCurrent ?? null);
@@ -776,7 +778,7 @@ const syncYInitiativeEntryRecord = (record, entry) => {
     syncYStringArray(ensureYArrayEntry(record, 'conditions'), Array.isArray(source.conditions) ? source.conditions.slice(0, 24) : [], 80);
     removeExtraneousMapKeys(record, new Set([
         'id', 'name', 'linkedTokenId', 'side', 'imageUrl', 'sourceType',
-        'sourceId', 'total', 'tie', 'hpCurrent', 'hpMax', 'ac',
+        'sourceId', 'submissionId', 'submittedAt', 'total', 'tie', 'hpCurrent', 'hpMax', 'ac',
         'passivePerception', 'stealthRoll', 'reactionUsed', 'concentrating',
         'hidden', 'defences', 'conditions'
     ]));
@@ -790,6 +792,8 @@ const serializeYInitiativeEntryRecord = (record, entryId) => ({
     imageUrl: toTrimmedString(record.get('imageUrl'), '', 4000),
     sourceType: toTrimmedString(record.get('sourceType'), '', 40),
     sourceId: toTrimmedString(record.get('sourceId'), '', 120),
+    submissionId: toTrimmedString(record.get('submissionId'), '', 120),
+    submittedAt: record.get('submittedAt') || 0,
     total: record.get('total'),
     tie: record.get('tie'),
     hpCurrent: record.get('hpCurrent') ?? null,
@@ -1123,6 +1127,8 @@ const patchYInitiativeEntryRecord = (record, baseEntry = {}, nextEntry = {}) => 
     mutated = patchYScalar(record, 'imageUrl', baseEntry.imageUrl, nextEntry.imageUrl) || mutated;
     mutated = patchYScalar(record, 'sourceType', baseEntry.sourceType, nextEntry.sourceType) || mutated;
     mutated = patchYScalar(record, 'sourceId', baseEntry.sourceId, nextEntry.sourceId) || mutated;
+    mutated = patchYScalar(record, 'submissionId', baseEntry.submissionId || '', nextEntry.submissionId || '') || mutated;
+    mutated = patchYScalar(record, 'submittedAt', baseEntry.submittedAt || 0, nextEntry.submittedAt || 0) || mutated;
     mutated = patchYScalar(record, 'total', baseEntry.total, nextEntry.total) || mutated;
     mutated = patchYScalar(record, 'tie', baseEntry.tie, nextEntry.tie) || mutated;
     mutated = patchYScalar(record, 'hpCurrent', baseEntry.hpCurrent, nextEntry.hpCurrent) || mutated;

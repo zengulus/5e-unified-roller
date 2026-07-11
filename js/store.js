@@ -1091,6 +1091,8 @@
             imageUrl: toSharedVTTMediaUrl(source.imageUrl),
             sourceType: toTrimmedString(source.sourceType, '', 40).trim(),
             sourceId: toTrimmedString(source.sourceId, '', 120).trim(),
+            submissionId: toTrimmedString(source.submissionId || source.rollId, '', 120).trim(),
+            submittedAt: Math.max(0, Math.round(toNumber(source.submittedAt || source.ts, 0))),
             total: Math.max(-999, Math.min(999, Math.round(toNumber(source.total, 0)))),
             tie: Math.max(0, Math.min(99, Math.round(toNumber(source.tie, 10)))),
             hpCurrent: hasHpCurrent ? Math.max(0, Math.min(999999, Math.round(toNumber(source.hpCurrent, 0)))) : null,

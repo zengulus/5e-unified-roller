@@ -231,7 +231,11 @@
     let unsubscribeSyncStatus = null;
     let vttCollabSession = null;
     let vttCollabInitPromise = null;
+    let vttCollabInitCaseId = '';
     let vttAuthorityTransitionId = 0;
+    let vttCaseTransitionId = 0;
+    let vttStateCaseId = '';
+    let pendingVTTCaseId = '';
     let vttCollabPendingStatus = null;
     let vttCollabDropoutStartedAt = 0;
     let vttCollabDropoutTimer = 0;
@@ -3543,9 +3547,6 @@
             if (syncEntryRosterIdentity(entry, linkedPlayer)) mutated = true;
         });
 
-        if (mutated && Array.isArray(state.initiative.entries)) {
-            sortInitiativeEntries(state.initiative.entries);
-        }
         return mutated;
     };
 
@@ -3581,8 +3582,17 @@
         const store = getStore();
         const targetId = String(caseId || '').trim();
         if (!targetId || !store || typeof store.setActiveCase !== 'function') return false;
-        if (targetId === getActiveCaseId()) return true;
-        if (!store.setActiveCase(targetId)) return false;
+        if (targetId === getActiveCaseId() && vttStateCaseId === targetId && !initialVTTLoadPending) return true;
+        const transitionId = ++vttCaseTransitionId;
+        pendingVTTCaseId = targetId;
+        initialVTTLoadPending = true;
+        if (targetId !== getActiveCaseId() && !store.setActiveCase(targetId)) {
+            if (transitionId === vttCaseTransitionId) {
+                pendingVTTCaseId = '';
+                initialVTTLoadPending = false;
+            }
+            return false;
+        }
 
         clearTokenPortraitPreview();
         closeQuickSpawnMenu();
@@ -3602,10 +3612,12 @@
 
         loadUIPreferences();
         loadRolePreference();
-        initialVTTLoadPending = true;
-        const nextSnapshot = await loadInitialVTTSnapshot(store);
+        const nextSnapshot = await loadInitialVTTSnapshot(store, targetId);
+        if (transitionId !== vttCaseTransitionId || getActiveCaseId() !== targetId) return false;
         if (!nextSnapshot) {
             vttState = null;
+            vttStateCaseId = targetId;
+            pendingVTTCaseId = '';
             normalizeSelections();
             return true;
         }
@@ -3613,11 +3625,13 @@
             persist: false,
             reason: 'case-switch'
         }).snapshot;
+        vttStateCaseId = targetId;
+        pendingVTTCaseId = '';
         initialVTTLoadPending = false;
         normalizeSelections();
         render();
 
-        await refreshVTTCollabRoomIfNeeded();
+        await refreshVTTCollabRoomIfNeeded(targetId, transitionId);
         return true;
     };
 
@@ -4544,7 +4558,6 @@
             }
             selectedEntryId = entry.id;
             if (linkedToken) selectedTokenId = linkedToken.id;
-            sortInitiativeEntries(entries);
         });
         return changed;
     };
@@ -4571,7 +4584,6 @@
             entries.forEach((entry) => {
                 if (clearPlayerRosterIdentityFromRecord(entry)) changedCount += 1;
             });
-            sortInitiativeEntries(entries);
         }, { reason: 'bust-vtt-roster-associations' });
         const store = getStore();
         const players = store && typeof store.getPlayers === 'function' ? store.getPlayers() : [];
@@ -4724,7 +4736,10 @@
         const useStoreOnly = !!opts.useStoreOnly;
         const store = getStore();
         if (!store) return null;
+        const activeCaseId = getActiveCaseId();
+        if (vttStateCaseId && vttStateCaseId !== activeCaseId) return null;
         if (!useStoreOnly && isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function') {
+            if (vttCollabSession.caseId !== activeCaseId) return null;
             try {
                 const snapshot = deepClone(vttCollabSession.getSnapshot());
                 if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
@@ -4781,6 +4796,7 @@
     };
 
     const withDraft = (mutator, options = {}) => {
+        if (pendingVTTCaseId || (vttStateCaseId && vttStateCaseId !== getActiveCaseId())) return false;
         if (options.allowLocalFallback !== true && !canMutateLiveVTTState(options.reason || 'vtt-draft')) {
             return false;
         }
@@ -5512,18 +5528,23 @@
             && config.campaignId);
     };
 
-    const loadInitialVTTSnapshot = async (store) => {
-        const activeCaseId = getActiveCaseId();
-        if (!store) return null;
+    const readLocalInitialVTTSnapshot = (store, caseId) => {
+        if (!store || typeof store.getVTTState !== 'function') return deepClone(DEFAULT_VTT_STATE);
+        return deepClone(store.getVTTState(caseId) || DEFAULT_VTT_STATE);
+    };
+
+    const loadInitialVTTSnapshot = async (store, requestedCaseId = getActiveCaseId()) => {
+        const activeCaseId = String(requestedCaseId || getActiveCaseId()).trim() || getActiveCaseId();
+        if (!store) return deepClone(DEFAULT_VTT_STATE);
 
         if (!hasSupabaseVTTConfig() || typeof store.loadVTTRoomSnapshot !== 'function') {
             setVTTCollabStatus({
-                state: 'degraded',
-                detail: 'PostgreSQL sync is not configured. VTT state was not loaded.',
+                state: 'local',
+                detail: 'PostgreSQL sync is not configured. Using case-local VTT state.',
                 peerCount: 0
             });
-            if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: PostgreSQL sync required';
-            return null;
+            if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: Loading local VTT...';
+            return readLocalInitialVTTSnapshot(store, activeCaseId);
         }
 
         const roomId = getVTTCollabRoomId(activeCaseId);
@@ -5560,11 +5581,13 @@
             if (result && result.ok && !result.snapshot) {
                 setVTTCollabStatus({
                     state: 'degraded',
-                    detail: 'No PostgreSQL VTT snapshot exists for this room yet.',
+                    detail: 'No PostgreSQL VTT snapshot exists for this room yet. Starting a new blank room.',
                     peerCount: 0
                 });
                 if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: No PostgreSQL VTT snapshot';
-                return null;
+                // The remote read definitively succeeded and confirmed that the room does not exist.
+                // A blank seed is safe here; case-local state must never become boot authority.
+                return deepClone(DEFAULT_VTT_STATE);
             }
             if (result && !result.ok) {
                 console.warn('VTT Supabase preflight failed', result.error || result.reason || result);
@@ -5583,6 +5606,8 @@
             });
         }
 
+        // Once PostgreSQL is configured, a failed/uncertain read must fail closed. Returning
+        // local state here could let DM collaboration seed stale data over durable prep.
         return null;
     };
 
@@ -5611,13 +5636,16 @@
         if (!isCurrentTransition()) return null;
         if (vttCollabSession === sessionToDestroy) vttCollabSession = null;
         vttCollabInitPromise = null;
+        vttCollabInitCaseId = '';
         pendingRemoteVTTSnapshot = null;
 
         if (nextRole === 'dm') {
-            const snapshot = await loadInitialVTTSnapshot(store);
+            const activeCaseId = getActiveCaseId();
+            const snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
             if (!isCurrentTransition()) return null;
             if (!snapshot) {
                 vttState = null;
+                vttStateCaseId = activeCaseId;
                 initialVTTLoadPending = true;
                 normalizeSelections();
                 render();
@@ -5636,11 +5664,13 @@
                 synced = deepClone(saved || synced);
             }
             vttState = deepClone(synced);
+            vttStateCaseId = activeCaseId;
             initialVTTLoadPending = false;
             normalizeSelections();
             render();
         } else {
             vttState = deepClone(DEFAULT_VTT_STATE);
+            vttStateCaseId = getActiveCaseId();
             initialVTTLoadPending = true;
             pendingRemoteVTTSnapshot = null;
             normalizeSelections();
@@ -5665,7 +5695,9 @@
         return session;
     };
 
-    const applyVTTCollabSnapshot = (payload) => {
+    const applyVTTCollabSnapshot = (payload, caseId = getActiveCaseId()) => {
+        const targetCaseId = String(caseId || '').trim();
+        if (!targetCaseId || targetCaseId !== getActiveCaseId() || (pendingVTTCaseId && pendingVTTCaseId !== targetCaseId)) return;
         const store = getStore();
         const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
             ? store.normalizeVTTStateSnapshot(payload)
@@ -5684,6 +5716,7 @@
         queueRemoteTweensFromSnapshots(vttState, clean);
         pendingRemoteVTTSnapshot = null;
         vttState = deepClone(synced.snapshot);
+        vttStateCaseId = targetCaseId;
         maybeFollowRemoteActivityForDM(changedSceneIds, vttState);
         normalizeSelections();
         render();
@@ -5691,6 +5724,7 @@
 
     const applyPendingRemoteVTTSnapshot = () => {
         if (dragState || !pendingRemoteVTTSnapshot) return false;
+        if (!vttCollabSession || vttCollabSession.caseId !== getActiveCaseId()) return false;
         const sessionSnapshot = isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function'
             ? vttCollabSession.getSnapshot()
             : null;
@@ -5700,6 +5734,7 @@
         queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
         const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
         vttState = deepClone(synced.snapshot);
+        vttStateCaseId = getActiveCaseId();
         pendingRemoteVTTSnapshot = null;
         maybeFollowRemoteActivityForDM(changedSceneIds, vttState);
         normalizeSelections();
@@ -5707,7 +5742,9 @@
         return true;
     };
 
-    const applyVTTCollabPositionChanges = (changes = [], meta = {}) => {
+    const applyVTTCollabPositionChanges = (changes = [], meta = {}, caseId = getActiveCaseId()) => {
+        const targetCaseId = String(caseId || '').trim();
+        if (!targetCaseId || targetCaseId !== getActiveCaseId() || (pendingVTTCaseId && pendingVTTCaseId !== targetCaseId)) return;
         if (dragState) {
             if (meta && meta.snapshot) {
                 const store = getStore();
@@ -5730,6 +5767,7 @@
             queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
             const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
             vttState = deepClone(synced.snapshot);
+            vttStateCaseId = targetCaseId;
             const remoteSceneIds = new Set(
                 (Array.isArray(changes) ? changes : [])
                     .map((change) => String(change && change.sceneId || '').trim())
@@ -5787,10 +5825,18 @@
     };
 
     const initVTTCollab = async () => {
-        if (vttCollabSession && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive())) {
+        const sessionCaseId = getActiveCaseId();
+        const sessionTransitionId = vttCaseTransitionId;
+        if (vttCollabSession
+            && vttCollabSession.caseId === sessionCaseId
+            && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive())) {
             return vttCollabSession;
         }
-        if (vttCollabInitPromise) return vttCollabInitPromise;
+        if (vttCollabInitPromise && vttCollabInitCaseId === sessionCaseId) return vttCollabInitPromise;
+        if (vttCollabInitPromise && vttCollabInitCaseId !== sessionCaseId) {
+            vttCollabInitPromise = null;
+            vttCollabInitCaseId = '';
+        }
         const store = getStore();
         if (!store || !window.RTF_VTT_COLLAB_READY || typeof window.RTF_VTT_COLLAB_READY.then !== 'function') {
             setVTTCollabStatus({
@@ -5816,8 +5862,8 @@
                 if (!api || typeof api.createSession !== 'function') return null;
                 return api.createSession({
                     store,
-                    roomId: getVTTCollabRoomId(),
-                    caseId: getActiveCaseId(),
+                    roomId: getVTTCollabRoomId(sessionCaseId),
+                    caseId: sessionCaseId,
                     preferCloudRoomSnapshot: !isDM(),
                     canSaveRoom: () => isDM(),
                     canSeedRelayRoom: () => isDM(),
@@ -5828,12 +5874,20 @@
                     getCurrentPayload: () => isDM()
                         ? (readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE))
                         : deepClone(DEFAULT_VTT_STATE),
-                    applySnapshot: (payload) => applyVTTCollabSnapshot(payload),
-                    applyPositionChanges: (changes, meta) => applyVTTCollabPositionChanges(changes, meta),
-                    onStatusChange: (status) => setVTTCollabStatus(status)
+                    applySnapshot: (payload) => applyVTTCollabSnapshot(payload, sessionCaseId),
+                    applyPositionChanges: (changes, meta) => applyVTTCollabPositionChanges(changes, meta, sessionCaseId),
+                    onStatusChange: (status) => {
+                        if (sessionCaseId === getActiveCaseId() && sessionTransitionId === vttCaseTransitionId) {
+                            setVTTCollabStatus(status);
+                        }
+                    }
                 });
             })
             .then((session) => {
+                if (sessionCaseId !== getActiveCaseId() || sessionTransitionId !== vttCaseTransitionId) {
+                    if (session && typeof session.destroy === 'function') session.destroy().catch(() => { });
+                    return null;
+                }
                 if (!session || (typeof session.isActive === 'function' && !session.isActive())) {
                     vttCollabSession = null;
                     updateStoreSyncChip(store && typeof store.getSyncStatus === 'function' ? store.getSyncStatus() : { connected: false });
@@ -5849,6 +5903,7 @@
             })
             .catch((err) => {
                 console.warn('VTT collaboration init failed', err);
+                if (sessionCaseId !== getActiveCaseId() || sessionTransitionId !== vttCaseTransitionId) return null;
                 vttCollabSession = null;
                 setVTTCollabStatus({
                     state: 'degraded',
@@ -5860,16 +5915,19 @@
             .finally(() => {
                 if (vttCollabInitPromise === initPromise) {
                     vttCollabInitPromise = null;
+                    vttCollabInitCaseId = '';
                 }
             });
 
         vttCollabInitPromise = initPromise;
+        vttCollabInitCaseId = sessionCaseId;
         return initPromise;
     };
 
-    const refreshVTTCollabRoomIfNeeded = async () => {
+    const refreshVTTCollabRoomIfNeeded = async (requestedCaseId = getActiveCaseId(), transitionId = vttCaseTransitionId) => {
+        const expectedCaseId = String(requestedCaseId || getActiveCaseId()).trim();
+        if (!expectedCaseId || expectedCaseId !== getActiveCaseId() || transitionId !== vttCaseTransitionId) return null;
         if (!vttCollabSession) return initVTTCollab();
-        const expectedCaseId = getActiveCaseId();
         const expectedRoomId = getVTTCollabRoomId(expectedCaseId);
         if (vttCollabSession.roomId === expectedRoomId && vttCollabSession.caseId === expectedCaseId) {
             return vttCollabSession;
@@ -5891,16 +5949,20 @@
 
         vttCollabSession = null;
         vttCollabInitPromise = null;
+        vttCollabInitCaseId = '';
         pendingRemoteVTTSnapshot = null;
         const store = getStore();
         if (store) {
-            const nextSnapshot = await loadInitialVTTSnapshot(store);
+            const nextSnapshot = await loadInitialVTTSnapshot(store, expectedCaseId);
+            if (expectedCaseId !== getActiveCaseId() || transitionId !== vttCaseTransitionId) return null;
             if (nextSnapshot) {
                 vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' }).snapshot;
+                vttStateCaseId = expectedCaseId;
                 normalizeSelections();
                 render();
             } else {
                 vttState = null;
+                vttStateCaseId = expectedCaseId;
                 initialVTTLoadPending = true;
                 normalizeSelections();
                 return null;
@@ -5938,16 +6000,19 @@
 
         vttCollabSession = null;
         vttCollabInitPromise = null;
+        vttCollabInitCaseId = '';
         pendingRemoteVTTSnapshot = null;
 
         if (initialVTTLoadPending || !vttState) {
             const store = getStore();
-            const snapshot = await loadInitialVTTSnapshot(store);
+            const activeCaseId = getActiveCaseId();
+            const snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
             if (!snapshot) return null;
             vttState = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
                 persist: isDM(),
                 reason: 'roster-player-presentation-sync'
             }).snapshot;
+            vttStateCaseId = activeCaseId;
             initialVTTLoadPending = false;
             normalizeSelections();
             render();
@@ -5978,7 +6043,7 @@
 
         const activeCaseId = getActiveCaseId();
         const roomId = getVTTCollabRoomId(activeCaseId);
-        if (!vttState) throw new Error('VTT has not loaded a PostgreSQL snapshot yet.');
+        if (!vttState || vttStateCaseId !== activeCaseId) throw new Error('VTT state for this case has not loaded yet.');
         const snapshot = deepClone(vttState);
         syncRosterLinkedPlayerPresentation(snapshot);
         coerceSnapshotFogToCellMasks(snapshot);
@@ -5989,6 +6054,7 @@
         if (session && typeof session.forceAuthoritativeSnapshot === 'function') {
             result = await session.forceAuthoritativeSnapshot(snapshot, { reason: 'dm-authoritative' });
             vttState = deepClone(session.getSnapshot ? session.getSnapshot() : snapshot);
+            vttStateCaseId = activeCaseId;
         } else {
             result = {
                 ok: false,
@@ -7192,6 +7258,8 @@
                 imageUrl: linkedToken ? getTokenMetadataImageUrl(linkedToken) : (seed.imageUrl || ''),
                 sourceType: sourceType || seed.sourceType || '',
                 sourceId: sourceId || seed.sourceId || '',
+                submissionId: String(packet.submissionId || packet.rollId || seed.submissionId || '').trim(),
+                submittedAt: Math.max(0, Math.round(toNumber(packet.submittedAt || packet.ts, seed.submittedAt || 0))),
                 total,
                 tie,
                 hpCurrent: packet.hpCurrent !== null && packet.hpCurrent !== undefined ? packet.hpCurrent : seed.hpCurrent,
@@ -8244,9 +8312,10 @@
 
     const renderSceneList = () => {
         if (!sceneListEl) return;
-        const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
-        const cases = getCaseSwitcherEntries();
         const activeCaseId = getActiveCaseId();
+        const isCurrentCaseSnapshot = !!(vttState && vttStateCaseId === activeCaseId && !pendingVTTCaseId);
+        const scenes = isCurrentCaseSnapshot && Array.isArray(vttState.scenes) ? vttState.scenes : [];
+        const cases = getCaseSwitcherEntries();
         const activeCaseName = getActiveCaseName();
         const caseOptions = cases.length ? cases : [{ id: activeCaseId, name: activeCaseName }];
         const sharedSceneId = getSharedSceneId(vttState);
@@ -10157,7 +10226,6 @@
                 if (matchesLinkedToken || matchesSourceIdentity) return syncInitiativeEntryFromToken(entry, scene.tokens[idx]);
                 return entry;
             });
-            sortInitiativeEntries(draft.initiative.entries);
         });
     };
 
@@ -10284,7 +10352,7 @@
         return true;
     };
 
-    const updateSelectedEntry = (mutator) => {
+    const updateSelectedEntry = (mutator, options = {}) => {
         if (!canEditInitiative()) return;
         if (!selectedEntryId) return;
         withDraft((draft) => {
@@ -10313,7 +10381,7 @@
                 linkedToken.stealthRoll = getEntryStealthRoll(entries[idx]);
                 linkedToken.defences = normalizeDefences(entries[idx].defences);
             }
-            sortInitiativeEntries(entries);
+            if (options.sort === true) sortInitiativeEntries(entries);
         });
     };
 
@@ -10349,7 +10417,6 @@
             selectedTokenId = token.id;
             selectedEvidenceNoteId = '';
             assigned = true;
-            sortInitiativeEntries(entries);
         });
         return assigned;
     };
@@ -10538,6 +10605,7 @@
 
         const saved = store.updateVTTState(draft, getActiveCaseId());
         vttState = deepClone(saved);
+        vttStateCaseId = getActiveCaseId();
         syncRosterLinkedPlayerPresentation(vttState);
         lastDragSyncAt = now;
     };
@@ -12137,7 +12205,7 @@
                 }
                 const nextValue = String(target.value || '').trim();
                 entry[field] = nextValue === '' ? null : Math.round(toNumber(nextValue, 0));
-            });
+            }, { sort: field === 'total' || field === 'tie' });
             return;
         }
 
@@ -12163,6 +12231,7 @@
         const rawStealthRoll = source.stealthRoll !== undefined ? source.stealthRoll : source.stealthDc;
         return {
             rollId,
+            submittedAt: Math.max(0, Math.round(toNumber(source.submittedAt || source.ts, Date.now()))),
             sourceType: String(source.source || source.sourceType || 'sheet').trim() || 'sheet',
             sourceId: String(source.sourceId || '').trim(),
             name,
@@ -12225,7 +12294,9 @@
                     defences: normalizeDefences(packet.defences && Object.values(packet.defences).some((value) => value !== null) ? packet.defences : base.defences),
                     linkedTokenId: linkedToken ? linkedToken.id : base.linkedTokenId,
                     sourceType: packet.sourceType || base.sourceType,
-                    sourceId: packet.sourceId || base.sourceId
+                    sourceId: packet.sourceId || base.sourceId,
+                    submissionId: packet.rollId,
+                    submittedAt: packet.submittedAt
                 };
                 if (linkedToken && packet.stealthRoll !== null) linkedToken.stealthRoll = packet.stealthRoll;
                 selectedEntryId = entries[idx].id;
@@ -12241,6 +12312,8 @@
                     imageUrl: linkedToken ? getTokenMetadataImageUrl(linkedToken) : '',
                     sourceType: packet.sourceType,
                     sourceId: packet.sourceId,
+                    submissionId: packet.rollId,
+                    submittedAt: packet.submittedAt,
                     total: 0,
                     tie: 10,
                     hpCurrent: null,
@@ -12257,6 +12330,8 @@
                 const nextEntry = {
                     ...seed,
                     name: packet.name || seed.name,
+                    submissionId: packet.rollId,
+                    submittedAt: packet.submittedAt,
                     total: packet.total,
                     tie: packet.tie,
                     ac: packet.ac !== null ? packet.ac : seed.ac,
@@ -12291,11 +12366,102 @@
         render();
     };
 
+    const ingestSharedInitiativeSubmissions = async (store) => {
+        if (!isDM() || !store || !isVTTCollabReady() || !vttCollabSession) return false;
+        const activeCaseId = getActiveCaseId();
+        if (pendingVTTCaseId || vttCollabSession.caseId !== activeCaseId || vttStateCaseId !== activeCaseId) return false;
+        if (typeof vttCollabSession.getSnapshot !== 'function' || typeof vttCollabSession.syncSnapshot !== 'function') return false;
+
+        const storeSnapshot = typeof store.getVTTState === 'function' ? deepClone(store.getVTTState(activeCaseId)) : null;
+        const baseSnapshot = deepClone(vttCollabSession.getSnapshot());
+        const incomingEntries = storeSnapshot && storeSnapshot.initiative && Array.isArray(storeSnapshot.initiative.entries)
+            ? storeSnapshot.initiative.entries
+            : [];
+        const nextEntries = baseSnapshot && baseSnapshot.initiative && Array.isArray(baseSnapshot.initiative.entries)
+            ? baseSnapshot.initiative.entries
+            : [];
+        let mutated = false;
+
+        incomingEntries.forEach((incoming) => {
+            const submissionId = String(incoming && incoming.submissionId || '').trim();
+            const submittedAt = Math.max(0, Math.round(toNumber(incoming && incoming.submittedAt, 0)));
+            if (!submissionId || !submittedAt) return;
+            const sourceType = String(incoming && incoming.sourceType || '').trim();
+            const sourceId = String(incoming && incoming.sourceId || '').trim();
+            const idx = nextEntries.findIndex((entry) =>
+                String(entry && entry.id || '').trim() === String(incoming && incoming.id || '').trim()
+                || !!(sourceType && sourceId
+                    && String(entry && entry.sourceType || '').trim() === sourceType
+                    && String(entry && entry.sourceId || '').trim() === sourceId)
+            );
+            const current = idx >= 0 ? nextEntries[idx] : null;
+            const currentSubmissionId = String(current && current.submissionId || '').trim();
+            const currentSubmittedAt = Math.max(0, Math.round(toNumber(current && current.submittedAt, 0)));
+            if (currentSubmissionId === submissionId || currentSubmittedAt > submittedAt) return;
+
+            const merged = {
+                ...(current || incoming),
+                id: String(current && current.id || incoming.id || buildId('init')).trim(),
+                name: incoming.name || (current && current.name) || 'Combatant',
+                linkedTokenId: String(current && current.linkedTokenId || incoming.linkedTokenId || '').trim(),
+                side: incoming.side || (current && current.side) || 'player',
+                imageUrl: incoming.imageUrl || (current && current.imageUrl) || '',
+                sourceType: sourceType || (current && current.sourceType) || '',
+                sourceId: sourceId || (current && current.sourceId) || '',
+                submissionId,
+                submittedAt,
+                total: incoming.total,
+                tie: incoming.tie,
+                hpCurrent: incoming.hpCurrent,
+                hpMax: incoming.hpMax,
+                ac: incoming.ac,
+                passivePerception: incoming.passivePerception,
+                stealthRoll: incoming.stealthRoll,
+                defences: normalizeDefences(incoming.defences),
+                reactionUsed: !!(current && current.reactionUsed),
+                concentrating: !!(current && current.concentrating),
+                hidden: !!(current && current.hidden),
+                conditions: Array.isArray(current && current.conditions) ? current.conditions.slice(0, 24) : []
+            };
+            if (idx >= 0) nextEntries[idx] = merged;
+            else nextEntries.push(merged);
+
+            const linkedToken = findTokenByIdAcrossScenes(baseSnapshot, merged.linkedTokenId)
+                || (merged.sourceType && merged.sourceId ? findTokenAcrossScenes(baseSnapshot, merged.sourceType, merged.sourceId) : null);
+            if (linkedToken) {
+                merged.linkedTokenId = linkedToken.id;
+                linkedToken.hpCurrent = merged.hpCurrent;
+                linkedToken.hpMax = merged.hpMax;
+                linkedToken.ac = merged.ac;
+                linkedToken.passivePerception = merged.passivePerception;
+                linkedToken.stealthRoll = merged.stealthRoll;
+                linkedToken.defences = normalizeDefences(merged.defences);
+            }
+            mutated = true;
+        });
+
+        if (!mutated) return false;
+        sortInitiativeEntries(nextEntries);
+        if (!baseSnapshot.initiative.activeEntryId && nextEntries[0]) baseSnapshot.initiative.activeEntryId = nextEntries[0].id;
+        await vttCollabSession.syncSnapshot(baseSnapshot, {
+            baseSnapshot: vttCollabSession.getSnapshot(),
+            flushNow: true,
+            reason: 'shared-initiative-submission'
+        });
+        if (activeCaseId !== getActiveCaseId() || vttCollabSession.caseId !== activeCaseId) return false;
+        vttState = deepClone(vttCollabSession.getSnapshot());
+        vttStateCaseId = activeCaseId;
+        normalizeSelections();
+        render();
+        return true;
+    };
+
     const handleStoreUpdate = (event) => {
         const store = getStore();
         if (!store) return;
         const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
         const activeCaseId = getActiveCaseId();
+        if (pendingVTTCaseId) return;
         loadRolePreference();
         refreshPlayerImageCache();
         if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
@@ -12306,6 +12472,11 @@
         }
         if (initialVTTLoadPending) return;
         if (isVTTCollabReady()) {
+            if (isDM()) {
+                ingestSharedInitiativeSubmissions(store).catch((err) => {
+                    console.warn('Failed ingesting shared initiative submission into live VTT', err);
+                });
+            }
             if (vttState && syncRosterLinkedPlayerPresentation(vttState)) {
                 normalizeSelections();
                 render();
@@ -12325,6 +12496,7 @@
         ).snapshot;
         queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
         vttState = nextSnapshot;
+        vttStateCaseId = activeCaseId;
         normalizeSelections();
         render();
     };
@@ -13334,9 +13506,13 @@
         loadRolePreference();
         loadUIPreferences();
         capturePlayerImagesAtLoad();
-        const initialSnapshot = await loadInitialVTTSnapshot(store);
+        const initialCaseId = getActiveCaseId();
+        const initialTransitionId = vttCaseTransitionId;
+        const initialSnapshot = await loadInitialVTTSnapshot(store, initialCaseId);
+        if (initialCaseId !== getActiveCaseId() || initialTransitionId !== vttCaseTransitionId) return;
         if (!initialSnapshot) {
             vttState = null;
+            vttStateCaseId = initialCaseId;
             initialVTTLoadPending = true;
             normalizeSelections();
             if (typeof store.onSyncStatus === 'function') {
@@ -13363,6 +13539,7 @@
         }
 
         vttState = initialSynced;
+        vttStateCaseId = initialCaseId;
         normalizeSelections();
         initialVTTLoadPending = false;
         render();

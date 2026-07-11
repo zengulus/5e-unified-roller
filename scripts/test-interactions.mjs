@@ -98,10 +98,55 @@ try {
         assert.equal(await page.locator('#vtt-dm-unlock-modal').isHidden(), true);
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
 
+        await page.locator('[data-action="create-scene"]').first().evaluate((button) => button.click());
+        assert.equal(await page.locator('#vtt-scene-list [data-scene-picker="local"] option').count(), 2);
+
         await page.locator('[data-action="open-vtt-panel"][data-panel="combat"]').first().evaluate((button) => button.click());
         await page.getByRole('button', { name: 'New Clock' }).click();
+        assert.match(await page.locator('#vtt-clock-list').innerText(), /Clock 1/);
+
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            const caseId = store.getActiveCaseId();
+            const state = structuredClone(store.getVTTState(caseId));
+            state.initiative = {
+                round: 1,
+                activeEntryId: 'init_fast',
+                entries: [
+                    { id: 'init_fast', name: 'Fast', total: 18, tie: 12 },
+                    { id: 'init_slow', name: 'Slow', total: 10, tie: 10 }
+                ]
+            };
+            store.updateVTTState(state, caseId);
+        });
+        await page.locator('#vtt-initiative-list .vtt-entry').first().click();
+        await page.locator('#vtt-initiative-list [data-action="edit-entry"]').first().click();
+        await page.getByRole('button', { name: 'Move Down' }).click();
+        assert.deepEqual(await page.locator('#vtt-initiative-list .vtt-entry-name').allTextContents(), ['Slow', 'Fast']);
+        await page.getByRole('button', { name: 'Use Reaction' }).click();
+        assert.deepEqual(await page.locator('#vtt-initiative-list .vtt-entry-name').allTextContents(), ['Slow', 'Fast']);
+
+        await page.reload();
+        assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
+        assert.deepEqual(await page.locator('#vtt-initiative-list .vtt-entry-name').allTextContents(), ['Slow', 'Fast']);
+        assert.deepEqual(await page.evaluate(() => {
+            const snapshot = window.RTF_STORE.normalizeVTTStateSnapshot({
+                initiative: { entries: [{ id: 'init_packet', submissionId: 'roll_packet', submittedAt: 1234 }] }
+            });
+            const entry = snapshot.initiative.entries[0];
+            return [entry.submissionId, entry.submittedAt];
+        }), ['roll_packet', 1234]);
+
         await page.getByRole('button', { name: 'Reset to Round 1' }).click();
         assert.equal(await page.locator('#vtt-round-pill').textContent(), 'Round 1');
+
+        const primaryCaseId = await page.evaluate(() => window.RTF_STORE.getActiveCaseId());
+        const secondCaseId = await page.evaluate(() => window.RTF_STORE.createCase('Second Case'));
+        await page.waitForFunction((caseId) => document.querySelector(`#vtt-scene-list [data-active-case-id="${caseId}"]`), secondCaseId);
+        assert.equal(await page.locator('#vtt-scene-list [data-scene-picker="local"] option').count(), 1);
+        await page.evaluate((caseId) => window.RTF_STORE.setActiveCase(caseId), primaryCaseId);
+        await page.waitForFunction((caseId) => document.querySelector(`#vtt-scene-list [data-active-case-id="${caseId}"]`), primaryCaseId);
+        assert.equal(await page.locator('#vtt-scene-list [data-scene-picker="local"] option').count(), 2);
     });
 } finally {
     await browser.close();
