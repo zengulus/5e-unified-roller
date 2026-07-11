@@ -10158,7 +10158,7 @@
             stageMetaEl.textContent = metaParts.join(' / ');
         }
         if (stageEl) {
-            if (!isDM() && localToolState.mode === TOOL_MODE_NAVIGATE) {
+            if (localToolState.mode === TOOL_MODE_NAVIGATE) {
                 stageEl.removeAttribute('title');
             } else {
                 stageEl.title = `${toolMeta} ${stealthMeta}`;
