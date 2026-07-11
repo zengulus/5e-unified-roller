@@ -715,18 +715,28 @@ body:not([data-active-vtt-panel]) .vtt-admin-panel {
     transition: opacity 160ms ease, transform 160ms ease;
 }
 
+.vtt-admin-panel {
+    display: none;
+}
+
 body[data-active-vtt-panel="setup"] .vtt-sidebar,
 body[data-active-vtt-panel="spawn"] .vtt-sidebar,
 body[data-active-vtt-panel="inspector"] .vtt-sidebar,
 body[data-active-vtt-panel="player-rolls"] .vtt-player-roll-rail,
 body[data-active-vtt-panel="admin"] .vtt-admin-panel {
+    z-index: 50;
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
 }
 
+body[data-active-vtt-panel="admin"] .vtt-admin-panel {
+    display: grid;
+}
+
 body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
     --vtt-rail-width: min(360px, calc(100vw - 2rem));
+    z-index: 50;
     max-height: calc(100vh - var(--vtt-overlay-top) - 0.75rem);
 }
 

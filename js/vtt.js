@@ -10062,7 +10062,13 @@
             if (scene.stealthMode) metaParts.push('Sight cones');
             stageMetaEl.textContent = metaParts.join(' / ');
         }
-        if (stageEl) stageEl.title = `${toolMeta} ${stealthMeta}`;
+        if (stageEl) {
+            if (!isDM() && localToolState.mode === TOOL_MODE_NAVIGATE) {
+                stageEl.removeAttribute('title');
+            } else {
+                stageEl.title = `${toolMeta} ${stealthMeta}`;
+            }
+        }
         renderTableDocks();
         renderYouTubeAudioPlayer(sharedScene);
         const sceneNameEl = document.getElementById('scene-name');
@@ -10556,6 +10562,17 @@
             const prevIdx = (safeIdx - 1 + entries.length) % entries.length;
             if (safeIdx === 0) draft.initiative.round = Math.max(1, (draft.initiative.round || 1) - 1);
             draft.initiative.activeEntryId = entries[prevIdx].id;
+        });
+    };
+
+    const resetInitiativeToRoundOne = () => {
+        if (!canEditInitiative()) return;
+        withDraft((draft) => {
+            const initiative = draft && draft.initiative ? draft.initiative : null;
+            if (!initiative) return;
+            const entries = Array.isArray(initiative.entries) ? initiative.entries : [];
+            initiative.round = 1;
+            initiative.activeEntryId = entries.length ? entries[0].id : '';
         });
     };
 
@@ -11654,6 +11671,11 @@
 
         if (action === 'next-turn') {
             advanceTurn(1);
+            return;
+        }
+
+        if (action === 'reset-initiative-round') {
+            resetInitiativeToRoundOne();
             return;
         }
 

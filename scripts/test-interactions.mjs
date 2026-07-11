@@ -97,6 +97,11 @@ try {
         await page.locator('#vtt-dm-unlock-form').evaluate((form) => form.requestSubmit());
         assert.equal(await page.locator('#vtt-dm-unlock-modal').isHidden(), true);
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
+
+        await page.locator('[data-action="open-vtt-panel"][data-panel="combat"]').first().evaluate((button) => button.click());
+        await page.getByRole('button', { name: 'New Clock' }).click();
+        await page.getByRole('button', { name: 'Reset to Round 1' }).click();
+        assert.equal(await page.locator('#vtt-round-pill').textContent(), 'Round 1');
     });
 } finally {
     await browser.close();
