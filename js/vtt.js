@@ -230,8 +230,10 @@
     let fitViewOnNextMapLoad = true;
     let unsubscribeSyncStatus = null;
     let vttCollabSession = null;
+    let vttCollabSessionAuthorityTransitionId = -1;
     let vttCollabInitPromise = null;
     let vttCollabInitCaseId = '';
+    let vttInitialRoomRecoveryPromise = null;
     let vttAuthorityTransitionId = 0;
     let vttCaseTransitionId = 0;
     let vttStateCaseId = '';
@@ -5661,13 +5663,23 @@
         }
         if (!isCurrentTransition()) return null;
         if (vttCollabSession === sessionToDestroy) vttCollabSession = null;
+        if (!vttCollabSession) vttCollabSessionAuthorityTransitionId = -1;
         vttCollabInitPromise = null;
         vttCollabInitCaseId = '';
         pendingRemoteVTTSnapshot = null;
 
         if (nextRole === 'dm') {
             const activeCaseId = getActiveCaseId();
-            const snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
+            let snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
+            if (!snapshot && isCurrentTransition()) {
+                setVTTCollabStatus({
+                    state: 'connecting',
+                    detail: 'GM room preflight was not ready. Retrying automatically.',
+                    peerCount: 0
+                });
+                await new Promise((resolve) => window.setTimeout(resolve, 250));
+                if (isCurrentTransition()) snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
+            }
             if (!isCurrentTransition()) return null;
             if (!snapshot) {
                 vttState = null;
@@ -5703,7 +5715,11 @@
             render();
         }
 
-        const session = await initVTTCollab();
+        let session = await initVTTCollab();
+        if (!session && isCurrentTransition()) {
+            await new Promise((resolve) => window.setTimeout(resolve, 250));
+            if (isCurrentTransition()) session = await initVTTCollab();
+        }
         if (!isCurrentTransition()) {
             if (session && session === vttCollabSession && typeof session.destroy === 'function') {
                 try {
@@ -5853,8 +5869,17 @@
     const initVTTCollab = async () => {
         const sessionCaseId = getActiveCaseId();
         const sessionTransitionId = vttCaseTransitionId;
+        const sessionAuthorityTransitionId = vttAuthorityTransitionId;
+        const sessionRole = localRole;
+        const isCurrentSessionRequest = () => (
+            sessionCaseId === getActiveCaseId()
+            && sessionTransitionId === vttCaseTransitionId
+            && sessionAuthorityTransitionId === vttAuthorityTransitionId
+            && sessionRole === localRole
+        );
         if (vttCollabSession
             && vttCollabSession.caseId === sessionCaseId
+            && vttCollabSessionAuthorityTransitionId === sessionAuthorityTransitionId
             && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive())) {
             return vttCollabSession;
         }
@@ -5890,27 +5915,31 @@
                     store,
                     roomId: getVTTCollabRoomId(sessionCaseId),
                     caseId: sessionCaseId,
-                    preferCloudRoomSnapshot: !isDM(),
-                    canSaveRoom: () => isDM(),
-                    canSeedRelayRoom: () => isDM(),
-                    canLoadColdSnapshot: () => isDM(),
-                    getSeedPayload: () => isDM()
+                    preferCloudRoomSnapshot: sessionRole !== 'dm',
+                    canSaveRoom: () => sessionRole === 'dm' && isCurrentSessionRequest(),
+                    canSeedRelayRoom: () => sessionRole === 'dm' && isCurrentSessionRequest(),
+                    canLoadColdSnapshot: () => sessionRole === 'dm' && isCurrentSessionRequest(),
+                    getSeedPayload: () => sessionRole === 'dm'
                         ? (readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE))
                         : deepClone(DEFAULT_VTT_STATE),
-                    getCurrentPayload: () => isDM()
+                    getCurrentPayload: () => sessionRole === 'dm'
                         ? (readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE))
                         : deepClone(DEFAULT_VTT_STATE),
-                    applySnapshot: (payload) => applyVTTCollabSnapshot(payload, sessionCaseId),
-                    applyPositionChanges: (changes, meta) => applyVTTCollabPositionChanges(changes, meta, sessionCaseId),
+                    applySnapshot: (payload) => {
+                        if (isCurrentSessionRequest()) applyVTTCollabSnapshot(payload, sessionCaseId);
+                    },
+                    applyPositionChanges: (changes, meta) => {
+                        if (isCurrentSessionRequest()) applyVTTCollabPositionChanges(changes, meta, sessionCaseId);
+                    },
                     onStatusChange: (status) => {
-                        if (sessionCaseId === getActiveCaseId() && sessionTransitionId === vttCaseTransitionId) {
+                        if (isCurrentSessionRequest()) {
                             setVTTCollabStatus(status);
                         }
                     }
                 });
             })
             .then((session) => {
-                if (sessionCaseId !== getActiveCaseId() || sessionTransitionId !== vttCaseTransitionId) {
+                if (!isCurrentSessionRequest()) {
                     if (session && typeof session.destroy === 'function') session.destroy().catch(() => { });
                     return null;
                 }
@@ -5920,6 +5949,7 @@
                     return null;
                 }
                 vttCollabSession = session;
+                vttCollabSessionAuthorityTransitionId = sessionAuthorityTransitionId;
                 setVTTCollabStatus(session.getStatus ? session.getStatus() : {
                     state: 'live',
                     detail: 'Live VTT connected.',
@@ -5929,8 +5959,9 @@
             })
             .catch((err) => {
                 console.warn('VTT collaboration init failed', err);
-                if (sessionCaseId !== getActiveCaseId() || sessionTransitionId !== vttCaseTransitionId) return null;
+                if (!isCurrentSessionRequest()) return null;
                 vttCollabSession = null;
+                vttCollabSessionAuthorityTransitionId = -1;
                 setVTTCollabStatus({
                     state: 'degraded',
                     detail: 'Live VTT unavailable. Shared VTT mirror still works.',
@@ -5995,6 +6026,74 @@
             }
         }
         return initVTTCollab();
+    };
+
+    const initVTTCollabWithRetry = async (attempts = 3, delayMs = 400) => {
+        const maxAttempts = Math.max(1, Math.round(toNumber(attempts, 3)));
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            const session = await initVTTCollab();
+            if (session) return session;
+            if (!hasLiveVTTConfig() || attempt >= maxAttempts - 1) return null;
+            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+        }
+        return null;
+    };
+
+    const recoverInitialVTTRoomIfNeeded = async () => {
+        if (!initialVTTLoadPending || vttState || vttInitialRoomRecoveryPromise) {
+            return vttInitialRoomRecoveryPromise;
+        }
+        const store = getStore();
+        if (!store) return null;
+        const caseId = getActiveCaseId();
+        const caseTransitionId = vttCaseTransitionId;
+        const authorityTransitionId = vttAuthorityTransitionId;
+        const requestedRole = localRole;
+        const isCurrentRequest = () => (
+            caseId === getActiveCaseId()
+            && caseTransitionId === vttCaseTransitionId
+            && authorityTransitionId === vttAuthorityTransitionId
+            && requestedRole === localRole
+        );
+
+        const recoveryPromise = (async () => {
+            setVTTCollabStatus({
+                state: 'connecting',
+                detail: 'Cloud access is ready. Retrying the initial VTT room load.',
+                peerCount: 0
+            });
+            const snapshot = await loadInitialVTTSnapshot(store, caseId);
+            if (!snapshot || !isCurrentRequest()) return null;
+            const fogMigrated = coerceSnapshotFogToCellMasks(snapshot);
+            let synced = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
+                persist: isDM(),
+                reason: fogMigrated ? 'fog-mask-migration' : 'roster-player-presentation-sync'
+            }).snapshot;
+            vttState = deepClone(synced);
+            vttStateCaseId = caseId;
+            initialVTTLoadPending = false;
+            normalizeSelections();
+            render();
+            const session = await initVTTCollabWithRetry();
+            if (session && isCurrentRequest()) processInitiativeQueue();
+            fitViewToWorld();
+            return session;
+        })().finally(() => {
+            if (vttInitialRoomRecoveryPromise === recoveryPromise) {
+                vttInitialRoomRecoveryPromise = null;
+            }
+        });
+        vttInitialRoomRecoveryPromise = recoveryPromise;
+        return recoveryPromise;
+    };
+
+    const handleVTTStoreSyncStatus = (status) => {
+        updateStoreSyncChip(status);
+        if (status && status.connected && initialVTTLoadPending && !vttState) {
+            recoverInitialVTTRoomIfNeeded().catch((err) => {
+                console.warn('Initial VTT room recovery failed', err);
+            });
+        }
     };
 
     const retryVTTCollabConnection = async () => {
@@ -13754,10 +13853,15 @@
             initialVTTLoadPending = true;
             normalizeSelections();
             if (typeof store.onSyncStatus === 'function') {
-                unsubscribeSyncStatus = store.onSyncStatus(updateStoreSyncChip);
+                unsubscribeSyncStatus = store.onSyncStatus(handleVTTStoreSyncStatus);
             } else {
                 updateStoreSyncChip({ connected: false });
             }
+            window.setTimeout(() => {
+                recoverInitialVTTRoomIfNeeded().catch((err) => {
+                    console.warn('Initial VTT room timed recovery failed', err);
+                });
+            }, 500);
             return;
         }
 
@@ -13781,14 +13885,14 @@
         normalizeSelections();
         initialVTTLoadPending = false;
         render();
-        initVTTCollab().catch((err) => {
+        initVTTCollabWithRetry().catch((err) => {
             console.warn('VTT collaboration init failed', err);
         }).finally(() => {
             processInitiativeQueue();
         });
 
         if (typeof store.onSyncStatus === 'function') {
-            unsubscribeSyncStatus = store.onSyncStatus(updateStoreSyncChip);
+            unsubscribeSyncStatus = store.onSyncStatus(handleVTTStoreSyncStatus);
         } else {
             updateStoreSyncChip({ connected: false });
         }
