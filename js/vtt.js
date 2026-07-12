@@ -266,8 +266,7 @@
     let rosterSelfModalError = '';
     let lastTokenPointerDownId = '';
     let lastTokenPointerDownAt = 0;
-    let lastEvidenceNotePointerDownId = '';
-    let lastEvidenceNotePointerDownAt = 0;
+    let lastEvidenceNotePointerDownState = null;
     let lastStageToolPointerDownState = null;
     let remoteTokenTweens = new Map();
     let localDragTweenSuppressions = new Map();
@@ -376,7 +375,7 @@
     const clearFogButtonEl = document.getElementById('vtt-clear-fog');
     const accentButtonEl = document.getElementById('vtt-accent-btn');
     const accentPickerEl = document.getElementById('accent-picker-input');
-    const viewMenuToggleEl = document.getElementById('vtt-view-menu-toggle');
+    const viewMenuToggleEls = Array.from(document.querySelectorAll('[data-vtt-master-menu-toggle]'));
     const viewMenuEl = document.getElementById('vtt-view-menu');
     const gridToggleEl = document.getElementById('vtt-grid-toggle');
     const topbarTabEl = document.getElementById('vtt-topbar-tab');
@@ -2836,7 +2835,9 @@
 
     const renderViewMenu = () => {
         if (viewMenuEl) viewMenuEl.hidden = !viewMenuOpen;
-        if (viewMenuToggleEl) viewMenuToggleEl.setAttribute('aria-expanded', viewMenuOpen ? 'true' : 'false');
+        viewMenuToggleEls.forEach((toggleEl) => {
+            toggleEl.setAttribute('aria-expanded', viewMenuOpen ? 'true' : 'false');
+        });
     };
 
     const renderToolsMenu = () => {
@@ -2979,14 +2980,23 @@
         if (left + width > window.innerWidth - margin) {
             left = Math.max(margin, tokenInspectorState.clientX - width - 14);
         }
-        if (top + height > window.innerHeight - margin) {
-            top = Math.max(margin, window.innerHeight - height - margin);
+        let bottomBoundary = window.innerHeight - margin;
+        if (window.matchMedia('(min-width: 861px)').matches) {
+            const tableHud = document.getElementById('vtt-table-hud');
+            const hudRect = tableHud ? tableHud.getBoundingClientRect() : null;
+            const hudStyle = tableHud ? window.getComputedStyle(tableHud) : null;
+            if (hudRect && hudRect.height > 0 && hudStyle && hudStyle.opacity !== '0') {
+                bottomBoundary = Math.min(bottomBoundary, hudRect.top - margin);
+            }
+        }
+        if (top + height > bottomBoundary) {
+            top = Math.max(margin, bottomBoundary - height);
         }
         tokenInspectorPopoverEl.style.left = `${Math.round(left)}px`;
         tokenInspectorPopoverEl.style.top = `${Math.round(top)}px`;
     };
 
-    const positionAnchoredPopover = (popoverEl, state, fallbackWidth = 360, fallbackHeight = 420) => {
+    const positionAnchoredPopover = (popoverEl, state, fallbackWidth = 360, fallbackHeight = 420, options = {}) => {
         if (!popoverEl || popoverEl.hidden || !state) return;
         const width = popoverEl.offsetWidth || fallbackWidth;
         const height = popoverEl.offsetHeight || fallbackHeight;
@@ -2996,8 +3006,17 @@
         if (left + width > window.innerWidth - margin) {
             left = Math.max(margin, toNumber(state.clientX, window.innerWidth / 2) - width - 14);
         }
-        if (top + height > window.innerHeight - margin) {
-            top = Math.max(margin, window.innerHeight - height - margin);
+        let bottomBoundary = window.innerHeight - margin;
+        if (options.avoidTableHud && window.matchMedia('(min-width: 861px)').matches) {
+            const tableHud = document.getElementById('vtt-table-hud');
+            const hudRect = tableHud ? tableHud.getBoundingClientRect() : null;
+            const hudStyle = tableHud ? window.getComputedStyle(tableHud) : null;
+            if (hudRect && hudRect.height > 0 && hudStyle && hudStyle.opacity !== '0') {
+                bottomBoundary = Math.min(bottomBoundary, hudRect.top - margin);
+            }
+        }
+        if (top + height > bottomBoundary) {
+            top = Math.max(margin, bottomBoundary - height);
         }
         popoverEl.style.left = `${Math.round(left)}px`;
         popoverEl.style.top = `${Math.round(top)}px`;
@@ -3005,7 +3024,7 @@
 
     const positionSheetActionPopover = () => positionAnchoredPopover(sheetActionPopoverEl, sheetActionState, 380, 460);
     const positionNPCRollPopover = () => positionAnchoredPopover(npcRollPopoverEl, npcRollState, 360, 340);
-    const positionStageContextMenu = () => positionAnchoredPopover(stageContextMenuEl, stageContextMenuState, 340, 360);
+    const positionStageContextMenu = () => positionAnchoredPopover(stageContextMenuEl, stageContextMenuState, 340, 360, { avoidTableHud: true });
 
     const closeSheetActionPopover = () => {
         if (!sheetActionState && (!sheetActionPopoverEl || sheetActionPopoverEl.hidden)) return false;
@@ -8764,6 +8783,9 @@
         const monsterAssignQuery = monster ? String(monster.name || '').trim() : '';
         return `
             <div class="vtt-inspector-stack">
+                <details class="vtt-inspector-section" open>
+                    <summary>Identity & Appearance</summary>
+                    <div class="vtt-inspector-section-body">
                 <label class="vtt-field">
                     <span>Label</span>
                     <input class="vtt-inspector-input" type="text" ${isRosterManagedPlayer ? 'readonly' : 'data-token-field="label"'} value="${escapeHtml(token.label)}">
@@ -8800,6 +8822,13 @@
                         <span>Image URL</span>
                         <input class="vtt-inspector-input" type="text" data-token-field="imageUrl" value="${escapeHtml(imageUrlValue)}">
                     </label>
+                </div>
+                    </div>
+                </details>
+                <details class="vtt-inspector-section">
+                    <summary>Stats & Size</summary>
+                    <div class="vtt-inspector-section-body">
+                <div class="vtt-inspector-grid">
                     <label class="vtt-field">
                         <span>HP Current</span>
                         <input class="vtt-inspector-input" type="number" data-token-field="hpCurrent" value="${token.hpCurrent ?? ''}">
@@ -8834,6 +8863,11 @@
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="1">1x1</button>
                     <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="2">2x2</button>
                 </div>
+                    </div>
+                </details>
+                <details class="vtt-inspector-section">
+                    <summary>Combat Actions</summary>
+                    <div class="vtt-inspector-section-body">
                 <div class="vtt-subhead">Quick Actions</div>
                 <div class="vtt-chip-row vtt-inspector-quick-row">
                     <button class="vtt-chip-btn" data-action="token-adjust-hp" data-id="${escapeHtml(token.id)}" data-delta="-5">-5 HP</button>
@@ -8848,8 +8882,18 @@
                     <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Poisoned">Poisoned</button>
                     <button class="vtt-chip-btn" data-action="token-clear-conditions" data-id="${escapeHtml(token.id)}">Clear Cond</button>
                 </div>
+                    </div>
+                </details>
+                <details class="vtt-inspector-section">
+                    <summary>Automation</summary>
+                    <div class="vtt-inspector-section-body">
                 <div class="vtt-subhead">Proximity Prompts</div>
                 ${buildProximityTriggerEditor('token', token.id, token.triggers)}
+                    </div>
+                </details>
+                <details class="vtt-inspector-section">
+                    <summary>Monster & Stat Block</summary>
+                    <div class="vtt-inspector-section-body">
                 ${monster ? `
                     <div class="vtt-subhead">Monster</div>
                     <div class="vtt-detail-note">${escapeHtml(monsterMeta || monster.name)}. Right-click the token and choose Roll stat block / NPC for checks, saves, attacks, and damage.</div>
@@ -8881,6 +8925,11 @@
                     <button class="vtt-chip-btn strong" type="button" data-action="assign-token-monster" data-id="${escapeHtml(token.id)}"${monsters.length ? '' : ' disabled'}>Assign Monster</button>
                     <button class="vtt-chip-btn" type="button" data-action="clear-token-monster" data-id="${escapeHtml(token.id)}"${monster ? '' : ' disabled'}>Clear Monster</button>
                 </div>
+                    </div>
+                </details>
+                <details class="vtt-inspector-section">
+                    <summary>Visibility & Advanced</summary>
+                    <div class="vtt-inspector-section-body">
                 <label class="vtt-inspector-check">
                     <input type="checkbox" data-token-field="hidden"${token.hidden ? ' checked' : ''}>
                     <span>Hidden In Player Mode</span>
@@ -8911,6 +8960,8 @@
                     </div>
                 ` : ''}
                 ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player token name stays synced from the roster. Updating portrait here also updates that roster entry.</div>' : ''}
+                    </div>
+                </details>
                 <div class="vtt-inspector-actions">
                     <button class="vtt-inline-btn" data-action="clone-token" data-id="${escapeHtml(token.id)}">Clone Token</button>
                     <button class="vtt-inline-btn" data-action="add-token-to-initiative" data-id="${escapeHtml(token.id)}">Add To Initiative</button>
@@ -11226,6 +11277,15 @@
             renderToolsMenu();
             return;
         }
+        if (action === 'open-global-sync' || action === 'open-global-settings') {
+            const globalMenuButton = document.querySelector(
+                action === 'open-global-sync' ? '.hero-menu-sync' : '.hero-menu-gear'
+            );
+            closeViewMenu();
+            renderViewMenu();
+            if (globalMenuButton instanceof HTMLElement) globalMenuButton.click();
+            return;
+        }
         if (action === 'toggle-tools-menu') {
             setActiveVTTPanel(uiState.activeVttPanel === 'dm-tools' ? '' : 'dm-tools');
             viewMenuOpen = false;
@@ -11252,6 +11312,7 @@
             if (isSpectator() && ![TOOL_MODE_NAVIGATE, TOOL_MODE_RULER].includes(nextMode)) return;
             if (nextMode === TOOL_MODE_NOTE && !isDM()) return;
             if ((nextMode === TOOL_MODE_FOG || nextMode === TOOL_MODE_FOG_REMOVE) && !isDM()) return;
+            closeViewMenu();
             setToolMode(nextMode);
             render();
             return;
@@ -12654,13 +12715,21 @@
         const note = getEvidenceNoteById(noteId);
         if (!note) return false;
         const now = Date.now();
-        const isDoublePress = lastEvidenceNotePointerDownId === note.id
-            && now - lastEvidenceNotePointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
-        lastEvidenceNotePointerDownId = note.id;
-        lastEvidenceNotePointerDownAt = now;
+        const previousPress = lastEvidenceNotePointerDownState;
+        const isDoublePress = !!(
+            previousPress
+            && previousPress.noteId === note.id
+            && now - previousPress.at <= TOKEN_DOUBLE_CLICK_MS
+            && Math.hypot(event.clientX - previousPress.clientX, event.clientY - previousPress.clientY) <= STAGE_TOOL_DOUBLE_PRESS_PX
+        );
+        lastEvidenceNotePointerDownState = {
+            noteId: note.id,
+            at: now,
+            clientX: event.clientX,
+            clientY: event.clientY
+        };
         if (isDoublePress) {
-            lastEvidenceNotePointerDownId = '';
-            lastEvidenceNotePointerDownAt = 0;
+            lastEvidenceNotePointerDownState = null;
             evidenceNoteDragState = null;
             openEvidenceNoteInspectorPopover(note.id, event.clientX, event.clientY);
             renderTokenInspectorPopover();
@@ -12693,6 +12762,7 @@
         const moveDistance = Math.hypot(event.clientX - state.startClientX, event.clientY - state.startClientY);
         if (!state.moved && moveDistance <= TOKEN_CLICK_MOVE_PX) return true;
         state.moved = true;
+        lastEvidenceNotePointerDownState = null;
         const worldPoint = screenToWorld(event.clientX, event.clientY);
         const cellPx = getSceneCellPx(scene);
         const offsetX = toNumber(scene.grid && scene.grid.offsetX, 0);
@@ -12965,6 +13035,7 @@
 
         lastTokenPointerDownId = '';
         lastTokenPointerDownAt = 0;
+        lastEvidenceNotePointerDownState = null;
         if (localToolState.mode === TOOL_MODE_NAVIGATE && selectedEvidenceNoteId) {
             selectedEvidenceNoteId = '';
             renderTokenInspector();
@@ -13371,7 +13442,7 @@
             quickSpawnMenuState = null;
             needsRender = true;
         }
-        if (viewMenuOpen && !targetEl.closest('.vtt-topbar-menu')) {
+        if (viewMenuOpen && !targetEl.closest('#vtt-view-menu') && !targetEl.closest('[data-vtt-master-menu-toggle]')) {
             viewMenuOpen = false;
             needsRender = true;
         }
@@ -13608,6 +13679,11 @@
         if (stageEl) stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
         if (stageEl) stageEl.addEventListener('dragstart', handleStageDragStart);
         if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
+        if (stageContextMenuEl) {
+            stageContextMenuEl.addEventListener('toggle', () => {
+                window.requestAnimationFrame(positionStageContextMenu);
+            }, true);
+        }
         if (initiativeListEl) initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
         if (topbarTabEl) topbarTabEl.addEventListener('pointerleave', () => clearHoverSuppression('topbarHoverSuppressed'));
         if (settingsRailTabEl) settingsRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));

@@ -88,7 +88,8 @@ try {
 
     await withPage('VTT DM password workflow', async (page) => {
         await page.goto(`${base}/vtt.html`);
-        await page.locator('#vtt-role-toggle').click({ force: true });
+        await page.locator('[data-vtt-master-menu-toggle]:visible').click();
+        await page.locator('#vtt-role-toggle').click();
         assert.equal(await page.locator('#vtt-dm-unlock-modal').isVisible(), true);
         await page.locator('#vtt-dm-unlock-input').fill('wrong');
         await page.locator('#vtt-dm-unlock-form').evaluate((form) => form.requestSubmit());

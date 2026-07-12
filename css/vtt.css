@@ -75,6 +75,11 @@ body[data-player-nav="vtt"] .vtt-topbar-actions {
     display: flex;
 }
 
+body[data-player-nav="vtt"] .vtt-topbar-actions .hero-menu-sync,
+body[data-player-nav="vtt"] .vtt-topbar-actions .hero-menu-gear {
+    display: none;
+}
+
 .vtt-topbar-brand .hero-eyebrow {
     margin: 0;
 }
@@ -1267,6 +1272,22 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
 .vtt-view-menu {
     display: grid;
     gap: 0.85rem;
+}
+
+.vtt-master-menu {
+    top: auto;
+    right: auto;
+    bottom: calc(100% + 0.65rem);
+    left: 50%;
+    box-sizing: border-box;
+    width: min(410px, calc(100vw - 2rem));
+    max-height: calc(100vh - 7rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    pointer-events: auto;
+    transform: translateX(-50%);
 }
 
 .vtt-menu-section {
@@ -3023,6 +3044,37 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     gap: 0.85rem;
 }
 
+.vtt-inspector-section {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.025);
+    overflow: clip;
+}
+
+.vtt-inspector-section > summary {
+    padding: 0.72rem 0.78rem;
+    color: rgba(242, 248, 255, 0.92);
+    font-size: 0.82rem;
+    font-weight: 800;
+    cursor: pointer;
+    user-select: none;
+}
+
+.vtt-inspector-section[open] > summary {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.08);
+}
+
+.vtt-inspector-section-body {
+    display: grid;
+    gap: 0.78rem;
+    padding: 0.78rem;
+}
+
+.vtt-inspector-section-body > .vtt-subhead:first-child {
+    margin-top: 0;
+}
+
 .vtt-inspector-actions .vtt-inline-btn.danger,
 .vtt-entry-actions .vtt-inline-btn.danger {
     border-color: rgba(255, 120, 120, 0.35);
@@ -3434,6 +3486,9 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag 
     width: min(21rem, calc(100vw - 1rem));
     max-height: min(82vh, 34rem);
     overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
     z-index: 64;
 }
 
@@ -4461,9 +4516,9 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     }
 
     /* Keep the desktop VTT menu useful without turning it into a page-height curtain. */
-    .vtt-topbar-menu .vtt-view-menu {
+    .vtt-master-menu {
         box-sizing: border-box;
-        width: min(390px, calc(100vw - 2rem));
+        width: min(410px, calc(100vw - 2rem));
         max-height: calc(100vh - 5.5rem);
         overflow-x: hidden;
         overflow-y: auto;
@@ -4471,7 +4526,10 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     }
 
     .vtt-view-menu .vtt-menu-section:nth-child(1) .vtt-menu-list,
-    .vtt-view-menu .vtt-menu-section:nth-child(2) .vtt-menu-list {
+    .vtt-view-menu .vtt-menu-section:nth-child(2) .vtt-menu-list,
+    .vtt-view-menu .vtt-menu-section:nth-child(3) .vtt-menu-list,
+    .vtt-view-menu .vtt-menu-section:nth-child(4) .vtt-menu-list,
+    .vtt-view-menu .vtt-menu-section:nth-child(5) .vtt-menu-list {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -4535,19 +4593,6 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         right: 100%;
         border-right: 0;
         border-radius: 0.7rem 0 0 0.7rem;
-    }
-
-    body:is(
-        [data-active-vtt-panel="setup"],
-        [data-active-vtt-panel="spawn"],
-        [data-active-vtt-panel="inspector"],
-        [data-active-vtt-panel="player-rolls"],
-        [data-active-vtt-panel="combat"],
-        [data-active-vtt-panel="admin"]
-    ) .vtt-table-hud {
-        opacity: 0;
-        pointer-events: none;
-        transform: translateY(0.5rem);
     }
 
     .vtt-table-hud {
@@ -4627,7 +4672,7 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     .vtt-player-roll-rail > .vtt-panel,
     .vtt-initiative-panel > .vtt-initiative-scroll,
     .vtt-admin-panel > .vtt-panel {
-        max-height: calc(100vh - var(--vtt-overlay-top) - 0.75rem);
+        max-height: calc(100vh - var(--vtt-overlay-top) - 6rem);
         overflow-y: auto;
         overflow-x: hidden;
         overscroll-behavior: contain;
