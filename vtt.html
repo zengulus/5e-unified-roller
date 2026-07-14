@@ -9,10 +9,17 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260712e">
+    <link rel="stylesheet" href="css/vtt.css?v=20260714a">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
+    <section class="vtt-mobile-unsupported" role="alert" aria-labelledby="vtt-mobile-unsupported-title">
+        <div class="vtt-mobile-unsupported-card">
+            <p class="hero-eyebrow">Light VTT</p>
+            <h1 id="vtt-mobile-unsupported-title">This application is not supported on mobile</h1>
+            <p>Open the VTT on a desktop browser with a wider window to continue.</p>
+        </div>
+    </section>
     <header class="hero-header vtt-topbar" id="vtt-topbar">
         <div class="vtt-topbar-brand">
             <p class="hero-eyebrow">Ravnica Task Force</p>
@@ -35,7 +42,8 @@
             </div>
             <div class="vtt-topbar-local-controls">
                 <button class="hero-btn ghost vtt-secondary-topbar-control" id="vtt-accent-btn" type="button">Accent</button>
-                <input type="color" id="accent-picker-input" class="vtt-accent-picker-input">
+                <input type="color" id="accent-picker-input" class="vtt-accent-picker-input"
+                    aria-label="Choose accent colour" tabindex="-1">
             </div>
             <div class="hero-actions vtt-topbar-actions">
                 <div class="hero-action-bar primary"></div>
@@ -457,7 +465,23 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt.js?v=20260712j"></script>
+    <script src="js/vtt-config.js?v=20260714a"></script>
+    <script src="js/vtt-runtime-state.js?v=20260714a"></script>
+    <script src="js/vtt-dom.js?v=20260714a"></script>
+    <script src="js/vtt-inspector-markup.js?v=20260714a"></script>
+    <script src="js/vtt-geometry.js?v=20260714b"></script>
+    <script src="js/vtt-rules.js?v=20260714b"></script>
+    <script src="js/vtt-rolls.js?v=20260714b"></script>
+    <script src="js/vtt-proximity.js?v=20260714b"></script>
+    <script src="js/vtt-markup.js?v=20260714b"></script>
+    <script src="js/vtt-stage-view.js?v=20260714b"></script>
+    <script src="js/vtt-stage-input.js?v=20260714b"></script>
+    <script src="js/vtt-field-router.js?v=20260714b"></script>
+    <script src="js/vtt-actions-rolls.js?v=20260714b"></script>
+    <script src="js/vtt-actions-table.js?v=20260714b"></script>
+    <script src="js/vtt-actions-scenes.js?v=20260714b"></script>
+    <script src="js/vtt-actions-selection.js?v=20260714b"></script>
+    <script src="js/vtt.js?v=20260714e"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

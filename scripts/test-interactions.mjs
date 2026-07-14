@@ -25,8 +25,8 @@ await new Promise((resolve, reject) => { server.once('error', reject); server.li
 const base = `http://${host}:${server.address().port}`;
 const browser = await chromium.launch({ headless: true, chromiumSandbox: false });
 
-async function withPage(name, run) {
-    const context = await browser.newContext();
+async function withPage(name, run, contextOptions = {}) {
+    const context = await browser.newContext(contextOptions);
     await context.addInitScript(() => {
         localStorage.setItem('rtf_connect_import_bust_v1', 'connect-login-required-20260428a');
     });
@@ -86,6 +86,62 @@ try {
         assert.match(await page.locator('#npcList').innerText(), /Test Informant/);
     });
 
+    await withPage('VTT desktop shell workflow', async (page) => {
+        await page.goto(`${base}/vtt.html`);
+        assert.equal(await page.locator('.vtt-mobile-unsupported').isHidden(), true);
+        assert.equal(await page.evaluate(() => matchMedia('(any-hover: hover) and (any-pointer: fine)').matches), true);
+        assert.equal(await page.evaluate(() => {
+            const hit = document.elementFromPoint(100, 200);
+            return !!(hit && hit.closest('#vtt-stage'));
+        }), true, 'closed VTT drawers must not intercept map input');
+
+        const menuTab = page.locator('#vtt-topbar-tab');
+        assert.equal(await menuTab.isVisible(), true);
+        assert.equal(await page.locator('body').getAttribute('data-topbar-collapsed'), '1');
+        await menuTab.click();
+        assert.equal(await page.locator('body').getAttribute('data-topbar-collapsed'), '0');
+        await menuTab.click();
+        assert.equal(await page.locator('body').getAttribute('data-topbar-collapsed'), '1');
+        assert.equal(await page.locator('#accent-picker-input').getAttribute('tabindex'), '-1');
+
+        await page.locator('#vtt-player-rolls-btn').click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'player-rolls');
+        assert.equal(await page.locator('#vtt-player-roll-panel').isVisible(), true);
+        await page.locator('#vtt-player-roll-rail-tab').click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '');
+
+        const stageBox = await page.locator('#vtt-stage').boundingBox();
+        assert.ok(stageBox, 'VTT stage must have a pointer target');
+        const stagePoint = {
+            x: Math.round(stageBox.x + stageBox.width * 0.55),
+            y: Math.round(stageBox.y + stageBox.height * 0.55)
+        };
+        const transformBeforeWheel = await page.locator('#vtt-map-world').getAttribute('style');
+        await page.mouse.move(stagePoint.x, stagePoint.y);
+        await page.mouse.wheel(0, -180);
+        await page.waitForTimeout(50);
+        assert.notEqual(await page.locator('#vtt-map-world').getAttribute('style'), transformBeforeWheel, 'wheel input must update the stage transform');
+        await page.mouse.click(stagePoint.x, stagePoint.y, { button: 'right' });
+        assert.equal(await page.locator('#vtt-stage-context-menu').isVisible(), true, 'right click must open the stage context menu');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#vtt-stage-context-menu').isHidden(), true, 'Escape must close the stage context menu');
+    });
+
+    await withPage('VTT mobile support notice', async (page) => {
+        await page.goto(`${base}/vtt.html`);
+        const notice = page.locator('.vtt-mobile-unsupported');
+        assert.equal(await notice.isVisible(), true);
+        assert.match(await notice.innerText(), /not supported on mobile/i);
+        assert.equal(await page.locator('#vtt-stage').isHidden(), true);
+        await page.setViewportSize({ width: 932, height: 430 });
+        assert.equal(await notice.isVisible(), true);
+        assert.equal(await page.locator('#vtt-stage').isHidden(), true);
+    }, {
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        isMobile: true
+    });
+
     await withPage('VTT DM password workflow', async (page) => {
         await page.goto(`${base}/vtt.html`);
         await page.locator('[data-vtt-master-menu-toggle]:visible').click();
@@ -98,6 +154,40 @@ try {
         await page.locator('#vtt-dm-unlock-form').evaluate((form) => form.requestSubmit());
         assert.equal(await page.locator('#vtt-dm-unlock-modal').isHidden(), true);
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
+
+        await page.locator('#vtt-dm-dock [data-action="open-quick-spawn"]').click();
+        await page.locator('#vtt-quick-spawn-menu [data-action="quick-spawn-custom"]').click();
+        await page.locator('.vtt-token').first().dblclick();
+        const inspector = page.locator('#vtt-token-inspector-popover');
+        await inspector.getByText('Combat Actions', { exact: true }).click();
+        assert.equal(await inspector.getByRole('button', { name: '-5 HP' }).isDisabled(), true);
+        assert.equal(await inspector.getByRole('button', { name: '+5 HP' }).isDisabled(), true);
+        assert.equal(await inspector.getByRole('button', { name: 'Bloodied' }).isDisabled(), true);
+        assert.equal(await inspector.getByRole('button', { name: 'Full HP' }).isDisabled(), true);
+        assert.deepEqual(await page.evaluate(() => {
+            const token = window.RTF_STORE.getVTTState().scenes[0].tokens[0];
+            return [token.hpCurrent, token.hpMax];
+        }), [null, null]);
+
+        await inspector.getByText('Stats & Size', { exact: true }).click();
+        await inspector.locator('[data-token-field="hpCurrent"]').fill('8');
+        await inspector.locator('[data-token-field="hpCurrent"]').press('Tab');
+        await inspector.getByText('Stats & Size', { exact: true }).click();
+        await inspector.locator('[data-token-field="hpMax"]').fill('10');
+        await inspector.locator('[data-token-field="hpMax"]').press('Tab');
+        await inspector.getByText('Combat Actions', { exact: true }).click();
+        await inspector.getByRole('button', { name: '-5 HP' }).click();
+        assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 3);
+        await inspector.getByText('Combat Actions', { exact: true }).click();
+        await inspector.getByRole('button', { name: '+5 HP' }).click();
+        assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 8);
+        await inspector.getByText('Combat Actions', { exact: true }).click();
+        await inspector.getByRole('button', { name: 'Bloodied' }).click();
+        assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 5);
+        await inspector.getByText('Combat Actions', { exact: true }).click();
+        await inspector.getByRole('button', { name: 'Full HP' }).click();
+        assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 10);
+        await inspector.getByRole('button', { name: 'Close token inspector' }).click();
 
         await page.locator('[data-action="create-scene"]').first().evaluate((button) => button.click());
         assert.equal(await page.locator('#vtt-scene-list [data-scene-picker="local"] option').count(), 2);
@@ -148,10 +238,35 @@ try {
         await page.evaluate((caseId) => window.RTF_STORE.setActiveCase(caseId), primaryCaseId);
         await page.waitForFunction((caseId) => document.querySelector(`#vtt-scene-list [data-active-case-id="${caseId}"]`), primaryCaseId);
         assert.equal(await page.locator('#vtt-scene-list [data-scene-picker="local"] option').count(), 2);
+
+        const sourceStageTitle = await page.locator('#vtt-stage-title').textContent();
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            store.getSyncConfig = () => ({
+                enabled: true,
+                supabaseUrl: 'https://forced-preflight-failure.invalid',
+                anonKey: 'test-key',
+                campaignId: 'test-campaign'
+            });
+            store.loadVTTRoomSnapshot = async () => ({
+                ok: false,
+                error: 'Forced VTT preflight failure'
+            });
+        });
+        await page.locator('[data-case-picker="active"]').evaluate((select, caseId) => {
+            select.value = caseId;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }, secondCaseId);
+        await page.waitForFunction((caseId) => (
+            window.RTF_STORE.getActiveCaseId() === caseId
+            && document.querySelector('[data-case-picker="active"]')?.value === caseId
+        ), primaryCaseId);
+        assert.equal(await page.locator('#vtt-stage-title').textContent(), sourceStageTitle);
+        assert.match(await page.locator('#vtt-sync-chip').getAttribute('aria-label'), /Forced VTT preflight failure/);
     });
 } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
 }
 
-console.log('Interaction workflows passed: 4');
+console.log('Interaction workflows passed: 6');

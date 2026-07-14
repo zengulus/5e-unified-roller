@@ -1,6 +1,6 @@
 # Unified 5e Player Sheet (`index.html`)
 
-Command-console sheet for players and DMs. Everything lives in Local Storage, so you can run it offline and jump between devices with the JSON import/export buttons.
+Command-console sheet for players and DMs. Everything lives in Local Storage, with JSON import/export buttons for moving between browser profiles and devices.
 
 ## Layout
 - **Command Console + Play Surface** – Hero header keeps the accent/BG plus global advantage/secret toggles, while the default `Play` face now promotes **Find Rolls** and pinned Quick Actions for fast checks, attacks, saves, spell casts, and recharge rolls. The misc bonus field still feeds every roll beneath it.

@@ -1,7 +1,7 @@
 {
   "name": "ravnica-task-force-tools",
   "version": "1.0.0",
-  "description": "Private offline-first campaign platform for the Ravnica Task Force 5e group.",
+  "description": "Private browser-based campaign platform for the Ravnica Task Force 5e group.",
   "main": "sw.js",
   "directories": {
     "doc": "docs"

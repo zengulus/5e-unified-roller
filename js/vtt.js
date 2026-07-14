@@ -1,8 +1,17 @@
 (function () {
     const Dice = window.RTF_DICE;
     if (!Dice) throw new Error('Shared dice engine failed to load.');
-    const DM_UNLOCK_PHRASE = 'setDMMode';
-
+    const vttConfig = window.RTF_VTT_CONFIG;
+    if (!vttConfig || !vttConfig.constants || typeof vttConfig.createDefaultVTTState !== 'function') {
+        throw new Error('VTT configuration module failed to load.');
+    }
+    const C = vttConfig.constants;
+    const vttSessionModuleReady = import('./vtt-session.js?v=20260714b')
+        .then(() => window.RTF_VTT_SESSION || null)
+        .catch((err) => {
+            console.warn('VTT session module failed to load', err);
+            return null;
+        });
     const reportVTTError = (operation, category, error) => {
         const report = {
             ok: false,
@@ -15,382 +24,57 @@
         window.dispatchEvent(new CustomEvent('rtf-operation-error', { detail: report }));
         return report;
     };
-    const UI_PREFS_STORAGE_PREFIX = 'rtf_vtt_ui_';
-    const PROCESSED_INIT_STORAGE_PREFIX = 'rtf_vtt_processed_init_';
-    const TRACKER_INITIATIVE_QUEUE_KEY = 'rtf_tracker_initiative_queue';
-    const SHEET_STORAGE_KEY = 'unifiedSheetData.json';
-    const GM_STORAGE_KEY = 'gmDashboardData';
-    const STORE_UPDATED_EVENT = 'rtf-store-updated';
-    const DEFAULT_WORLD_SIZE = { width: 2400, height: 1600 };
-    const DRAG_SYNC_INTERVAL_MS = 120;
-    const REMOTE_TOKEN_TWEEN_MS = 240;
-    const LOCAL_DRAG_TWEEN_SUPPRESS_MS = 1200;
-    const TOKEN_DOUBLE_CLICK_MS = 320;
-    const TOKEN_PORTRAIT_PREVIEW_MS = 3000;
-    const TOKEN_CLICK_MOVE_PX = 5;
-    const STAGE_TOOL_DOUBLE_PRESS_PX = 18;
-    const FOG_EDGE_POINT_COUNT = 11;
-    const FOG_EDGE_OVERDRAW_PX = 0;
-    const SIDE_OPTIONS = ['player', 'ally', 'enemy', 'neutral'];
-    const MOVE_ACCESS_OPTIONS = ['dm', 'player'];
-    const DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
-    const TOOL_MODE_NAVIGATE = 'navigate';
-    const TOOL_MODE_PING = 'ping';
-    const TOOL_MODE_RULER = 'ruler';
-    const TOOL_MODE_CIRCLE = 'circle';
-    const TOOL_MODE_CONE = 'cone';
-    const TOOL_MODE_NOTE = 'note';
-    const TOOL_MODE_FOG = 'fog';
-    const TOOL_MODE_FOG_REMOVE = 'fog-remove';
-    const TEMPLATE_KIND_CIRCLE = 'circle';
-    const TEMPLATE_KIND_CONE = 'cone';
-    const DEFAULT_TOOL_SIZE_CELLS = 4;
-    const DEFAULT_TEMPLATE_CONE_ARC_DEG = 53.13010235415598;
-    const TEMPLATE_HOLD_PERSIST_MS = 1000;
-    const TEMPLATE_SHARED_LIFETIME_MS = 5000;
-    const PING_SHARED_LIFETIME_MS = 4200;
-    const TOKEN_DROP_PULSE_MS = 720;
-    const TOKEN_HP_FLASH_MS = 680;
-    const FOG_REVEAL_SHIMMER_MS = 900;
-    const ROLL_ACTION_GUARD_MS = 900;
-    const LIVE_STATUS_DROPOUT_GRACE_MS = 5000;
-    const TOUCH_CONTEXT_HOLD_MS = 420;
-    const TOUCH_CONTEXT_MOVE_PX = 14;
-    const STEALTH_STATUS_DETECTED = 'detected';
-    const STEALTH_STATUS_UNSEEN = 'unseen';
-    const SCENE_VIEW_SHARED = 'shared';
-    const SCENE_VIEW_LOCAL = 'local';
-    const MUSIC_TENSION_LEVELS = ['passive', 'tense', 'active'];
-    const QUICK_ACTION_SEARCH_DICE = [20, 12, 10, 8, 6, 4, 100];
-    const QUICK_ACTION_SEARCH_RESULT_LIMIT = 18;
-    const SRD_MONSTER_DATA_URL = 'monsters/dnd_srd_5_2_1__monsters.json';
-    const MONSTER_SEARCH_RESULT_LIMIT = 80;
-    const MONSTER_ASSIGN_RESULT_LIMIT = 8;
-    const DEFAULT_VTT_CELL_PX = 70;
-    const DEFAULT_EVIDENCE_NOTE_CATEGORY = 'evidence';
-    const DEFAULT_EVIDENCE_NOTE_COLOR = '#39b66b';
-    const EVIDENCE_NOTE_SHAPE_PIN = 'pin';
-    const EVIDENCE_NOTE_SHAPE_ZONE = 'zone';
-    const EVIDENCE_NOTE_SHAPE_OPTIONS = [EVIDENCE_NOTE_SHAPE_PIN, EVIDENCE_NOTE_SHAPE_ZONE];
-    const EVIDENCE_NOTE_CATEGORY_META = Object.freeze({
-        evidence: { label: 'Evidence', shortLabel: 'E', color: '#39b66b', defaultTitle: 'Evidence Zone' },
-        clue: { label: 'Clue', shortLabel: '?', color: '#58d4f7', defaultTitle: 'Clue Pin' },
-        poi: { label: 'Point Of Interest', shortLabel: 'P', color: '#9b7cff', defaultTitle: 'Point Of Interest' },
-        danger: { label: 'Danger', shortLabel: '!', color: '#d85b5b', defaultTitle: 'Danger Zone' },
-        objective: { label: 'Objective', shortLabel: 'O', color: '#f0b357', defaultTitle: 'Objective Zone' },
-        exit: { label: 'Exit', shortLabel: 'X', color: '#70d98b', defaultTitle: 'Exit' },
-        sound: { label: 'Sound', shortLabel: '~', color: '#d6b4ff', defaultTitle: 'Sound Source' },
-        cover: { label: 'Cover', shortLabel: 'C', color: '#7aa2f7', defaultTitle: 'Cover' },
-        difficult: { label: 'Difficult Terrain', shortLabel: 'D', color: '#c9a45f', defaultTitle: 'Difficult Terrain' },
-        obscured: { label: 'Obscured', shortLabel: 'V', color: '#8aa0aa', defaultTitle: 'Obscured Area' },
-        hazard: { label: 'Hazard', shortLabel: 'H', color: '#f07178', defaultTitle: 'Hazard' },
-        safe: { label: 'Safe Zone', shortLabel: '+', color: '#5fd38d', defaultTitle: 'Safe Zone' },
-        info: { label: 'Info', shortLabel: 'i', color: '#4f8dff', defaultTitle: 'Info Zone' },
-        other: { label: 'Other', shortLabel: '?', color: '#8f9aa8', defaultTitle: 'Zone' }
+    const runtimeStateFactory = window.RTF_VTT_RUNTIME_STATE;
+    if (!runtimeStateFactory || typeof runtimeStateFactory.create !== 'function') {
+        throw new Error('VTT runtime state module failed to load.');
+    }
+    const runtimeState = runtimeStateFactory.create({
+        defaultWorldSize: C.DEFAULT_WORLD_SIZE,
+        sceneViewMode: C.SCENE_VIEW_SHARED,
+        toolMode: C.TOOL_MODE_NAVIGATE,
+        toolSizeCells: C.DEFAULT_TOOL_SIZE_CELLS
     });
-    const MOOD_EMOJI_OPTIONS = ['🙂', '😠', '😰', '🤔', '😏', '😢', '😨', '😤', '🫡', '👁️', '🩸', '🏃', '🛡️', '✨'];
-    const PROXIMITY_PROMPT_STORAGE_PREFIX = 'rtf_vtt_proximity_seen_';
-    const PROXIMITY_PROMPT_STATE_LIMIT = 80;
-    const PROXIMITY_TRIGGER_KIND_OPTIONS = ['fiction', 'skillRoll'];
-    const PROXIMITY_TRIGGER_TYPE_OPTIONS = ['enter', 'startTurnNear', 'click', 'reveal'];
-    const PROXIMITY_TRIGGER_TARGET_OPTIONS = ['playerTokens', 'anyVisibleToken'];
-    const PROXIMITY_TRIGGER_REPEAT_OPTIONS = ['oncePerToken', 'oncePerScene', 'always'];
-    const PROXIMITY_TRIGGER_SKILL_OPTIONS = [
-        'acrobatics',
-        'animal handling',
-        'perception',
-        'investigation',
-        'insight',
-        'arcana',
-        'deception',
-        'stealth',
-        'survival',
-        'athletics',
-        'intimidation',
-        'medicine',
-        'nature',
-        'performance',
-        'persuasion',
-        'religion',
-        'history',
-        'sleight of hand'
-    ];
-    const PROXIMITY_TRIGGER_SKILL_LABELS = {
-        'acrobatics': 'Acrobatics',
-        'animal handling': 'Animal Handling',
-        'arcana': 'Arcana',
-        'athletics': 'Athletics',
-        'deception': 'Deception',
-        'history': 'History',
-        'insight': 'Insight',
-        'intimidation': 'Intimidation',
-        'investigation': 'Investigation',
-        'medicine': 'Medicine',
-        'nature': 'Nature',
-        'perception': 'Perception',
-        'performance': 'Performance',
-        'persuasion': 'Persuasion',
-        'religion': 'Religion',
-        'sleight of hand': 'Sleight Of Hand',
-        'stealth': 'Stealth',
-        'survival': 'Survival'
+    const {
+        session: sessionState,
+        stage: stageState,
+        ui: uiRuntime,
+        resources
+    } = runtimeState;
+    const requireStageView = () => {
+        if (!resources.stageView) throw new Error('VTT stage view is not initialized.');
+        return resources.stageView;
     };
-    const TOKEN_COORD_PRECISION = 1000;
-    const MIN_VTT_MAP_SCALE = 0.25;
-    const MAX_VTT_MAP_SCALE = 4;
-    const GUILDLESS_TOKEN_BUCKET = 'tokens';
-    const GUILDLESS_TOKEN_FOLDER = 'guildless';
-    const GUILDLESS_TOKEN_MIN = 1;
-    const GUILDLESS_TOKEN_MAX = 300;
-    const DEFAULT_VTT_STATE = {
-        updatedAt: 0,
-        activeSceneId: 'scene_1',
-        scenes: [
-            {
-                id: 'scene_1',
-                name: 'Scene 1',
-                mapImageUrl: '',
-                mapScale: 1,
-                grid: {
-                    cellPx: DEFAULT_VTT_CELL_PX,
-                    offsetX: 0,
-                    offsetY: 0,
-                    cellDistance: 5
-                },
-                stealthMode: false,
-                music: {
-                    tension: 'passive',
-                    tracks: {
-                        passive: '',
-                        tense: '',
-                        active: ''
-                    },
-                    titles: {
-                        passive: '',
-                        tense: '',
-                        active: ''
-                    }
-                },
-                tokens: [],
-                templates: [],
-                evidenceNotes: [],
-                clocks: [],
-                pings: [],
-                fog: []
-            }
-        ],
-        initiative: {
-            entries: [],
-            round: 1,
-            activeEntryId: ''
-        }
+    const requireStageInput = () => {
+        if (!resources.stageInput) throw new Error('VTT stage input is not initialized.');
+        return resources.stageInput;
     };
-
-    let vttState = null;
-    let selectedTokenId = '';
-    let selectedEntryId = '';
-    let selectedTemplateId = '';
-    let selectedEvidenceNoteId = '';
-    let selectedClockId = '';
-    let previewTokenTimer = 0;
-    let suppressedTokenPreviewClickId = '';
-    let suppressedTokenPreviewClickUntil = 0;
-    let localRole = 'player';
-    let initialVTTLoadPending = true;
-    let uiState = {
-        topbarCollapsed: true,
-        settingsCollapsed: true,
-        initiativeCollapsed: true,
-        playerRollRailCollapsed: true,
-        scenePanelCollapsed: false,
-        spawnPanelCollapsed: false,
-        inspectorPanelCollapsed: false,
-        showGrid: true,
-        showTokenNames: true,
-        sceneViewMode: SCENE_VIEW_SHARED,
-        localSceneId: '',
-        activeVttPanel: ''
-    };
-    let npcSearchOpen = false;
-    let npcSearchState = null;
-    let npcSearchQuery = '';
-    let npcSearchLoading = false;
-    let npcSearchRefreshPromise = null;
-    let monsterDirectory = [];
-    let monsterDirectoryLoading = false;
-    let monsterDirectoryPromise = null;
-    let previewTokenId = '';
-    let localView = { x: 40, y: 40, zoom: 1 };
-    let worldSize = { ...DEFAULT_WORLD_SIZE };
-    let mapSize = { width: 0, height: 0 };
-    let mapLoadState = { url: '', loaded: false };
-    let dragState = null;
-    let panState = null;
-    let lastDragSyncAt = 0;
-    let fitViewOnNextMapLoad = true;
-    let unsubscribeSyncStatus = null;
-    let vttCollabSession = null;
-    let vttCollabSessionAuthorityTransitionId = -1;
-    let vttCollabInitPromise = null;
-    let vttCollabInitCaseId = '';
-    let vttInitialRoomRecoveryPromise = null;
-    let vttAuthorityTransitionId = 0;
-    let vttCaseTransitionId = 0;
-    let vttStateCaseId = '';
-    let pendingVTTCaseId = '';
-    let vttCollabPendingStatus = null;
-    let vttCollabDropoutStartedAt = 0;
-    let vttCollabDropoutTimer = 0;
-    let lastStableLiveSyncChipLabel = '';
-    let pendingRemoteVTTSnapshot = null;
-    let spawnDragState = null;
-    let quickSpawnMenuState = null;
-    let stageContextMenuState = null;
-    let tokenInspectorState = null;
-    let initiativeDetailState = null;
-    let sheetActionState = null;
-    let sheetActionQuery = '';
-    let playerRollSearchQuery = '';
-    let npcRollState = null;
-    let playerRollMenuOpen = false;
-    let playerFocusLastResult = null;
-    let youtubeMusicState = { key: '', status: 'stopped' };
-    let youtubeMusicVolume = 70;
-    let activeProximityPrompt = null;
-    let suppressedProximityPromptKeys = new Set();
-    let localRollMode = 'norm';
-    let lastContextPointerState = null;
-    let viewMenuOpen = false;
-    let toolsMenuOpen = false;
-    let dmUnlockReturnFocusEl = null;
-    let rosterSelfModalReturnFocusEl = null;
-    let rosterSelfModalSelectedId = '';
-    let rosterSelfModalError = '';
-    let lastTokenPointerDownId = '';
-    let lastTokenPointerDownAt = 0;
-    let lastEvidenceNotePointerDownState = null;
-    let lastStageToolPointerDownState = null;
-    let remoteTokenTweens = new Map();
-    let localDragTweenSuppressions = new Map();
-    let recentLocalDragDrops = new Map();
-    let remoteTokenTweenFrame = 0;
-    let localToolState = { mode: TOOL_MODE_NAVIGATE, sizeCells: DEFAULT_TOOL_SIZE_CELLS };
-    let localPingVariant = 'attention';
-    let askRollPickMode = false;
-    let pendingAskRollRequest = null;
-    let templatePlacementState = null;
-    let templateRotateState = null;
-    let visionConeRotateState = null;
-    let rulerState = null;
-    let fogPlacementState = null;
-    let evidenceNotePlacementState = null;
-    let evidenceNoteDragState = null;
-    let pendingTouchContextState = null;
-    let templateExpiryTimer = 0;
-    let pingExpiryTimer = 0;
-    let visualEffectTimer = 0;
-    let fogRevealBursts = [];
-    const tokenVisualEffects = new Map();
-    const tokenHpSnapshot = new Map();
-    const tokenImageRetryKeys = new Map();
-    const playerImageUrlsAtLoad = new Map();
-    const rollActionGuard = new Map();
-
-    const body = document.body;
-    const topbarEl = document.querySelector('.vtt-topbar');
-    const stageEl = document.getElementById('vtt-stage');
-    const mapWorldEl = document.getElementById('vtt-map-world');
-    const worldEl = document.getElementById('vtt-world');
-    const stageGridEl = document.getElementById('vtt-stage-grid');
-    const mapImageEl = document.getElementById('vtt-map-image');
-    const gridLayerEl = document.getElementById('vtt-grid-layer');
-    const fogLayerEl = document.getElementById('vtt-fog-layer');
-    const noteLayerEl = document.getElementById('vtt-note-layer');
-    const templateLayerEl = document.getElementById('vtt-template-layer');
-    const tokenLayerEl = document.getElementById('vtt-token-layer');
-    const visionLayerEl = document.getElementById('vtt-vision-layer');
-    const caseNameEl = document.getElementById('vtt-case-name');
-    const syncChipEl = document.getElementById('vtt-sync-chip');
-    const youtubeAudioPlayerEl = document.getElementById('vtt-youtube-audio-player');
-    const settingsToggleEl = document.getElementById('vtt-settings-toggle');
-    const initiativeToggleEl = document.getElementById('vtt-initiative-toggle');
-    const scenePanelToggleEl = document.getElementById('vtt-scene-panel-toggle');
-    const spawnPanelToggleEl = document.getElementById('vtt-spawn-panel-toggle');
-    const inspectorPanelToggleEl = document.getElementById('vtt-inspector-panel-toggle');
-    const roleToggleEl = document.getElementById('vtt-role-toggle');
-    const spectatorToggleEl = document.getElementById('vtt-spectator-toggle');
-    const tokenNamesToggleEl = document.getElementById('vtt-token-names-toggle');
-    const zoomResetEls = Array.from(document.querySelectorAll('[data-action="zoom-reset"]'));
-    const activeSceneLabelEl = document.getElementById('vtt-active-scene-label');
-    const scenePanelSceneLabelEl = document.getElementById('vtt-scene-panel-scene-label');
-    const stageTitleEl = document.getElementById('vtt-stage-title');
-    const stageMetaEl = document.getElementById('vtt-stage-meta');
-    const modeChipEl = document.getElementById('vtt-mode-chip');
-    const roundPillEl = document.getElementById('vtt-round-pill');
-    const selectionPillEl = document.getElementById('vtt-selection-pill');
-    const tokenInspectorEl = document.getElementById('vtt-token-inspector');
-    const inspectorPanelEl = document.getElementById('vtt-inspector-panel');
-    const tokenInspectorPopoverEl = document.getElementById('vtt-token-inspector-popover');
-    const stageContextMenuEl = document.getElementById('vtt-stage-context-menu');
-    const sheetActionPopoverEl = document.getElementById('vtt-sheet-action-popover');
-    const npcRollPopoverEl = document.getElementById('vtt-npc-roll-popover');
-    const proximityPromptStackEl = document.getElementById('vtt-proximity-prompt-stack');
-    const playerRollPanelEl = document.getElementById('vtt-player-roll-panel');
-    const playerRollToggleEl = document.getElementById('vtt-player-roll-toggle');
-    const playerRollMenuEl = document.getElementById('vtt-player-roll-menu');
-    const playerRollRailEl = document.getElementById('vtt-player-roll-rail');
-    const initiativePanelEl = document.getElementById('vtt-initiative-panel');
-    const adminPanelEl = document.getElementById('vtt-admin-panel');
-    const playerDockStatusEl = document.getElementById('vtt-player-dock-status');
-    const playerFindTokenEl = document.getElementById('vtt-player-find-token');
-    const playerMeasureButtonEl = document.getElementById('vtt-player-measure-btn');
-    const playerPingButtonEl = document.getElementById('vtt-player-ping-btn');
-    const playerRollsButtonEl = document.getElementById('vtt-player-rolls-btn');
-    const playerCombatButtonEl = document.getElementById('vtt-player-combat-btn');
-    const settingsRailTabEl = document.getElementById('vtt-settings-rail-tab');
-    const playerRollRailTabEl = document.getElementById('vtt-player-roll-rail-tab');
-    const initiativeRailTabEl = document.getElementById('vtt-initiative-rail-tab');
-    const clockListEl = document.getElementById('vtt-clock-list');
-    const initiativeListEl = document.getElementById('vtt-initiative-list');
-    const initiativeDetailPanelEl = document.getElementById('vtt-initiative-detail-panel');
-    const sceneListEl = document.getElementById('vtt-scene-list');
-    const sceneMusicEditorEl = document.querySelector('.vtt-scene-music-editor');
-    const playerSpawnListEl = document.getElementById('vtt-player-spawn-list');
-    const npcSearchToggleEl = document.getElementById('vtt-npc-search-toggle');
-    const npcSearchPopoverEl = document.getElementById('vtt-npc-search-popover');
-    const npcSearchInputEl = document.getElementById('vtt-npc-search-input');
-    const npcSearchListEl = document.getElementById('vtt-npc-search-list');
-    const quickSpawnMenuEl = document.getElementById('vtt-quick-spawn-menu');
-    const spawnGhostEl = document.getElementById('vtt-spawn-ghost');
-    const toolsMenuToggleEl = document.getElementById('vtt-tools-menu-toggle');
-    const toolsMenuEl = document.getElementById('vtt-tools-menu');
-    const rulerToggleEl = document.getElementById('vtt-ruler-toggle');
-    const toolModeNavigateEl = document.getElementById('vtt-tool-mode-navigate');
-    const toolModePingEl = document.getElementById('vtt-tool-mode-ping');
-    const toolModeCircleEl = document.getElementById('vtt-tool-mode-circle');
-    const toolModeConeEl = document.getElementById('vtt-tool-mode-cone');
-    const toolModeNoteEl = document.getElementById('vtt-tool-mode-note');
-    const toolModeFogEl = document.getElementById('vtt-tool-mode-fog');
-    const toolModeFogRemoveEl = document.getElementById('vtt-tool-mode-fog-remove');
-    const toolSizeInputEl = document.getElementById('vtt-tool-size-input');
-    const stealthModeToggleEl = document.getElementById('vtt-stealth-mode-toggle');
-    const clearFogButtonEl = document.getElementById('vtt-clear-fog');
-    const accentButtonEl = document.getElementById('vtt-accent-btn');
-    const accentPickerEl = document.getElementById('accent-picker-input');
-    const viewMenuToggleEls = Array.from(document.querySelectorAll('[data-vtt-master-menu-toggle]'));
-    const viewMenuEl = document.getElementById('vtt-view-menu');
-    const gridToggleEl = document.getElementById('vtt-grid-toggle');
-    const topbarTabEl = document.getElementById('vtt-topbar-tab');
-    const sidebarEl = document.getElementById('vtt-settings-panel');
-    const rosterSelfModalEl = document.getElementById('vtt-roster-self-modal');
-    const rosterSelfDetailEl = document.getElementById('vtt-roster-self-detail');
-    const rosterSelfListEl = document.getElementById('vtt-roster-self-list');
-    const rosterSelfErrorEl = document.getElementById('vtt-roster-self-error');
-    const rosterSelfConfirmEl = document.getElementById('vtt-roster-self-confirm');
-    const dmUnlockModalEl = document.getElementById('vtt-dm-unlock-modal');
-    const dmUnlockFormEl = document.getElementById('vtt-dm-unlock-form');
-    const dmUnlockInputEl = document.getElementById('vtt-dm-unlock-input');
-    const dmUnlockErrorEl = document.getElementById('vtt-dm-unlock-error');
+    const addFogRevealBurst = (...args) => requireStageView().addFogRevealBurst(...args);
+    const applyRenderedWorldGeometry = (...args) => requireStageView().applyRenderedWorldGeometry(...args);
+    const applyWorldTransform = (...args) => requireStageView().applyWorldTransform(...args);
+    const buildRemoteTokenTweenKey = (...args) => requireStageView().buildRemoteTokenTweenKey(...args);
+    const fitViewToWorld = (...args) => requireStageView().fitViewToWorld(...args);
+    const focusViewOnToken = (...args) => requireStageView().focusViewOnToken(...args);
+    const getRecentLocalDragDrop = (...args) => requireStageView().getRecentLocalDragDrop(...args);
+    const getRenderableTokenCells = (...args) => requireStageView().getRenderableTokenCells(...args);
+    const getWorldSizeForScene = (...args) => requireStageView().getWorldSizeForScene(...args);
+    const isClientPointInsideStage = (...args) => requireStageView().isClientPointInsideStage(...args);
+    const markTokenVisualEffect = (...args) => requireStageView().markTokenVisualEffect(...args);
+    const queueRemoteTokenTween = (...args) => requireStageView().queueRemoteTokenTween(...args);
+    const queueRemoteTweensFromSnapshots = (...args) => requireStageView().queueRemoteTweensFromSnapshots(...args);
+    const reconcileSnapshotWithRecentLocalDragDrops = (...args) => requireStageView().reconcileSnapshotWithRecentLocalDragDrops(...args);
+    const rememberRecentLocalDragDrop = (...args) => requireStageView().rememberRecentLocalDragDrop(...args);
+    const renderStage = (...args) => requireStageView().renderStage(...args);
+    const scaleForZoom = (...args) => requireStageView().scaleForZoom(...args);
+    const screenToWorld = (...args) => requireStageView().screenToWorld(...args);
+    const setZoomAroundStageCenter = (...args) => requireStageView().setZoomAroundStageCenter(...args);
+    const setZoomAtPoint = (...args) => requireStageView().setZoomAtPoint(...args);
+    const suppressLocalDragTween = (...args) => requireStageView().suppressLocalDragTween(...args);
+    const worldToScreen = (...args) => requireStageView().worldToScreen(...args);
+    const vttDomFactory = window.RTF_VTT_DOM;
+    if (!vttDomFactory || typeof vttDomFactory.create !== 'function') {
+        throw new Error('VTT DOM registry module failed to load.');
+    }
+    const dom = vttDomFactory.create(document);
 
     const escapeHtml = (value = '') => String(value)
         .replace(/&/g, '&amp;')
@@ -405,35 +89,23 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     };
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-    const normalizeRollMode = (value) => {
-        const clean = String(value || '').trim().toLowerCase();
-        if (clean === 'adv' || clean === 'advantage') return 'adv';
-        if (clean === 'dis' || clean === 'disadvantage') return 'dis';
-        return 'norm';
-    };
-    const getRollModeLabel = (mode = localRollMode) => {
-        const clean = normalizeRollMode(mode);
-        if (clean === 'adv') return 'Adv';
-        if (clean === 'dis') return 'Dis';
-        return 'Normal';
-    };
     const hasValue = (value) => value !== null && value !== undefined && value !== '';
     const clampMapScale = (value, fallback = 1) => {
         const parsed = Number(value);
-        if (!Number.isFinite(parsed)) return clamp(Math.round(fallback * 1000) / 1000, MIN_VTT_MAP_SCALE, MAX_VTT_MAP_SCALE);
-        return clamp(Math.round(parsed * 1000) / 1000, MIN_VTT_MAP_SCALE, MAX_VTT_MAP_SCALE);
+        if (!Number.isFinite(parsed)) return clamp(Math.round(fallback * 1000) / 1000, C.MIN_VTT_MAP_SCALE, C.MAX_VTT_MAP_SCALE);
+        return clamp(Math.round(parsed * 1000) / 1000, C.MIN_VTT_MAP_SCALE, C.MAX_VTT_MAP_SCALE);
     };
     const normalizeTokenCoordinate = (value, fallback = 0) => {
         const parsed = toNumber(value, fallback);
-        return Math.max(0, Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION);
+        return Math.max(0, Math.round(parsed * C.TOKEN_COORD_PRECISION) / C.TOKEN_COORD_PRECISION);
     };
     const normalizeGridCoordinate = (value, fallback = 0) => {
         const parsed = toNumber(value, fallback);
-        return Math.max(0, Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION);
+        return Math.max(0, Math.round(parsed * C.TOKEN_COORD_PRECISION) / C.TOKEN_COORD_PRECISION);
     };
     const normalizeWorldCoordinate = (value, fallback = 0) => {
         const parsed = toNumber(value, fallback);
-        return Math.round(parsed * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION;
+        return Math.round(parsed * C.TOKEN_COORD_PRECISION) / C.TOKEN_COORD_PRECISION;
     };
     const snapTokenCoordinate = (value, fallback = 0) => {
         const safe = normalizeTokenCoordinate(value, fallback);
@@ -483,7 +155,7 @@
     };
     const getTokenImageRenderUrl = (token) => {
         if (!token) return '';
-        const retryKey = tokenImageRetryKeys.get(String(token.id || '').trim()) || '';
+        const retryKey = resources.tokenImageRetryKeys.get(String(token.id || '').trim()) || '';
         return getUsableMediaUrl(appendTokenImageRetryKey(getCanonicalTokenImageUrl(token), retryKey));
     };
     const trimTrailingSlashes = (value = '') => String(value || '').replace(/\/+$/, '');
@@ -510,8 +182,8 @@
         }
     };
     const buildGuildlessImageUrl = () => {
-        const imageNumber = randomIntInclusive(GUILDLESS_TOKEN_MIN, GUILDLESS_TOKEN_MAX);
-        return buildSupabasePublicObjectUrl(GUILDLESS_TOKEN_BUCKET, `${GUILDLESS_TOKEN_FOLDER}/${imageNumber}.png`);
+        const imageNumber = randomIntInclusive(C.GUILDLESS_TOKEN_MIN, C.GUILDLESS_TOKEN_MAX);
+        return buildSupabasePublicObjectUrl(C.GUILDLESS_TOKEN_BUCKET, `${C.GUILDLESS_TOKEN_FOLDER}/${imageNumber}.png`);
     };
     const buildId = (prefix) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const buildInitials = (label = '') => {
@@ -525,12 +197,12 @@
     const normalizeSearchText = (value = '') => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const normalizeMusicTension = (value, fallback = 'passive') => {
         const clean = String(value || '').trim().toLowerCase();
-        if (MUSIC_TENSION_LEVELS.includes(clean)) return clean;
-        return MUSIC_TENSION_LEVELS.includes(fallback) ? fallback : 'passive';
+        if (C.MUSIC_TENSION_LEVELS.includes(clean)) return clean;
+        return C.MUSIC_TENSION_LEVELS.includes(fallback) ? fallback : 'passive';
     };
     const normalizeOptionalMusicTension = (value) => {
         const clean = String(value || '').trim().toLowerCase();
-        return MUSIC_TENSION_LEVELS.includes(clean) ? clean : '';
+        return C.MUSIC_TENSION_LEVELS.includes(clean) ? clean : '';
     };
     const normalizeYouTubeUrl = (value) => {
         const raw = String(value || '').trim();
@@ -551,7 +223,7 @@
         const sourceTitles = source.titles && typeof source.titles === 'object' ? source.titles : {};
         const tracks = {};
         const titles = {};
-        MUSIC_TENSION_LEVELS.forEach((level) => {
+        C.MUSIC_TENSION_LEVELS.forEach((level) => {
             const trackValue = Object.prototype.hasOwnProperty.call(sourceTracks, level)
                 ? sourceTracks[level]
                 : source[level];
@@ -606,140 +278,69 @@
         }
         return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`;
     };
-    const normalizeProximityTriggerSkill = (value) => {
-        const clean = String(value || '').trim().toLowerCase();
-        if (PROXIMITY_TRIGGER_SKILL_OPTIONS.includes(clean)) return clean;
-        return 'perception';
-    };
-    const getProximitySkillLabel = (value) => PROXIMITY_TRIGGER_SKILL_LABELS[normalizeProximityTriggerSkill(value)] || toTitleCaseWords(value || 'Perception');
-    const normalizeProximityTrigger = (trigger, idx = 0) => {
-        const source = trigger && typeof trigger === 'object' ? trigger : {};
-        const kind = String(source.kind || 'skillRoll').trim();
-        const triggerType = String(source.trigger || 'enter').trim();
-        const target = String(source.target || 'playerTokens').trim();
-        const repeat = String(source.repeat || 'oncePerToken').trim();
-        const rawDc = source.dc;
-        const hasDc = rawDc !== null && rawDc !== undefined && rawDc !== '';
-        const fallbackId = `prompt_${idx + 1}`;
-        return {
-            id: String(source.id || fallbackId).trim().slice(0, 120) || fallbackId,
-            enabled: source.enabled !== undefined ? !!source.enabled : true,
-            trigger: PROXIMITY_TRIGGER_TYPE_OPTIONS.includes(triggerType) ? triggerType : 'enter',
-            radiusCells: clamp(Math.round(toNumber(source.radiusCells, 0)), 0, 24),
-            target: PROXIMITY_TRIGGER_TARGET_OPTIONS.includes(target) ? target : 'playerTokens',
-            repeat: PROXIMITY_TRIGGER_REPEAT_OPTIONS.includes(repeat) ? repeat : 'oncePerToken',
-            kind: PROXIMITY_TRIGGER_KIND_OPTIONS.includes(kind) ? kind : 'skillRoll',
-            skill: normalizeProximityTriggerSkill(source.skill),
-            dc: hasDc ? clamp(Math.round(toNumber(rawDc, 10)), 1, 40) : null,
-            dcVisible: !!source.dcVisible,
-            revealOnSuccess: !!source.revealOnSuccess,
-            clockId: String(source.clockId || '').trim().slice(0, 120),
-            clockSuccessDelta: clamp(Math.round(toNumber(source.clockSuccessDelta, 0)), -20, 20),
-            clockFailDelta: clamp(Math.round(toNumber(source.clockFailDelta, 0)), -20, 20),
-            title: String(source.title || 'Something catches your attention').trim().slice(0, 160) || 'Something catches your attention',
-            body: String(source.body || '').trim().slice(0, 800),
-            successText: String(source.successText || '').trim().slice(0, 600),
-            failText: String(source.failText || '').trim().slice(0, 600)
-        };
-    };
-    const normalizeProximityTriggers = (triggers) => (
-        Array.isArray(triggers)
-            ? triggers.map((entry, idx) => normalizeProximityTrigger(entry, idx)).slice(0, 12)
-            : []
-    );
-    const normalizeProximityPromptResult = (result, trigger = null) => {
-        const source = result && typeof result === 'object' ? result : null;
-        if (!source) return null;
-        const rawSuccess = source.success;
-        const rawTotal = source.total;
-        const numericTotal = Number(rawTotal);
-        return {
-            ok: !!source.ok,
-            total: Number.isFinite(numericTotal) ? Math.round(numericTotal) : String(rawTotal || '').slice(0, 40),
-            formula: String(source.formula || '').slice(0, 160),
-            label: String(source.label || getProximitySkillLabel(trigger && trigger.skill)).slice(0, 120),
-            success: rawSuccess === true ? true : (rawSuccess === false ? false : null),
-            rollMode: normalizeRollMode(source.rollMode),
-            persisted: source.persisted !== undefined ? !!source.persisted : true
-        };
-    };
-    const normalizeProximityPromptStateEntry = (entry, idx = 0) => {
-        const source = entry && typeof entry === 'object' ? entry : {};
-        const fallbackKey = `prompt_state_${idx + 1}`;
-        const key = String(source.key || source.id || fallbackKey).trim().slice(0, 320) || fallbackKey;
-        const at = Math.max(0, Math.round(toNumber(source.at, Date.now())));
-        const resolvedAt = Math.max(0, Math.round(toNumber(source.resolvedAt, 0)));
-        const dismissedAt = Math.max(0, Math.round(toNumber(source.dismissedAt, 0)));
-        return {
-            key,
-            sceneId: String(source.sceneId || '').trim().slice(0, 120),
-            triggerId: String(source.triggerId || '').trim().slice(0, 120),
-            tokenId: String(source.tokenId || '').trim().slice(0, 120),
-            at,
-            resolvedAt,
-            dismissed: !!source.dismissed,
-            dismissedAt,
-            result: normalizeProximityPromptResult(source.result)
-        };
-    };
-    const normalizeProximityPromptStates = (states) => (
-        Array.isArray(states)
-            ? states.map((entry, idx) => normalizeProximityPromptStateEntry(entry, idx)).slice(-PROXIMITY_PROMPT_STATE_LIMIT)
-            : []
-    );
-    const buildSeededProximityTrigger = (seed = 'perception') => {
-        const cleanSeed = String(seed || 'perception').trim().toLowerCase();
-        if (cleanSeed === 'fiction') {
-            return normalizeProximityTrigger({
-                id: buildId('prompt'),
-                kind: 'fiction',
-                title: 'A detail surfaces',
-                body: 'Describe the sensory detail, clue, or pressure beat the players notice here.',
-                radiusCells: 0
-            });
-        }
-        const skill = normalizeProximityTriggerSkill(cleanSeed);
-        return normalizeProximityTrigger({
-            id: buildId('prompt'),
-            kind: 'skillRoll',
-            skill,
-            dc: 15,
-            dcVisible: false,
-            title: `${getProximitySkillLabel(skill)} prompt`,
-            body: `Something here invites a ${getProximitySkillLabel(skill)} check.`,
-            successText: 'On a success, give the player a concrete, actionable detail.',
-            failText: 'On a miss, give texture or partial information without stopping play.',
-            radiusCells: 0
-        });
-    };
-    const sheetStatNames = {
-        str: 'Strength',
-        dex: 'Dexterity',
-        con: 'Constitution',
-        int: 'Intelligence',
-        wis: 'Wisdom',
-        cha: 'Charisma'
-    };
-    const sheetSkillsMap = {
-        'acrobatics': 'dex',
-        'animal handling': 'wis',
-        'arcana': 'int',
-        'athletics': 'str',
-        'deception': 'cha',
-        'history': 'int',
-        'insight': 'wis',
-        'intimidation': 'cha',
-        'investigation': 'int',
-        'medicine': 'wis',
-        'nature': 'int',
-        'perception': 'wis',
-        'performance': 'cha',
-        'persuasion': 'cha',
-        'religion': 'int',
-        'sleight of hand': 'dex',
-        'stealth': 'dex',
-        'survival': 'wis'
-    };
+    const vttRulesFactory = window.RTF_VTT_RULES;
+    if (!vttRulesFactory || typeof vttRulesFactory.create !== 'function') {
+        throw new Error('VTT rules module failed to load.');
+    }
+    const vttRules = vttRulesFactory.create({ buildId, toImageUrl });
+    const sheetSkillsMap = vttRules.SHEET_SKILLS_MAP;
+    const normalizeDefences = vttRules.normalizeDefences;
+    const parsePlayerHp = vttRules.parsePlayerHp;
+    const getSheetMod = vttRules.getSheetMod;
+    const getSheetPB = vttRules.getSheetPB;
+    const getSheetSkillMiscBonus = vttRules.getSheetSkillMiscBonus;
+    const getSheetSkillBonus = vttRules.getSheetSkillBonus;
+    const getSheetArmorClass = vttRules.getSheetArmorClass;
+    const getSheetDefences = vttRules.getSheetDefences;
+    const getSheetStealthRoll = vttRules.getSheetStealthRoll;
+    const abilityModFromScore = vttRules.abilityModFromScore;
+    const formatSignedBonus = vttRules.formatSignedBonus;
+    const normalizeMonsterRollKeyPart = vttRules.normalizeMonsterRollKeyPart;
+    const normalizeMonsterRecord = vttRules.normalizeMonsterRecord;
+    const buildTokenFromPlayer = vttRules.buildTokenFromPlayer;
+    const buildTokenFromNPC = vttRules.buildTokenFromNPC;
+    const buildTokenFromMonster = vttRules.buildTokenFromMonster;
+    const applyMonsterStatBlockToToken = vttRules.applyMonsterStatBlockToToken;
+    const updateMonsterRollOverrideForToken = vttRules.updateMonsterRollOverrideForToken;
+    const buildCustomToken = vttRules.buildCustomToken;
+    const filterMonsterRollPresets = vttRules.filterMonsterRollPresets;
+    const vttRollsFactory = window.RTF_VTT_ROLLS;
+    if (!vttRollsFactory || typeof vttRollsFactory.create !== 'function') {
+        throw new Error('VTT rolls module failed to load.');
+    }
+    const vttRolls = vttRollsFactory.create({
+        normalizeSearchText,
+        sheetSkillsMap,
+        defaultSearchLimit: C.QUICK_ACTION_SEARCH_RESULT_LIMIT
+    });
+    const normalizeRollMode = vttRolls.normalizeRollMode;
+    const getRollModeLabel = (mode = uiRuntime.playerRoll.mode) => vttRolls.getRollModeLabel(mode);
+    const vttProximityFactory = window.RTF_VTT_PROXIMITY;
+    if (!vttProximityFactory || typeof vttProximityFactory.createModel !== 'function') {
+        throw new Error('VTT proximity module failed to load.');
+    }
+    const vttProximityModel = vttProximityFactory.createModel({
+        buildId,
+        clamp,
+        normalizeRollMode,
+        toNumber,
+        toTitleCaseWords
+    });
+    const {
+        PROXIMITY_TRIGGER_KIND_OPTIONS,
+        PROXIMITY_TRIGGER_TYPE_OPTIONS,
+        PROXIMITY_TRIGGER_TARGET_OPTIONS,
+        PROXIMITY_TRIGGER_REPEAT_OPTIONS,
+        PROXIMITY_TRIGGER_SKILL_OPTIONS,
+        normalizeProximityTriggerSkill,
+        getProximitySkillLabel,
+        normalizeProximityTrigger,
+        normalizeProximityTriggers,
+        normalizeProximityPromptResult,
+        normalizeProximityPromptStateEntry,
+        normalizeProximityPromptStates,
+        buildSeededProximityTrigger
+    } = vttProximityModel;
     const readJSONStorage = (key, fallback = null) => {
         try {
             const raw = localStorage.getItem(key);
@@ -749,7 +350,7 @@
         }
     };
     const getActiveSheetBundle = (preferredSheetKey = '') => {
-        const allData = readJSONStorage(SHEET_STORAGE_KEY, null);
+        const allData = readJSONStorage(C.SHEET_STORAGE_KEY, null);
         if (!allData || typeof allData !== 'object' || !allData.characters || typeof allData.characters !== 'object') return null;
         const cleanSheetKey = String(preferredSheetKey || '').trim();
         if (cleanSheetKey) {
@@ -763,165 +364,9 @@
         if (!character || typeof character !== 'object') return null;
         return { allData, activeId: allData.characters[activeId] ? activeId : Object.keys(allData.characters)[0], character };
     };
-    const buildSheetActionItem = (options = {}) => {
-        const action = options.action && typeof options.action === 'object' ? options.action : null;
-        const key = String(options.key || '').trim();
-        if (!action || !key) return null;
-        const label = String(options.label || action.label || 'Action').trim() || 'Action';
-        const summary = String(options.summary || action.summary || '').trim();
-        const category = String(options.category || 'Action').trim() || 'Action';
-        const detail = String(options.detail || '').trim();
-        const priority = Number.isFinite(options.priority) ? Number(options.priority) : 0;
-        return {
-            key,
-            label,
-            summary,
-            category,
-            detail,
-            priority,
-            action: { ...action, label, summary },
-            searchText: normalizeSearchText([label, summary, category, detail, options.searchTerms || ''].join(' '))
-        };
-    };
-    const buildSheetCodeActionItem = (options = {}) => buildSheetActionItem({
-        ...options,
-        action: {
-            kind: 'code',
-            code: String(options.code || '').trim(),
-            label: options.label || 'Action',
-            summary: options.summary || ''
-        }
-    });
     const buildSheetActionCatalog = () => {
-        const bundle = getActiveSheetBundle(sheetActionState && sheetActionState.sheetKey);
-        const character = bundle && bundle.character ? bundle.character : null;
-        if (!character) return [];
-        const items = [];
-        items.push(buildSheetCodeActionItem({
-            key: 'core:initiative',
-            category: 'Core',
-            code: 'rollInitiative()',
-            label: 'Initiative',
-            summary: 'Roll initiative from the sheet',
-            priority: 1300,
-            searchTerms: 'initiative init combat turn order'
-        }));
-        DEFENCE_KEYS.forEach((stat) => {
-            const fullName = sheetStatNames[stat] || stat.toUpperCase();
-            items.push(buildSheetCodeActionItem({
-                key: `check:${stat}`,
-                category: 'Check',
-                code: `rollCheck('${stat}')`,
-                label: `${fullName} Check`,
-                summary: `d20 + ${fullName}`,
-                detail: fullName,
-                priority: 900,
-                searchTerms: `${stat} ${fullName} ability check`
-            }));
-            items.push(buildSheetCodeActionItem({
-                key: `save:${stat}`,
-                category: 'Save',
-                code: `rollSave('${stat}')`,
-                label: `${fullName} Save`,
-                summary: `d20 + ${fullName} save`,
-                detail: fullName,
-                priority: 880,
-                searchTerms: `${stat} ${fullName} saving throw save`
-            }));
-        });
-        Object.keys(sheetSkillsMap).forEach((skillName) => {
-            const ability = sheetSkillsMap[skillName];
-            items.push(buildSheetCodeActionItem({
-                key: `skill:${skillName}`,
-                category: 'Skill',
-                code: `rollSkill('${skillName}')`,
-                label: toTitleCaseWords(skillName),
-                summary: `${sheetStatNames[ability] || ability.toUpperCase()} skill check`,
-                detail: sheetStatNames[ability] || ability.toUpperCase(),
-                priority: skillName === 'perception' ? 1120 : (skillName === 'stealth' ? 1110 : 840),
-                searchTerms: `${skillName} ${ability} skill check`
-            }));
-        });
-        (Array.isArray(character.attacks) ? character.attacks : []).forEach((attack, idx) => {
-            const name = String(attack && attack.name || '').trim() || `Attack ${idx + 1}`;
-            const damage = String(attack && attack.dmg || '').trim();
-            items.push(buildSheetCodeActionItem({
-                key: `attack:atk:${idx}`,
-                category: 'Attack',
-                code: `rollAttack(${idx})`,
-                label: `Atk: ${name}`,
-                summary: 'Attack roll',
-                detail: damage || 'Attack',
-                priority: 760,
-                searchTerms: `${name} attack weapon hit ${damage} ${attack && attack.desc ? attack.desc : ''}`
-            }));
-            items.push(buildSheetCodeActionItem({
-                key: `attack:dmg:${idx}`,
-                category: 'Damage',
-                code: `rollDamage(${idx})`,
-                label: `Dmg: ${name}`,
-                summary: damage ? `Roll damage - ${damage}` : 'Roll damage',
-                detail: damage || 'Damage',
-                priority: 750,
-                searchTerms: `${name} damage ${damage} ${attack && attack.desc ? attack.desc : ''}`
-            }));
-        });
-        (Array.isArray(character.resources) ? character.resources : []).forEach((resource, idx) => {
-            if (!resource || !resource.rCheck) return;
-            const name = String(resource.name || '').trim() || `Resource ${idx + 1}`;
-            const formula = String(resource.rFormula || '1d6').trim() || '1d6';
-            items.push(buildSheetCodeActionItem({
-                key: `resource:recharge:${idx}`,
-                category: 'Recharge',
-                code: `rollResRecharge(${idx})`,
-                label: `Recharge: ${name}`,
-                summary: `Roll recharge - ${formula}`,
-                detail: formula,
-                priority: 700,
-                searchTerms: `${name} recharge resource ${formula}`
-            }));
-        });
-        (Array.isArray(character.spellbook) ? character.spellbook : []).forEach((spell, idx) => {
-            const spellName = String(spell && spell.name || '').trim();
-            if (!spellName) return;
-            const level = Math.max(0, Math.min(9, parseInt(spell.lvl, 10) || 0));
-            const levelText = level === 0 ? 'Cantrip' : `Level ${level}`;
-            items.push(buildSheetActionItem({
-                key: `spell:cast:${idx}`,
-                category: 'Spell',
-                label: `Cast: ${spellName}`,
-                summary: `Cast from spellbook - ${levelText}`,
-                detail: levelText,
-                priority: 620,
-                searchTerms: `${spellName} ${levelText} ${spell.school || ''} ${spell.classes || ''} ${spell.damageFormula || ''} ${spell.description || ''}`,
-                action: { kind: 'spell', castMode: 'normal', spellName, spellIndex: idx }
-            }));
-            if (spell.ritual) {
-                items.push(buildSheetActionItem({
-                    key: `spell:ritual:${idx}`,
-                    category: 'Ritual',
-                    label: `Ritual: ${spellName}`,
-                    summary: `Ritual cast - ${levelText}`,
-                    detail: levelText,
-                    priority: 610,
-                    searchTerms: `${spellName} ritual ${levelText}`,
-                    action: { kind: 'spell', castMode: 'ritual', spellName, spellIndex: idx }
-                }));
-            }
-        });
-        QUICK_ACTION_SEARCH_DICE.forEach((sides) => {
-            items.push(buildSheetCodeActionItem({
-                key: `die:${sides}`,
-                category: 'Die',
-                code: `rollDie(${sides}, 0, 'd${sides}', ${sides === 20 ? 'true' : 'false'}, 'check')`,
-                label: `d${sides}`,
-                summary: 'Standard die roll',
-                detail: sides === 20 ? 'Supports ADV/DIS' : 'Single die',
-                priority: 420,
-                searchTerms: `d${sides} die dice`
-            }));
-        });
-        return items.filter(Boolean);
+        const bundle = getActiveSheetBundle(uiRuntime.overlays.sheetAction && uiRuntime.overlays.sheetAction.sheetKey);
+        return vttRules.buildSheetActionCatalog(bundle && bundle.character);
     };
     const buildSceneRecord = (scenes, sourceScene = null) => {
         const source = sourceScene && typeof sourceScene === 'object' ? sourceScene : null;
@@ -951,7 +396,7 @@
             mapImageUrl: source ? String(source.mapImageUrl || '') : '',
             mapScale: source ? clampMapScale(source.mapScale, 1) : 1,
             grid: deepClone(source && source.grid ? source.grid : {
-                cellPx: DEFAULT_VTT_CELL_PX,
+                cellPx: C.DEFAULT_VTT_CELL_PX,
                 offsetX: 0,
                 offsetY: 0,
                 cellDistance: 5
@@ -1035,127 +480,100 @@
         if (!Number.isFinite(hpCurrent) || !Number.isFinite(hpMax) || hpMax <= 0) return false;
         return hpCurrent <= hpMax / 2;
     };
-    const getTokenCenterInCells = (token) => ({
-        x: normalizeTokenCoordinate(toNumber(token && token.x, 0) + Math.max(1, toNumber(token && token.w, 1)) / 2, 0.5),
-        y: normalizeTokenCoordinate(toNumber(token && token.y, 0) + Math.max(1, toNumber(token && token.h, 1)) / 2, 0.5)
+    const vttGeometryFactory = window.RTF_VTT_GEOMETRY;
+    if (!vttGeometryFactory || typeof vttGeometryFactory.create !== 'function') {
+        throw new Error('VTT geometry module failed to load.');
+    }
+    const vttGeometry = vttGeometryFactory.create({
+        buildId,
+        clamp,
+        escapeHtml,
+        getHexColorRgbString,
+        getLocalRole: () => sessionState.role,
+        getLocalToolSizeCells: () => stageState.tool.current.sizeCells,
+        getSceneCellPx: (...args) => getSceneCellPx(...args),
+        getTokenStealthRoll,
+        getVisionPassivePerception,
+        getVTTState: () => sessionState.snapshot,
+        getWorldSize: () => stageState.view.world,
+        getWorldSizeForScene: (...args) => getWorldSizeForScene(...args),
+        normalizeAngleDeg: (...args) => normalizeAngleDeg(...args),
+        normalizeGridCoordinate,
+        normalizeProximityPromptStates,
+        normalizeProximityTriggers,
+        normalizeTokenCoordinate,
+        normalizeToolSizeCells: (...args) => normalizeToolSizeCells(...args),
+        normalizeWorldCoordinate,
+        snapWorldPointToTemplateAnchor: (...args) => snapWorldPointToTemplateAnchor(...args),
+        toNumber,
+        config: {
+            defaultWorldSize: C.DEFAULT_WORLD_SIZE,
+            defaultToolSizeCells: C.DEFAULT_TOOL_SIZE_CELLS,
+            templateKindCircle: C.TEMPLATE_KIND_CIRCLE,
+            templateKindCone: C.TEMPLATE_KIND_CONE,
+            fogEdgeOverdrawPx: C.FOG_EDGE_OVERDRAW_PX,
+            defaultEvidenceNoteCategory: C.DEFAULT_EVIDENCE_NOTE_CATEGORY,
+            defaultEvidenceNoteColor: C.DEFAULT_EVIDENCE_NOTE_COLOR,
+            evidenceNoteShapePin: C.EVIDENCE_NOTE_SHAPE_PIN,
+            evidenceNoteShapeZone: C.EVIDENCE_NOTE_SHAPE_ZONE,
+            evidenceNoteShapeOptions: C.EVIDENCE_NOTE_SHAPE_OPTIONS,
+            evidenceNoteCategoryMeta: C.EVIDENCE_NOTE_CATEGORY_META,
+            stealthStatusDetected: C.STEALTH_STATUS_DETECTED,
+            stealthStatusUnseen: C.STEALTH_STATUS_UNSEEN
+        }
     });
-    const getTokenFootprintPoints = (token) => {
-        if (!token) return [];
-        const width = Math.max(1, toNumber(token.w, 1));
-        const height = Math.max(1, toNumber(token.h, 1));
-        const x = toNumber(token.x, 0);
-        const y = toNumber(token.y, 0);
-        return [
-            { x: x + width / 2, y: y + height / 2 },
-            { x: x, y: y },
-            { x: x + width / 2, y: y },
-            { x: x + width, y: y },
-            { x: x, y: y + height / 2 },
-            { x: x + width, y: y + height / 2 },
-            { x: x, y: y + height },
-            { x: x + width / 2, y: y + height },
-            { x: x + width, y: y + height }
-        ];
-    };
-    const getTemplateWorldPoint = (scene, point) => {
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        return {
-            x: offsetX + toNumber(point && point.x, 0) * cellPx,
-            y: offsetY + toNumber(point && point.y, 0) * cellPx
-        };
-    };
-    const getConeHalfWidthPx = (lengthPx, arcDeg) => {
-        const clampedArc = clamp(toNumber(arcDeg, 60), 1, 170);
-        return Math.max(1, lengthPx * Math.tan((clampedArc / 2) * Math.PI / 180));
-    };
-    const getConeWorldVertices = (originPoint, lengthPx, angleDeg, arcDeg) => {
-        const radians = normalizeAngleDeg(angleDeg) * Math.PI / 180;
-        const axisX = Math.cos(radians);
-        const axisY = Math.sin(radians);
-        const perpX = -axisY;
-        const perpY = axisX;
-        const halfWidth = getConeHalfWidthPx(lengthPx, arcDeg);
-        return [
-            { x: originPoint.x, y: originPoint.y },
-            { x: originPoint.x + axisX * lengthPx - perpX * halfWidth, y: originPoint.y + axisY * lengthPx - perpY * halfWidth },
-            { x: originPoint.x + axisX * lengthPx + perpX * halfWidth, y: originPoint.y + axisY * lengthPx + perpY * halfWidth }
-        ];
-    };
-    const getPointAtAngle = (originX, originY, radius, angleDeg) => {
-        const radians = normalizeAngleDeg(angleDeg) * Math.PI / 180;
-        return {
-            x: originX + Math.cos(radians) * radius,
-            y: originY + Math.sin(radians) * radius
-        };
-    };
-    const getAreaTemplateWorldGeometry = (template, scene) => {
-        if (!template || !scene) return null;
-        const sizePx = Math.max(1, normalizeToolSizeCells(template.sizeCells, DEFAULT_TOOL_SIZE_CELLS) * getSceneCellPx(scene));
-        const anchor = getTemplateWorldPoint(scene, template);
-        if (String(template.kind || TEMPLATE_KIND_CIRCLE) === TEMPLATE_KIND_CONE) {
-            const halfWidth = sizePx / 2;
-            return {
-                kind: TEMPLATE_KIND_CONE,
-                left: anchor.x,
-                top: anchor.y - halfWidth,
-                width: sizePx,
-                height: halfWidth * 2,
-                rotationDeg: normalizeAngleDeg(template.angleDeg)
-            };
-        }
-        return {
-            kind: TEMPLATE_KIND_CIRCLE,
-            left: anchor.x - sizePx,
-            top: anchor.y - sizePx,
-            width: sizePx * 2,
-            height: sizePx * 2,
-            rotationDeg: 0
-        };
-    };
-    const getAreaTemplateWorldBounds = (template, scene) => {
-        const geometry = getAreaTemplateWorldGeometry(template, scene);
-        if (!geometry) return null;
-        if (geometry.kind === TEMPLATE_KIND_CIRCLE) {
-            return {
-                minX: geometry.left,
-                minY: geometry.top,
-                maxX: geometry.left + geometry.width,
-                maxY: geometry.top + geometry.height
-            };
-        }
-        const anchor = getTemplateWorldPoint(scene, template);
-        const vertices = getConeWorldVertices(anchor, geometry.width, geometry.rotationDeg, DEFAULT_TEMPLATE_CONE_ARC_DEG);
-        return {
-            minX: Math.min(...vertices.map((point) => point.x)),
-            minY: Math.min(...vertices.map((point) => point.y)),
-            maxX: Math.max(...vertices.map((point) => point.x)),
-            maxY: Math.max(...vertices.map((point) => point.y))
-        };
-    };
-    const buildAreaTemplate = (kind, scene, worldPoint, options = {}) => {
-        if (!scene || !worldPoint) return null;
-        const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
-        return {
-            id: buildId('template'),
-            kind: kind === TEMPLATE_KIND_CONE ? TEMPLATE_KIND_CONE : TEMPLATE_KIND_CIRCLE,
-            x: anchor.x,
-            y: anchor.y,
-            sizeCells: normalizeToolSizeCells(options.sizeCells, localToolState.sizeCells),
-            angleDeg: normalizeAngleDeg(options.angleDeg)
-        };
-    };
-    const getRenderableSceneTemplates = (scene, now = Date.now()) => {
-        if (!scene || !Array.isArray(scene.templates)) return [];
-        return scene.templates.filter((template) => toNumber(template && template.expiresAt, 0) > now);
-    };
+    const {
+        applyFogMaskMutation,
+        areFogEntriesEquivalent,
+        buildAreaTemplate,
+        buildEvidenceNoteAreaLabel,
+        buildEvidenceNoteFromCellBounds,
+        buildEvidenceNoteFromWorldPoints,
+        buildFogCellsFromCellSet,
+        buildFogEdgeMarkup,
+        buildFogMaskFromWorldPoints,
+        buildFogMaskMarkup,
+        buildStealthStatusMap,
+        collectFogCellSet,
+        getAreaTemplateWorldGeometry,
+        getDefaultEvidenceNoteHighlightColor,
+        getDefaultEvidenceNoteTitle,
+        getEvidenceNoteCategoryLabel,
+        getEvidenceNoteCategoryShortLabel,
+        getEvidenceNoteCellBounds,
+        getEvidenceNoteCellPoint,
+        getEvidenceNoteDisplayTitle,
+        getEvidenceNoteHighlightColor,
+        getEvidenceNoteHighlightRgb,
+        getEvidenceNoteShapeLabel,
+        getFogEntryWorldRect,
+        getPointAtAngle,
+        getRenderableScenePings,
+        getRenderableSceneTemplates,
+        getSceneEvidenceNotes,
+        getStealthVisionTargetSummary,
+        getTemplateAngleFromWorldPoint,
+        getTemplateWorldPoint,
+        getTokenCenterInCells,
+        getTokenVisionFacingDeg,
+        getVisibleEvidenceNotesForRole,
+        getVisibleTokensForRole,
+        getVisionConeGeometry,
+        isEvidenceNotePin,
+        isEvidenceNoteVisibleToRole,
+        isTokenHiddenForRole,
+        isTokenUnderFog,
+        normalizeEvidenceNoteBody,
+        normalizeEvidenceNoteCategory,
+        normalizeEvidenceNoteShape,
+        normalizeEvidenceNoteTitle
+    } = vttGeometry;
     const queueSharedTransientTemplate = (template) => {
         if (!canUseSharedPlayerTools()) return;
         if (!template) return;
         const payload = {
             ...template,
-            expiresAt: Date.now() + TEMPLATE_SHARED_LIFETIME_MS
+            expiresAt: Date.now() + C.TEMPLATE_SHARED_LIFETIME_MS
         };
         withDraft((draft) => {
             const scene = getActiveScene(draft);
@@ -1164,82 +582,17 @@
             scene.templates.push(payload);
         });
     };
-    const getRenderableScenePings = (scene, now = Date.now()) => {
-        if (!scene || !Array.isArray(scene.pings)) return [];
-        return scene.pings.filter((ping) => toNumber(ping && ping.expiresAt, 0) > now);
-    };
-    const scheduleVisualEffectRender = (delayMs = 760) => {
-        if (visualEffectTimer) return;
-        visualEffectTimer = window.setTimeout(() => {
-            visualEffectTimer = 0;
-            renderStage();
-        }, Math.max(120, toNumber(delayMs, 760)));
-    };
-    const pruneVisualEffects = (now = Date.now()) => {
-        tokenVisualEffects.forEach((effect, tokenId) => {
-            if (!effect || toNumber(effect.expiresAt, 0) <= now) tokenVisualEffects.delete(tokenId);
-        });
-        fogRevealBursts = fogRevealBursts.filter((burst) => toNumber(burst && burst.expiresAt, 0) > now);
-        const nextTokenExpiry = Array.from(tokenVisualEffects.values())
-            .map((effect) => toNumber(effect && effect.expiresAt, 0))
-            .filter((expiresAt) => expiresAt > now);
-        const nextFogExpiry = fogRevealBursts
-            .map((burst) => toNumber(burst && burst.expiresAt, 0))
-            .filter((expiresAt) => expiresAt > now);
-        const nextExpiry = Math.min(...nextTokenExpiry, ...nextFogExpiry);
-        if (Number.isFinite(nextExpiry)) scheduleVisualEffectRender(nextExpiry - now + 40);
-    };
-    const markTokenVisualEffect = (tokenId, kind, durationMs = TOKEN_HP_FLASH_MS) => {
-        const cleanTokenId = String(tokenId || '').trim();
-        const cleanKind = String(kind || '').trim();
-        if (!cleanTokenId || !cleanKind) return;
-        tokenVisualEffects.set(cleanTokenId, {
-            kind: cleanKind,
-            expiresAt: Date.now() + Math.max(120, toNumber(durationMs, TOKEN_HP_FLASH_MS))
-        });
-        scheduleVisualEffectRender(durationMs + 40);
-    };
-    const getTokenVisualEffectKind = (tokenId, now = Date.now()) => {
-        const effect = tokenVisualEffects.get(String(tokenId || '').trim());
-        if (!effect) return '';
-        if (toNumber(effect.expiresAt, 0) <= now) {
-            tokenVisualEffects.delete(String(tokenId || '').trim());
-            return '';
-        }
-        return String(effect.kind || '').trim();
-    };
-    const PING_VARIANT_OPTIONS = {
-        attention: { label: 'Attention', color: '#4f8dff', variant: 'attention', icon: '!' },
-        danger: { label: 'Danger', color: '#ff5f5f', variant: 'danger', icon: '!' },
-        question: { label: 'Question', color: '#ffd35f', variant: 'question', icon: '?' },
-        askRoll: { label: 'Ask To Roll', color: '#7ee787', variant: 'ask-roll', icon: '?', pickable: false }
-    };
     const normalizePingVariant = (value) => {
         const clean = String(value || '').trim().toLowerCase();
-        if (PING_VARIANT_OPTIONS[clean]) return clean;
-        const matched = Object.entries(PING_VARIANT_OPTIONS)
+        if (C.PING_VARIANT_OPTIONS[clean]) return clean;
+        const matched = Object.entries(C.PING_VARIANT_OPTIONS)
             .find(([, option]) => String(option && option.variant || '').trim().toLowerCase() === clean);
         return matched ? matched[0] : 'attention';
     };
-    const getPingVariantOptions = (event = null, variant = localPingVariant) => {
-        if (event && event.altKey) return PING_VARIANT_OPTIONS.danger;
-        if (event && event.shiftKey) return PING_VARIANT_OPTIONS.question;
-        return PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || PING_VARIANT_OPTIONS.attention;
-    };
-    const schedulePingExpiryRender = (scene) => {
-        if (pingExpiryTimer) {
-            window.clearTimeout(pingExpiryTimer);
-            pingExpiryTimer = 0;
-        }
-        const pings = getRenderableScenePings(scene);
-        if (!pings.length) return;
-        const nextExpiry = Math.min(...pings.map((ping) => Math.max(0, toNumber(ping && ping.expiresAt, 0))));
-        if (!Number.isFinite(nextExpiry) || nextExpiry <= 0) return;
-        const delay = Math.max(0, nextExpiry - Date.now() + 32);
-        pingExpiryTimer = window.setTimeout(() => {
-            pingExpiryTimer = 0;
-            renderStage();
-        }, delay);
+    const getPingVariantOptions = (event = null, variant = stageState.tool.pingVariant) => {
+        if (event && event.altKey) return C.PING_VARIANT_OPTIONS.danger;
+        if (event && event.shiftKey) return C.PING_VARIANT_OPTIONS.question;
+        return C.PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || C.PING_VARIANT_OPTIONS.attention;
     };
     const queueSharedPing = (scene, worldPoint, options = {}) => {
         if (!canUseSharedPlayerTools()) return false;
@@ -1265,7 +618,7 @@
             color,
             variant,
             createdAt: now,
-            expiresAt: now + (askRoll ? 2 * 60 * 1000 : PING_SHARED_LIFETIME_MS)
+            expiresAt: now + (askRoll ? 2 * 60 * 1000 : C.PING_SHARED_LIFETIME_MS)
         };
         if (askRoll && askRoll.label) ping.askRoll = askRoll;
         withDraft((draft) => {
@@ -1289,402 +642,6 @@
         });
         return removed;
     };
-    const scheduleTemplateExpiryRender = (scene) => {
-        if (templateExpiryTimer) {
-            window.clearTimeout(templateExpiryTimer);
-            templateExpiryTimer = 0;
-        }
-        const templates = getRenderableSceneTemplates(scene);
-        if (!templates.length) return;
-        const nextExpiry = Math.min(...templates.map((template) => Math.max(0, toNumber(template && template.expiresAt, 0))));
-        if (!Number.isFinite(nextExpiry) || nextExpiry <= 0) return;
-        const delay = Math.max(0, nextExpiry - Date.now() + 32);
-        templateExpiryTimer = window.setTimeout(() => {
-            templateExpiryTimer = 0;
-            renderStage();
-        }, delay);
-    };
-    const getTemplateAngleFromWorldPoint = (scene, template, worldPoint) => {
-        if (!scene || !template || !worldPoint) return 0;
-        const origin = getTemplateWorldPoint(scene, template);
-        return normalizeAngleDeg(Math.atan2(worldPoint.y - origin.y, worldPoint.x - origin.x) * 180 / Math.PI);
-    };
-    const snapWorldPointToFogCorner = (scene, worldPoint) => {
-        if (!scene || !worldPoint) return { x: 0, y: 0 };
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        return {
-            x: Math.round((toNumber(worldPoint.x, offsetX) - offsetX) / cellPx) * cellPx + offsetX,
-            y: Math.round((toNumber(worldPoint.y, offsetY) - offsetY) / cellPx) * cellPx + offsetY
-        };
-    };
-    const getFogCellAtWorldPoint = (scene, worldPoint) => {
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        return {
-            col: Math.floor((toNumber(worldPoint && worldPoint.x, offsetX) - offsetX) / cellPx),
-            row: Math.floor((toNumber(worldPoint && worldPoint.y, offsetY) - offsetY) / cellPx)
-        };
-    };
-    const buildFogMaskFromWorldPoints = (scene, startWorldPoint, endWorldPoint, id = buildId('fog')) => {
-        if (!scene || !startWorldPoint || !endWorldPoint) return null;
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const start = getFogCellAtWorldPoint(scene, startWorldPoint);
-        const end = getFogCellAtWorldPoint(scene, endWorldPoint);
-        const leftCol = Math.min(start.col, end.col);
-        const topRow = Math.min(start.row, end.row);
-        const widthCells = Math.max(1, Math.abs(end.col - start.col) + 1);
-        const heightCells = Math.max(1, Math.abs(end.row - start.row) + 1);
-        return {
-            id: String(id || buildId('fog')).trim() || buildId('fog'),
-            x: Math.round(offsetX + leftCol * cellPx),
-            y: Math.round(offsetY + topRow * cellPx),
-            w: Math.max(1, Math.round(widthCells * cellPx)),
-            h: Math.max(1, Math.round(heightCells * cellPx))
-        };
-    };
-    const buildFogCellKey = (col, row) => `${Math.round(toNumber(col, 0))},${Math.round(toNumber(row, 0))}`;
-    const buildFogCellId = (col, row) => `fog_${Math.round(toNumber(col, 0))}_${Math.round(toNumber(row, 0))}`;
-    const hashStringToUnit = (value = '') => {
-        let hash = 2166136261;
-        String(value || '').split('').forEach((char) => {
-            hash ^= char.charCodeAt(0);
-            hash = Math.imul(hash, 16777619);
-        });
-        return (hash >>> 0) / 4294967295;
-    };
-    const FOG_EDGE_WIBBLE_PX = 3;
-    const FOG_EDGE_CORNER_RADIUS_PX = 10;
-
-    const buildFogPointKey = (x, y) => `${Math.round(toNumber(x, 0))},${Math.round(toNumber(y, 0))}`;
-
-    const getFogBoundaryDirectionIndex = (edge) => {
-        const dx = Math.sign(toNumber(edge.ex, 0) - toNumber(edge.sx, 0));
-        const dy = Math.sign(toNumber(edge.ey, 0) - toNumber(edge.sy, 0));
-
-        if (dx > 0) return 0; // east
-        if (dy > 0) return 1; // south
-        if (dx < 0) return 2; // west
-        return 3;             // north
-    };
-
-    const pickNextFogBoundaryEdge = (candidates, previousEdge) => {
-        const unused = candidates.filter((edge) => !edge.used);
-        if (!unused.length) return null;
-        if (!previousEdge) return unused[0];
-
-        const previousDir = getFogBoundaryDirectionIndex(previousEdge);
-
-        return unused
-            .map((edge) => {
-                const nextDir = getFogBoundaryDirectionIndex(edge);
-                const turn = (nextDir - previousDir + 4) % 4;
-
-                // Prefer right turn, then straight, then left, then reverse.
-                // This keeps touching/diagonal components from merging too eagerly.
-                const priority = turn === 1 ? 0 : turn === 0 ? 1 : turn === 3 ? 2 : 3;
-
-                return { edge, priority };
-            })
-            .sort((left, right) => left.priority - right.priority)[0].edge;
-    };
-
-    const buildFogBoundaryLoops = (cellSet) => {
-        if (!(cellSet instanceof Set) || !cellSet.size) return [];
-
-        const edges = [];
-
-        cellSet.forEach((key) => {
-            const cell = parseFogCellKey(key);
-            const col = cell.col;
-            const row = cell.row;
-
-            if (!cellSet.has(buildFogCellKey(col, row - 1))) {
-                edges.push({ sx: col,     sy: row,     ex: col + 1, ey: row     });
-            }
-
-            if (!cellSet.has(buildFogCellKey(col + 1, row))) {
-                edges.push({ sx: col + 1, sy: row,     ex: col + 1, ey: row + 1 });
-            }
-
-            if (!cellSet.has(buildFogCellKey(col, row + 1))) {
-                edges.push({ sx: col + 1, sy: row + 1, ex: col,     ey: row + 1 });
-            }
-
-            if (!cellSet.has(buildFogCellKey(col - 1, row))) {
-                edges.push({ sx: col,     sy: row + 1, ex: col,     ey: row     });
-            }
-        });
-
-        const outgoing = new Map();
-
-        edges.forEach((edge) => {
-            edge.used = false;
-            const startKey = buildFogPointKey(edge.sx, edge.sy);
-            if (!outgoing.has(startKey)) outgoing.set(startKey, []);
-            outgoing.get(startKey).push(edge);
-        });
-
-        const loops = [];
-
-        edges.forEach((firstEdge) => {
-            if (firstEdge.used) return;
-
-            const loop = [{ x: firstEdge.sx, y: firstEdge.sy }];
-            let edge = firstEdge;
-            let guard = 0;
-
-            while (edge && !edge.used && guard < edges.length + 8) {
-                guard += 1;
-                edge.used = true;
-
-                loop.push({ x: edge.ex, y: edge.ey });
-
-                const nextKey = buildFogPointKey(edge.ex, edge.ey);
-                const candidates = outgoing.get(nextKey) || [];
-                edge = pickNextFogBoundaryEdge(candidates, edge);
-
-                if (edge && buildFogPointKey(edge.sx, edge.sy) === buildFogPointKey(loop[0].x, loop[0].y) && edge.used) {
-                    break;
-                }
-            }
-
-            if (loop.length >= 4) {
-                const last = loop[loop.length - 1];
-                const first = loop[0];
-
-                if (buildFogPointKey(last.x, last.y) === buildFogPointKey(first.x, first.y)) {
-                    loop.pop();
-                }
-
-                if (loop.length >= 3) loops.push(loop);
-            }
-        });
-
-        return loops;
-    };
-
-    const getWibbledFogWorldPoint = (scene, point, phaseOffset = 0) => {
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-
-        const seed = `${point.x}:${point.y}`;
-        const unitA = hashStringToUnit(`${seed}:x`);
-        const unitB = hashStringToUnit(`${seed}:y`);
-
-        const wobbleX =
-            Math.sin(unitA * Math.PI * 2 + phaseOffset) * FOG_EDGE_WIBBLE_PX
-            + Math.sin(unitB * Math.PI * 3.3 - phaseOffset * 0.7) * FOG_EDGE_WIBBLE_PX * 0.35;
-
-        const wobbleY =
-            Math.sin(unitB * Math.PI * 2 + phaseOffset * 0.91) * FOG_EDGE_WIBBLE_PX
-            + Math.sin(unitA * Math.PI * 3.1 - phaseOffset * 0.53) * FOG_EDGE_WIBBLE_PX * 0.35;
-
-        return {
-            x: offsetX + toNumber(point.x, 0) * cellPx + wobbleX,
-            y: offsetY + toNumber(point.y, 0) * cellPx + wobbleY
-        };
-    };
-
-    const getDistanceBetweenPoints = (a, b) => {
-        const dx = toNumber(b && b.x, 0) - toNumber(a && a.x, 0);
-        const dy = toNumber(b && b.y, 0) - toNumber(a && a.y, 0);
-        return Math.sqrt(dx * dx + dy * dy);
-    };
-
-    const getPointToward = (from, to, distance) => {
-        const total = getDistanceBetweenPoints(from, to);
-        if (!Number.isFinite(total) || total <= 0.001) return { x: from.x, y: from.y };
-
-        const ratio = clamp(distance / total, 0, 1);
-
-        return {
-            x: from.x + (to.x - from.x) * ratio,
-            y: from.y + (to.y - from.y) * ratio
-        };
-    };
-
-    const buildRoundedFogLoopPath = (scene, loop, phaseOffset = 0) => {
-        if (!scene || !Array.isArray(loop) || loop.length < 3) return '';
-
-        const points = loop.map((point) => getWibbledFogWorldPoint(scene, point, phaseOffset));
-        const cellPx = getSceneCellPx(scene);
-        const baseRadius = Math.min(FOG_EDGE_CORNER_RADIUS_PX, Math.max(1, cellPx * 0.45));
-
-        const corners = points.map((point, idx) => {
-            const previous = points[(idx - 1 + points.length) % points.length];
-            const next = points[(idx + 1) % points.length];
-
-            const previousDistance = getDistanceBetweenPoints(point, previous);
-            const nextDistance = getDistanceBetweenPoints(point, next);
-            const radius = Math.min(baseRadius, previousDistance / 2, nextDistance / 2);
-
-            return {
-                point,
-                entry: getPointToward(point, previous, radius),
-                exit: getPointToward(point, next, radius)
-            };
-        });
-
-        const commands = [
-            `M ${corners[0].exit.x.toFixed(2)} ${corners[0].exit.y.toFixed(2)}`
-        ];
-
-        for (let idx = 1; idx < corners.length; idx += 1) {
-            const corner = corners[idx];
-
-            commands.push(`L ${corner.entry.x.toFixed(2)} ${corner.entry.y.toFixed(2)}`);
-            commands.push(`Q ${corner.point.x.toFixed(2)} ${corner.point.y.toFixed(2)} ${corner.exit.x.toFixed(2)} ${corner.exit.y.toFixed(2)}`);
-        }
-
-        commands.push(`L ${corners[0].entry.x.toFixed(2)} ${corners[0].entry.y.toFixed(2)}`);
-        commands.push(`Q ${corners[0].point.x.toFixed(2)} ${corners[0].point.y.toFixed(2)} ${corners[0].exit.x.toFixed(2)} ${corners[0].exit.y.toFixed(2)}`);
-        commands.push('Z');
-
-        return commands.join(' ');
-    };
-
-    const buildFogBoundaryPath = (scene, cellSet, phaseOffset = 0) => {
-        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return '';
-
-        return buildFogBoundaryLoops(cellSet)
-            .map((loop) => buildRoundedFogLoopPath(scene, loop, phaseOffset))
-            .filter(Boolean)
-            .join(' ');
-    };
-
-    const buildFogTextureMaskUrl = (path, width, height) => {
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><path d="${path}" fill="white" fill-rule="evenodd"/></svg>`;
-        return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-    };
-
-    const buildFogEdgeMarkup = (scene, cellSet) => {
-        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return '';
-
-        const width = Math.max(1, worldSize.width || DEFAULT_WORLD_SIZE.width);
-        const height = Math.max(1, worldSize.height || DEFAULT_WORLD_SIZE.height);
-
-        const pathA = buildFogBoundaryPath(scene, cellSet, 0);
-
-        if (!pathA) return '';
-
-        const textureMaskUrl = buildFogTextureMaskUrl(pathA, width, height);
-
-        return `
-            <div class="vtt-fog-texture-clip"
-                data-world-left="0"
-                data-world-top="0"
-                data-world-width="${escapeHtml(String(width))}"
-                data-world-height="${escapeHtml(String(height))}"
-                style="--vtt-fog-mask-image:url(${escapeHtml(textureMaskUrl)});">
-                <div class="vtt-fog-texture-plane vtt-fog-texture-plane-a"></div>
-                <div class="vtt-fog-texture-plane vtt-fog-texture-plane-b"></div>
-            </div>
-            <svg class="vtt-fog-edge-svg"
-                data-world-left="0"
-                data-world-top="0"
-                data-world-width="${escapeHtml(String(width))}"
-                data-world-height="${escapeHtml(String(height))}"
-                viewBox="0 0 ${escapeHtml(String(width))} ${escapeHtml(String(height))}"
-                preserveAspectRatio="none"
-                aria-hidden="true">
-                <path class="vtt-fog-edge-path" d="${escapeHtml(pathA)}" fill-rule="evenodd"></path>
-            </svg>
-        `;
-    };
-    const parseFogCellKey = (key) => {
-        const parts = String(key || '').split(',');
-        return {
-            col: Math.round(toNumber(parts[0], 0)),
-            row: Math.round(toNumber(parts[1], 0))
-        };
-    };
-    const getFogEntryCellBounds = (scene, fogEntry) => {
-        if (!scene || !fogEntry) return null;
-        if (fogEntry.col !== undefined || fogEntry.row !== undefined) {
-            const left = Math.round(toNumber(fogEntry.col, 0));
-            const top = Math.round(toNumber(fogEntry.row, 0));
-            const widthCells = Math.max(1, Math.round(toNumber(fogEntry.cols, 1)));
-            const heightCells = Math.max(1, Math.round(toNumber(fogEntry.rows, 1)));
-            return {
-                left,
-                top,
-                right: left + widthCells,
-                bottom: top + heightCells
-            };
-        }
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const left = Math.round((toNumber(fogEntry.x, offsetX) - offsetX) / cellPx);
-        const top = Math.round((toNumber(fogEntry.y, offsetY) - offsetY) / cellPx);
-        const widthCells = Math.max(1, Math.round(Math.max(1, toNumber(fogEntry.w, cellPx)) / cellPx));
-        const heightCells = Math.max(1, Math.round(Math.max(1, toNumber(fogEntry.h, cellPx)) / cellPx));
-        return {
-            left,
-            top,
-            right: left + widthCells,
-            bottom: top + heightCells
-        };
-    };
-    const mutateFogCellSetForMask = (cellSet, scene, mask, add = true) => {
-        if (!(cellSet instanceof Set) || !scene || !mask) return cellSet;
-        const bounds = getFogEntryCellBounds(scene, mask);
-        if (!bounds) return cellSet;
-        for (let row = bounds.top; row < bounds.bottom; row += 1) {
-            for (let col = bounds.left; col < bounds.right; col += 1) {
-                const key = buildFogCellKey(col, row);
-                if (add) cellSet.add(key);
-                else cellSet.delete(key);
-            }
-        }
-        return cellSet;
-    };
-    const collectFogCellSet = (scene, masks = []) => {
-        const cellSet = new Set();
-        if (!scene || !Array.isArray(masks)) return cellSet;
-        masks.forEach((mask) => {
-            mutateFogCellSetForMask(cellSet, scene, mask, true);
-        });
-        return cellSet;
-    };
-    const buildFogCellsFromCellSet = (scene, cellSet) => {
-        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return [];
-        return Array.from(cellSet)
-            .map((key) => parseFogCellKey(key))
-            .sort((left, right) => left.row - right.row || left.col - right.col)
-            .map((cell) => ({
-                id: buildFogCellId(cell.col, cell.row),
-                col: cell.col,
-                row: cell.row
-            }));
-    };
-    const areFogEntriesEquivalent = (left = [], right = []) => {
-        if (!Array.isArray(left) || !Array.isArray(right)) return false;
-        if (left.length !== right.length) return false;
-
-        for (let idx = 0; idx < left.length; idx += 1) {
-            const a = left[idx] || {};
-            const b = right[idx] || {};
-            if (
-                String(a.id || '') !== String(b.id || '')
-                || Math.round(toNumber(a.col, 0)) !== Math.round(toNumber(b.col, 0))
-                || Math.round(toNumber(a.row, 0)) !== Math.round(toNumber(b.row, 0))
-                || Math.round(toNumber(a.cols, 1)) !== Math.round(toNumber(b.cols, 1))
-                || Math.round(toNumber(a.rows, 1)) !== Math.round(toNumber(b.rows, 1))
-            ) {
-                return false;
-            }
-        }
-
-        return true;
-    };
-
     const coerceSceneFogToCellMask = (scene) => {
         if (!scene) return false;
 
@@ -1713,311 +670,8 @@
 
         return mutated;
     };
-    const buildFogRenderRectsFromCellSet = (scene, cellSet) => {
-        if (!scene || !(cellSet instanceof Set) || !cellSet.size) return [];
-        const rows = new Map();
-        cellSet.forEach((key) => {
-            const cell = parseFogCellKey(key);
-            if (!rows.has(cell.row)) rows.set(cell.row, new Set());
-            rows.get(cell.row).add(cell.col);
-        });
-
-        const finalized = [];
-        let openRects = new Map();
-        let previousRow = null;
-        Array.from(rows.keys()).sort((left, right) => left - right).forEach((row) => {
-            const cols = Array.from(rows.get(row) || []).sort((left, right) => left - right);
-            const runs = [];
-            let runStart = null;
-            let runEnd = null;
-            cols.forEach((col) => {
-                if (runStart === null) {
-                    runStart = col;
-                    runEnd = col + 1;
-                    return;
-                }
-                if (col === runEnd) {
-                    runEnd = col + 1;
-                    return;
-                }
-                runs.push({ left: runStart, right: runEnd });
-                runStart = col;
-                runEnd = col + 1;
-            });
-            if (runStart !== null && runEnd !== null) runs.push({ left: runStart, right: runEnd });
-
-            const canContinue = previousRow !== null && row === previousRow + 1;
-            const nextOpenRects = new Map();
-            runs.forEach((run) => {
-                const runKey = `${run.left}:${run.right}`;
-                if (canContinue && openRects.has(runKey)) {
-                    const rect = openRects.get(runKey);
-                    rect.bottom = row + 1;
-                    nextOpenRects.set(runKey, rect);
-                    openRects.delete(runKey);
-                    return;
-                }
-                nextOpenRects.set(runKey, {
-                    left: run.left,
-                    top: row,
-                    right: run.right,
-                    bottom: row + 1
-                });
-            });
-
-            openRects.forEach((rect) => finalized.push(rect));
-            openRects = nextOpenRects;
-            previousRow = row;
-        });
-        openRects.forEach((rect) => finalized.push(rect));
-
-        return finalized.map((rect) => ({
-            id: `fog_rect_${rect.left}_${rect.top}_${rect.right}_${rect.bottom}`,
-            col: rect.left,
-            row: rect.top,
-            cols: Math.max(1, rect.right - rect.left),
-            rows: Math.max(1, rect.bottom - rect.top)
-        }));
-    };
-    const buildFogRenderRects = (scene, masks = []) => buildFogRenderRectsFromCellSet(scene, collectFogCellSet(scene, masks));
-    const applyFogMaskMutation = (scene, mask, mode = 'add') => {
-        if (!scene || !mask) return Array.isArray(scene && scene.fog) ? scene.fog.slice() : [];
-        const cellSet = collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
-        mutateFogCellSetForMask(cellSet, scene, mask, mode !== 'remove');
-        return buildFogCellsFromCellSet(scene, cellSet);
-    };
-    const findFogMaskIndexAtWorldPoint = (scene, worldPoint) => {
-        if (!scene || !worldPoint || !Array.isArray(scene.fog)) return -1;
-        const cell = getFogCellAtWorldPoint(scene, worldPoint);
-        for (let idx = scene.fog.length - 1; idx >= 0; idx -= 1) {
-            const bounds = getFogEntryCellBounds(scene, scene.fog[idx]);
-            if (!bounds) continue;
-            if (cell.col >= bounds.left && cell.col < bounds.right && cell.row >= bounds.top && cell.row < bounds.bottom) return idx;
-        }
-        return -1;
-    };
-    const getFogEntryWorldRect = (scene, fogEntry) => {
-        if (!scene || !fogEntry) return null;
-        const bounds = getFogEntryCellBounds(scene, fogEntry);
-        if (!bounds) return null;
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        return {
-            x: Math.round(offsetX + bounds.left * cellPx),
-            y: Math.round(offsetY + bounds.top * cellPx),
-            w: Math.max(1, Math.round((bounds.right - bounds.left) * cellPx)),
-            h: Math.max(1, Math.round((bounds.bottom - bounds.top) * cellPx))
-        };
-    };
-    const buildFogMaskMarkup = (scene, mask, className = '') => {
-        const rect = getFogEntryWorldRect(scene, mask);
-        if (!rect) return '';
-        const isPreview = String(className || '').includes('preview');
-        const overdraw = isPreview ? 0 : FOG_EDGE_OVERDRAW_PX;
-        return `
-            <div class="vtt-fog-mask${className ? ` ${className}` : ''}"
-                data-world-left="${escapeHtml(String(rect.x - overdraw))}"
-                data-world-top="${escapeHtml(String(rect.y - overdraw))}"
-                data-world-width="${escapeHtml(String(rect.w + overdraw * 2))}"
-                data-world-height="${escapeHtml(String(rect.h + overdraw * 2))}"></div>
-        `;
-    };
-    const addFogRevealBurst = (scene, mask) => {
-        const rect = getFogEntryWorldRect(scene, mask);
-        if (!rect) return;
-        fogRevealBursts.push({
-            id: buildId('fogburst'),
-            x: rect.x,
-            y: rect.y,
-            w: rect.w,
-            h: rect.h,
-            expiresAt: Date.now() + FOG_REVEAL_SHIMMER_MS
-        });
-        fogRevealBursts = fogRevealBursts.slice(-12);
-        scheduleVisualEffectRender(FOG_REVEAL_SHIMMER_MS + 40);
-    };
-    const buildFogRevealShimmerMarkup = (now = Date.now()) => {
-        if (!fogRevealBursts.length) return '';
-        return fogRevealBursts
-            .filter((burst) => toNumber(burst && burst.expiresAt, 0) > now)
-            .map((burst) => `
-                <div class="vtt-fog-reveal-shimmer"
-                    data-world-left="${escapeHtml(String(burst.x))}"
-                    data-world-top="${escapeHtml(String(burst.y))}"
-                    data-world-width="${escapeHtml(String(burst.w))}"
-                    data-world-height="${escapeHtml(String(burst.h))}"></div>
-            `).join('');
-    };
-    const getEvidenceNoteCategoryConfig = (category) => {
-        const key = String(category || '').trim().toLowerCase();
-        return EVIDENCE_NOTE_CATEGORY_META[key] || EVIDENCE_NOTE_CATEGORY_META[DEFAULT_EVIDENCE_NOTE_CATEGORY];
-    };
-    const normalizeEvidenceNoteCategory = (value, fallback = DEFAULT_EVIDENCE_NOTE_CATEGORY) => {
-        const key = String(value || '').trim().toLowerCase();
-        return EVIDENCE_NOTE_CATEGORY_META[key] ? key : fallback;
-    };
-    const normalizeEvidenceNoteShape = (value, fallback = EVIDENCE_NOTE_SHAPE_ZONE) => {
-        const clean = String(value || '').trim().toLowerCase();
-        return EVIDENCE_NOTE_SHAPE_OPTIONS.includes(clean) ? clean : fallback;
-    };
-    const isEvidenceNotePin = (note) => normalizeEvidenceNoteShape(note && note.shape) === EVIDENCE_NOTE_SHAPE_PIN;
-    const getEvidenceNoteShapeLabel = (note) => isEvidenceNotePin(note) ? 'Pin' : 'Zone';
-    const getEvidenceNoteCategoryLabel = (category) => getEvidenceNoteCategoryConfig(category).label;
-    const getEvidenceNoteCategoryShortLabel = (category) => getEvidenceNoteCategoryConfig(category).shortLabel;
-    const getDefaultEvidenceNoteTitle = (category = DEFAULT_EVIDENCE_NOTE_CATEGORY) => getEvidenceNoteCategoryConfig(category).defaultTitle || 'Zone';
-    const getDefaultEvidenceNoteHighlightColor = (category = DEFAULT_EVIDENCE_NOTE_CATEGORY) => getEvidenceNoteCategoryConfig(category).color || DEFAULT_EVIDENCE_NOTE_COLOR;
-    const normalizeEvidenceNoteTitle = (value, fallback = getDefaultEvidenceNoteTitle()) => {
-        const clean = String(value || '').trim().slice(0, 160);
-        return clean || fallback;
-    };
-    const EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX = 26;
-    const EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX = 220;
-    const EVIDENCE_NOTE_CHIP_ESTIMATED_CHAR_WIDTH_PX = 6.8;
-    const EVIDENCE_NOTE_CHIP_ESTIMATED_PADDING_PX = 22;
-    const normalizeEvidenceNoteBody = (value) => String(value || '').trim().slice(0, 6000);
-    const getEvidenceNoteHighlightColor = (note) => {
-        const category = normalizeEvidenceNoteCategory(note && note.category);
-        return getDefaultEvidenceNoteHighlightColor(category);
-    };
-    const getEvidenceNoteHighlightRgb = (note) => {
-        return getHexColorRgbString(getEvidenceNoteHighlightColor(note), DEFAULT_EVIDENCE_NOTE_COLOR);
-    };
-    const getEvidenceNoteDisplayTitle = (note) => {
-        const category = normalizeEvidenceNoteCategory(note && note.category);
-        return normalizeEvidenceNoteTitle(note && note.title, getDefaultEvidenceNoteTitle(category));
-    };
-    const getSceneEvidenceNotes = (scene) => (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes : []);
-    const buildEvidenceNoteFromCellBounds = (scene, bounds, source = {}) => {
-        if (!scene || !bounds) return null;
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const category = normalizeEvidenceNoteCategory(source.category);
-        const shape = normalizeEvidenceNoteShape(source.shape, EVIDENCE_NOTE_SHAPE_ZONE);
-        const defaultTitle = getDefaultEvidenceNoteTitle(category);
-        const isPin = shape === EVIDENCE_NOTE_SHAPE_PIN;
-        const left = isPin ? normalizeGridCoordinate(bounds.left, 0) : Math.round(toNumber(bounds.left, 0));
-        const top = isPin ? normalizeGridCoordinate(bounds.top, 0) : Math.round(toNumber(bounds.top, 0));
-        const widthCells = shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, Math.round(toNumber(bounds.widthCells, 1)));
-        const heightCells = shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, Math.round(toNumber(bounds.heightCells, 1)));
-        return {
-            id: String(source.id || buildId('evidence')).trim() || buildId('evidence'),
-            shape,
-            category,
-            title: normalizeEvidenceNoteTitle(source.title, defaultTitle),
-            body: normalizeEvidenceNoteBody(source.body),
-            hidden: source.hidden !== undefined ? !!source.hidden : !(source.visibleToPlayers !== undefined ? !!source.visibleToPlayers : true),
-            highlightColor: getDefaultEvidenceNoteHighlightColor(category),
-            triggers: normalizeProximityTriggers(source.triggers),
-            proximityPromptStates: normalizeProximityPromptStates(source.proximityPromptStates),
-            x: normalizeWorldCoordinate(offsetX + left * cellPx),
-            y: normalizeWorldCoordinate(offsetY + top * cellPx),
-            w: Math.max(1, Math.round(widthCells * cellPx)),
-            h: Math.max(1, Math.round(heightCells * cellPx))
-        };
-    };
-    const buildEvidenceNoteFromWorldPoints = (scene, startWorldPoint, endWorldPoint, id = buildId('evidence'), source = {}) => {
-        if (!scene || !startWorldPoint || !endWorldPoint) return null;
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const startCell = getFogCellAtWorldPoint(scene, startWorldPoint);
-        const endCell = getFogCellAtWorldPoint(scene, endWorldPoint);
-        const startCol = startCell.col;
-        const startRow = startCell.row;
-        const endCol = endCell.col;
-        const endRow = endCell.row;
-        const hasDraggedArea = Math.abs(endCol - startCol) > 0 || Math.abs(endRow - startRow) > 0;
-        const shape = hasDraggedArea
-            ? EVIDENCE_NOTE_SHAPE_ZONE
-            : normalizeEvidenceNoteShape(source.shape, EVIDENCE_NOTE_SHAPE_PIN);
-        if (shape === EVIDENCE_NOTE_SHAPE_PIN) {
-            return buildEvidenceNoteFromCellBounds(scene, {
-                left: (toNumber(endWorldPoint.x, offsetX) - offsetX) / cellPx,
-                top: (toNumber(endWorldPoint.y, offsetY) - offsetY) / cellPx,
-                widthCells: 1,
-                heightCells: 1
-            }, {
-                ...source,
-                shape,
-                id
-            });
-        }
-        const start = snapWorldPointToFogCorner(scene, startWorldPoint);
-        const end = snapWorldPointToFogCorner(scene, endWorldPoint);
-        const snappedStartCol = Math.round((start.x - offsetX) / cellPx);
-        const snappedStartRow = Math.round((start.y - offsetY) / cellPx);
-        const snappedEndCol = Math.round((end.x - offsetX) / cellPx);
-        const snappedEndRow = Math.round((end.y - offsetY) / cellPx);
-        return buildEvidenceNoteFromCellBounds(scene, {
-            left: Math.min(snappedStartCol, snappedEndCol),
-            top: Math.min(snappedStartRow, snappedEndRow),
-            widthCells: Math.max(1, Math.abs(snappedEndCol - snappedStartCol)),
-            heightCells: Math.max(1, Math.abs(snappedEndRow - snappedStartRow))
-        }, {
-            ...source,
-            shape,
-            id
-        });
-    };
-    const getEvidenceNoteCellBounds = (scene, note) => {
-        if (!scene || !note) return null;
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        const rawLeft = (toNumber(note.x, offsetX) - offsetX) / cellPx;
-        const rawTop = (toNumber(note.y, offsetY) - offsetY) / cellPx;
-        const left = isEvidenceNotePin(note) ? Math.floor(rawLeft) : Math.round(rawLeft);
-        const top = isEvidenceNotePin(note) ? Math.floor(rawTop) : Math.round(rawTop);
-        const widthCells = Math.max(1, Math.round(Math.max(1, toNumber(note.w, cellPx)) / cellPx));
-        const heightCells = Math.max(1, Math.round(Math.max(1, toNumber(note.h, cellPx)) / cellPx));
-        return {
-            left,
-            top,
-            widthCells,
-            heightCells,
-            right: left + widthCells,
-            bottom: top + heightCells
-        };
-    };
-    const getEvidenceNoteCellPoint = (scene, note) => {
-        if (!scene || !note) return null;
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene && scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene && scene.grid && scene.grid.offsetY, 0);
-        return {
-            x: normalizeGridCoordinate((toNumber(note.x, offsetX) - offsetX) / cellPx),
-            y: normalizeGridCoordinate((toNumber(note.y, offsetY) - offsetY) / cellPx)
-        };
-    };
-    const isEvidenceNoteCoveredByFog = (scene, note, fogCellSet = null) => {
-        if (!scene || !note) return false;
-        const cellSet = fogCellSet instanceof Set ? fogCellSet : collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
-        if (!cellSet.size) return false;
-        const bounds = getEvidenceNoteCellBounds(scene, note);
-        if (!bounds) return false;
-        for (let row = bounds.top; row < bounds.bottom; row += 1) {
-            for (let col = bounds.left; col < bounds.right; col += 1) {
-                if (!cellSet.has(buildFogCellKey(col, row))) return false;
-            }
-        }
-        return true;
-    };
-    const isEvidenceNoteVisibleToRole = (note, scene, role = localRole, fogCellSet = null) => {
-        if (!note) return false;
-        if (role === 'dm') return true;
-        if (note.hidden) return false;
-        return !isEvidenceNoteCoveredByFog(scene, note, fogCellSet);
-    };
-    const getVisibleEvidenceNotesForRole = (scene, role = localRole) => {
-        const notes = getSceneEvidenceNotes(scene);
-        if (role === 'dm') return notes;
-        const fogCellSet = collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
-        return notes.filter((note) => isEvidenceNoteVisibleToRole(note, scene, role, fogCellSet));
-    };
     const getSceneClocks = (scene) => (Array.isArray(scene && scene.clocks) ? scene.clocks : []);
-    const getVisibleSceneClocksForRole = (scene, role = localRole) => {
+    const getVisibleSceneClocksForRole = (scene, role = sessionState.role) => {
         const clocks = getSceneClocks(scene);
         if (role === 'dm') return clocks;
         return clocks.filter((clock) => !clock.hidden);
@@ -2041,28 +695,12 @@
         });
         return true;
     };
-    const getEvidenceNoteById = (noteId, state = vttState, role = localRole) => {
+    const getEvidenceNoteById = (noteId, state = sessionState.snapshot, role = sessionState.role) => {
         const targetId = String(noteId || '').trim();
         if (!targetId) return null;
         const scene = getActiveScene(state);
         if (!scene) return null;
         return getVisibleEvidenceNotesForRole(scene, role).find((note) => String(note && note.id || '').trim() === targetId) || null;
-    };
-    const buildEvidenceNoteExcerpt = (note, maxLength = 96) => {
-        const body = String(note && note.body || '').replace(/\s+/g, ' ').trim();
-        if (!body) return '';
-        if (body.length <= maxLength) return body;
-        return `${body.slice(0, Math.max(1, maxLength - 1)).trimEnd()}...`;
-    };
-    const buildEvidenceNoteAreaLabel = (note, scene) => {
-        const bounds = getEvidenceNoteCellBounds(scene, note);
-        if (isEvidenceNotePin(note)) {
-            const point = getEvidenceNoteCellPoint(scene, note);
-            if (!point) return 'Pin';
-            return `Pin ${point.x}, ${point.y}`;
-        }
-        if (!bounds) return '1 x 1 sq';
-        return `${bounds.widthCells} x ${bounds.heightCells} sq`;
     };
     const applyEvidenceNoteChipPresentation = (noteEl) => {
         if (!(noteEl instanceof HTMLElement)) return;
@@ -2072,50 +710,30 @@
             noteEl.dataset.noteTitle,
             getDefaultEvidenceNoteTitle(noteEl.dataset.noteCategory)
         );
-        const noteWidthPx = Math.max(1, Math.round(noteEl.offsetWidth || toNumber(noteEl.dataset.worldWidth, 1) * localView.zoom));
-        const availableWidthPx = clamp(noteWidthPx - 14, EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX, EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX);
+        const noteWidthPx = Math.max(1, Math.round(noteEl.offsetWidth || toNumber(noteEl.dataset.worldWidth, 1) * stageState.view.local.zoom));
+        const availableWidthPx = clamp(noteWidthPx - 14, C.EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX, C.EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX);
         const estimatedTitleWidthPx = Math.max(
-            EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX,
-            Math.round(fullTitle.length * EVIDENCE_NOTE_CHIP_ESTIMATED_CHAR_WIDTH_PX + EVIDENCE_NOTE_CHIP_ESTIMATED_PADDING_PX)
+            C.EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX,
+            Math.round(fullTitle.length * C.EVIDENCE_NOTE_CHIP_ESTIMATED_CHAR_WIDTH_PX + C.EVIDENCE_NOTE_CHIP_ESTIMATED_PADDING_PX)
         );
         const collapsed = estimatedTitleWidthPx > availableWidthPx;
         noteEl.classList.toggle('is-icon-only', collapsed);
-        noteEl.style.setProperty('--vtt-note-chip-max-width', `${collapsed ? EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX : availableWidthPx}px`);
+        noteEl.style.setProperty('--vtt-note-chip-max-width', `${collapsed ? C.EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX : availableWidthPx}px`);
         titleEl.textContent = fullTitle;
         titleEl.dataset.noteCategoryShort = getEvidenceNoteCategoryShortLabel(noteEl.dataset.noteCategory);
         titleEl.setAttribute('aria-label', fullTitle);
         titleEl.title = fullTitle;
     };
-    const clearPendingTouchContext = () => {
-        if (!pendingTouchContextState) return null;
-        if (pendingTouchContextState.timer) {
-            window.clearTimeout(pendingTouchContextState.timer);
-        }
-        const snapshot = pendingTouchContextState;
-        pendingTouchContextState = null;
-        return snapshot;
-    };
-    const canUseTouchContextActions = (event) => {
-        if (!event || event.button !== 0 || event.isPrimary === false) return false;
-        const pointerType = String(event.pointerType || '').toLowerCase();
-        if (pointerType === 'touch') return true;
-        if (pointerType !== 'pen') return false;
-        const maxTouchPoints = Number.isFinite(Number(window.navigator && window.navigator.maxTouchPoints))
-            ? Number(window.navigator.maxTouchPoints)
-            : 0;
-        const hasCoarsePointer = typeof window.matchMedia === 'function'
-            && (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(any-pointer: coarse)').matches);
-        return hasCoarsePointer || maxTouchPoints > 0;
-    };
+    const clearPendingTouchContext = (...args) => requireStageInput().clearPendingTouchContext(...args);
     const activateTokenSelection = (tokenId) => {
         const token = getTokenById(tokenId);
         if (!token) return null;
-        selectedTokenId = token.id;
-        selectedTemplateId = '';
-        selectedEvidenceNoteId = '';
-        visionConeRotateState = null;
+        stageState.selection.tokenId = token.id;
+        stageState.selection.templateId = '';
+        stageState.selection.evidenceNoteId = '';
+        stageState.placement.visionConeRotate = null;
         const linkedEntry = findEntryForToken(token.id);
-        selectedEntryId = linkedEntry ? linkedEntry.id : '';
+        stageState.selection.entryId = linkedEntry ? linkedEntry.id : '';
         return token;
     };
     const isLocalPlayerOwnToken = (token) => {
@@ -2127,191 +745,41 @@
         return false;
     };
     const clearTokenPortraitPreview = ({ render = false } = {}) => {
-        if (previewTokenTimer) {
-            window.clearTimeout(previewTokenTimer);
-            previewTokenTimer = 0;
+        if (stageState.preview.timerId) {
+            window.clearTimeout(stageState.preview.timerId);
+            stageState.preview.timerId = 0;
         }
-        if (!previewTokenId) return false;
-        previewTokenId = '';
+        if (!stageState.preview.tokenId) return false;
+        stageState.preview.tokenId = '';
         if (render) renderStage();
         return true;
     };
-    const showTokenPortraitPreview = (tokenId, durationMs = TOKEN_PORTRAIT_PREVIEW_MS) => {
+    const showTokenPortraitPreview = (tokenId, durationMs = C.TOKEN_PORTRAIT_PREVIEW_MS) => {
         const token = getTokenById(tokenId);
         if (!canPreviewTokenPortrait(token)) {
             clearTokenPortraitPreview();
             return false;
         }
-        if (previewTokenTimer) window.clearTimeout(previewTokenTimer);
-        previewTokenId = token.id;
-        previewTokenTimer = window.setTimeout(() => {
-            if (previewTokenId !== token.id) return;
-            previewTokenTimer = 0;
-            previewTokenId = '';
+        if (stageState.preview.timerId) window.clearTimeout(stageState.preview.timerId);
+        stageState.preview.tokenId = token.id;
+        stageState.preview.timerId = window.setTimeout(() => {
+            if (stageState.preview.tokenId !== token.id) return;
+            stageState.preview.timerId = 0;
+            stageState.preview.tokenId = '';
             renderStage();
-        }, Math.max(1, Math.round(toNumber(durationMs, TOKEN_PORTRAIT_PREVIEW_MS))));
+        }, Math.max(1, Math.round(toNumber(durationMs, C.TOKEN_PORTRAIT_PREVIEW_MS))));
         return true;
     };
     const activateEvidenceNoteSelection = (noteId) => {
         const note = getEvidenceNoteById(noteId);
         if (!note) return null;
-        selectedEvidenceNoteId = note.id;
-        selectedTokenId = '';
-        selectedEntryId = '';
-        selectedTemplateId = '';
-        previewTokenId = '';
-        visionConeRotateState = null;
+        stageState.selection.evidenceNoteId = note.id;
+        stageState.selection.tokenId = '';
+        stageState.selection.entryId = '';
+        stageState.selection.templateId = '';
+        stageState.preview.tokenId = '';
+        stageState.placement.visionConeRotate = null;
         return note;
-    };
-    const beginTouchContextInteraction = (event, scene, worldPoint) => {
-        if (!canUseTouchContextActions(event)) return false;
-        const pointerType = String(event && event.pointerType || '').toLowerCase();
-        if (localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
-        clearPendingTouchContext();
-        const targetEl = getEventTargetElement(event);
-        const tokenEl = targetEl ? targetEl.closest('.vtt-token') : null;
-        if (tokenEl) {
-            const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
-            if (!token) return false;
-            const canMoveToken = canRoleMoveToken(token, localRole);
-            const state = {
-                pointerId: event.pointerId,
-                pointerType,
-                sceneId: scene.id,
-                targetKind: 'token',
-                tokenId: token.id,
-                clientX: Math.round(event.clientX),
-                clientY: Math.round(event.clientY),
-                anchorX: (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x,
-                anchorY: (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y,
-                canMoveToken,
-                originX: localView.x,
-                originY: localView.y,
-                triggered: false,
-                timer: 0
-            };
-            state.timer = window.setTimeout(() => {
-                if (pendingTouchContextState !== state) return;
-                state.triggered = true;
-                previewTokenId = '';
-                activateTokenSelection(state.tokenId);
-                openStageContextMenu(state.clientX, state.clientY, {
-                    tokenId: state.tokenId,
-                    worldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
-                    source: 'touch'
-                });
-                render();
-            }, TOUCH_CONTEXT_HOLD_MS);
-            pendingTouchContextState = state;
-            activateTokenSelection(token.id);
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderToolsMenu();
-            renderStage();
-            return true;
-        }
-        const state = {
-            pointerId: event.pointerId,
-            pointerType,
-            sceneId: scene.id,
-            targetKind: 'stage',
-            clientX: Math.round(event.clientX),
-            clientY: Math.round(event.clientY),
-            originX: localView.x,
-            originY: localView.y,
-            worldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
-            triggered: false,
-            timer: 0
-        };
-        state.timer = window.setTimeout(() => {
-            if (pendingTouchContextState !== state) return;
-            state.triggered = true;
-            previewTokenId = '';
-            openStageContextMenu(state.clientX, state.clientY, {
-                worldPoint: state.worldPoint,
-                source: 'touch'
-            });
-            render();
-        }, TOUCH_CONTEXT_HOLD_MS);
-        pendingTouchContextState = state;
-        return true;
-    };
-    const getVisionConeRangeCells = (token) => {
-        const baseRange = Math.max(0, Math.round(toNumber(token && token.vision && token.vision.baseRangeCells, 6)));
-        const passivePerception = getVisionPassivePerception(token);
-        return Math.max(0, baseRange + Math.max(0, Math.floor((passivePerception - 10) / 2)));
-    };
-    const getVisionConeArcDeg = (token) => clamp(toNumber(token && token.vision && token.vision.arcDeg, 90), 1, 360);
-    const getTokenVisionFacingDeg = (token) => normalizeAngleDeg(token && token.vision && token.vision.facingDeg);
-    const getVisionConeGeometry = (token, scene, sceneSize = getWorldSizeForScene(scene)) => {
-        if (!token || !scene || !token.vision || !token.vision.enabled) return null;
-        const side = String(token.side || '').trim().toLowerCase();
-        if (side !== 'enemy' && side !== 'neutral') return null;
-        const rangeCells = getVisionConeRangeCells(token);
-        if (!rangeCells) return null;
-        const origin = getTemplateWorldPoint(scene, getTokenCenterInCells(token));
-        const radiusPx = rangeCells * getSceneCellPx(scene);
-        return {
-            left: 0,
-            top: 0,
-            width: Math.max(1, Math.round(toNumber(sceneSize && sceneSize.width, DEFAULT_WORLD_SIZE.width))),
-            height: Math.max(1, Math.round(toNumber(sceneSize && sceneSize.height, DEFAULT_WORLD_SIZE.height))),
-            centerX: origin.x,
-            centerY: origin.y,
-            radiusPx,
-            facingDeg: getTokenVisionFacingDeg(token),
-            arcDeg: getVisionConeArcDeg(token)
-        };
-    };
-    const isCellPointInsideVisionCone = (point, token) => {
-        if (!point || !token || !token.vision || !token.vision.enabled) return false;
-        const origin = getTokenCenterInCells(token);
-        const dx = toNumber(point.x, 0) - origin.x;
-        const dy = toNumber(point.y, 0) - origin.y;
-        const distance = Math.hypot(dx, dy);
-        const rangeCells = getVisionConeRangeCells(token);
-        if (distance > rangeCells || !rangeCells) return false;
-        const angle = normalizeAngleDeg(Math.atan2(dy, dx) * 180 / Math.PI);
-        const facing = normalizeAngleDeg(token.vision.facingDeg);
-        const delta = Math.abs((((angle - facing) + 540) % 360) - 180);
-        return delta <= getVisionConeArcDeg(token) / 2;
-    };
-    const getStealthVisionTargetSummary = (token, scene, state = vttState) => {
-        const summary = { detectedIds: [], unseenIds: [] };
-        if (!token || !scene || !state || !Array.isArray(scene.tokens)) return summary;
-        const enemyPassivePerception = getVisionPassivePerception(token);
-        scene.tokens.forEach((candidate) => {
-            if (!candidate || candidate.id === token.id) return;
-            const side = String(candidate.side || '').trim().toLowerCase();
-            if (side !== 'player' && side !== 'ally') return;
-            const intersectsCone = getTokenFootprintPoints(candidate).some((point) => isCellPointInsideVisionCone(point, token));
-            if (!intersectsCone) return;
-            const stealthRoll = getTokenStealthRoll(candidate);
-            if (stealthRoll !== null && stealthRoll > enemyPassivePerception) {
-                summary.unseenIds.push(candidate.id);
-                return;
-            }
-            summary.detectedIds.push(candidate.id);
-        });
-        return summary;
-    };
-    const buildStealthStatusMap = (scene, state = vttState) => {
-        const statuses = new Map();
-        if (!scene || !scene.stealthMode || !Array.isArray(scene.tokens)) return statuses;
-        scene.tokens.forEach((token) => {
-            const side = String(token && token.side || '').trim().toLowerCase();
-            if (side !== 'enemy' && side !== 'neutral') return;
-            if (isTokenHiddenForRole(token, scene, 'player')) return;
-            const summary = getStealthVisionTargetSummary(token, scene, state);
-            summary.unseenIds.forEach((tokenId) => {
-                if (!statuses.has(tokenId)) statuses.set(tokenId, STEALTH_STATUS_UNSEEN);
-            });
-            summary.detectedIds.forEach((tokenId) => {
-                statuses.set(tokenId, STEALTH_STATUS_DETECTED);
-            });
-        });
-        return statuses;
     };
     const getStore = () => (window.RTF_STORE && typeof window.RTF_STORE.getVTTState === 'function' ? window.RTF_STORE : null);
     const getActiveCaseId = () => {
@@ -2327,25 +795,39 @@
         }
         return `vtt:case:${String(caseId || 'case_primary').trim() || 'case_primary'}`;
     };
-    const getUIPrefsStorageKey = () => `${UI_PREFS_STORAGE_PREFIX}${getActiveCaseId()}`;
-    const getProcessedInitStorageKey = () => `${PROCESSED_INIT_STORAGE_PREFIX}${getActiveCaseId()}`;
+    const getUIPrefsStorageKey = () => `${C.UI_PREFS_STORAGE_PREFIX}${getActiveCaseId()}`;
+    const getProcessedInitStorageKey = () => `${C.PROCESSED_INIT_STORAGE_PREFIX}${getActiveCaseId()}`;
     const getRolePrefsStorageKey = () => {
         const store = getStore();
         return store && typeof store.getVTTLocalPrefsStorageKey === 'function'
             ? String(store.getVTTLocalPrefsStorageKey() || '').trim()
             : '';
     };
-    const getVTTCollabStatus = () => (
-        vttCollabSession && typeof vttCollabSession.getStatus === 'function'
-            ? vttCollabSession.getStatus()
+    const getVTTCollabTransport = () => (
+        resources.sessionController && typeof resources.sessionController.getTransport === 'function'
+            ? resources.sessionController.getTransport()
             : null
     );
-    const isVTTCollabReady = () => {
-        if (!(vttCollabSession && typeof vttCollabSession.isActive === 'function' && vttCollabSession.isActive())) return false;
-        const status = getVTTCollabStatus();
-        return !!(status && status.connected && status.transportConnected);
-    };
-    const requiresLiveVTTRoom = () => hasLiveVTTConfig();
+    const getVTTCollabStatus = () => (
+        resources.sessionController && typeof resources.sessionController.getStatus === 'function'
+            ? resources.sessionController.getStatus()
+            : null
+    );
+    const isVTTCollabReady = () => !!(
+        resources.sessionController
+        && typeof resources.sessionController.isReady === 'function'
+        && resources.sessionController.isReady()
+    );
+    const isVTTCollabInitializing = () => !!(
+        resources.sessionController
+        && typeof resources.sessionController.isInitializing === 'function'
+        && resources.sessionController.isInitializing()
+    );
+    const requiresLiveVTTRoom = () => !!(
+        resources.sessionController
+        && typeof resources.sessionController.hasLiveConfig === 'function'
+        && resources.sessionController.hasLiveConfig()
+    );
     const canMutateLiveVTTState = (reason = 'vtt-mutation') => {
         if (!requiresLiveVTTRoom() || isVTTCollabReady()) return true;
         const status = getVTTCollabStatus();
@@ -2353,7 +835,7 @@
             ? status.detail
             : 'Live VTT room is not ready. Changes were not applied locally.';
         setVTTCollabStatus({
-            state: vttCollabInitPromise ? 'connecting' : 'degraded',
+            state: isVTTCollabInitializing() ? 'connecting' : 'degraded',
             detail,
             peerCount: status && Number.isFinite(status.peerCount) ? status.peerCount : 0
         });
@@ -2361,7 +843,7 @@
         return false;
     };
     const canDeleteLiveVTTState = (reason = 'vtt-delete') => {
-        if (initialVTTLoadPending) {
+        if (sessionState.initialLoadPending) {
             setVTTCollabStatus({
                 state: 'connecting',
                 detail: 'VTT is still loading. Delete actions are disabled until the live room is ready.',
@@ -2387,38 +869,38 @@
         if (clean === 'spectator') return 'spectator';
         return 'player';
     };
-    const isDM = () => localRole === 'dm';
-    const isPlayer = () => localRole === 'player';
-    const isSpectator = () => localRole === 'spectator';
+    const isDM = () => sessionState.role === 'dm';
+    const isPlayer = () => sessionState.role === 'player';
+    const isSpectator = () => sessionState.role === 'spectator';
     const canUseSharedPlayerTools = () => !isSpectator();
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
-        npcSearchOpen = false;
-        npcSearchState = null;
-        if (clearQuery) npcSearchQuery = '';
+        uiRuntime.npcSearch.open = false;
+        uiRuntime.npcSearch.state = null;
+        if (clearQuery) uiRuntime.npcSearch.query = '';
     };
     const normalizeToolMode = (value) => {
         const token = String(value || '').trim().toLowerCase();
-        if (token === TOOL_MODE_PING || token === TOOL_MODE_RULER || token === TOOL_MODE_CIRCLE || token === TOOL_MODE_CONE || token === TOOL_MODE_NOTE || token === TOOL_MODE_FOG || token === TOOL_MODE_FOG_REMOVE) return token;
-        return TOOL_MODE_NAVIGATE;
+        if (token === C.TOOL_MODE_PING || token === C.TOOL_MODE_RULER || token === C.TOOL_MODE_CIRCLE || token === C.TOOL_MODE_CONE || token === C.TOOL_MODE_NOTE || token === C.TOOL_MODE_FOG || token === C.TOOL_MODE_FOG_REMOVE) return token;
+        return C.TOOL_MODE_NAVIGATE;
     };
-    const getToolModeLabel = (mode = localToolState.mode) => {
+    const getToolModeLabel = (mode = stageState.tool.current.mode) => {
         const clean = normalizeToolMode(mode);
-        if (clean === TOOL_MODE_PING) return 'Ping';
-        if (clean === TOOL_MODE_RULER) return 'Ruler';
-        if (clean === TOOL_MODE_CIRCLE) return 'Circle';
-        if (clean === TOOL_MODE_CONE) return 'Cone';
-        if (clean === TOOL_MODE_NOTE) return 'Pin / Zone';
-        if (clean === TOOL_MODE_FOG) return 'Fog';
-        if (clean === TOOL_MODE_FOG_REMOVE) return 'Unfog';
+        if (clean === C.TOOL_MODE_PING) return 'Ping';
+        if (clean === C.TOOL_MODE_RULER) return 'Ruler';
+        if (clean === C.TOOL_MODE_CIRCLE) return 'Circle';
+        if (clean === C.TOOL_MODE_CONE) return 'Cone';
+        if (clean === C.TOOL_MODE_NOTE) return 'Pin / Zone';
+        if (clean === C.TOOL_MODE_FOG) return 'Fog';
+        if (clean === C.TOOL_MODE_FOG_REMOVE) return 'Unfog';
         return 'Navigate';
     };
-    const normalizeToolSizeCells = (value, fallback = DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
+    const normalizeToolSizeCells = (value, fallback = C.DEFAULT_TOOL_SIZE_CELLS) => clamp(Math.round(toNumber(value, fallback)), 1, 99);
     const normalizeAngleDeg = (value) => {
         const parsed = Math.round(toNumber(value, 0));
         const result = parsed % 360;
         return result < 0 ? result + 360 : result;
     };
-    const getSceneCellPx = (scene) => Math.max(1, toNumber(scene && scene.grid && scene.grid.cellPx, DEFAULT_VTT_CELL_PX));
+    const getSceneCellPx = (scene) => Math.max(1, toNumber(scene && scene.grid && scene.grid.cellPx, C.DEFAULT_VTT_CELL_PX));
     const snapTemplateCenterCellCoordinate = (value) => Math.max(0.5, Math.round(toNumber(value, 0.5) - 0.5) + 0.5);
     const snapTemplateIntersectionCellCoordinate = (value) => Math.max(0, Math.round(toNumber(value, 0)));
     const snapWorldPointToTemplateAnchor = (scene, worldPoint) => {
@@ -2445,293 +927,10 @@
             y: centerAnchor.y
         };
     };
-    const getTemplateById = (templateId, state = vttState) => {
+    const getTemplateById = (templateId, state = sessionState.snapshot) => {
         const scene = getActiveScene(state);
         if (!scene || !Array.isArray(scene.templates)) return null;
         return scene.templates.find((template) => String(template && template.id || '').trim() === String(templateId || '').trim()) || null;
-    };
-    const buildRemoteTokenTweenKey = (sceneId, tokenId) => `${String(sceneId || '').trim()}::${String(tokenId || '').trim()}`;
-    const easeRemoteTokenTween = (progress) => 1 - Math.pow(1 - clamp(progress, 0, 1), 3);
-    const suppressLocalDragTween = (sceneId, tokenId, durationMs = LOCAL_DRAG_TWEEN_SUPPRESS_MS) => {
-        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
-        if (!key || key === '::') return;
-        localDragTweenSuppressions.set(key, Date.now() + Math.max(1, Math.round(toNumber(durationMs, LOCAL_DRAG_TWEEN_SUPPRESS_MS))));
-        remoteTokenTweens.delete(key);
-    };
-    const isLocalDragTweenSuppressed = (sceneId, tokenId, now = Date.now()) => {
-        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
-        const expiresAt = localDragTweenSuppressions.get(key);
-        if (!expiresAt) return false;
-        if (now > expiresAt) {
-            localDragTweenSuppressions.delete(key);
-            return false;
-        }
-        return true;
-    };
-    const rememberRecentLocalDragDrop = (sceneId, tokenId, x, y, durationMs = LOCAL_DRAG_TWEEN_SUPPRESS_MS) => {
-        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
-        if (!key) return;
-        recentLocalDragDrops.set(key, {
-            sceneId: String(sceneId || '').trim(),
-            tokenId: String(tokenId || '').trim(),
-            x: normalizeTokenCoordinate(x, 0),
-            y: normalizeTokenCoordinate(y, 0),
-            expiresAt: Date.now() + Math.max(1, Math.round(toNumber(durationMs, LOCAL_DRAG_TWEEN_SUPPRESS_MS)))
-        });
-    };
-    const getRecentLocalDragDrop = (sceneId, tokenId, now = Date.now()) => {
-        const key = buildRemoteTokenTweenKey(sceneId, tokenId);
-        if (!key) return null;
-        const entry = recentLocalDragDrops.get(key);
-        if (!entry) return null;
-        if (now > entry.expiresAt) {
-            recentLocalDragDrops.delete(key);
-            return null;
-        }
-        return entry;
-    };
-    const reconcileSnapshotWithRecentLocalDragDrops = (snapshot) => {
-        if (!snapshot || !Array.isArray(snapshot.scenes) || !recentLocalDragDrops.size) return snapshot;
-        const now = Date.now();
-        snapshot.scenes.forEach((scene) => {
-            const sceneId = String(scene && scene.id || '').trim();
-            if (!sceneId || !Array.isArray(scene.tokens)) return;
-            scene.tokens.forEach((token) => {
-                const tokenId = String(token && token.id || '').trim();
-                const drop = getRecentLocalDragDrop(sceneId, tokenId, now);
-                if (!drop || !token) return;
-                const tokenX = normalizeTokenCoordinate(token.x, drop.x);
-                const tokenY = normalizeTokenCoordinate(token.y, drop.y);
-                if (tokenX === drop.x && tokenY === drop.y) return;
-                token.x = drop.x;
-                token.y = drop.y;
-            });
-        });
-        return snapshot;
-    };
-    const normalizeRemoteTokenFacingDeg = (value) => {
-        if (value === null || value === undefined || value === '') return null;
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed)) return null;
-        return normalizeAngleDeg(parsed);
-    };
-    const getAngleTweenDeltaDeg = (fromDeg, toDeg) => {
-        if (fromDeg === null || toDeg === null) return 0;
-        return (((toDeg - fromDeg) + 540) % 360) - 180;
-    };
-    const pruneRemoteTokenTweens = (now = Date.now()) => {
-        for (const [key, tween] of remoteTokenTweens.entries()) {
-            if (!tween || !Number.isFinite(tween.startedAt) || !Number.isFinite(tween.durationMs)) {
-                remoteTokenTweens.delete(key);
-                continue;
-            }
-            if (now >= tween.startedAt + tween.durationMs) {
-                remoteTokenTweens.delete(key);
-            }
-        }
-    };
-    const hasActiveSceneRemoteTweens = (sceneId = getViewedSceneId(vttState, localRole), now = Date.now()) => {
-        const targetSceneId = String(sceneId || '').trim();
-        if (!targetSceneId) return false;
-        for (const tween of remoteTokenTweens.values()) {
-            if (!tween || tween.sceneId !== targetSceneId) continue;
-            if (now < tween.startedAt + tween.durationMs) return true;
-        }
-        return false;
-    };
-    const scheduleRemoteTokenTweenRender = () => {
-        if (remoteTokenTweenFrame || !hasActiveSceneRemoteTweens()) return;
-        remoteTokenTweenFrame = window.requestAnimationFrame(() => {
-            remoteTokenTweenFrame = 0;
-            pruneRemoteTokenTweens();
-            renderStage();
-            if (hasActiveSceneRemoteTweens()) scheduleRemoteTokenTweenRender();
-        });
-    };
-    const getRemoteTokenTweenProgress = (tween, now = Date.now()) => {
-        if (!tween || !Number.isFinite(tween.startedAt) || !Number.isFinite(tween.durationMs) || tween.durationMs <= 0) return 1;
-        return easeRemoteTokenTween((now - tween.startedAt) / tween.durationMs);
-    };
-    const getRemoteTokenTweenCurrentPosition = (tween, now = Date.now()) => {
-        if (!tween) return null;
-        const progress = getRemoteTokenTweenProgress(tween, now);
-        return {
-            x: Math.round((tween.fromX + (tween.toX - tween.fromX) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION,
-            y: Math.round((tween.fromY + (tween.toY - tween.fromY) * progress) * TOKEN_COORD_PRECISION) / TOKEN_COORD_PRECISION
-        };
-    };
-    const getRemoteTokenTweenCurrentFacingDeg = (tween, now = Date.now()) => {
-        if (!tween || tween.fromFacingDeg === null || tween.toFacingDeg === null) return null;
-        const progress = getRemoteTokenTweenProgress(tween, now);
-        return normalizeAngleDeg(tween.fromFacingDeg + getAngleTweenDeltaDeg(tween.fromFacingDeg, tween.toFacingDeg) * progress);
-    };
-    const queueRemoteTokenTween = (sceneId, tokenId, fromX, fromY, toX, toY, fromFacingDegRaw = null, toFacingDegRaw = null) => {
-        const cleanSceneId = String(sceneId || '').trim();
-        const cleanTokenId = String(tokenId || '').trim();
-        if (!cleanSceneId || !cleanTokenId) return;
-        const tweenKey = buildRemoteTokenTweenKey(cleanSceneId, cleanTokenId);
-        const now = Date.now();
-        if (isLocalDragTweenSuppressed(cleanSceneId, cleanTokenId, now)) {
-            remoteTokenTweens.delete(tweenKey);
-            return;
-        }
-        const previousTween = remoteTokenTweens.get(tweenKey);
-        const currentPosition = previousTween ? getRemoteTokenTweenCurrentPosition(previousTween, now) : null;
-        const fromFacingDeg = normalizeRemoteTokenFacingDeg(fromFacingDegRaw);
-        const toFacingDeg = normalizeRemoteTokenFacingDeg(toFacingDegRaw);
-        const currentFacingDeg = previousTween ? getRemoteTokenTweenCurrentFacingDeg(previousTween, now) : null;
-        const startX = currentPosition ? currentPosition.x : fromX;
-        const startY = currentPosition ? currentPosition.y : fromY;
-        const startFacingDeg = currentFacingDeg === null ? fromFacingDeg : currentFacingDeg;
-        const facingDelta = Math.abs(getAngleTweenDeltaDeg(startFacingDeg, toFacingDeg));
-        if (startX === toX && startY === toY && facingDelta <= 0.001) {
-            remoteTokenTweens.delete(tweenKey);
-            return;
-        }
-        remoteTokenTweens.set(tweenKey, {
-            sceneId: cleanSceneId,
-            tokenId: cleanTokenId,
-            fromX: startX,
-            fromY: startY,
-            toX,
-            toY,
-            fromFacingDeg: startFacingDeg,
-            toFacingDeg,
-            startedAt: now,
-            durationMs: REMOTE_TOKEN_TWEEN_MS
-        });
-        scheduleRemoteTokenTweenRender();
-    };
-    const queueRemoteTweensFromSnapshots = (previousState, nextState) => {
-        if (!previousState || !nextState || !Array.isArray(previousState.scenes) || !Array.isArray(nextState.scenes)) return;
-        const previousScenes = new Map(previousState.scenes.map((scene) => [String(scene && scene.id || '').trim(), scene]));
-        nextState.scenes.forEach((scene) => {
-            const cleanSceneId = String(scene && scene.id || '').trim();
-            if (!cleanSceneId || !scene || !Array.isArray(scene.tokens)) return;
-            const previousScene = previousScenes.get(cleanSceneId);
-            if (!previousScene || !Array.isArray(previousScene.tokens)) return;
-            const previousTokens = new Map(previousScene.tokens.map((token) => [String(token && token.id || '').trim(), token]));
-            scene.tokens.forEach((token) => {
-                const previousToken = previousTokens.get(String(token && token.id || '').trim());
-                if (!previousToken || !token) return;
-                const fromX = normalizeTokenCoordinate(previousToken.x, token.x);
-                const fromY = normalizeTokenCoordinate(previousToken.y, token.y);
-                const toX = normalizeTokenCoordinate(token.x, fromX);
-                const toY = normalizeTokenCoordinate(token.y, fromY);
-                const fromFacingDeg = previousToken.vision && previousToken.vision.facingDeg;
-                const toFacingDeg = token.vision && token.vision.facingDeg;
-                queueRemoteTokenTween(cleanSceneId, token.id, fromX, fromY, toX, toY, fromFacingDeg, toFacingDeg);
-            });
-        });
-    };
-    const getRenderableTokenCells = (token, scene, now = Date.now()) => {
-        if (!token || !scene) return { x: 0, y: 0 };
-        if (dragState && String(dragState.tokenId || '').trim() === String(token.id || '').trim()) {
-            return {
-                x: normalizeTokenCoordinate(token.x, 0),
-                y: normalizeTokenCoordinate(token.y, 0)
-            };
-        }
-        const tweenKey = buildRemoteTokenTweenKey(scene.id, token.id);
-        const tween = remoteTokenTweens.get(tweenKey);
-        if (!tween || now >= tween.startedAt + tween.durationMs) {
-            if (tween) remoteTokenTweens.delete(tweenKey);
-            return {
-                x: normalizeTokenCoordinate(token.x, 0),
-                y: normalizeTokenCoordinate(token.y, 0)
-            };
-        }
-        return getRemoteTokenTweenCurrentPosition(tween, now);
-    };
-    const getRenderableTokenFacingDeg = (token, scene, now = Date.now()) => {
-        if (!token || !scene || !token.vision) return getTokenVisionFacingDeg(token);
-        const tweenKey = buildRemoteTokenTweenKey(scene.id, token.id);
-        const tween = remoteTokenTweens.get(tweenKey);
-        if (!tween || now >= tween.startedAt + tween.durationMs || tween.fromFacingDeg === null || tween.toFacingDeg === null) {
-            return getTokenVisionFacingDeg(token);
-        }
-        return getRemoteTokenTweenCurrentFacingDeg(tween, now);
-    };
-    const getRenderableVisionToken = (token, scene, now = Date.now()) => {
-        if (!token || !token.vision) return token;
-        if (visionConeRotateState && visionConeRotateState.tokenId === token.id) {
-            return {
-                ...token,
-                vision: {
-                    ...(token.vision || {}),
-                    facingDeg: visionConeRotateState.angleDeg
-                }
-            };
-        }
-        return {
-            ...token,
-            vision: {
-                ...(token.vision || {}),
-                facingDeg: getRenderableTokenFacingDeg(token, scene, now)
-            }
-        };
-    };
-    const getEventTargetElement = (event) => {
-        const target = event && event.target;
-        if (target instanceof Element) return target;
-        if (target instanceof Node) return target.parentElement;
-        return null;
-    };
-    const getEvidenceNoteElementAtClientPoint = (clientX, clientY, target = null) => {
-        if (target instanceof Element) {
-            const directMatch = target.closest('.vtt-map-note');
-            if (directMatch) return directMatch;
-        }
-        if (typeof document.elementsFromPoint !== 'function') return null;
-        const hitElements = document.elementsFromPoint(clientX, clientY);
-        for (const hitEl of hitElements) {
-            if (!(hitEl instanceof Element)) continue;
-            const noteEl = hitEl.closest('.vtt-map-note');
-            if (noteEl) return noteEl;
-        }
-        return null;
-    };
-    const getTokenElementAtClientPoint = (clientX, clientY, target = null) => {
-        if (target instanceof Element) {
-            const directMatch = target.closest('.vtt-token');
-            if (directMatch) return directMatch;
-        }
-        if (typeof document.elementsFromPoint !== 'function') return null;
-        const hitElements = document.elementsFromPoint(clientX, clientY);
-        for (const hitEl of hitElements) {
-            if (!(hitEl instanceof Element)) continue;
-            const tokenEl = hitEl.closest('.vtt-token');
-            if (tokenEl) return tokenEl;
-        }
-        return null;
-    };
-    const getTemplateElementAtClientPoint = (clientX, clientY, target = null) => {
-        if (target instanceof Element) {
-            const directMatch = target.closest('.vtt-area-template');
-            if (directMatch) return directMatch;
-        }
-        if (typeof document.elementsFromPoint !== 'function') return null;
-        const hitElements = document.elementsFromPoint(clientX, clientY);
-        for (const hitEl of hitElements) {
-            if (!(hitEl instanceof Element)) continue;
-            const templateEl = hitEl.closest('.vtt-area-template');
-            if (templateEl) return templateEl;
-        }
-        return null;
-    };
-    const getVisionConeRotateHandleElementAtClientPoint = (clientX, clientY, target = null) => {
-        if (target instanceof Element) {
-            const directMatch = target.closest('.vtt-vision-cone-rotate-handle');
-            if (directMatch) return directMatch;
-        }
-        if (typeof document.elementsFromPoint !== 'function') return null;
-        const hitElements = document.elementsFromPoint(clientX, clientY);
-        for (const hitEl of hitElements) {
-            if (!(hitEl instanceof Element)) continue;
-            const handleEl = hitEl.closest('.vtt-vision-cone-rotate-handle');
-            if (handleEl) return handleEl;
-        }
-        return null;
     };
     const deleteTemplateById = (templateId) => {
         if (!canDeleteLiveVTTState('delete-template')) return false;
@@ -2741,42 +940,42 @@
             const scene = getActiveScene(draft);
             if (!scene || !Array.isArray(scene.templates)) return;
             scene.templates = scene.templates.filter((template) => String(template && template.id || '').trim() !== targetId);
-            if (selectedTemplateId === targetId) selectedTemplateId = '';
-            if (templateRotateState && templateRotateState.templateId === targetId) templateRotateState = null;
+            if (stageState.selection.templateId === targetId) stageState.selection.templateId = '';
+            if (stageState.placement.templateRotate && stageState.placement.templateRotate.templateId === targetId) stageState.placement.templateRotate = null;
         });
         return true;
     };
     const clearTemplatePlacementState = () => {
-        if (!templatePlacementState && !templateRotateState && !visionConeRotateState && !rulerState && !fogPlacementState && !evidenceNotePlacementState && !evidenceNoteDragState) return false;
-        templatePlacementState = null;
-        templateRotateState = null;
-        visionConeRotateState = null;
-        rulerState = null;
-        fogPlacementState = null;
-        evidenceNotePlacementState = null;
-        evidenceNoteDragState = null;
+        if (!stageState.placement.template && !stageState.placement.templateRotate && !stageState.placement.visionConeRotate && !stageState.placement.ruler && !stageState.placement.fog && !stageState.placement.evidenceNote && !stageState.placement.evidenceNoteDrag) return false;
+        stageState.placement.template = null;
+        stageState.placement.templateRotate = null;
+        stageState.placement.visionConeRotate = null;
+        stageState.placement.ruler = null;
+        stageState.placement.fog = null;
+        stageState.placement.evidenceNote = null;
+        stageState.placement.evidenceNoteDrag = null;
         return true;
     };
     const setToolMode = (mode) => {
         clearTemplatePlacementState();
-        localToolState.mode = normalizeToolMode(mode);
-        if (localToolState.mode !== TOOL_MODE_PING) pendingAskRollRequest = null;
-        lastStageToolPointerDownState = null;
+        stageState.tool.current.mode = normalizeToolMode(mode);
+        if (stageState.tool.current.mode !== C.TOOL_MODE_PING) stageState.tool.pendingAskRollRequest = null;
+        stageState.pointer.lastToolPointerDown = null;
     };
     const setAskRollPickMode = (enabled) => {
-        askRollPickMode = !!enabled && isPlayer() && canUseSharedPlayerTools();
-        if (askRollPickMode) {
-            pendingAskRollRequest = null;
+        stageState.tool.askRollPickMode = !!enabled && isPlayer() && canUseSharedPlayerTools();
+        if (stageState.tool.askRollPickMode) {
+            stageState.tool.pendingAskRollRequest = null;
             closeSheetActionPopover();
             closeNPCRollPopover();
-            if (localToolState.mode === TOOL_MODE_PING) setToolMode(TOOL_MODE_NAVIGATE);
+            if (stageState.tool.current.mode === C.TOOL_MODE_PING) setToolMode(C.TOOL_MODE_NAVIGATE);
         }
         render();
-        return askRollPickMode;
+        return stageState.tool.askRollPickMode;
     };
     const closeToolsMenu = () => {
-        if (!toolsMenuOpen) return false;
-        toolsMenuOpen = false;
+        if (!uiRuntime.menus.toolsOpen) return false;
+        uiRuntime.menus.toolsOpen = false;
         renderToolsMenu();
         return true;
     };
@@ -2791,18 +990,18 @@
     };
 
     const saveActivePanelPreference = (previousPanel) => {
-        if ((previousPanel || '') === (uiState.activeVttPanel || '')) return;
+        if ((previousPanel || '') === (uiRuntime.preferences.activeVttPanel || '')) return;
         persistUIPreferences();
     };
 
     const setActiveVTTPanel = (panel, options = {}) => {
-        const previousPanel = uiState.activeVttPanel || '';
+        const previousPanel = uiRuntime.preferences.activeVttPanel || '';
         const nextPanel = getAllowedVTTPanel(panel);
-        uiState.activeVttPanel = nextPanel;
-        if (nextPanel !== 'dm-tools') toolsMenuOpen = false;
-        if (nextPanel !== 'player-rolls') playerRollMenuOpen = false;
-        if (nextPanel === 'player-rolls') playerRollMenuOpen = true;
-        if (nextPanel === 'dm-tools') toolsMenuOpen = true;
+        uiRuntime.preferences.activeVttPanel = nextPanel;
+        if (nextPanel !== 'dm-tools') uiRuntime.menus.toolsOpen = false;
+        if (nextPanel !== 'player-rolls') uiRuntime.playerRoll.menuOpen = false;
+        if (nextPanel === 'player-rolls') uiRuntime.playerRoll.menuOpen = true;
+        if (nextPanel === 'dm-tools') uiRuntime.menus.toolsOpen = true;
         saveActivePanelPreference(previousPanel);
         applyUIPreferences();
         renderToolsMenu();
@@ -2810,12 +1009,12 @@
         if (options.focus === false || !nextPanel) return;
         window.requestAnimationFrame(() => {
             const focusTarget = nextPanel === 'combat'
-                ? initiativePanelEl
+                ? dom.initiativePanelEl
                 : (nextPanel === 'admin'
-                    ? adminPanelEl
+                    ? dom.adminPanelEl
                     : (nextPanel === 'player-rolls'
-                        ? playerRollPanelEl
-                        : ((nextPanel === 'setup' || nextPanel === 'spawn' || nextPanel === 'inspector') ? sidebarEl : null)));
+                        ? dom.playerRollPanelEl
+                        : ((nextPanel === 'setup' || nextPanel === 'spawn' || nextPanel === 'inspector') ? dom.sidebarEl : null)));
             if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({ preventScroll: true });
         });
     };
@@ -2823,11 +1022,11 @@
     const closeActiveVTTPanel = () => {
         const clearedTransient = clearTransientDrawerState();
         const cancelledAskRollPick = cancelAskRollPickMode();
-        if (!uiState.activeVttPanel && !toolsMenuOpen && !clearedTransient && !cancelledAskRollPick) return false;
-        const previousPanel = uiState.activeVttPanel || '';
-        uiState.activeVttPanel = '';
-        toolsMenuOpen = false;
-        playerRollMenuOpen = false;
+        if (!uiRuntime.preferences.activeVttPanel && !uiRuntime.menus.toolsOpen && !clearedTransient && !cancelledAskRollPick) return false;
+        const previousPanel = uiRuntime.preferences.activeVttPanel || '';
+        uiRuntime.preferences.activeVttPanel = '';
+        uiRuntime.menus.toolsOpen = false;
+        uiRuntime.playerRoll.menuOpen = false;
         saveActivePanelPreference(previousPanel);
         applyUIPreferences();
         renderToolsMenu();
@@ -2836,99 +1035,99 @@
     };
 
     const renderViewMenu = () => {
-        if (viewMenuEl) viewMenuEl.hidden = !viewMenuOpen;
-        viewMenuToggleEls.forEach((toggleEl) => {
-            toggleEl.setAttribute('aria-expanded', viewMenuOpen ? 'true' : 'false');
+        if (dom.viewMenuEl) dom.viewMenuEl.hidden = !uiRuntime.menus.viewOpen;
+        dom.viewMenuToggleEls.forEach((toggleEl) => {
+            toggleEl.setAttribute('aria-expanded', uiRuntime.menus.viewOpen ? 'true' : 'false');
         });
     };
 
     const renderToolsMenu = () => {
-        if (!isDM() && [TOOL_MODE_NOTE, TOOL_MODE_FOG, TOOL_MODE_FOG_REMOVE].includes(localToolState.mode)) {
-            setToolMode(TOOL_MODE_NAVIGATE);
+        if (!isDM() && [C.TOOL_MODE_NOTE, C.TOOL_MODE_FOG, C.TOOL_MODE_FOG_REMOVE].includes(stageState.tool.current.mode)) {
+            setToolMode(C.TOOL_MODE_NAVIGATE);
         }
-        if (isSpectator() && ![TOOL_MODE_NAVIGATE, TOOL_MODE_RULER].includes(localToolState.mode)) {
-            setToolMode(TOOL_MODE_NAVIGATE);
+        if (isSpectator() && ![C.TOOL_MODE_NAVIGATE, C.TOOL_MODE_RULER].includes(stageState.tool.current.mode)) {
+            setToolMode(C.TOOL_MODE_NAVIGATE);
         }
-        if (toolsMenuEl) toolsMenuEl.hidden = !toolsMenuOpen;
-        if (toolsMenuToggleEl) toolsMenuToggleEl.setAttribute('aria-expanded', toolsMenuOpen ? 'true' : 'false');
-        if (rulerToggleEl) rulerToggleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false');
-        if (toolModeNavigateEl) toolModeNavigateEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NAVIGATE ? 'true' : 'false');
-        if (toolModePingEl) {
-            toolModePingEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_PING ? 'true' : 'false');
-            toolModePingEl.disabled = isSpectator();
+        if (dom.toolsMenuEl) dom.toolsMenuEl.hidden = !uiRuntime.menus.toolsOpen;
+        if (dom.toolsMenuToggleEl) dom.toolsMenuToggleEl.setAttribute('aria-expanded', uiRuntime.menus.toolsOpen ? 'true' : 'false');
+        if (dom.rulerToggleEl) dom.rulerToggleEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_RULER ? 'true' : 'false');
+        if (dom.toolModeNavigateEl) dom.toolModeNavigateEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_NAVIGATE ? 'true' : 'false');
+        if (dom.toolModePingEl) {
+            dom.toolModePingEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_PING ? 'true' : 'false');
+            dom.toolModePingEl.disabled = isSpectator();
         }
-        if (toolModeCircleEl) {
-            toolModeCircleEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CIRCLE ? 'true' : 'false');
-            toolModeCircleEl.disabled = isSpectator();
+        if (dom.toolModeCircleEl) {
+            dom.toolModeCircleEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_CIRCLE ? 'true' : 'false');
+            dom.toolModeCircleEl.disabled = isSpectator();
         }
-        if (toolModeConeEl) {
-            toolModeConeEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_CONE ? 'true' : 'false');
-            toolModeConeEl.disabled = isSpectator();
+        if (dom.toolModeConeEl) {
+            dom.toolModeConeEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_CONE ? 'true' : 'false');
+            dom.toolModeConeEl.disabled = isSpectator();
         }
-        if (toolModeNoteEl) {
-            toolModeNoteEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_NOTE ? 'true' : 'false');
-            toolModeNoteEl.hidden = !isDM();
-            toolModeNoteEl.disabled = false;
+        if (dom.toolModeNoteEl) {
+            dom.toolModeNoteEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_NOTE ? 'true' : 'false');
+            dom.toolModeNoteEl.hidden = !isDM();
+            dom.toolModeNoteEl.disabled = false;
         }
-        if (toolModeFogEl) {
-            toolModeFogEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG ? 'true' : 'false');
-            toolModeFogEl.hidden = !isDM();
-            toolModeFogEl.disabled = false;
+        if (dom.toolModeFogEl) {
+            dom.toolModeFogEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_FOG ? 'true' : 'false');
+            dom.toolModeFogEl.hidden = !isDM();
+            dom.toolModeFogEl.disabled = false;
         }
-        if (toolModeFogRemoveEl) {
-            toolModeFogRemoveEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_FOG_REMOVE ? 'true' : 'false');
-            toolModeFogRemoveEl.hidden = !isDM();
-            toolModeFogRemoveEl.disabled = false;
+        if (dom.toolModeFogRemoveEl) {
+            dom.toolModeFogRemoveEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE ? 'true' : 'false');
+            dom.toolModeFogRemoveEl.hidden = !isDM();
+            dom.toolModeFogRemoveEl.disabled = false;
         }
-        if (toolSizeInputEl && document.activeElement !== toolSizeInputEl) {
-            toolSizeInputEl.value = String(localToolState.sizeCells);
+        if (dom.toolSizeInputEl && document.activeElement !== dom.toolSizeInputEl) {
+            dom.toolSizeInputEl.value = String(stageState.tool.current.sizeCells);
         }
-        if (toolSizeInputEl) {
-            const dragAreaModeActive = localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE || localToolState.mode === TOOL_MODE_NOTE || localToolState.mode === TOOL_MODE_PING;
-            toolSizeInputEl.disabled = dragAreaModeActive;
-            toolSizeInputEl.title = dragAreaModeActive ? 'Ping, Fog, and Zone tools do not use template size.' : '';
+        if (dom.toolSizeInputEl) {
+            const dragAreaModeActive = stageState.tool.current.mode === C.TOOL_MODE_FOG || stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE || stageState.tool.current.mode === C.TOOL_MODE_NOTE || stageState.tool.current.mode === C.TOOL_MODE_PING;
+            dom.toolSizeInputEl.disabled = dragAreaModeActive;
+            dom.toolSizeInputEl.title = dragAreaModeActive ? 'Ping, Fog, and Zone tools do not use template size.' : '';
         }
-        if (stealthModeToggleEl) {
+        if (dom.stealthModeToggleEl) {
             const scene = getActiveScene();
             const enabled = !!(scene && scene.stealthMode);
-            stealthModeToggleEl.textContent = `Sight Cones: ${enabled ? 'On' : 'Off'}`;
-            stealthModeToggleEl.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-            stealthModeToggleEl.hidden = !isDM();
-            stealthModeToggleEl.disabled = false;
+            dom.stealthModeToggleEl.textContent = `Sight Cones: ${enabled ? 'On' : 'Off'}`;
+            dom.stealthModeToggleEl.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+            dom.stealthModeToggleEl.hidden = !isDM();
+            dom.stealthModeToggleEl.disabled = false;
         }
-        if (clearFogButtonEl) {
+        if (dom.clearFogButtonEl) {
             const scene = getActiveScene();
             const fogCount = scene && Array.isArray(scene.fog) ? scene.fog.length : 0;
-            clearFogButtonEl.hidden = !isDM() || fogCount === 0;
-            clearFogButtonEl.disabled = false;
-            clearFogButtonEl.textContent = fogCount > 0 ? `Clear Fog (${fogCount})` : 'Clear Fog';
+            dom.clearFogButtonEl.hidden = !isDM() || fogCount === 0;
+            dom.clearFogButtonEl.disabled = false;
+            dom.clearFogButtonEl.textContent = fogCount > 0 ? `Clear Fog (${fogCount})` : 'Clear Fog';
         }
-        if (body) body.dataset.toolMode = localToolState.mode;
+        if (dom.body) dom.body.dataset.toolMode = stageState.tool.current.mode;
         renderModeChip();
     };
 
     const renderModeChip = () => {
-        if (!modeChipEl) return;
-        const activeMode = normalizeToolMode(localToolState.mode);
-        const showChip = activeMode !== TOOL_MODE_NAVIGATE;
-        modeChipEl.hidden = !showChip;
+        if (!dom.modeChipEl) return;
+        const activeMode = normalizeToolMode(stageState.tool.current.mode);
+        const showChip = activeMode !== C.TOOL_MODE_NAVIGATE;
+        dom.modeChipEl.hidden = !showChip;
         if (!showChip) {
-            modeChipEl.textContent = '';
+            dom.modeChipEl.textContent = '';
             return;
         }
-        if (activeMode === TOOL_MODE_PING) {
-            if (pendingAskRollRequest) {
-                modeChipEl.textContent = `Ask to roll ${pendingAskRollRequest.label} - click the map location`;
+        if (activeMode === C.TOOL_MODE_PING) {
+            if (stageState.tool.pendingAskRollRequest) {
+                dom.modeChipEl.textContent = `Ask to roll ${stageState.tool.pendingAskRollRequest.label} - click the map location`;
                 return;
             }
-            modeChipEl.textContent = `${getPingVariantOptions().label} ping - click the map, double click or tap to go back`;
+            dom.modeChipEl.textContent = `${getPingVariantOptions().label} ping - click the map, double click or tap to go back`;
             return;
         }
-        modeChipEl.textContent = `Now in ${getToolModeLabel(activeMode)} - double click or tap to go back to normal`;
+        dom.modeChipEl.textContent = `Now in ${getToolModeLabel(activeMode)} - double click or tap to go back to normal`;
     };
 
     const positionNPCSearchPopover = () => {
-        if (!npcSearchPopoverEl || npcSearchPopoverEl.hidden) return;
+        if (!dom.npcSearchPopoverEl || dom.npcSearchPopoverEl.hidden) return;
         const margin = 12;
         const gap = 8;
         const viewportWidth = Math.max(0, window.innerWidth || document.documentElement.clientWidth || 0);
@@ -2936,26 +1135,26 @@
         const maxWidth = Math.max(0, viewportWidth - margin * 2);
         const maxHeight = Math.max(0, viewportHeight - margin * 2);
 
-        npcSearchPopoverEl.style.right = 'auto';
-        npcSearchPopoverEl.style.maxWidth = `${Math.round(maxWidth)}px`;
-        npcSearchPopoverEl.style.maxHeight = `${Math.round(maxHeight)}px`;
+        dom.npcSearchPopoverEl.style.right = 'auto';
+        dom.npcSearchPopoverEl.style.maxWidth = `${Math.round(maxWidth)}px`;
+        dom.npcSearchPopoverEl.style.maxHeight = `${Math.round(maxHeight)}px`;
 
-        const popoverWidth = Math.max(0, Math.min(npcSearchPopoverEl.offsetWidth || maxWidth, maxWidth));
-        const popoverHeight = npcSearchPopoverEl.offsetHeight || 0;
+        const popoverWidth = Math.max(0, Math.min(dom.npcSearchPopoverEl.offsetWidth || maxWidth, maxWidth));
+        const popoverHeight = dom.npcSearchPopoverEl.offsetHeight || 0;
         let left = margin;
         let top = margin;
 
-        if (npcSearchState) {
-            left = npcSearchState.clientX + 14;
-            top = npcSearchState.clientY + 14;
+        if (uiRuntime.npcSearch.state) {
+            left = uiRuntime.npcSearch.state.clientX + 14;
+            top = uiRuntime.npcSearch.state.clientY + 14;
             if (left + popoverWidth > viewportWidth - margin) {
-                left = Math.max(margin, npcSearchState.clientX - popoverWidth - 14);
+                left = Math.max(margin, uiRuntime.npcSearch.state.clientX - popoverWidth - 14);
             }
             if (top + popoverHeight > viewportHeight - margin) {
                 top = Math.max(margin, viewportHeight - popoverHeight - margin);
             }
-        } else if (npcSearchToggleEl) {
-            const toggleRect = npcSearchToggleEl.getBoundingClientRect();
+        } else if (dom.npcSearchToggleEl) {
+            const toggleRect = dom.npcSearchToggleEl.getBoundingClientRect();
             left = toggleRect.right - popoverWidth;
             left = clamp(left, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
 
@@ -2968,19 +1167,19 @@
             }
         }
 
-        npcSearchPopoverEl.style.left = `${Math.round(left)}px`;
-        npcSearchPopoverEl.style.top = `${Math.round(top)}px`;
+        dom.npcSearchPopoverEl.style.left = `${Math.round(left)}px`;
+        dom.npcSearchPopoverEl.style.top = `${Math.round(top)}px`;
     };
 
     const positionTokenInspectorPopover = () => {
-        if (!tokenInspectorPopoverEl || tokenInspectorPopoverEl.hidden || !tokenInspectorState) return;
-        const width = tokenInspectorPopoverEl.offsetWidth || 420;
-        const height = tokenInspectorPopoverEl.offsetHeight || 520;
+        if (!dom.tokenInspectorPopoverEl || dom.tokenInspectorPopoverEl.hidden || !uiRuntime.overlays.tokenInspector) return;
+        const width = dom.tokenInspectorPopoverEl.offsetWidth || 420;
+        const height = dom.tokenInspectorPopoverEl.offsetHeight || 520;
         const margin = 12;
-        let left = tokenInspectorState.clientX + 14;
-        let top = tokenInspectorState.clientY + 14;
+        let left = uiRuntime.overlays.tokenInspector.clientX + 14;
+        let top = uiRuntime.overlays.tokenInspector.clientY + 14;
         if (left + width > window.innerWidth - margin) {
-            left = Math.max(margin, tokenInspectorState.clientX - width - 14);
+            left = Math.max(margin, uiRuntime.overlays.tokenInspector.clientX - width - 14);
         }
         let bottomBoundary = window.innerHeight - margin;
         if (window.matchMedia('(min-width: 861px)').matches) {
@@ -2994,8 +1193,8 @@
         if (top + height > bottomBoundary) {
             top = Math.max(margin, bottomBoundary - height);
         }
-        tokenInspectorPopoverEl.style.left = `${Math.round(left)}px`;
-        tokenInspectorPopoverEl.style.top = `${Math.round(top)}px`;
+        dom.tokenInspectorPopoverEl.style.left = `${Math.round(left)}px`;
+        dom.tokenInspectorPopoverEl.style.top = `${Math.round(top)}px`;
     };
 
     const positionAnchoredPopover = (popoverEl, state, fallbackWidth = 360, fallbackHeight = 420, options = {}) => {
@@ -3024,53 +1223,53 @@
         popoverEl.style.top = `${Math.round(top)}px`;
     };
 
-    const positionSheetActionPopover = () => positionAnchoredPopover(sheetActionPopoverEl, sheetActionState, 380, 460);
-    const positionNPCRollPopover = () => positionAnchoredPopover(npcRollPopoverEl, npcRollState, 360, 340);
-    const positionStageContextMenu = () => positionAnchoredPopover(stageContextMenuEl, stageContextMenuState, 340, 360, { avoidTableHud: true });
+    const positionSheetActionPopover = () => positionAnchoredPopover(dom.sheetActionPopoverEl, uiRuntime.overlays.sheetAction, 380, 460);
+    const positionNPCRollPopover = () => positionAnchoredPopover(dom.npcRollPopoverEl, uiRuntime.overlays.npcRoll, 360, 340);
+    const positionStageContextMenu = () => positionAnchoredPopover(dom.stageContextMenuEl, uiRuntime.overlays.stageContextMenu, 340, 360, { avoidTableHud: true });
 
     const closeSheetActionPopover = () => {
-        if (!sheetActionState && (!sheetActionPopoverEl || sheetActionPopoverEl.hidden)) return false;
-        sheetActionState = null;
-        sheetActionQuery = '';
-        if (sheetActionPopoverEl) {
-            sheetActionPopoverEl.hidden = true;
-            sheetActionPopoverEl.innerHTML = '';
+        if (!uiRuntime.overlays.sheetAction && (!dom.sheetActionPopoverEl || dom.sheetActionPopoverEl.hidden)) return false;
+        uiRuntime.overlays.sheetAction = null;
+        uiRuntime.queries.sheetAction = '';
+        if (dom.sheetActionPopoverEl) {
+            dom.sheetActionPopoverEl.hidden = true;
+            dom.sheetActionPopoverEl.innerHTML = '';
         }
         return true;
     };
 
     const closeNPCRollPopover = () => {
-        if (!npcRollState && (!npcRollPopoverEl || npcRollPopoverEl.hidden)) return false;
-        npcRollState = null;
-        if (npcRollPopoverEl) {
-            npcRollPopoverEl.hidden = true;
-            npcRollPopoverEl.innerHTML = '';
+        if (!uiRuntime.overlays.npcRoll && (!dom.npcRollPopoverEl || dom.npcRollPopoverEl.hidden)) return false;
+        uiRuntime.overlays.npcRoll = null;
+        if (dom.npcRollPopoverEl) {
+            dom.npcRollPopoverEl.hidden = true;
+            dom.npcRollPopoverEl.innerHTML = '';
         }
         return true;
     };
 
     const closeStageContextMenu = () => {
-        if (!stageContextMenuState && (!stageContextMenuEl || stageContextMenuEl.hidden)) return false;
-        stageContextMenuState = null;
-        if (stageContextMenuEl) {
-            stageContextMenuEl.hidden = true;
-            stageContextMenuEl.innerHTML = '';
+        if (!uiRuntime.overlays.stageContextMenu && (!dom.stageContextMenuEl || dom.stageContextMenuEl.hidden)) return false;
+        uiRuntime.overlays.stageContextMenu = null;
+        if (dom.stageContextMenuEl) {
+            dom.stageContextMenuEl.hidden = true;
+            dom.stageContextMenuEl.innerHTML = '';
         }
         return true;
     };
 
     const closeInitiativeDetail = () => {
-        if (!initiativeDetailState && (!initiativeDetailPanelEl || initiativeDetailPanelEl.hidden)) return false;
-        initiativeDetailState = null;
-        if (initiativeDetailPanelEl) initiativeDetailPanelEl.hidden = true;
+        if (!uiRuntime.overlays.initiativeDetail && (!dom.initiativeDetailPanelEl || dom.initiativeDetailPanelEl.hidden)) return false;
+        uiRuntime.overlays.initiativeDetail = null;
+        if (dom.initiativeDetailPanelEl) dom.initiativeDetailPanelEl.hidden = true;
         return true;
     };
 
     const openInitiativeDetail = (entryId, clientX, clientY) => {
         const targetId = String(entryId || '').trim();
         if (!targetId || !isDM()) return false;
-        selectedEntryId = targetId;
-        initiativeDetailState = {
+        stageState.selection.entryId = targetId;
+        uiRuntime.overlays.initiativeDetail = {
             entryId: targetId,
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
@@ -3079,112 +1278,86 @@
     };
 
     const positionInitiativeDetail = () => {
-        if (!initiativeDetailPanelEl || initiativeDetailPanelEl.hidden || !initiativeDetailState) return;
-        const width = initiativeDetailPanelEl.offsetWidth || 360;
-        const height = initiativeDetailPanelEl.offsetHeight || 420;
+        if (!dom.initiativeDetailPanelEl || dom.initiativeDetailPanelEl.hidden || !uiRuntime.overlays.initiativeDetail) return;
+        const width = dom.initiativeDetailPanelEl.offsetWidth || 360;
+        const height = dom.initiativeDetailPanelEl.offsetHeight || 420;
         const margin = 12;
-        let left = initiativeDetailState.clientX + 14;
-        let top = initiativeDetailState.clientY + 14;
+        let left = uiRuntime.overlays.initiativeDetail.clientX + 14;
+        let top = uiRuntime.overlays.initiativeDetail.clientY + 14;
         if (left + width > window.innerWidth - margin) {
-            left = Math.max(margin, initiativeDetailState.clientX - width - 14);
+            left = Math.max(margin, uiRuntime.overlays.initiativeDetail.clientX - width - 14);
         }
         if (top + height > window.innerHeight - margin) {
             top = Math.max(margin, window.innerHeight - height - margin);
         }
-        initiativeDetailPanelEl.style.left = `${Math.round(left)}px`;
-        initiativeDetailPanelEl.style.top = `${Math.round(top)}px`;
+        dom.initiativeDetailPanelEl.style.left = `${Math.round(left)}px`;
+        dom.initiativeDetailPanelEl.style.top = `${Math.round(top)}px`;
     };
 
     const applyUIPreferences = () => {
-        if (body) {
-            body.dataset.topbarCollapsed = uiState.topbarCollapsed ? '1' : '0';
-            body.dataset.settingsCollapsed = uiState.settingsCollapsed ? '1' : '0';
-            body.dataset.initiativeCollapsed = uiState.initiativeCollapsed ? '1' : '0';
-            body.dataset.playerRollRailCollapsed = uiState.playerRollRailCollapsed ? '1' : '0';
-            body.dataset.scenePanelCollapsed = uiState.scenePanelCollapsed ? '1' : '0';
-            body.dataset.spawnPanelCollapsed = uiState.spawnPanelCollapsed ? '1' : '0';
-            body.dataset.inspectorPanelCollapsed = uiState.inspectorPanelCollapsed ? '1' : '0';
-            body.dataset.gridHidden = uiState.showGrid ? '0' : '1';
-            body.dataset.tokenNamesHidden = uiState.showTokenNames ? '0' : '1';
-            body.dataset.activeVttPanel = getAllowedVTTPanel(uiState.activeVttPanel);
+        if (dom.body) {
+            dom.body.dataset.topbarCollapsed = uiRuntime.preferences.topbarCollapsed ? '1' : '0';
+            dom.body.dataset.settingsCollapsed = uiRuntime.preferences.settingsCollapsed ? '1' : '0';
+            dom.body.dataset.initiativeCollapsed = uiRuntime.preferences.initiativeCollapsed ? '1' : '0';
+            dom.body.dataset.playerRollRailCollapsed = uiRuntime.preferences.playerRollRailCollapsed ? '1' : '0';
+            dom.body.dataset.scenePanelCollapsed = uiRuntime.preferences.scenePanelCollapsed ? '1' : '0';
+            dom.body.dataset.spawnPanelCollapsed = uiRuntime.preferences.spawnPanelCollapsed ? '1' : '0';
+            dom.body.dataset.inspectorPanelCollapsed = uiRuntime.preferences.inspectorPanelCollapsed ? '1' : '0';
+            dom.body.dataset.gridHidden = uiRuntime.preferences.showGrid ? '0' : '1';
+            dom.body.dataset.tokenNamesHidden = uiRuntime.preferences.showTokenNames ? '0' : '1';
+            dom.body.dataset.activeVttPanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
         }
-        if (topbarTabEl) {
-            topbarTabEl.textContent = 'Menu 📌';
-            topbarTabEl.title = uiState.topbarCollapsed ? 'Pin menu open' : 'Unpin menu';
-            topbarTabEl.setAttribute('aria-label', uiState.topbarCollapsed ? 'Pin menu open' : 'Unpin menu');
-            topbarTabEl.setAttribute('aria-pressed', uiState.topbarCollapsed ? 'false' : 'true');
+        if (dom.topbarTabEl) {
+            dom.topbarTabEl.textContent = 'Menu 📌';
+            dom.topbarTabEl.title = uiRuntime.preferences.topbarCollapsed ? 'Pin menu open' : 'Unpin menu';
+            dom.topbarTabEl.setAttribute('aria-label', uiRuntime.preferences.topbarCollapsed ? 'Pin menu open' : 'Unpin menu');
+            dom.topbarTabEl.setAttribute('aria-pressed', uiRuntime.preferences.topbarCollapsed ? 'false' : 'true');
         }
-        if (settingsToggleEl) {
-            settingsToggleEl.textContent = `Sidebar: ${uiState.settingsCollapsed ? 'Tucked' : 'Pinned'}`;
-            settingsToggleEl.setAttribute('aria-pressed', uiState.settingsCollapsed ? 'false' : 'true');
-            settingsToggleEl.disabled = !isDM();
+        if (dom.settingsRailTabEl) {
+            dom.settingsRailTabEl.textContent = 'Close';
+            dom.settingsRailTabEl.title = 'Close drawer';
+            dom.settingsRailTabEl.setAttribute('aria-label', 'Close drawer');
+            dom.settingsRailTabEl.removeAttribute('aria-pressed');
         }
-        if (initiativeToggleEl) {
-            initiativeToggleEl.textContent = `Initiative: ${uiState.initiativeCollapsed ? 'Tucked' : 'Pinned'}`;
-            initiativeToggleEl.setAttribute('aria-pressed', uiState.initiativeCollapsed ? 'false' : 'true');
+        if (dom.playerRollRailTabEl) {
+            dom.playerRollRailTabEl.textContent = 'Close';
+            dom.playerRollRailTabEl.title = 'Close player controls';
+            dom.playerRollRailTabEl.setAttribute('aria-label', 'Close player controls');
+            dom.playerRollRailTabEl.removeAttribute('aria-pressed');
         }
-        if (settingsRailTabEl) {
-            settingsRailTabEl.textContent = 'Close';
-            settingsRailTabEl.title = 'Close drawer';
-            settingsRailTabEl.setAttribute('aria-label', 'Close drawer');
-            settingsRailTabEl.removeAttribute('aria-pressed');
+        if (dom.initiativeRailTabEl) {
+            dom.initiativeRailTabEl.textContent = 'Close';
+            dom.initiativeRailTabEl.title = 'Close combat drawer';
+            dom.initiativeRailTabEl.setAttribute('aria-label', 'Close combat drawer');
+            dom.initiativeRailTabEl.removeAttribute('aria-pressed');
         }
-        if (playerRollRailTabEl) {
-            playerRollRailTabEl.textContent = 'Close';
-            playerRollRailTabEl.title = 'Close player controls';
-            playerRollRailTabEl.setAttribute('aria-label', 'Close player controls');
-            playerRollRailTabEl.removeAttribute('aria-pressed');
+        if (dom.tokenNamesToggleEl) {
+            dom.tokenNamesToggleEl.textContent = `Token Names: ${uiRuntime.preferences.showTokenNames ? 'On' : 'Off'}`;
+            dom.tokenNamesToggleEl.setAttribute('aria-pressed', uiRuntime.preferences.showTokenNames ? 'true' : 'false');
         }
-        if (initiativeRailTabEl) {
-            initiativeRailTabEl.textContent = 'Close';
-            initiativeRailTabEl.title = 'Close combat drawer';
-            initiativeRailTabEl.setAttribute('aria-label', 'Close combat drawer');
-            initiativeRailTabEl.removeAttribute('aria-pressed');
+        if (dom.gridToggleEl) {
+            dom.gridToggleEl.textContent = `Grid: ${uiRuntime.preferences.showGrid ? 'On' : 'Off'}`;
+            dom.gridToggleEl.setAttribute('aria-pressed', uiRuntime.preferences.showGrid ? 'true' : 'false');
         }
-        if (scenePanelToggleEl) {
-            scenePanelToggleEl.textContent = `Scene Panel: ${uiState.scenePanelCollapsed ? 'Off' : 'On'}`;
-            scenePanelToggleEl.setAttribute('aria-pressed', uiState.scenePanelCollapsed ? 'false' : 'true');
-            scenePanelToggleEl.disabled = !isDM();
+        const activePanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
+        if (dom.sidebarEl) {
+            dom.sidebarEl.tabIndex = -1;
+            dom.sidebarEl.setAttribute('aria-hidden', activePanel === 'setup' || activePanel === 'spawn' || activePanel === 'inspector' ? 'false' : 'true');
         }
-        if (spawnPanelToggleEl) {
-            spawnPanelToggleEl.textContent = `Spawn Panel: ${uiState.spawnPanelCollapsed ? 'Off' : 'On'}`;
-            spawnPanelToggleEl.setAttribute('aria-pressed', uiState.spawnPanelCollapsed ? 'false' : 'true');
-            spawnPanelToggleEl.disabled = !isDM();
+        if (dom.playerRollPanelEl) {
+            dom.playerRollPanelEl.tabIndex = -1;
+            dom.playerRollPanelEl.setAttribute('aria-hidden', activePanel === 'player-rolls' ? 'false' : 'true');
         }
-        if (inspectorPanelToggleEl) {
-            inspectorPanelToggleEl.textContent = `Inspector: ${uiState.inspectorPanelCollapsed ? 'Off' : 'On'}`;
-            inspectorPanelToggleEl.setAttribute('aria-pressed', uiState.inspectorPanelCollapsed ? 'false' : 'true');
+        if (dom.initiativePanelEl) {
+            dom.initiativePanelEl.tabIndex = -1;
+            dom.initiativePanelEl.setAttribute('aria-hidden', activePanel === 'combat' ? 'false' : 'true');
         }
-        if (tokenNamesToggleEl) {
-            tokenNamesToggleEl.textContent = `Token Names: ${uiState.showTokenNames ? 'On' : 'Off'}`;
-            tokenNamesToggleEl.setAttribute('aria-pressed', uiState.showTokenNames ? 'true' : 'false');
+        if (dom.adminPanelEl) {
+            dom.adminPanelEl.tabIndex = -1;
+            dom.adminPanelEl.setAttribute('aria-hidden', activePanel === 'admin' ? 'false' : 'true');
         }
-        if (gridToggleEl) {
-            gridToggleEl.textContent = `Grid: ${uiState.showGrid ? 'On' : 'Off'}`;
-            gridToggleEl.setAttribute('aria-pressed', uiState.showGrid ? 'true' : 'false');
-        }
-        const activePanel = getAllowedVTTPanel(uiState.activeVttPanel);
-        if (sidebarEl) {
-            sidebarEl.tabIndex = -1;
-            sidebarEl.setAttribute('aria-hidden', activePanel === 'setup' || activePanel === 'spawn' || activePanel === 'inspector' ? 'false' : 'true');
-        }
-        if (playerRollPanelEl) {
-            playerRollPanelEl.tabIndex = -1;
-            playerRollPanelEl.setAttribute('aria-hidden', activePanel === 'player-rolls' ? 'false' : 'true');
-        }
-        if (initiativePanelEl) {
-            initiativePanelEl.tabIndex = -1;
-            initiativePanelEl.setAttribute('aria-hidden', activePanel === 'combat' ? 'false' : 'true');
-        }
-        if (adminPanelEl) {
-            adminPanelEl.tabIndex = -1;
-            adminPanelEl.setAttribute('aria-hidden', activePanel === 'admin' ? 'false' : 'true');
-        }
-        if (playerRollsButtonEl) {
-            playerRollsButtonEl.setAttribute('aria-expanded', activePanel === 'player-rolls' ? 'true' : 'false');
-        }
-        if (playerCombatButtonEl) {
-            playerCombatButtonEl.setAttribute('aria-expanded', activePanel === 'combat' ? 'true' : 'false');
+        if (dom.playerRollsButtonEl) {
+            dom.playerRollsButtonEl.setAttribute('aria-expanded', activePanel === 'player-rolls' ? 'true' : 'false');
         }
         renderViewMenu();
     };
@@ -3193,7 +1366,7 @@
         try {
             const raw = localStorage.getItem(getUIPrefsStorageKey());
             const parsed = raw ? JSON.parse(raw) : {};
-            uiState = {
+            uiRuntime.preferences = {
                 topbarCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'topbarCollapsed') ? !!parsed.topbarCollapsed : true,
                 settingsCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'settingsCollapsed') ? !!parsed.settingsCollapsed : true,
                 initiativeCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'initiativeCollapsed') ? !!parsed.initiativeCollapsed : true,
@@ -3203,12 +1376,12 @@
                 inspectorPanelCollapsed: !!(parsed && parsed.inspectorPanelCollapsed),
                 showGrid: parsed && parsed.showGrid !== undefined ? !!parsed.showGrid : true,
                 showTokenNames: parsed && parsed.showTokenNames !== undefined ? !!parsed.showTokenNames : true,
-                sceneViewMode: parsed && parsed.sceneViewMode === SCENE_VIEW_LOCAL ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED,
+                sceneViewMode: parsed && parsed.sceneViewMode === C.SCENE_VIEW_LOCAL ? C.SCENE_VIEW_LOCAL : C.SCENE_VIEW_SHARED,
                 localSceneId: String(parsed && parsed.localSceneId || '').trim(),
                 activeVttPanel: getAllowedVTTPanel(parsed && parsed.activeVttPanel)
             };
         } catch (err) {
-            uiState = {
+            uiRuntime.preferences = {
                 topbarCollapsed: true,
                 settingsCollapsed: true,
                 initiativeCollapsed: true,
@@ -3218,7 +1391,7 @@
                 inspectorPanelCollapsed: false,
                 showGrid: true,
                 showTokenNames: true,
-                sceneViewMode: SCENE_VIEW_SHARED,
+                sceneViewMode: C.SCENE_VIEW_SHARED,
                 localSceneId: '',
                 activeVttPanel: ''
             };
@@ -3228,14 +1401,14 @@
 
     const persistUIPreferences = () => {
         try {
-            localStorage.setItem(getUIPrefsStorageKey(), JSON.stringify(uiState));
+            localStorage.setItem(getUIPrefsStorageKey(), JSON.stringify(uiRuntime.preferences));
         } catch (err) {
             // Ignore local-only preference persistence failures.
         }
     };
 
     const toggleUIPreference = (key) => {
-        uiState[key] = !uiState[key];
+        uiRuntime.preferences[key] = !uiRuntime.preferences[key];
         persistUIPreferences();
         applyUIPreferences();
         window.requestAnimationFrame(() => {
@@ -3244,15 +1417,14 @@
     };
 
     const toggleDrawerPreference = (key, suppressDatasetKey = '') => {
-        uiState[key] = !uiState[key];
-        if (body && suppressDatasetKey) {
-            body.dataset[suppressDatasetKey] = uiState[key] ? '1' : '0';
+        uiRuntime.preferences[key] = !uiRuntime.preferences[key];
+        if (dom.body && suppressDatasetKey) {
+            dom.body.dataset[suppressDatasetKey] = uiRuntime.preferences[key] ? '1' : '0';
         }
-        if (body) {
-            if (key === 'topbarCollapsed') body.dataset.topbarPreview = '0';
-            if (key === 'settingsCollapsed') body.dataset.settingsPreview = '0';
-            if (key === 'playerRollRailCollapsed') body.dataset.playerRollPreview = '0';
-            if (key === 'initiativeCollapsed') body.dataset.initiativePreview = '0';
+        if (dom.body) {
+            if (key === 'settingsCollapsed') dom.body.dataset.settingsPreview = '0';
+            if (key === 'playerRollRailCollapsed') dom.body.dataset.playerRollPreview = '0';
+            if (key === 'initiativeCollapsed') dom.body.dataset.initiativePreview = '0';
         }
         persistUIPreferences();
         applyUIPreferences();
@@ -3262,52 +1434,50 @@
     };
 
     const clearHoverSuppression = (suppressDatasetKey = '') => {
-        if (!body || !suppressDatasetKey) return;
-        body.dataset[suppressDatasetKey] = '0';
+        if (!dom.body || !suppressDatasetKey) return;
+        dom.body.dataset[suppressDatasetKey] = '0';
     };
 
     const clearTransientDrawerState = () => {
-        if (!body) return false;
+        if (!dom.body) return false;
         const keys = [
-            'topbarPreview',
             'settingsPreview',
             'playerRollPreview',
             'initiativePreview',
-            'topbarHoverSuppressed',
             'settingsHoverSuppressed',
             'playerRollHoverSuppressed',
             'initiativeHoverSuppressed'
         ];
         let changed = false;
         keys.forEach((key) => {
-            if (body.dataset[key] === '0') return;
-            body.dataset[key] = '0';
+            if (dom.body.dataset[key] === '0') return;
+            dom.body.dataset[key] = '0';
             changed = true;
         });
         return changed;
     };
 
     const cancelAskRollPickMode = () => {
-        const wasActive = !!(askRollPickMode || pendingAskRollRequest);
-        askRollPickMode = false;
-        pendingAskRollRequest = null;
-        if (wasActive && localToolState.mode === TOOL_MODE_PING) setToolMode(TOOL_MODE_NAVIGATE);
+        const wasActive = !!(stageState.tool.askRollPickMode || stageState.tool.pendingAskRollRequest);
+        stageState.tool.askRollPickMode = false;
+        stageState.tool.pendingAskRollRequest = null;
+        if (wasActive && stageState.tool.current.mode === C.TOOL_MODE_PING) setToolMode(C.TOOL_MODE_NAVIGATE);
         return wasActive;
     };
 
     const setDrawerPreview = (previewDatasetKey = '', suppressDatasetKey = '', active = false) => {
-        if (!body || !previewDatasetKey) return;
-        if (active && suppressDatasetKey && body.dataset[suppressDatasetKey] === '1') return;
-        body.dataset[previewDatasetKey] = active ? '1' : '0';
+        if (!dom.body || !previewDatasetKey) return;
+        if (active && suppressDatasetKey && dom.body.dataset[suppressDatasetKey] === '1') return;
+        dom.body.dataset[previewDatasetKey] = active ? '1' : '0';
     };
 
-    const getActiveScene = (state = vttState) => {
+    const getActiveScene = (state = sessionState.snapshot) => {
         if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return null;
         const viewedSceneId = getViewedSceneId(state);
         return state.scenes.find((scene) => scene.id === viewedSceneId) || state.scenes[0] || null;
     };
 
-    const getSceneById = (sceneId, state = vttState) => {
+    const getSceneById = (sceneId, state = sessionState.snapshot) => {
         if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return null;
         const targetId = String(sceneId || '').trim();
         if (!targetId) return null;
@@ -3316,7 +1486,7 @@
 
     const getSceneMapScale = (scene) => clampMapScale(scene && scene.mapScale, 1);
 
-    const getSharedSceneId = (state = vttState) => {
+    const getSharedSceneId = (state = sessionState.snapshot) => {
         if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return '';
         const preferredId = String(state.activeSceneId || '').trim();
         return state.scenes.some((scene) => scene.id === preferredId)
@@ -3353,45 +1523,45 @@
         return changedSceneIds;
     };
 
-    const isUsingLocalSceneView = (state = vttState, role = localRole) => {
+    const isUsingLocalSceneView = (state = sessionState.snapshot, role = sessionState.role) => {
         if (role !== 'dm') return false;
-        if (uiState.sceneViewMode !== SCENE_VIEW_LOCAL) return false;
-        const localSceneId = String(uiState.localSceneId || '').trim();
+        if (uiRuntime.preferences.sceneViewMode !== C.SCENE_VIEW_LOCAL) return false;
+        const localSceneId = String(uiRuntime.preferences.localSceneId || '').trim();
         return !!(localSceneId && state && Array.isArray(state.scenes) && state.scenes.some((scene) => scene.id === localSceneId));
     };
 
-    const getViewedSceneId = (state = vttState, role = localRole) => (
-        isUsingLocalSceneView(state, role) ? String(uiState.localSceneId || '').trim() : getSharedSceneId(state)
+    const getViewedSceneId = (state = sessionState.snapshot, role = sessionState.role) => (
+        isUsingLocalSceneView(state, role) ? String(uiRuntime.preferences.localSceneId || '').trim() : getSharedSceneId(state)
     );
 
     const setSceneViewPreference = (mode, sceneId = '') => {
-        const cleanMode = mode === SCENE_VIEW_LOCAL && isDM() ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED;
+        const cleanMode = mode === C.SCENE_VIEW_LOCAL && isDM() ? C.SCENE_VIEW_LOCAL : C.SCENE_VIEW_SHARED;
         const cleanSceneId = String(sceneId || '').trim();
-        uiState.sceneViewMode = cleanMode;
-        uiState.localSceneId = cleanMode === SCENE_VIEW_LOCAL ? cleanSceneId : '';
+        uiRuntime.preferences.sceneViewMode = cleanMode;
+        uiRuntime.preferences.localSceneId = cleanMode === C.SCENE_VIEW_LOCAL ? cleanSceneId : '';
         persistUIPreferences();
     };
-    const maybeFollowRemoteActivityForDM = (sceneIds = new Set(), state = vttState) => {
-        if (!isDM() || !isUsingLocalSceneView(state, localRole)) return false;
-        if (dragState || spawnDragState || fogPlacementState || evidenceNotePlacementState || evidenceNoteDragState || templatePlacementState || templateRotateState || visionConeRotateState || rulerState) return false;
+    const maybeFollowRemoteActivityForDM = (sceneIds = new Set(), state = sessionState.snapshot) => {
+        if (!isDM() || !isUsingLocalSceneView(state, sessionState.role)) return false;
+        if (stageState.pointer.drag || stageState.pointer.spawnDrag || stageState.placement.fog || stageState.placement.evidenceNote || stageState.placement.evidenceNoteDrag || stageState.placement.template || stageState.placement.templateRotate || stageState.placement.visionConeRotate || stageState.placement.ruler) return false;
         const sharedSceneId = getSharedSceneId(state);
         if (!sharedSceneId || !sceneIds.has(sharedSceneId)) return false;
-        const viewedSceneId = getViewedSceneId(state, localRole);
+        const viewedSceneId = getViewedSceneId(state, sessionState.role);
         if (viewedSceneId === sharedSceneId) return false;
-        setSceneViewPreference(SCENE_VIEW_SHARED);
-        previewTokenId = '';
-        fitViewOnNextMapLoad = true;
+        setSceneViewPreference(C.SCENE_VIEW_SHARED);
+        stageState.preview.tokenId = '';
+        stageState.view.fitOnNextMapLoad = true;
         return true;
     };
     const canEditInitiative = () => isDM();
 
-    const getTokenById = (tokenId, state = vttState) => {
+    const getTokenById = (tokenId, state = sessionState.snapshot) => {
         const scene = getActiveScene(state);
         if (!scene || !Array.isArray(scene.tokens)) return null;
         return scene.tokens.find((token) => token.id === tokenId) || null;
     };
 
-    const getEntryById = (entryId, state = vttState) => {
+    const getEntryById = (entryId, state = sessionState.snapshot) => {
         const entries = state && state.initiative && Array.isArray(state.initiative.entries) ? state.initiative.entries : [];
         return entries.find((entry) => entry.id === entryId) || null;
     };
@@ -3408,11 +1578,11 @@
     };
 
     const capturePlayerImagesAtLoad = () => {
-        playerImageUrlsAtLoad.clear();
+        resources.playerImageUrlsAtLoad.clear();
         getPlayers().forEach((player) => {
             const playerId = String(player && player.id || '').trim();
             if (!playerId) return;
-            playerImageUrlsAtLoad.set(playerId, toSharedTokenImageUrl(player && player.imageUrl));
+            resources.playerImageUrlsAtLoad.set(playerId, toSharedTokenImageUrl(player && player.imageUrl));
         });
     };
 
@@ -3426,11 +1596,11 @@
     };
 
     const ensureNPCSearchData = async () => {
-        if (npcSearchRefreshPromise) return npcSearchRefreshPromise;
+        if (resources.npcSearch.refreshPromise) return resources.npcSearch.refreshPromise;
         const store = getStore();
-        npcSearchLoading = true;
+        resources.npcSearch.loading = true;
         renderNPCSearchPopover();
-        npcSearchRefreshPromise = (async () => {
+        resources.npcSearch.refreshPromise = (async () => {
             if (window.RTF_DATA_LOADER && typeof window.RTF_DATA_LOADER.ensureDatasets === 'function') {
                 try {
                     await window.RTF_DATA_LOADER.ensureDatasets(['npcs']);
@@ -3447,11 +1617,11 @@
                 }
             }
         })().finally(() => {
-            npcSearchLoading = false;
-            npcSearchRefreshPromise = null;
+            resources.npcSearch.loading = false;
+            resources.npcSearch.refreshPromise = null;
             renderNPCSearchPopover();
         });
-        return npcSearchRefreshPromise;
+        return resources.npcSearch.refreshPromise;
     };
 
     const normalizeMoveAccess = (value, fallback = 'dm') => {
@@ -3489,8 +1659,8 @@
     const getRosterPlayerImageUrlForToken = (token) => {
         if (String(token && token.sourceType || '').trim() !== 'player') return null;
         const playerId = String(token && token.sourceId || '').trim();
-        if (!playerId || !playerImageUrlsAtLoad.has(playerId)) return '';
-        return playerImageUrlsAtLoad.get(playerId) || '';
+        if (!playerId || !resources.playerImageUrlsAtLoad.has(playerId)) return '';
+        return resources.playerImageUrlsAtLoad.get(playerId) || '';
     };
 
     const getCanonicalTokenImageUrl = (token) => {
@@ -3544,7 +1714,7 @@
         return mutated;
     };
 
-    const syncRosterLinkedPlayerPresentation = (state = vttState) => {
+    const syncRosterLinkedPlayerPresentation = (state = sessionState.snapshot) => {
         if (!state || !Array.isArray(state.scenes) || !state.initiative || !Array.isArray(state.initiative.entries)) return false;
         const players = getPlayers();
         if (!players.length) return false;
@@ -3575,7 +1745,7 @@
         return mutated;
     };
 
-    const canRoleMoveToken = (token, role = localRole) => {
+    const canRoleMoveToken = (token, role = sessionState.role) => {
         if (!token) return false;
         if (role === 'dm') return true;
         if (role === 'spectator') return false;
@@ -3607,14 +1777,15 @@
         const store = getStore();
         const targetId = String(caseId || '').trim();
         if (!targetId || !store || typeof store.setActiveCase !== 'function') return false;
-        if (targetId === getActiveCaseId() && vttStateCaseId === targetId && !initialVTTLoadPending) return true;
-        const transitionId = ++vttCaseTransitionId;
-        pendingVTTCaseId = targetId;
-        initialVTTLoadPending = true;
+        const previousCaseId = getActiveCaseId();
+        if (targetId === previousCaseId && sessionState.stateCaseId === targetId && !sessionState.initialLoadPending) return true;
+        const transitionId = ++sessionState.caseTransitionId;
+        sessionState.pendingCaseId = targetId;
+        sessionState.initialLoadPending = true;
         if (targetId !== getActiveCaseId() && !store.setActiveCase(targetId)) {
-            if (transitionId === vttCaseTransitionId) {
-                pendingVTTCaseId = '';
-                initialVTTLoadPending = false;
+            if (transitionId === sessionState.caseTransitionId) {
+                sessionState.pendingCaseId = '';
+                sessionState.initialLoadPending = false;
             }
             return false;
         }
@@ -3625,34 +1796,68 @@
         closeTokenInspectorPopover();
         closeSheetActionPopover();
         closeNPCRollPopover();
-        selectedTokenId = '';
-        selectedEntryId = '';
-        selectedTemplateId = '';
-        selectedEvidenceNoteId = '';
-        selectedClockId = '';
-        pendingRemoteVTTSnapshot = null;
-        dragState = null;
-        panState = null;
-        fitViewOnNextMapLoad = true;
+        stageState.selection.tokenId = '';
+        stageState.selection.entryId = '';
+        stageState.selection.templateId = '';
+        stageState.selection.evidenceNoteId = '';
+        stageState.selection.clockId = '';
+        sessionState.pendingRemoteSnapshot = null;
+        stageState.pointer.drag = null;
+        stageState.pointer.pan = null;
+        stageState.view.fitOnNextMapLoad = true;
 
         loadUIPreferences();
         loadRolePreference();
         const nextSnapshot = await loadInitialVTTSnapshot(store, targetId);
-        if (transitionId !== vttCaseTransitionId || getActiveCaseId() !== targetId) return false;
+        if (transitionId !== sessionState.caseTransitionId || getActiveCaseId() !== targetId) return false;
         if (!nextSnapshot) {
-            vttState = null;
-            vttStateCaseId = targetId;
-            pendingVTTCaseId = '';
+            const collabStatus = getVTTCollabPendingStatus();
+            const preflightFailureDetail = String(
+                collabStatus && collabStatus.detail
+                    ? collabStatus.detail
+                    : 'The selected VTT case could not be loaded.'
+            ).trim();
+            const restoredPreviousCase = !previousCaseId
+                || previousCaseId === targetId
+                || store.setActiveCase(previousCaseId);
+            sessionState.pendingCaseId = '';
+            sessionState.initialLoadPending = false;
+            if (!restoredPreviousCase) {
+                sessionState.snapshot = null;
+                sessionState.stateCaseId = '';
+                if (dom.mapImageEl) {
+                    dom.mapImageEl.removeAttribute('src');
+                    dom.mapImageEl.style.display = 'none';
+                }
+                [dom.gridLayerEl, dom.fogLayerEl, dom.noteLayerEl, dom.templateLayerEl, dom.tokenLayerEl, dom.visionLayerEl]
+                    .filter(Boolean)
+                    .forEach((layer) => layer.replaceChildren());
+                renderSceneList();
+                setVTTCollabStatus({
+                    state: 'degraded',
+                    detail: `${preflightFailureDetail} The previous case could not be restored, so the stage was cleared.`,
+                    peerCount: 0
+                });
+                return false;
+            }
+            loadUIPreferences();
+            loadRolePreference();
             normalizeSelections();
-            return true;
+            render();
+            setVTTCollabStatus({
+                state: 'degraded',
+                detail: `${preflightFailureDetail} Stayed on the previous case.`,
+                peerCount: 0
+            });
+            return false;
         }
-        vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, {
+        sessionState.snapshot = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, {
             persist: false,
             reason: 'case-switch'
         }).snapshot;
-        vttStateCaseId = targetId;
-        pendingVTTCaseId = '';
-        initialVTTLoadPending = false;
+        sessionState.stateCaseId = targetId;
+        sessionState.pendingCaseId = '';
+        sessionState.initialLoadPending = false;
         normalizeSelections();
         render();
 
@@ -3680,158 +1885,17 @@
         localStorage.setItem(getProcessedInitStorageKey(), JSON.stringify(next));
     };
 
-    const normalizeDefences = (value) => {
-        const source = value && typeof value === 'object' ? value : {};
-        const out = {};
-        DEFENCE_KEYS.forEach((key) => {
-            const raw = source[key];
-            out[key] = raw === null || raw === undefined || raw === '' ? null : clamp(Math.round(toNumber(raw, 0)), 0, 99);
-        });
-        return out;
-    };
-
-    const parsePlayerHp = (rawValue) => {
-        const text = String(rawValue || '').trim();
-        if (!text) return { hpCurrent: null, hpMax: null };
-        if (text.includes('/')) {
-            const parts = text.split('/');
-            const hpMax = clamp(Math.round(toNumber(parts[0], 0)), 0, 999999);
-            const hpCurrent = clamp(Math.round(toNumber(parts[1], hpMax)), 0, 999999);
-            return { hpCurrent, hpMax };
-        }
-        const numeric = clamp(Math.round(toNumber(text, 0)), 0, 999999);
-        return { hpCurrent: numeric, hpMax: numeric };
-    };
-
-    const abilityModFromScore = (score) => Math.floor((Math.round(toNumber(score, 10)) - 10) / 2);
-    const formatSignedBonus = (value) => {
-        const clean = Math.round(toNumber(value, 0));
-        return clean >= 0 ? `+${clean}` : String(clean);
-    };
-    const normalizeMonsterRollKeyPart = (value = '') => normalizeSearchText(value).replace(/\s+/g, '-') || 'roll';
-    const normalizeMonsterAction = (action) => {
-        const source = action && typeof action === 'object' ? action : {};
-        const name = String(source.name || '').trim();
-        const desc = String(source.desc || '').trim();
-        if (!name && !desc) return null;
-        const attackMatch = desc.match(/Attack Roll:\s*([+-]\s*\d+)/i) || desc.match(/(?:Melee|Ranged)\s+Attack[^:]*:\s*([+-]\s*\d+)/i);
-        const saveMatch = desc.match(/([A-Za-z]+)\s+Saving Throw:\s*DC\s*(\d+)/i);
-        const hitDamageMatch = desc.match(/Hit:\s*\d+\s*\(([^)]+)\)\s*([A-Za-z]+)?\s*damage/i);
-        const failureDamageMatch = desc.match(/Failure:\s*\d+\s*\(([^)]+)\)\s*([A-Za-z]+)?\s*damage/i);
-        const damageFormula = String(source.damageFormula || '').trim() || (String(source.damage_dice || '').trim()
-            ? `${source.damage_dice}${Number.isFinite(Number(source.damage_bonus)) && Number(source.damage_bonus) ? ` ${Number(source.damage_bonus) >= 0 ? '+' : '-'} ${Math.abs(Number(source.damage_bonus))}` : ''}`
-            : (hitDamageMatch ? hitDamageMatch[1].trim() : (failureDamageMatch ? failureDamageMatch[1].trim() : '')));
-        return {
-            name: name || 'Action',
-            desc,
-            attackBonus: attackMatch ? Math.round(toNumber(attackMatch[1].replace(/\s+/g, ''), 0)) : (hasValue(source.attackBonus) ? Math.round(toNumber(source.attackBonus, 0)) : null),
-            saveAbility: saveMatch ? saveMatch[1].slice(0, 3).toLowerCase() : String(source.saveAbility || '').trim(),
-            saveDc: saveMatch ? Math.round(toNumber(saveMatch[2], 0)) : (hasValue(source.saveDc) ? Math.round(toNumber(source.saveDc, 0)) : null),
-            damageFormula,
-            damageType: hitDamageMatch && hitDamageMatch[2] ? hitDamageMatch[2] : (failureDamageMatch && failureDamageMatch[2] ? failureDamageMatch[2] : '')
-        };
-    };
-    const normalizeMonsterRecord = (monster, id = '') => {
-        const source = monster && typeof monster === 'object' ? monster : {};
-        const slug = String(source.slug || id || source.name || '').trim();
-        const name = String(source.name || slug || 'Monster').trim() || 'Monster';
-        const sourceAbilities = source.abilities && typeof source.abilities === 'object' ? source.abilities : {};
-        const abilities = {
-            str: Math.round(toNumber(hasValue(source.strength) ? source.strength : sourceAbilities.str, 10)),
-            dex: Math.round(toNumber(hasValue(source.dexterity) ? source.dexterity : sourceAbilities.dex, 10)),
-            con: Math.round(toNumber(hasValue(source.constitution) ? source.constitution : sourceAbilities.con, 10)),
-            int: Math.round(toNumber(hasValue(source.intelligence) ? source.intelligence : sourceAbilities.int, 10)),
-            wis: Math.round(toNumber(hasValue(source.wisdom) ? source.wisdom : sourceAbilities.wis, 10)),
-            cha: Math.round(toNumber(hasValue(source.charisma) ? source.charisma : sourceAbilities.cha, 10))
-        };
-        const sourceSaves = source.saves && typeof source.saves === 'object' ? source.saves : {};
-        const saves = {};
-        DEFENCE_KEYS.forEach((key) => {
-            const fullName = sheetStatNames[key] ? sheetStatNames[key].toLowerCase() : '';
-            const raw = fullName && hasValue(source[`${fullName}_save`]) ? source[`${fullName}_save`] : sourceSaves[key];
-            if (hasValue(raw)) saves[key] = Math.round(toNumber(raw, 0));
-        });
-        const sourceSkills = source.skills && typeof source.skills === 'object' ? source.skills : {};
-        const skills = {};
-        Object.keys(sheetSkillsMap).forEach((skillName) => {
-            const sourceKey = skillName.replace(/\s+/g, '_');
-            const raw = hasValue(source[sourceKey]) ? source[sourceKey] : sourceSkills[skillName];
-            if (hasValue(raw)) skills[skillName] = Math.round(toNumber(raw, 0));
-        });
-        const actions = [
-            ...(Array.isArray(source.actions) ? source.actions : []),
-            ...(Array.isArray(source.bonus_actions) ? source.bonus_actions : []),
-            ...(Array.isArray(source.reactions) ? source.reactions : []),
-            ...(Array.isArray(source.legendary_actions) ? source.legendary_actions : [])
-        ].map(normalizeMonsterAction).filter(Boolean);
-        const rawHitPoints = hasValue(source.hit_points) ? source.hit_points : source.hitPoints;
-        const rawArmorClass = hasValue(source.armor_class) ? source.armor_class : source.armorClass;
-        const hitPoints = Number.isFinite(Number(rawHitPoints)) ? Math.round(Number(rawHitPoints)) : null;
-        const armorClass = Number.isFinite(Number(rawArmorClass)) ? Math.round(Number(rawArmorClass)) : null;
-        const passiveMatch = String(source.senses || '').match(/Passive Perception\s*(\d+)/i);
-        const perception = Number.isFinite(Number(source.perception)) ? Math.round(Number(source.perception)) : null;
-        const passivePerception = passiveMatch
-            ? Math.round(toNumber(passiveMatch[1], 10))
-            : (hasValue(source.passivePerception) ? Math.round(toNumber(source.passivePerception, 10)) : (perception !== null ? 10 + perception : null));
-        return {
-            id: slug || buildId('monster'),
-            name,
-            slug,
-            size: String(source.size || '').trim(),
-            type: String(source.type || '').trim(),
-            challengeRating: String(source.challenge_rating || source.challengeRating || '').trim(),
-            armorClass,
-            hitPoints,
-            hitDice: String(source.hit_dice || source.hitDice || '').trim(),
-            initiative: hasValue(source.initiative) ? Math.round(toNumber(source.initiative, abilityModFromScore(abilities.dex))) : abilityModFromScore(abilities.dex),
-            abilities,
-            saves,
-            skills,
-            passivePerception,
-            senses: String(source.senses || '').trim(),
-            languages: String(source.languages || '').trim(),
-            actions
-        };
-    };
-    const getMonsterSizeCells = (monster) => {
-        const size = String(monster && monster.size || '').trim().toLowerCase();
-        if (size === 'huge') return 3;
-        if (size === 'gargantuan') return 4;
-        if (size === 'large') return 2;
-        return 1;
-    };
-    const getMonsterDirectory = () => monsterDirectory;
-    const findMonsterById = (monsterId) => {
-        const targetId = String(monsterId || '').trim();
-        if (!targetId) return null;
-        return getMonsterDirectory().find((monster) => String(monster && monster.id || '') === targetId) || null;
-    };
-    const filterMonsterDirectory = (query = '', limit = MONSTER_ASSIGN_RESULT_LIMIT) => {
-        const cleanQuery = normalizeSearchText(query);
-        const monsters = getMonsterDirectory();
-        const matched = cleanQuery
-            ? monsters.filter((monster) => normalizeSearchText([
-                monster && monster.name,
-                monster && monster.type,
-                monster && monster.size,
-                monster && monster.challengeRating
-            ].join(' ')).includes(cleanQuery))
-            : monsters;
-        return matched.slice(0, Math.max(1, limit));
-    };
-    const findMonsterForAssignmentQuery = (query = '', selectedId = '') => {
-        const selected = findMonsterById(selectedId);
-        if (selected) return selected;
-        const cleanQuery = normalizeSearchText(query);
-        if (!cleanQuery) return null;
-        const monsters = getMonsterDirectory();
-        return monsters.find((monster) => normalizeSearchText(monster && monster.name) === cleanQuery)
-            || filterMonsterDirectory(query, 1)[0]
-            || null;
-    };
+    const getMonsterDirectory = () => resources.monsters.directory;
+    const findMonsterById = (monsterId) => vttRules.findMonsterById(getMonsterDirectory(), monsterId);
+    const filterMonsterDirectory = (query = '', limit = C.MONSTER_ASSIGN_RESULT_LIMIT) => (
+        vttRules.filterMonsterDirectory(getMonsterDirectory(), query, limit)
+    );
+    const findMonsterForAssignmentQuery = (query = '', selectedId = '') => (
+        vttRules.findMonsterForAssignmentQuery(getMonsterDirectory(), query, selectedId)
+    );
     const buildMonsterAssignResultsMarkup = (query = '', selectedId = '') => {
-        if (monsterDirectoryLoading) return '<div class="vtt-empty">Loading SRD monsters...</div>';
-        const monsters = filterMonsterDirectory(query, MONSTER_ASSIGN_RESULT_LIMIT);
+        if (resources.monsters.loading) return '<div class="vtt-empty">Loading SRD monsters...</div>';
+        const monsters = filterMonsterDirectory(query, C.MONSTER_ASSIGN_RESULT_LIMIT);
         if (!monsters.length) {
             return `<div class="vtt-empty">${query ? 'No SRD monsters match that filter.' : 'No SRD monsters loaded yet.'}</div>`;
         }
@@ -3847,11 +1911,11 @@
         }).join('');
     };
     const ensureMonsterDirectory = async () => {
-        if (monsterDirectory.length) return monsterDirectory;
-        if (monsterDirectoryPromise) return monsterDirectoryPromise;
-        monsterDirectoryLoading = true;
+        if (resources.monsters.directory.length) return resources.monsters.directory;
+        if (resources.monsters.promise) return resources.monsters.promise;
+        resources.monsters.loading = true;
         renderNPCSearchPopover();
-        monsterDirectoryPromise = fetch(SRD_MONSTER_DATA_URL)
+        resources.monsters.promise = fetch(C.SRD_MONSTER_DATA_URL)
             .then((response) => {
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 return response.json();
@@ -3860,240 +1924,33 @@
                 const records = payload && typeof payload === 'object'
                     ? Object.entries(payload).filter(([key, value]) => key !== '_info' && value && typeof value === 'object')
                     : [];
-                monsterDirectory = records
+                resources.monsters.directory = records
                     .map(([key, value]) => normalizeMonsterRecord(value, key))
                     .sort((left, right) => left.name.localeCompare(right.name));
-                return monsterDirectory;
+                return resources.monsters.directory;
             })
             .catch((err) => {
                 console.warn('Failed loading SRD monster directory', err);
-                monsterDirectory = [];
-                return monsterDirectory;
+                resources.monsters.directory = [];
+                return resources.monsters.directory;
             })
             .finally(() => {
-                monsterDirectoryLoading = false;
-                monsterDirectoryPromise = null;
+                resources.monsters.loading = false;
+                resources.monsters.promise = null;
                 renderNPCSearchPopover();
                 renderTokenInspector();
                 renderTokenInspectorPopover();
                 renderNPCRollPopover();
             });
-        return monsterDirectoryPromise;
+        return resources.monsters.promise;
     };
-
-    const buildTokenFromPlayer = (player) => {
-        const hp = parsePlayerHp(player && player.hp);
-        return {
-            id: buildId('token'),
-            label: String(player && player.name || 'Player').trim() || 'Player',
-            side: 'player',
-            imageUrl: '',
-            x: 0,
-            y: 0,
-            w: 1,
-            h: 1,
-            sourceType: 'player',
-            sourceId: String(player && player.id || '').trim(),
-            moveAccess: 'player',
-            hpCurrent: hp.hpCurrent,
-            hpMax: hp.hpMax,
-            ac: Number.isFinite(Number(player && player.ac)) ? clamp(Math.round(Number(player.ac)), 0, 99) : null,
-            passivePerception: Number.isFinite(Number(player && player.pp)) ? clamp(Math.round(Number(player.pp)), 0, 99) : null,
-            defences: normalizeDefences(null),
-            conditions: [],
-            triggers: [],
-            proximityPromptStates: [],
-            hidden: false,
-            stealthRoll: null,
-            vision: {
-                enabled: true,
-                facingDeg: 0,
-                arcDeg: 90,
-                baseRangeCells: 6,
-                passivePerception: 10
-            }
-        };
-    };
-
-    const buildTokenFromNPC = (npc) => {
-        const hp = parsePlayerHp(npc && npc.hp);
-        return {
-            id: buildId('token'),
-            label: String(npc && npc.name || 'NPC').trim() || 'NPC',
-            side: 'neutral',
-            imageUrl: toImageUrl(npc && npc.imageUrl),
-            x: 0,
-            y: 0,
-            w: 1,
-            h: 1,
-            sourceType: 'npc',
-            sourceId: String(npc && npc.id || '').trim(),
-            moveAccess: 'dm',
-            hpCurrent: hp.hpCurrent,
-            hpMax: hp.hpMax,
-            ac: Number.isFinite(Number(npc && npc.ac)) ? clamp(Math.round(Number(npc.ac)), 0, 99) : null,
-            passivePerception: Number.isFinite(Number(npc && npc.pp)) ? clamp(Math.round(Number(npc.pp)), 0, 99) : null,
-            defences: normalizeDefences(npc && npc.defences),
-            conditions: [],
-            triggers: [],
-            proximityPromptStates: [],
-            hidden: false,
-            stealthRoll: null,
-            vision: {
-                enabled: true,
-                facingDeg: 0,
-                arcDeg: 90,
-                baseRangeCells: 6,
-                passivePerception: 10
-            }
-        };
-    };
-
-    const buildTokenFromMonster = (monster) => {
-        const statBlock = normalizeMonsterRecord(monster, monster && monster.id);
-        const sizeCells = getMonsterSizeCells(statBlock);
-        return {
-            id: buildId('token'),
-            label: statBlock.name,
-            side: 'enemy',
-            imageUrl: '',
-            x: 0,
-            y: 0,
-            w: sizeCells,
-            h: sizeCells,
-            sourceType: 'monster',
-            sourceId: String(statBlock.id || '').trim(),
-            moveAccess: 'dm',
-            hpCurrent: statBlock.hitPoints,
-            hpMax: statBlock.hitPoints,
-            ac: statBlock.armorClass,
-            passivePerception: statBlock.passivePerception,
-            defences: normalizeDefences(statBlock.saves),
-            monster: statBlock,
-            conditions: [],
-            triggers: [],
-            proximityPromptStates: [],
-            hidden: false,
-            stealthRoll: null,
-            vision: {
-                enabled: true,
-                facingDeg: 0,
-                arcDeg: 90,
-                baseRangeCells: 6,
-                passivePerception: statBlock.passivePerception || 10
-            }
-        };
-    };
-
-    const applyMonsterStatBlockToToken = (token, monster, options = {}) => {
-        if (!token || !monster) return false;
-        const opts = options && typeof options === 'object' ? options : {};
-        const statBlock = normalizeMonsterRecord(monster, monster.id || monster.slug || monster.name);
-        token.sourceType = 'monster';
-        token.sourceId = String(statBlock.id || '').trim();
-        token.monster = statBlock;
-        if (opts.rename) token.label = statBlock.name;
-        if (opts.resize) {
-            const sizeCells = getMonsterSizeCells(statBlock);
-            token.w = sizeCells;
-            token.h = sizeCells;
-        }
-        if (opts.stats !== false) {
-            token.hpCurrent = statBlock.hitPoints;
-            token.hpMax = statBlock.hitPoints;
-            token.ac = statBlock.armorClass;
-            token.passivePerception = statBlock.passivePerception;
-            token.defences = normalizeDefences(statBlock.saves);
-            if (!token.vision || typeof token.vision !== 'object') {
-                token.vision = { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6, passivePerception: 10 };
-            }
-            token.vision.passivePerception = statBlock.passivePerception || 10;
-        }
-        return true;
-    };
-
-    const getMonsterRollOverrides = (token) => (
-        token && token.monsterRollOverrides && typeof token.monsterRollOverrides === 'object'
-            ? token.monsterRollOverrides
-            : {}
-    );
-    const applyMonsterRollOverride = (token, preset) => {
-        if (!preset || !preset.key) return preset;
-        const override = getMonsterRollOverrides(token)[preset.key];
-        if (!override || typeof override !== 'object') return preset;
-        const label = String(override.label || '').trim();
-        const formula = String(override.formula || '').trim();
-        const type = String(override.type || '').trim();
-        const detail = String(override.detail || '').trim();
-        return {
-            ...preset,
-            baseLabel: preset.baseLabel || preset.label,
-            baseFormula: preset.baseFormula || preset.formula,
-            baseType: preset.baseType || preset.type,
-            baseDetail: preset.baseDetail || preset.detail || '',
-            label: label || preset.label,
-            formula: formula || preset.formula,
-            type: type || preset.type,
-            detail: detail || preset.detail || '',
-            override,
-            hasOverride: true
-        };
-    };
-    const updateMonsterRollOverrideForToken = (draft, tokenId, presetKey, override) => {
-        const targetTokenId = String(tokenId || '').trim();
-        const targetPresetKey = String(presetKey || '').trim();
-        if (!draft || !Array.isArray(draft.scenes) || !targetTokenId || !targetPresetKey) return false;
-        for (const scene of draft.scenes) {
-            if (!scene || !Array.isArray(scene.tokens)) continue;
-            const token = scene.tokens.find((entry) => String(entry && entry.id || '').trim() === targetTokenId);
-            if (!token) continue;
-            if (!token.monsterRollOverrides || typeof token.monsterRollOverrides !== 'object') token.monsterRollOverrides = {};
-            if (override && Object.keys(override).length) token.monsterRollOverrides[targetPresetKey] = override;
-            else delete token.monsterRollOverrides[targetPresetKey];
-            return true;
-        }
-        return false;
-    };
-
-    const buildCustomToken = () => ({
-        id: buildId('token'),
-        label: 'New Token',
-        side: 'neutral',
-        imageUrl: '',
-        x: 0,
-        y: 0,
-        w: 1,
-        h: 1,
-        sourceType: '',
-        sourceId: '',
-        moveAccess: 'dm',
-        hpCurrent: null,
-        hpMax: null,
-        ac: null,
-        passivePerception: null,
-        defences: normalizeDefences(null),
-        conditions: [],
-        triggers: [],
-        proximityPromptStates: [],
-        hidden: false,
-        stealthRoll: null,
-        vision: {
-            enabled: true,
-            facingDeg: 0,
-            arcDeg: 90,
-            baseRangeCells: 6,
-            passivePerception: 10
-        }
-    });
-
-    const GUILDLESS_LABEL_PATTERN = /^guildless(?:\s+(\d+))?$/i;
 
     const getNextGuildlessTokenNumber = (scene) => {
         if (!scene || !Array.isArray(scene.tokens)) return 1;
         let maxGuildlessNumber = 0;
         scene.tokens.forEach((token) => {
             const label = String(token && token.label || '').trim();
-            const match = label.match(GUILDLESS_LABEL_PATTERN);
+            const match = label.match(C.GUILDLESS_LABEL_PATTERN);
             if (!match) return;
             const nextNumber = match[1] ? Math.max(1, Math.round(toNumber(match[1], 1))) : 1;
             if (nextNumber > maxGuildlessNumber) maxGuildlessNumber = nextNumber;
@@ -4130,7 +1987,7 @@
     };
 
     const getSpawnDescriptorLabel = (kind, id = '') => {
-        if (kind === 'guildless') return buildGuildlessTokenLabel(getActiveScene(vttState));
+        if (kind === 'guildless') return buildGuildlessTokenLabel(getActiveScene(sessionState.snapshot));
         const source = findSpawnSource(kind, id);
         if (source && source.name) return String(source.name).trim() || 'Token';
         if (kind === 'player') return 'Player';
@@ -4163,7 +2020,7 @@
 
     const positionTokenAtWorldPoint = (token, scene, worldPoint) => {
         if (!token || !scene || !scene.grid || !worldPoint) return token;
-        const cellPx = Math.max(1, toNumber(scene.grid.cellPx, DEFAULT_VTT_CELL_PX));
+        const cellPx = Math.max(1, toNumber(scene.grid.cellPx, C.DEFAULT_VTT_CELL_PX));
         const offsetX = toNumber(scene.grid.offsetX, 0);
         const offsetY = toNumber(scene.grid.offsetY, 0);
         const tokenWidth = Math.max(1, toNumber(token.w, 1));
@@ -4197,17 +2054,17 @@
             if (!sourceToken) return;
             const clonedToken = cloneTokenRecord(sourceToken);
             if (!clonedToken) return;
-            if (GUILDLESS_LABEL_PATTERN.test(String(sourceToken.label || '').trim())) {
+            if (C.GUILDLESS_LABEL_PATTERN.test(String(sourceToken.label || '').trim())) {
                 clonedToken.label = buildGuildlessTokenLabel(scene);
             }
             scene.tokens.push(clonedToken);
             clonedTokenId = clonedToken.id;
-            selectedTokenId = clonedToken.id;
-            selectedEntryId = '';
-            selectedEvidenceNoteId = '';
-            if (tokenInspectorState && tokenInspectorState.kind === 'token' && tokenInspectorState.targetId === targetId) {
-                tokenInspectorState = {
-                    ...tokenInspectorState,
+            stageState.selection.tokenId = clonedToken.id;
+            stageState.selection.entryId = '';
+            stageState.selection.evidenceNoteId = '';
+            if (uiRuntime.overlays.tokenInspector && uiRuntime.overlays.tokenInspector.kind === 'token' && uiRuntime.overlays.tokenInspector.targetId === targetId) {
+                uiRuntime.overlays.tokenInspector = {
+                    ...uiRuntime.overlays.tokenInspector,
                     targetId: clonedToken.id,
                     tokenId: clonedToken.id
                 };
@@ -4236,9 +2093,9 @@
                 token.y = 0;
             }
             scene.tokens.push(token);
-            selectedTokenId = token.id;
-            selectedEvidenceNoteId = '';
-            quickSpawnMenuState = null;
+            stageState.selection.tokenId = token.id;
+            stageState.selection.evidenceNoteId = '';
+            uiRuntime.overlays.quickSpawn = null;
         });
         return true;
     };
@@ -4256,15 +2113,15 @@
             if (!scene) return;
             if (!Array.isArray(scene.evidenceNotes)) scene.evidenceNotes = [];
             const note = buildEvidenceNoteFromWorldPoints(scene, safeWorldPoint, safeWorldPoint, buildId('evidence'), {
-                shape: normalizeEvidenceNoteShape(opts.shape, EVIDENCE_NOTE_SHAPE_PIN)
+                shape: normalizeEvidenceNoteShape(opts.shape, C.EVIDENCE_NOTE_SHAPE_PIN)
             });
             if (!note) return;
             scene.evidenceNotes.push(note);
             createdNoteId = note.id;
-            selectedEvidenceNoteId = note.id;
-            selectedTokenId = '';
-            selectedEntryId = '';
-            quickSpawnMenuState = null;
+            stageState.selection.evidenceNoteId = note.id;
+            stageState.selection.tokenId = '';
+            stageState.selection.entryId = '';
+            uiRuntime.overlays.quickSpawn = null;
         });
         if (!createdNoteId) return false;
         if (opts.openPopover !== false) {
@@ -4285,7 +2142,7 @@
             const safeWorldPoint = worldPoint && typeof worldPoint === 'object'
                 ? { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) }
                 : null;
-            const cellPx = Math.max(1, toNumber(scene && scene.grid && scene.grid.cellPx, DEFAULT_VTT_CELL_PX));
+            const cellPx = Math.max(1, toNumber(scene && scene.grid && scene.grid.cellPx, C.DEFAULT_VTT_CELL_PX));
             const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(players.length))));
             const columnCenter = (columns - 1) / 2;
             let firstTokenId = '';
@@ -4309,10 +2166,10 @@
                 if (!firstTokenId) firstTokenId = token.id;
             });
 
-            selectedTokenId = firstTokenId;
-            selectedEntryId = '';
-            selectedEvidenceNoteId = '';
-            quickSpawnMenuState = null;
+            stageState.selection.tokenId = firstTokenId;
+            stageState.selection.entryId = '';
+            stageState.selection.evidenceNoteId = '';
+            uiRuntime.overlays.quickSpawn = null;
         });
         return true;
     };
@@ -4395,9 +2252,9 @@
         return null;
     };
 
-    const hasAnyDefenceValues = (defences) => DEFENCE_KEYS.some((key) => hasValue(defences && defences[key]));
+    const hasAnyDefenceValues = (defences) => C.DEFENCE_KEYS.some((key) => hasValue(defences && defences[key]));
 
-    const getAssignedTokenForEntry = (entry, state = vttState) => {
+    const getAssignedTokenForEntry = (entry, state = sessionState.snapshot) => {
         if (!entry) return null;
         const linkedToken = findTokenByIdAcrossScenes(state, entry.linkedTokenId);
         if (linkedToken) return linkedToken;
@@ -4407,7 +2264,7 @@
         return null;
     };
 
-    const buildTokenAssignmentLabel = (token, scene, state = vttState) => {
+    const buildTokenAssignmentLabel = (token, scene, state = sessionState.snapshot) => {
         if (!token) return 'Unlinked';
         const cleanScene = scene || findSceneForTokenId(state, token.id);
         const sceneName = cleanScene && cleanScene.name ? cleanScene.name : 'Scene';
@@ -4420,7 +2277,7 @@
         return `${String(token.label || 'Token').trim() || 'Token'} - ${sceneName}${meta}`;
     };
 
-    const getInitiativeTokenAssignmentOptions = (state = vttState) => {
+    const getInitiativeTokenAssignmentOptions = (state = sessionState.snapshot) => {
         if (!state || !Array.isArray(state.scenes)) return [];
         const activeScene = getActiveScene(state);
         const sharedSceneId = getSharedSceneId(state);
@@ -4477,7 +2334,7 @@
         if (typeof store.updatePlayer === 'function') {
             const updated = store.updatePlayer(String(rosterPlayer.id || '').trim(), { imageUrl: rawValue });
             if (updated && updated.id) {
-                playerImageUrlsAtLoad.set(String(updated.id || '').trim(), toSharedTokenImageUrl(updated.imageUrl));
+                resources.playerImageUrlsAtLoad.set(String(updated.id || '').trim(), toSharedTokenImageUrl(updated.imageUrl));
             }
             return updated;
         }
@@ -4487,7 +2344,7 @@
         if (!target) return null;
         target.imageUrl = toSharedTokenImageUrl(rawValue);
         store.save({ scope: `campaign.players.${target.id}` });
-        playerImageUrlsAtLoad.set(String(target.id || '').trim(), target.imageUrl || '');
+        resources.playerImageUrlsAtLoad.set(String(target.id || '').trim(), target.imageUrl || '');
         return { ...target };
     };
 
@@ -4581,8 +2438,8 @@
                 if (clearPlayerRosterIdentityFromRecord(entry)) changed = true;
                 if (linkedToken && clearPlayerRosterIdentityFromRecord(linkedToken)) changed = true;
             }
-            selectedEntryId = entry.id;
-            if (linkedToken) selectedTokenId = linkedToken.id;
+            stageState.selection.entryId = entry.id;
+            if (linkedToken) stageState.selection.tokenId = linkedToken.id;
         });
         return changed;
     };
@@ -4622,8 +2479,8 @@
         }
         closeInitiativeDetail();
         closeTokenInspectorPopover();
-        selectedEntryId = '';
-        selectedTokenId = '';
+        stageState.selection.entryId = '';
+        stageState.selection.tokenId = '';
         normalizeSelections();
         render();
         alert(changedCount
@@ -4632,51 +2489,6 @@
         return true;
     };
 
-    const getTokenWorldRect = (token, scene) => {
-        if (!token || !scene || !scene.grid) return null;
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene.grid.offsetY, 0);
-        const left = offsetX + normalizeTokenCoordinate(token.x, 0) * cellPx;
-        const top = offsetY + normalizeTokenCoordinate(token.y, 0) * cellPx;
-        const width = Math.max(1, toNumber(token.w, 1) * cellPx);
-        const height = Math.max(1, toNumber(token.h, 1) * cellPx);
-        return {
-            left,
-            top,
-            right: left + width,
-            bottom: top + height
-        };
-    };
-
-    const doWorldRectsOverlap = (leftRect, rightRect) => {
-        if (!leftRect || !rightRect) return false;
-        return leftRect.left < rightRect.right
-            && leftRect.right > rightRect.left
-            && leftRect.top < rightRect.bottom
-            && leftRect.bottom > rightRect.top;
-    };
-
-    const isTokenUnderFog = (scene, token) => {
-        if (!scene || !token || !Array.isArray(scene.fog) || !scene.fog.length) return false;
-        const cellSet = collectFogCellSet(scene, scene.fog);
-        if (!cellSet.size) return false;
-        const left = Math.floor(toNumber(token.x, 0));
-        const top = Math.floor(toNumber(token.y, 0));
-        const right = Math.ceil(toNumber(token.x, 0) + Math.max(1, toNumber(token.w, 1)));
-        const bottom = Math.ceil(toNumber(token.y, 0) + Math.max(1, toNumber(token.h, 1)));
-        for (let row = top; row < bottom; row += 1) {
-            for (let col = left; col < right; col += 1) {
-                if (cellSet.has(buildFogCellKey(col, row))) return true;
-            }
-        }
-        return false;
-    };
-
-    const isTokenHiddenForRole = (token, scene, role = localRole) => {
-        if (role === 'dm') return false;
-        return !!(token && (token.hidden || isTokenUnderFog(scene, token)));
-    };
 
     const getSceneTokenForEntry = (scene, entry) => {
         if (!scene || !Array.isArray(scene.tokens) || !entry) return null;
@@ -4694,7 +2506,7 @@
         ) || null;
     };
 
-    const isEntryHiddenForRole = (entry, state = vttState, role = localRole) => {
+    const isEntryHiddenForRole = (entry, state = sessionState.snapshot, role = sessionState.role) => {
         if (!entry) return true;
         if (role === 'dm') return false;
         if (entry.hidden) return true;
@@ -4703,19 +2515,14 @@
         return !!(linkedToken && isTokenHiddenForRole(linkedToken, scene, role));
     };
 
-    const getVisibleTokensForRole = (scene, role = localRole) => {
-        if (!scene || !Array.isArray(scene.tokens)) return [];
-        if (role === 'dm') return scene.tokens;
-        return scene.tokens.filter((token) => !isTokenHiddenForRole(token, scene, role));
-    };
 
-    const getVisibleInitiativeEntriesForRole = (state = vttState, role = localRole) => {
+    const getVisibleInitiativeEntriesForRole = (state = sessionState.snapshot, role = sessionState.role) => {
         const entries = state && state.initiative && Array.isArray(state.initiative.entries) ? state.initiative.entries : [];
         if (role === 'dm') return entries;
         return entries.filter((entry) => !isEntryHiddenForRole(entry, state, role));
     };
 
-    const getVisibleSceneTokenForEntry = (entry, state = vttState, role = localRole) => {
+    const getVisibleSceneTokenForEntry = (entry, state = sessionState.snapshot, role = sessionState.role) => {
         if (!entry) return null;
         const scene = getActiveScene(state);
         const linkedToken = getSceneTokenForEntry(scene, entry);
@@ -4724,15 +2531,15 @@
         return linkedToken;
     };
 
-    const syncTokenSelectionFromEntry = (entryId, state = vttState, role = localRole) => {
+    const syncTokenSelectionFromEntry = (entryId, state = sessionState.snapshot, role = sessionState.role) => {
         const entry = getEntryById(entryId, state);
         const token = getVisibleSceneTokenForEntry(entry, state, role);
-        selectedTokenId = token ? token.id : '';
-        if (token) selectedEvidenceNoteId = '';
+        stageState.selection.tokenId = token ? token.id : '';
+        if (token) stageState.selection.evidenceNoteId = '';
         return token;
     };
 
-    const findEntryForToken = (tokenId, state = vttState) => {
+    const findEntryForToken = (tokenId, state = sessionState.snapshot) => {
         const token = getTokenById(tokenId, state);
         if (!token) return null;
         const entries = state && state.initiative && Array.isArray(state.initiative.entries) ? state.initiative.entries : [];
@@ -4762,23 +2569,24 @@
         const store = getStore();
         if (!store) return null;
         const activeCaseId = getActiveCaseId();
-        if (vttStateCaseId && vttStateCaseId !== activeCaseId) return null;
-        if (!useStoreOnly && isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function') {
-            if (vttCollabSession.caseId !== activeCaseId) return null;
+        if (sessionState.stateCaseId && sessionState.stateCaseId !== activeCaseId) return null;
+        const collabTransport = getVTTCollabTransport();
+        if (!useStoreOnly && isVTTCollabReady() && collabTransport && typeof collabTransport.getSnapshot === 'function') {
+            if (collabTransport.caseId !== activeCaseId) return null;
             try {
-                const snapshot = deepClone(vttCollabSession.getSnapshot());
+                const snapshot = deepClone(collabTransport.getSnapshot());
                 if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
                 return snapshot;
             } catch (err) {
                 console.warn('VTT collaboration snapshot read failed', err);
             }
         }
-        if (!useStoreOnly && vttCollabInitPromise && vttState) {
-            const snapshot = deepClone(vttState);
+        if (!useStoreOnly && isVTTCollabInitializing() && sessionState.snapshot) {
+            const snapshot = deepClone(sessionState.snapshot);
             if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
             return snapshot;
         }
-        if (initialVTTLoadPending || !vttState) return null;
+        if (sessionState.initialLoadPending || !sessionState.snapshot) return null;
         const snapshot = deepClone(store.getVTTState(getActiveCaseId()));
         if (shouldSyncRosterPresentation) syncRosterLinkedPlayerPresentation(snapshot);
         return snapshot;
@@ -4805,12 +2613,13 @@
     const persistSharedVTTSnapshot = (payload, options = {}) => {
         const store = getStore();
         if (!store) return null;
-        if (isVTTCollabReady() && typeof vttCollabSession.syncSnapshot === 'function') {
-            Promise.resolve(vttCollabSession.syncSnapshot(payload, options)).catch((err) => {
+        const collabTransport = getVTTCollabTransport();
+        if (isVTTCollabReady() && collabTransport && typeof collabTransport.syncSnapshot === 'function') {
+            Promise.resolve(collabTransport.syncSnapshot(payload, options)).catch((err) => {
                 console.warn('VTT collaboration snapshot sync failed', err);
             });
-            return typeof vttCollabSession.getSnapshot === 'function'
-                ? deepClone(vttCollabSession.getSnapshot())
+            return typeof collabTransport.getSnapshot === 'function'
+                ? deepClone(collabTransport.getSnapshot())
                 : deepClone(payload);
         }
         if (requiresLiveVTTRoom() && options.allowLocalFallback !== true) {
@@ -4821,7 +2630,7 @@
     };
 
     const withDraft = (mutator, options = {}) => {
-        if (pendingVTTCaseId || (vttStateCaseId && vttStateCaseId !== getActiveCaseId())) return false;
+        if (sessionState.pendingCaseId || (sessionState.stateCaseId && sessionState.stateCaseId !== getActiveCaseId())) return false;
         if (options.allowLocalFallback !== true && !canMutateLiveVTTState(options.reason || 'vtt-draft')) {
             return false;
         }
@@ -4839,10 +2648,10 @@
             baseSnapshot
         });
 
-        vttState = deepClone(saved || draft);
-        syncRosterLinkedPlayerPresentation(vttState);
+        sessionState.snapshot = deepClone(saved || draft);
+        syncRosterLinkedPlayerPresentation(sessionState.snapshot);
         normalizeSelections();
-        if (options.fitView) fitViewOnNextMapLoad = true;
+        if (options.fitView) stageState.view.fitOnNextMapLoad = true;
         render();
         return true;
     };
@@ -4852,330 +2661,82 @@
         const tokens = getVisibleTokensForRole(scene);
         const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
         const visibleClocks = getVisibleSceneClocksForRole(scene);
-        const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
-        if (!visibleEntries.some((entry) => entry.id === selectedEntryId)) {
-            const activeEntryId = vttState && vttState.initiative ? String(vttState.initiative.activeEntryId || '').trim() : '';
-            selectedEntryId = visibleEntries.some((entry) => entry.id === activeEntryId)
+        const visibleEntries = getVisibleInitiativeEntriesForRole(sessionState.snapshot, sessionState.role);
+        if (!visibleEntries.some((entry) => entry.id === stageState.selection.entryId)) {
+            const activeEntryId = sessionState.snapshot && sessionState.snapshot.initiative ? String(sessionState.snapshot.initiative.activeEntryId || '').trim() : '';
+            stageState.selection.entryId = visibleEntries.some((entry) => entry.id === activeEntryId)
                 ? activeEntryId
                 : (visibleEntries[0] ? visibleEntries[0].id : '');
         }
-        if (!tokens.some((token) => token.id === selectedTokenId)) {
-            selectedTokenId = '';
+        if (!tokens.some((token) => token.id === stageState.selection.tokenId)) {
+            stageState.selection.tokenId = '';
         }
-        if (!visibleEvidenceNotes.some((note) => note.id === selectedEvidenceNoteId)) {
-            selectedEvidenceNoteId = '';
+        if (!visibleEvidenceNotes.some((note) => note.id === stageState.selection.evidenceNoteId)) {
+            stageState.selection.evidenceNoteId = '';
         }
-        if (!visibleClocks.some((clock) => clock.id === selectedClockId)) {
-            selectedClockId = '';
+        if (!visibleClocks.some((clock) => clock.id === stageState.selection.clockId)) {
+            stageState.selection.clockId = '';
         }
-        if (!tokens.some((token) => token.id === previewTokenId && getCanonicalTokenImageUrl(token))) {
-            previewTokenId = '';
+        if (!tokens.some((token) => token.id === stageState.preview.tokenId && getCanonicalTokenImageUrl(token))) {
+            stageState.preview.tokenId = '';
         }
         if (!isDM()) {
-            tokenInspectorState = null;
-        } else if (tokenInspectorState) {
-            const popoverTargetId = String(tokenInspectorState.targetId || tokenInspectorState.tokenId || '').trim();
+            uiRuntime.overlays.tokenInspector = null;
+        } else if (uiRuntime.overlays.tokenInspector) {
+            const popoverTargetId = String(uiRuntime.overlays.tokenInspector.targetId || uiRuntime.overlays.tokenInspector.tokenId || '').trim();
             if (!popoverTargetId) {
-                tokenInspectorState = null;
-            } else if (tokenInspectorState.kind === 'note') {
-                if (!visibleEvidenceNotes.some((note) => note.id === popoverTargetId)) tokenInspectorState = null;
+                uiRuntime.overlays.tokenInspector = null;
+            } else if (uiRuntime.overlays.tokenInspector.kind === 'note') {
+                if (!visibleEvidenceNotes.some((note) => note.id === popoverTargetId)) uiRuntime.overlays.tokenInspector = null;
             } else if (!tokens.some((token) => token.id === popoverTargetId)) {
-                tokenInspectorState = null;
+                uiRuntime.overlays.tokenInspector = null;
             }
         }
-        selectedTemplateId = '';
-        if (templatePlacementState && (!scene || templatePlacementState.sceneId !== scene.id)) {
-            templatePlacementState = null;
+        stageState.selection.templateId = '';
+        if (stageState.placement.template && (!scene || stageState.placement.template.sceneId !== scene.id)) {
+            stageState.placement.template = null;
         }
-        templateRotateState = null;
-        if (visionConeRotateState && (!scene || visionConeRotateState.sceneId !== scene.id || !tokens.some((token) => token.id === visionConeRotateState.tokenId))) {
-            visionConeRotateState = null;
+        stageState.placement.templateRotate = null;
+        if (stageState.placement.visionConeRotate && (!scene || stageState.placement.visionConeRotate.sceneId !== scene.id || !tokens.some((token) => token.id === stageState.placement.visionConeRotate.tokenId))) {
+            stageState.placement.visionConeRotate = null;
         }
-        if (rulerState && (!scene || rulerState.sceneId !== scene.id)) {
-            rulerState = null;
+        if (stageState.placement.ruler && (!scene || stageState.placement.ruler.sceneId !== scene.id)) {
+            stageState.placement.ruler = null;
         }
-        if (evidenceNotePlacementState && (!scene || evidenceNotePlacementState.sceneId !== scene.id)) {
-            evidenceNotePlacementState = null;
+        if (stageState.placement.evidenceNote && (!scene || stageState.placement.evidenceNote.sceneId !== scene.id)) {
+            stageState.placement.evidenceNote = null;
         }
-        if (evidenceNoteDragState && (!scene || evidenceNoteDragState.sceneId !== scene.id || !visibleEvidenceNotes.some((note) => note.id === evidenceNoteDragState.noteId))) {
-            evidenceNoteDragState = null;
+        if (stageState.placement.evidenceNoteDrag && (!scene || stageState.placement.evidenceNoteDrag.sceneId !== scene.id || !visibleEvidenceNotes.some((note) => note.id === stageState.placement.evidenceNoteDrag.noteId))) {
+            stageState.placement.evidenceNoteDrag = null;
         }
-        if (body) {
-            body.dataset.vttRole = localRole;
-            body.dataset.sceneViewMode = isUsingLocalSceneView(vttState, localRole) ? SCENE_VIEW_LOCAL : SCENE_VIEW_SHARED;
+        if (dom.body) {
+            dom.body.dataset.vttRole = sessionState.role;
+            dom.body.dataset.sceneViewMode = isUsingLocalSceneView(sessionState.snapshot, sessionState.role) ? C.SCENE_VIEW_LOCAL : C.SCENE_VIEW_SHARED;
         }
-    };
-
-    const getLoadedMapSizeForScene = (scene) => {
-        if (!scene || !scene.mapImageUrl) return { width: 0, height: 0 };
-        if (mapLoadState.url !== scene.mapImageUrl || !mapLoadState.loaded) return { width: 0, height: 0 };
-        const scale = getSceneMapScale(scene);
-        return {
-            width: Math.max(0, Math.round((mapSize.width || 0) * scale)),
-            height: Math.max(0, Math.round((mapSize.height || 0) * scale))
-        };
-    };
-
-    const getWorldSizeForScene = (scene) => {
-        if (!scene) return { ...DEFAULT_WORLD_SIZE };
-        const grid = scene.grid || { cellPx: DEFAULT_VTT_CELL_PX, offsetX: 0, offsetY: 0 };
-        const loadedMapSize = getLoadedMapSizeForScene(scene);
-        let width = loadedMapSize.width || 0;
-        let height = loadedMapSize.height || 0;
-        const hasTokens = Array.isArray(scene.tokens) && scene.tokens.length;
-        if ((scene.mapImageUrl && !loadedMapSize.width) || (!scene.mapImageUrl && !hasTokens)) {
-            width = Math.max(width, DEFAULT_WORLD_SIZE.width);
-            height = Math.max(height, DEFAULT_WORLD_SIZE.height);
-        }
-        if (Array.isArray(scene.tokens) && scene.tokens.length) {
-            scene.tokens.forEach((token) => {
-                width = Math.max(width, grid.offsetX + (token.x + token.w + 4) * grid.cellPx);
-                height = Math.max(height, grid.offsetY + (token.y + token.h + 4) * grid.cellPx);
-            });
-        }
-        if (Array.isArray(scene.evidenceNotes) && scene.evidenceNotes.length) {
-            scene.evidenceNotes.forEach((note) => {
-                width = Math.max(width, toNumber(note && note.x, 0) + Math.max(1, toNumber(note && note.w, grid.cellPx)) + grid.cellPx * 2);
-                height = Math.max(height, toNumber(note && note.y, 0) + Math.max(1, toNumber(note && note.h, grid.cellPx)) + grid.cellPx * 2);
-            });
-        }
-        if (Array.isArray(scene.fog) && scene.fog.length) {
-            scene.fog.forEach((fogEntry) => {
-                const rect = getFogEntryWorldRect(scene, fogEntry);
-                if (!rect) return;
-                width = Math.max(width, rect.x + rect.w + grid.cellPx * 2);
-                height = Math.max(height, rect.y + rect.h + grid.cellPx * 2);
-            });
-        }
-        return {
-            width: Math.max(1, Math.round(width)),
-            height: Math.max(1, Math.round(height))
-        };
-    };
-
-    const scaleForZoom = (value) => Math.max(0, Math.round(value * localView.zoom * 1000) / 1000);
-
-    const applyRenderedWorldGeometry = (scene = getActiveScene()) => {
-        if (!scene || !mapWorldEl || !worldEl || !mapImageEl || !fogLayerEl || !noteLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
-        const mapDisplaySize = getLoadedMapSizeForScene(scene);
-        const scaledMapWidth = scaleForZoom(mapDisplaySize.width || 0);
-        const scaledMapHeight = scaleForZoom(mapDisplaySize.height || 0);
-        mapWorldEl.style.width = `${scaledMapWidth}px`;
-        mapWorldEl.style.height = `${scaledMapHeight}px`;
-        mapImageEl.style.width = `${scaledMapWidth}px`;
-        mapImageEl.style.height = `${scaledMapHeight}px`;
-        worldEl.style.width = `${scaleForZoom(worldSize.width)}px`;
-        worldEl.style.height = `${scaleForZoom(worldSize.height)}px`;
-
-        fogLayerEl.querySelectorAll('.vtt-fog-mask, .vtt-fog-reveal-shimmer').forEach((maskEl) => {
-            if (!(maskEl instanceof HTMLElement)) return;
-            const worldLeft = toNumber(maskEl.dataset.worldLeft, 0);
-            const worldTop = toNumber(maskEl.dataset.worldTop, 0);
-            maskEl.style.left = `${scaleForZoom(worldLeft)}px`;
-            maskEl.style.top = `${scaleForZoom(worldTop)}px`;
-            maskEl.style.width = `${scaleForZoom(toNumber(maskEl.dataset.worldWidth, 0))}px`;
-            maskEl.style.height = `${scaleForZoom(toNumber(maskEl.dataset.worldHeight, 0))}px`;
-            if (maskEl.classList.contains('vtt-fog-reveal-shimmer')) return;
-            maskEl.style.setProperty('--vtt-fog-texture-x', `${-scaleForZoom(worldLeft)}px`);
-            maskEl.style.setProperty('--vtt-fog-texture-y', `${-scaleForZoom(worldTop)}px`);
-        });
-
-        fogLayerEl.querySelectorAll('.vtt-fog-texture-clip').forEach((textureEl) => {
-            if (!(textureEl instanceof HTMLElement)) return;
-
-            const worldLeft = toNumber(textureEl.dataset.worldLeft, 0);
-            const worldTop = toNumber(textureEl.dataset.worldTop, 0);
-            const worldWidth = toNumber(textureEl.dataset.worldWidth, worldSize.width);
-            const worldHeight = toNumber(textureEl.dataset.worldHeight, worldSize.height);
-            const tilePx = Math.max(32, scaleForZoom(256));
-
-            textureEl.style.left = `${scaleForZoom(worldLeft)}px`;
-            textureEl.style.top = `${scaleForZoom(worldTop)}px`;
-            textureEl.style.width = `${scaleForZoom(worldWidth)}px`;
-            textureEl.style.height = `${scaleForZoom(worldHeight)}px`;
-            textureEl.style.setProperty('--vtt-fog-texture-tile', `${tilePx}px`);
-            textureEl.style.setProperty('--vtt-fog-texture-gutter', `${tilePx}px`);
-        });
-
-        fogLayerEl.querySelectorAll('.vtt-fog-edge-svg').forEach((edgeEl) => {
-            if (!(edgeEl instanceof SVGSVGElement)) return;
-
-            const worldLeft = toNumber(edgeEl.dataset.worldLeft, 0);
-            const worldTop = toNumber(edgeEl.dataset.worldTop, 0);
-            const worldWidth = toNumber(edgeEl.dataset.worldWidth, worldSize.width);
-            const worldHeight = toNumber(edgeEl.dataset.worldHeight, worldSize.height);
-
-            edgeEl.style.left = `${scaleForZoom(worldLeft)}px`;
-            edgeEl.style.top = `${scaleForZoom(worldTop)}px`;
-            edgeEl.style.width = `${scaleForZoom(worldWidth)}px`;
-            edgeEl.style.height = `${scaleForZoom(worldHeight)}px`;
-        });
-
-        noteLayerEl.querySelectorAll('.vtt-map-note').forEach((noteEl) => {
-            if (!(noteEl instanceof HTMLElement)) return;
-            noteEl.style.left = `${scaleForZoom(toNumber(noteEl.dataset.worldLeft, 0))}px`;
-            noteEl.style.top = `${scaleForZoom(toNumber(noteEl.dataset.worldTop, 0))}px`;
-            noteEl.style.width = `${scaleForZoom(toNumber(noteEl.dataset.worldWidth, 0))}px`;
-            noteEl.style.height = `${scaleForZoom(toNumber(noteEl.dataset.worldHeight, 0))}px`;
-            applyEvidenceNoteChipPresentation(noteEl);
-        });
-
-        templateLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
-            if (!(itemEl instanceof HTMLElement)) return;
-            itemEl.style.left = `${scaleForZoom(toNumber(itemEl.dataset.worldLeft, 0))}px`;
-            itemEl.style.top = `${scaleForZoom(toNumber(itemEl.dataset.worldTop, 0))}px`;
-            itemEl.style.width = `${scaleForZoom(toNumber(itemEl.dataset.worldWidth, 0))}px`;
-            itemEl.style.height = `${scaleForZoom(toNumber(itemEl.dataset.worldHeight, 0))}px`;
-            if (itemEl.dataset.worldRotation !== undefined) {
-                itemEl.style.transform = `rotate(${toNumber(itemEl.dataset.worldRotation, 0)}deg)`;
-            }
-        });
-
-        visionLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
-            if (!(itemEl instanceof HTMLElement)) return;
-            itemEl.style.left = `${scaleForZoom(toNumber(itemEl.dataset.worldLeft, 0))}px`;
-            itemEl.style.top = `${scaleForZoom(toNumber(itemEl.dataset.worldTop, 0))}px`;
-            itemEl.style.width = `${scaleForZoom(toNumber(itemEl.dataset.worldWidth, 0))}px`;
-            itemEl.style.height = `${scaleForZoom(toNumber(itemEl.dataset.worldHeight, 0))}px`;
-            if (itemEl.dataset.worldRotation !== undefined) {
-                itemEl.style.transform = `rotate(${toNumber(itemEl.dataset.worldRotation, 0)}deg)`;
-            }
-        });
-
-        if (proximityPromptStackEl && !proximityPromptStackEl.hidden) {
-            positionProximityPrompt(scene);
-        }
-
-        tokenLayerEl.querySelectorAll('.vtt-token').forEach((tokenEl) => {
-            if (!(tokenEl instanceof HTMLElement)) return;
-            tokenEl.style.left = `${scaleForZoom(toNumber(tokenEl.dataset.worldLeft, 0))}px`;
-            tokenEl.style.top = `${scaleForZoom(toNumber(tokenEl.dataset.worldTop, 0))}px`;
-            tokenEl.style.width = `${scaleForZoom(toNumber(tokenEl.dataset.worldWidth, 0))}px`;
-            tokenEl.style.height = `${scaleForZoom(toNumber(tokenEl.dataset.worldHeight, 0))}px`;
-            tokenEl.style.setProperty('--vtt-token-font-scale', String(clamp(localView.zoom, 0.9, 1.9)));
-        });
-    };
-
-    const applyWorldTransform = (scene = getActiveScene()) => {
-        zoomResetEls.forEach((zoomEl) => {
-            if (zoomEl) zoomEl.textContent = `${Math.round(localView.zoom * 100)}%`;
-        });
-        if (mapWorldEl) {
-            mapWorldEl.style.transform = `translate(${localView.x}px, ${localView.y}px)`;
-        }
-        if (!worldEl) return;
-        worldEl.style.transform = `translate(${localView.x}px, ${localView.y}px)`;
-        renderStageGrid(scene);
-    };
-
-    const setZoomAtPoint = (nextZoom, clientX, clientY) => {
-        if (!stageEl) return;
-        const rect = stageEl.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        const clampedZoom = clampZoom(nextZoom);
-        const stageX = clientX - rect.left;
-        const stageY = clientY - rect.top;
-        const worldX = (stageX - localView.x) / localView.zoom;
-        const worldY = (stageY - localView.y) / localView.zoom;
-        localView.zoom = clampedZoom;
-        localView.x = Math.round(stageX - worldX * clampedZoom);
-        localView.y = Math.round(stageY - worldY * clampedZoom);
-        applyRenderedWorldGeometry();
-        applyWorldTransform();
-    };
-
-    const setZoomAroundStageCenter = (nextZoom) => {
-        if (!stageEl) return;
-        const rect = stageEl.getBoundingClientRect();
-        setZoomAtPoint(nextZoom, rect.left + rect.width / 2, rect.top + rect.height / 2);
-    };
-
-    const renderStageGrid = (scene = getActiveScene()) => {
-        if (!stageGridEl || !scene || !scene.grid) return;
-        const cellSize = Math.max(8, Math.round(scene.grid.cellPx * localView.zoom * 1000) / 1000);
-        const offsetX = positiveModulo(localView.x + scene.grid.offsetX * localView.zoom, cellSize);
-        const offsetY = positiveModulo(localView.y + scene.grid.offsetY * localView.zoom, cellSize);
-        stageGridEl.style.backgroundSize = `${cellSize}px ${cellSize}px`;
-        stageGridEl.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
-    };
-
-    const fitViewToWorld = () => {
-        if (!stageEl) return;
-        const rect = stageEl.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        const padding = 36;
-        const zoom = clamp(
-            Math.min(
-                (rect.width - padding * 2) / Math.max(1, worldSize.width),
-                (rect.height - padding * 2) / Math.max(1, worldSize.height)
-            ),
-            0.25,
-            1.8
-        );
-        localView.zoom = zoom;
-        localView.x = Math.round((rect.width - worldSize.width * zoom) / 2);
-        localView.y = Math.round((rect.height - worldSize.height * zoom) / 2);
-        applyRenderedWorldGeometry();
-        applyWorldTransform();
-    };
-
-    const focusViewOnToken = (token, scene = getActiveScene()) => {
-        if (!stageEl || !token || !scene || !scene.grid) return false;
-        const rect = stageEl.getBoundingClientRect();
-        if (!rect.width || !rect.height) return false;
-        const cellPx = getSceneCellPx(scene);
-        const centerX = toNumber(scene.grid.offsetX, 0) + (toNumber(token.x, 0) + Math.max(1, toNumber(token.w, 1)) / 2) * cellPx;
-        const centerY = toNumber(scene.grid.offsetY, 0) + (toNumber(token.y, 0) + Math.max(1, toNumber(token.h, 1)) / 2) * cellPx;
-        localView.x = Math.round(rect.width / 2 - centerX * localView.zoom);
-        localView.y = Math.round(rect.height / 2 - centerY * localView.zoom);
-        applyRenderedWorldGeometry(scene);
-        applyWorldTransform(scene);
-        return true;
-    };
-
-    const screenToWorld = (clientX, clientY) => {
-        const rect = stageEl.getBoundingClientRect();
-        return {
-            x: (clientX - rect.left - localView.x) / localView.zoom,
-            y: (clientY - rect.top - localView.y) / localView.zoom
-        };
-    };
-    const worldToScreen = (worldPoint = {}) => {
-        const rect = stageEl ? stageEl.getBoundingClientRect() : { left: 0, top: 0 };
-        return {
-            x: rect.left + localView.x + toNumber(worldPoint.x, 0) * localView.zoom,
-            y: rect.top + localView.y + toNumber(worldPoint.y, 0) * localView.zoom
-        };
-    };
-
-    const isClientPointInsideStage = (clientX, clientY) => {
-        if (!stageEl) return false;
-        const rect = stageEl.getBoundingClientRect();
-        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
     };
 
     const closeQuickSpawnMenu = () => {
-        if (!quickSpawnMenuState) return false;
-        quickSpawnMenuState = null;
+        if (!uiRuntime.overlays.quickSpawn) return false;
+        uiRuntime.overlays.quickSpawn = null;
         renderQuickSpawnMenu();
         return true;
     };
 
     const getContextSpawnWorldPoint = () => {
-        if (stageContextMenuState && stageContextMenuState.worldPoint) return stageContextMenuState.worldPoint;
-        if (quickSpawnMenuState && quickSpawnMenuState.worldPoint) return quickSpawnMenuState.worldPoint;
-        if (npcSearchState && npcSearchState.worldPoint) return npcSearchState.worldPoint;
+        if (uiRuntime.overlays.stageContextMenu && uiRuntime.overlays.stageContextMenu.worldPoint) return uiRuntime.overlays.stageContextMenu.worldPoint;
+        if (uiRuntime.overlays.quickSpawn && uiRuntime.overlays.quickSpawn.worldPoint) return uiRuntime.overlays.quickSpawn.worldPoint;
+        if (uiRuntime.npcSearch.state && uiRuntime.npcSearch.state.worldPoint) return uiRuntime.npcSearch.state.worldPoint;
         return null;
     };
 
     const getStageContextWorldPoint = () => {
-        if (stageContextMenuState && stageContextMenuState.worldPoint) return stageContextMenuState.worldPoint;
+        if (uiRuntime.overlays.stageContextMenu && uiRuntime.overlays.stageContextMenu.worldPoint) return uiRuntime.overlays.stageContextMenu.worldPoint;
         return null;
     };
 
     const closeViewMenu = () => {
-        if (!viewMenuOpen) return false;
-        viewMenuOpen = false;
+        if (!uiRuntime.menus.viewOpen) return false;
+        uiRuntime.menus.viewOpen = false;
         renderViewMenu();
         return true;
     };
@@ -5188,8 +2749,8 @@
         closeQuickSpawnMenu();
         closeTokenInspectorPopover();
         closeInitiativeDetail();
-        npcSearchOpen = true;
-        npcSearchState = {
+        uiRuntime.npcSearch.open = true;
+        uiRuntime.npcSearch.state = {
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2)),
             worldPoint: worldPoint && Number.isFinite(Number(worldPoint.x)) && Number.isFinite(Number(worldPoint.y))
@@ -5197,10 +2758,10 @@
                 : null
         };
         renderNPCSearchPopover();
-        if (npcSearchInputEl) {
+        if (dom.npcSearchInputEl) {
             window.requestAnimationFrame(() => {
-                npcSearchInputEl.focus();
-                npcSearchInputEl.select();
+                dom.npcSearchInputEl.focus();
+                dom.npcSearchInputEl.select();
             });
         }
         ensureNPCSearchData().catch((err) => {
@@ -5210,9 +2771,9 @@
     };
 
     const closeTokenInspectorPopover = () => {
-        if (!tokenInspectorState && (!tokenInspectorPopoverEl || tokenInspectorPopoverEl.hidden)) return false;
-        tokenInspectorState = null;
-        if (tokenInspectorPopoverEl) tokenInspectorPopoverEl.hidden = true;
+        if (!uiRuntime.overlays.tokenInspector && (!dom.tokenInspectorPopoverEl || dom.tokenInspectorPopoverEl.hidden)) return false;
+        uiRuntime.overlays.tokenInspector = null;
+        if (dom.tokenInspectorPopoverEl) dom.tokenInspectorPopoverEl.hidden = true;
         return true;
     };
 
@@ -5223,7 +2784,7 @@
         closeQuickSpawnMenu();
         closeNPCSearch();
         closeInitiativeDetail();
-        tokenInspectorState = {
+        uiRuntime.overlays.tokenInspector = {
             kind: 'token',
             targetId,
             tokenId: targetId,
@@ -5240,7 +2801,7 @@
         closeQuickSpawnMenu();
         closeNPCSearch();
         closeInitiativeDetail();
-        tokenInspectorState = {
+        uiRuntime.overlays.tokenInspector = {
             kind: 'note',
             targetId,
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
@@ -5250,15 +2811,15 @@
     };
 
     const openQuickSpawnMenu = (clientX, clientY) => {
-        if (!stageEl || !isDM()) return false;
+        if (!dom.stageEl || !isDM()) return false;
         closeStageContextMenu();
         closeNPCSearch();
         closeViewMenu();
         closeToolsMenu();
         closeTokenInspectorPopover();
         closeInitiativeDetail();
-        const rect = stageEl.getBoundingClientRect();
-        quickSpawnMenuState = {
+        const rect = dom.stageEl.getBoundingClientRect();
+        uiRuntime.overlays.quickSpawn = {
             worldPoint: screenToWorld(clientX, clientY),
             clientX: Math.round(clientX),
             clientY: Math.round(clientY),
@@ -5270,8 +2831,8 @@
     };
 
     const clearSpawnDrag = () => {
-        if (!spawnDragState) return false;
-        spawnDragState = null;
+        if (!stageState.pointer.spawnDrag) return false;
+        stageState.pointer.spawnDrag = null;
         renderSpawnGhost();
         return true;
     };
@@ -5285,7 +2846,7 @@
         closeToolsMenu();
         closeQuickSpawnMenu();
         closeTokenInspectorPopover();
-        spawnDragState = {
+        stageState.pointer.spawnDrag = {
             pointerId: event.pointerId,
             kind,
             id: String(id || '').trim(),
@@ -5294,7 +2855,7 @@
             clientY: event.clientY,
             overStage: isClientPointInsideStage(event.clientX, event.clientY)
         };
-        previewTokenId = '';
+        stageState.preview.tokenId = '';
         renderSpawnGhost();
         return true;
     };
@@ -5302,84 +2863,70 @@
     const loadRolePreference = () => {
         const store = getStore();
         if (store && typeof store.getVTTLocalRole === 'function') {
-            localRole = normalizeLocalRole(store.getVTTLocalRole(getActiveCaseId()));
+            sessionState.role = normalizeLocalRole(store.getVTTLocalRole(getActiveCaseId()));
         } else {
-            localRole = 'player';
+            sessionState.role = 'player';
         }
-        if (body) body.dataset.vttRole = localRole;
+        if (dom.body) dom.body.dataset.vttRole = sessionState.role;
     };
 
     const setRolePreference = (role) => {
-        const previousRole = localRole;
-        localRole = normalizeLocalRole(role);
+        const previousRole = sessionState.role;
+        sessionState.role = normalizeLocalRole(role);
         const store = getStore();
         if (store && typeof store.setVTTLocalRole === 'function') {
-            localRole = normalizeLocalRole(store.setVTTLocalRole(localRole, getActiveCaseId()));
+            sessionState.role = normalizeLocalRole(store.setVTTLocalRole(sessionState.role, getActiveCaseId()));
         }
-        if (localRole !== 'dm') {
-            if (localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE || localToolState.mode === TOOL_MODE_NOTE) {
-                localToolState.mode = TOOL_MODE_NAVIGATE;
+        if (sessionState.role !== 'dm') {
+            if (stageState.tool.current.mode === C.TOOL_MODE_FOG || stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE || stageState.tool.current.mode === C.TOOL_MODE_NOTE) {
+                stageState.tool.current.mode = C.TOOL_MODE_NAVIGATE;
             }
             closeNPCSearch();
-            quickSpawnMenuState = null;
+            uiRuntime.overlays.quickSpawn = null;
             closeTokenInspectorPopover();
             clearSpawnDrag();
             closeInitiativeDetail();
         } else {
-            playerRollMenuOpen = false;
+            uiRuntime.playerRoll.menuOpen = false;
             closeSheetActionPopover();
             closeNPCRollPopover();
         }
-        if (localRole !== 'player') {
-            activeProximityPrompt = null;
-            playerRollMenuOpen = false;
+        if (sessionState.role !== 'player') {
+            vttProximityController.reset();
+            uiRuntime.playerRoll.menuOpen = false;
             closeRosterSelfModal();
             closeSheetActionPopover();
         }
-        if (isSpectator() && localToolState.mode !== TOOL_MODE_RULER) {
-            localToolState.mode = TOOL_MODE_NAVIGATE;
+        if (isSpectator() && stageState.tool.current.mode !== C.TOOL_MODE_RULER) {
+            stageState.tool.current.mode = C.TOOL_MODE_NAVIGATE;
         }
         clearPendingTouchContext();
         closeViewMenu();
         closeToolsMenu();
-        if (!getAllowedVTTPanel(uiState.activeVttPanel)) uiState.activeVttPanel = '';
+        if (!getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel)) uiRuntime.preferences.activeVttPanel = '';
         clearTemplatePlacementState();
-        if (body) body.dataset.vttRole = localRole;
+        if (dom.body) dom.body.dataset.vttRole = sessionState.role;
         render();
-        if (vttCollabSession && typeof vttCollabSession.handleSavePermissionChanged === 'function') {
-            vttCollabSession.handleSavePermissionChanged();
-        }
-        if (previousRole !== localRole && hasLiveVTTConfig()) {
-            const transitionId = ++vttAuthorityTransitionId;
-            const requestedRole = localRole;
-            handleVTTAuthorityRoleChange(previousRole, requestedRole, transitionId).catch((err) => {
-                if (transitionId !== vttAuthorityTransitionId || localRole !== requestedRole) return;
-                console.warn('VTT collaboration role authority refresh failed', err);
-                setVTTCollabStatus({
-                    state: 'degraded',
-                    detail: err && err.message ? err.message : 'Live VTT role refresh failed.',
-                    peerCount: 0,
-                    retryable: true
-                });
-            });
+        if (resources.sessionController && typeof resources.sessionController.handleRoleChanged === 'function') {
+            resources.sessionController.handleRoleChanged(previousRole, sessionState.role);
         }
     };
 
-    const isDMUnlockModalOpen = () => !!(dmUnlockModalEl && !dmUnlockModalEl.hidden);
+    const isDMUnlockModalOpen = () => !!(dom.dmUnlockModalEl && !dom.dmUnlockModalEl.hidden);
 
     const closeDMUnlockModal = ({ restoreFocus = true, refreshRosterSelf = true } = {}) => {
-        if (!dmUnlockModalEl) return false;
-        if (dmUnlockInputEl) dmUnlockInputEl.value = '';
-        if (dmUnlockErrorEl) {
-            dmUnlockErrorEl.hidden = true;
-            dmUnlockErrorEl.textContent = 'That password was not accepted.';
+        if (!dom.dmUnlockModalEl) return false;
+        if (dom.dmUnlockInputEl) dom.dmUnlockInputEl.value = '';
+        if (dom.dmUnlockErrorEl) {
+            dom.dmUnlockErrorEl.hidden = true;
+            dom.dmUnlockErrorEl.textContent = 'That password was not accepted.';
         }
-        if (dmUnlockModalEl.hidden) return false;
-        dmUnlockModalEl.hidden = true;
-        if (restoreFocus && dmUnlockReturnFocusEl && typeof dmUnlockReturnFocusEl.focus === 'function') {
-            dmUnlockReturnFocusEl.focus();
+        if (dom.dmUnlockModalEl.hidden) return false;
+        dom.dmUnlockModalEl.hidden = true;
+        if (restoreFocus && uiRuntime.modals.dmUnlock.returnFocusEl && typeof uiRuntime.modals.dmUnlock.returnFocusEl.focus === 'function') {
+            uiRuntime.modals.dmUnlock.returnFocusEl.focus();
         }
-        dmUnlockReturnFocusEl = null;
+        uiRuntime.modals.dmUnlock.returnFocusEl = null;
         if (refreshRosterSelf && isPlayer()) {
             window.requestAnimationFrame(renderRosterSelfModal);
         }
@@ -5387,7 +2934,7 @@
     };
 
     const openDMUnlockModal = () => {
-        if (!dmUnlockModalEl || !dmUnlockInputEl) return false;
+        if (!dom.dmUnlockModalEl || !dom.dmUnlockInputEl) return false;
         closeNPCSearch();
         closeViewMenu();
         closeToolsMenu();
@@ -5396,29 +2943,29 @@
         closeInitiativeDetail();
         clearSpawnDrag();
         clearTemplatePlacementState();
-        dmUnlockReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : roleToggleEl;
-        dmUnlockModalEl.hidden = false;
-        if (dmUnlockErrorEl) {
-            dmUnlockErrorEl.hidden = true;
-            dmUnlockErrorEl.textContent = 'That password was not accepted.';
+        uiRuntime.modals.dmUnlock.returnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : dom.roleToggleEl;
+        dom.dmUnlockModalEl.hidden = false;
+        if (dom.dmUnlockErrorEl) {
+            dom.dmUnlockErrorEl.hidden = true;
+            dom.dmUnlockErrorEl.textContent = 'That password was not accepted.';
         }
-        dmUnlockInputEl.value = '';
+        dom.dmUnlockInputEl.value = '';
         window.requestAnimationFrame(() => {
-            dmUnlockInputEl.focus();
-            dmUnlockInputEl.select();
+            dom.dmUnlockInputEl.focus();
+            dom.dmUnlockInputEl.select();
         });
         return true;
     };
 
     const submitDMUnlockModal = () => {
-        if (!dmUnlockInputEl) return false;
-        if (String(dmUnlockInputEl.value || '').trim() !== DM_UNLOCK_PHRASE) {
-            if (dmUnlockErrorEl) {
-                dmUnlockErrorEl.textContent = 'That password was not accepted.';
-                dmUnlockErrorEl.hidden = false;
+        if (!dom.dmUnlockInputEl) return false;
+        if (String(dom.dmUnlockInputEl.value || '').trim() !== C.DM_UNLOCK_PHRASE) {
+            if (dom.dmUnlockErrorEl) {
+                dom.dmUnlockErrorEl.textContent = 'That password was not accepted.';
+                dom.dmUnlockErrorEl.hidden = false;
             }
-            dmUnlockInputEl.focus();
-            dmUnlockInputEl.select();
+            dom.dmUnlockInputEl.focus();
+            dom.dmUnlockInputEl.select();
             return false;
         }
         closeDMUnlockModal({ restoreFocus: false, refreshRosterSelf: false });
@@ -5428,357 +2975,144 @@
 
     const promptForDMMode = () => openDMUnlockModal();
 
-    const setSyncChipState = ({ state = 'local', label = 'Local', detail = '', retryable = false } = {}) => {
-        if (!syncChipEl) return;
-        syncChipEl.dataset.state = state;
-        syncChipEl.dataset.retryable = retryable ? 'true' : 'false';
-        syncChipEl.textContent = label;
-        syncChipEl.title = detail || label;
-        syncChipEl.setAttribute('aria-label', detail || label);
-        syncChipEl.setAttribute('role', retryable ? 'button' : 'status');
-        syncChipEl.tabIndex = retryable ? 0 : -1;
-    };
-
-    const clearVTTCollabDropoutTimer = () => {
-        if (!vttCollabDropoutTimer) return;
-        clearTimeout(vttCollabDropoutTimer);
-        vttCollabDropoutTimer = 0;
-    };
-
-    const scheduleVTTCollabDropoutRefresh = (delayMs) => {
-        if (vttCollabDropoutTimer || !Number.isFinite(delayMs) || delayMs <= 0) return;
-        vttCollabDropoutTimer = window.setTimeout(() => {
-            vttCollabDropoutTimer = 0;
-            if (vttCollabPendingStatus) {
-                setVTTCollabStatus(vttCollabPendingStatus);
-            }
-        }, delayMs);
-    };
-
-    const updateStoreSyncChip = (status) => {
-        const hasActiveCollabSession = !!(vttCollabSession
-            && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive()));
-        if (hasActiveCollabSession || vttCollabInitPromise) return;
-        const source = status && status.connected
-            ? (status.pendingPush ? 'Syncing' : 'Shared')
-            : 'Local';
-        const detail = source === 'Syncing'
-            ? 'Shared VTT sync is pushing updates.'
-            : (source === 'Shared'
-                ? 'Shared VTT sync is connected through the store.'
-                : 'VTT is running locally on this browser.');
-        setSyncChipState({
-            state: source.toLowerCase(),
-            label: source,
-            detail,
-            retryable: false
-        });
-    };
-
-    const setVTTCollabStatus = (status = {}) => {
-        const source = status && typeof status === 'object' ? status : {};
-        vttCollabPendingStatus = source;
-        const state = source.state === 'live'
-            ? 'live'
-            : (source.state === 'connecting'
-                ? 'connecting'
-                : (source.state === 'reconnecting'
-                    ? 'reconnecting'
-                    : (source.state === 'degraded' ? 'degraded' : 'local')));
-        const peerCount = Number.isFinite(source.peerCount) ? Math.max(0, source.peerCount) : 0;
-        const detail = String(source.detail || '').trim();
-        let label = 'Local';
-        if (state === 'live') {
-            label = peerCount > 0 ? `Live · ${peerCount}` : 'Live';
-            lastStableLiveSyncChipLabel = label;
-            vttCollabDropoutStartedAt = 0;
-            clearVTTCollabDropoutTimer();
-        } else if (state === 'connecting') {
-            label = 'Connecting';
-        } else if (state === 'reconnecting') {
-            label = 'Reconnecting';
-        } else if (state === 'degraded') {
-            label = 'Degraded';
-        }
-
-        if (state === 'local') {
-            vttCollabDropoutStartedAt = 0;
-            lastStableLiveSyncChipLabel = '';
-            clearVTTCollabDropoutTimer();
-        } else if (state !== 'live' && state !== 'degraded' && lastStableLiveSyncChipLabel) {
-            const now = Date.now();
-            if (!vttCollabDropoutStartedAt) {
-                vttCollabDropoutStartedAt = now;
-            }
-            const elapsedMs = Math.max(0, now - vttCollabDropoutStartedAt);
-            const remainingMs = LIVE_STATUS_DROPOUT_GRACE_MS - elapsedMs;
-            if (remainingMs > 0) {
-                scheduleVTTCollabDropoutRefresh(remainingMs);
-                setSyncChipState({
-                    state: 'live',
-                    label: lastStableLiveSyncChipLabel,
-                    detail: detail || lastStableLiveSyncChipLabel,
-                    retryable: false
+    const buildVTTSessionController = (factory) => factory.create({
+        defaultSnapshot: vttConfig.createDefaultVTTState(),
+        liveStatusDropoutGraceMs: C.LIVE_STATUS_DROPOUT_GRACE_MS,
+        state: {
+            getRole: () => sessionState.role,
+            getCaseTransitionId: () => sessionState.caseTransitionId,
+            getStateCaseId: () => sessionState.stateCaseId,
+            setStateCaseId: (caseId) => {
+                sessionState.stateCaseId = String(caseId || '').trim();
+            },
+            getSnapshot: () => sessionState.snapshot,
+            setSnapshot: (snapshot) => {
+                sessionState.snapshot = snapshot;
+            },
+            isInitialLoadPending: () => sessionState.initialLoadPending,
+            setInitialLoadPending: (pending) => {
+                sessionState.initialLoadPending = !!pending;
+            },
+            readSharedSnapshot: (...args) => readSharedVTTSnapshot(...args),
+            ensureRosterPresentation: (...args) => ensureRosterLinkedPlayerPresentationPersisted(...args),
+            persistSnapshot: (...args) => persistSharedVTTSnapshot(...args),
+            syncRosterPresentation: (...args) => syncRosterLinkedPlayerPresentation(...args),
+            coerceFog: (...args) => coerceSnapshotFogToCellMasks(...args),
+            clearPendingRemoteSnapshot: () => {
+                sessionState.pendingRemoteSnapshot = null;
+            },
+            applyRemoteSnapshot: (...args) => applyVTTCollabSnapshot(...args),
+            applyRemotePositionChanges: (...args) => applyVTTCollabPositionChanges(...args)
+        },
+        store: {
+            getStore,
+            getActiveCaseId,
+            getRoomId: getVTTCollabRoomId,
+            getCollabReady: () => window.RTF_VTT_COLLAB_READY
+        },
+        ui: {
+            setSyncChip: ({ state = 'local', label = 'Local', detail = '', retryable = false } = {}) => {
+                if (!dom.syncChipEl) return;
+                dom.syncChipEl.dataset.state = state;
+                dom.syncChipEl.dataset.retryable = retryable ? 'true' : 'false';
+                dom.syncChipEl.textContent = label;
+                dom.syncChipEl.title = detail || label;
+                dom.syncChipEl.setAttribute('aria-label', detail || label);
+                dom.syncChipEl.setAttribute('role', retryable ? 'button' : 'status');
+                dom.syncChipEl.tabIndex = retryable ? 0 : -1;
+            },
+            getSyncChipState: () => dom.syncChipEl ? String(dom.syncChipEl.dataset.state || '') : '',
+            setActiveSceneLabel: (label) => {
+                if (dom.activeSceneLabelEl) dom.activeSceneLabelEl.textContent = String(label || '');
+            },
+            normalizeSelections: (...args) => normalizeSelections(...args),
+            render: (...args) => render(...args),
+            fitViewToWorld: (...args) => fitViewToWorld(...args),
+            processInitiativeQueue: (...args) => processInitiativeQueue(...args),
+            closeAdminMenus: () => {
+                closeViewMenu();
+                closeToolsMenu();
+            },
+            confirm: (message) => window.confirm(message),
+            alert: (message) => window.alert(message),
+            bindSyncRetry: (handler) => {
+                if (!dom.syncChipEl || dom.syncChipEl.dataset.bound === '1') return;
+                dom.syncChipEl.dataset.bound = '1';
+                dom.syncChipEl.addEventListener('click', () => {
+                    if (dom.syncChipEl.dataset.retryable !== 'true') return;
+                    handler();
                 });
-                return;
+                dom.syncChipEl.addEventListener('keydown', (event) => {
+                    if (dom.syncChipEl.dataset.retryable !== 'true') return;
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    handler();
+                });
             }
-            clearVTTCollabDropoutTimer();
-            label = state === 'reconnecting' ? 'Reconnecting' : 'Connecting';
         }
-        setSyncChipState({
-            state,
-            label,
-            detail: detail || label,
-            retryable: state === 'local' || state === 'degraded'
-        });
-    };
+    });
 
-    const hasLiveVTTConfig = () => {
-        const store = getStore();
-        if (!store || typeof store.getSyncConfig !== 'function') return false;
-        const config = store.getSyncConfig();
-        return !!(config
-            && config.enabled
-            && config.supabaseUrl
-            && config.anonKey
-            && config.campaignId
-            && String(config.collabRelayUrl || '').trim());
-    };
-
-    const hasSupabaseVTTConfig = () => {
-        const store = getStore();
-        if (!store || typeof store.getSyncConfig !== 'function') return false;
-        const config = store.getSyncConfig();
-        return !!(config
-            && config.enabled
-            && config.supabaseUrl
-            && config.anonKey
-            && config.campaignId);
-    };
-
-    const readLocalInitialVTTSnapshot = (store, caseId) => {
-        if (!store || typeof store.getVTTState !== 'function') return deepClone(DEFAULT_VTT_STATE);
-        return deepClone(store.getVTTState(caseId) || DEFAULT_VTT_STATE);
-    };
-
-    const loadInitialVTTSnapshot = async (store, requestedCaseId = getActiveCaseId()) => {
-        const activeCaseId = String(requestedCaseId || getActiveCaseId()).trim() || getActiveCaseId();
-        if (!store) return deepClone(DEFAULT_VTT_STATE);
-
-        if (!hasSupabaseVTTConfig() || typeof store.loadVTTRoomSnapshot !== 'function') {
-            setVTTCollabStatus({
-                state: 'local',
-                detail: 'PostgreSQL sync is not configured. Using case-local VTT state.',
-                peerCount: 0
-            });
-            if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: Loading local VTT...';
-            return readLocalInitialVTTSnapshot(store, activeCaseId);
-        }
-
-        const roomId = getVTTCollabRoomId(activeCaseId);
-        setVTTCollabStatus({
-            state: 'connecting',
-            detail: isDM()
-                ? 'GM is loading the saved VTT room before seeding Render.'
-                : 'Checking saved VTT room before loading the scene.',
-            peerCount: 0
-        });
-        if (activeSceneLabelEl) activeSceneLabelEl.textContent = isDM()
-            ? 'Scene: Loading GM saved VTT...'
-            : 'Scene: Checking saved VTT...';
-
-        try {
-            const result = await store.loadVTTRoomSnapshot({
-                roomId,
-                caseId: activeCaseId,
-                force: true
-            });
-            if (result && result.ok && result.snapshot && result.snapshot.payload) {
-                const payload = deepClone(result.snapshot.payload);
-                if (typeof store.mirrorVTTSnapshotToState === 'function') {
-                    store.mirrorVTTSnapshotToState({
-                        roomId,
-                        caseId: activeCaseId,
-                        payload,
-                        updatedAt: result.snapshot.updatedAt,
-                        source: 'vtt-room-preflight'
-                    });
+    const ensureVTTSessionController = () => {
+        if (resources.sessionController) return Promise.resolve(resources.sessionController);
+        if (resources.sessionControllerPromise) return resources.sessionControllerPromise;
+        resources.sessionControllerPromise = Promise.resolve(vttSessionModuleReady)
+            .then((factory) => {
+                if (!factory || typeof factory.create !== 'function') {
+                    throw new Error('VTT session module failed to load.');
                 }
-                return payload;
-            }
-            if (result && result.ok && !result.snapshot) {
-                setVTTCollabStatus({
-                    state: 'degraded',
-                    detail: 'No PostgreSQL VTT snapshot exists for this room yet. Starting a new blank room.',
-                    peerCount: 0
-                });
-                if (activeSceneLabelEl) activeSceneLabelEl.textContent = 'Scene: No PostgreSQL VTT snapshot';
-                // The remote read definitively succeeded and confirmed that the room does not exist.
-                // A blank seed is safe here; case-local state must never become boot authority.
-                return deepClone(DEFAULT_VTT_STATE);
-            }
-            if (result && !result.ok) {
-                console.warn('VTT Supabase preflight failed', result.error || result.reason || result);
-                setVTTCollabStatus({
-                    state: 'degraded',
-                    detail: result.error || 'PostgreSQL VTT snapshot check failed. VTT state was not loaded.',
-                    peerCount: 0
-                });
-            }
-        } catch (err) {
-            console.warn('VTT Supabase preflight failed', err);
-            setVTTCollabStatus({
-                state: 'degraded',
-                detail: err && err.message ? err.message : 'PostgreSQL VTT snapshot check failed. VTT state was not loaded.',
-                peerCount: 0
+                const controller = buildVTTSessionController(factory);
+                resources.sessionController = controller;
+                return controller;
+            })
+            .finally(() => {
+                resources.sessionControllerPromise = null;
             });
-        }
-
-        // Once PostgreSQL is configured, a failed/uncertain read must fail closed. Returning
-        // local state here could let DM collaboration seed stale data over durable prep.
-        return null;
-    };
-
-    const handleVTTAuthorityRoleChange = async (previousRole, nextRole, transitionId = vttAuthorityTransitionId) => {
-        if (previousRole === nextRole || !hasLiveVTTConfig()) return null;
-        const store = getStore();
-        if (!store) return null;
-        const isCurrentTransition = () => transitionId === vttAuthorityTransitionId && localRole === nextRole;
-
-        setVTTCollabStatus({
-            state: 'connecting',
-            detail: nextRole === 'dm'
-                ? 'GM mode enabled. Loading the saved VTT room before seeding Render.'
-                : 'Player mode enabled. Waiting for the GM live VTT room.',
-                peerCount: 0
-            });
-
-        const sessionToDestroy = vttCollabSession;
-        if (sessionToDestroy && typeof sessionToDestroy.destroy === 'function') {
-            try {
-                await sessionToDestroy.destroy();
-            } catch (err) {
-                console.warn('VTT collaboration role session teardown failed', err);
-            }
-        }
-        if (!isCurrentTransition()) return null;
-        if (vttCollabSession === sessionToDestroy) vttCollabSession = null;
-        if (!vttCollabSession) vttCollabSessionAuthorityTransitionId = -1;
-        vttCollabInitPromise = null;
-        vttCollabInitCaseId = '';
-        pendingRemoteVTTSnapshot = null;
-
-        if (nextRole === 'dm') {
-            const activeCaseId = getActiveCaseId();
-            let snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
-            if (!snapshot && isCurrentTransition()) {
-                setVTTCollabStatus({
-                    state: 'connecting',
-                    detail: 'GM room preflight was not ready. Retrying automatically.',
-                    peerCount: 0
-                });
-                await new Promise((resolve) => window.setTimeout(resolve, 250));
-                if (isCurrentTransition()) snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
-            }
-            if (!isCurrentTransition()) return null;
-            if (!snapshot) {
-                vttState = null;
-                vttStateCaseId = activeCaseId;
-                initialVTTLoadPending = true;
-                normalizeSelections();
-                render();
-                return null;
-            }
-            const fogMigrated = coerceSnapshotFogToCellMasks(snapshot);
-            let synced = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
-                persist: true,
-                reason: fogMigrated ? 'fog-mask-migration' : 'roster-player-presentation-sync'
-            }).snapshot;
-            if (fogMigrated) {
-                const saved = persistSharedVTTSnapshot(synced, {
-                    reason: 'fog-mask-migration',
-                    baseSnapshot: null
-                });
-                synced = deepClone(saved || synced);
-            }
-            vttState = deepClone(synced);
-            vttStateCaseId = activeCaseId;
-            initialVTTLoadPending = false;
-            normalizeSelections();
-            render();
-        } else {
-            vttState = deepClone(DEFAULT_VTT_STATE);
-            vttStateCaseId = getActiveCaseId();
-            initialVTTLoadPending = true;
-            pendingRemoteVTTSnapshot = null;
-            normalizeSelections();
-            render();
-        }
-
-        let session = await initVTTCollab();
-        if (!session && isCurrentTransition()) {
-            await new Promise((resolve) => window.setTimeout(resolve, 250));
-            if (isCurrentTransition()) session = await initVTTCollab();
-        }
-        if (!isCurrentTransition()) {
-            if (session && session === vttCollabSession && typeof session.destroy === 'function') {
-                try {
-                    await session.destroy();
-                } catch (err) {
-                    console.warn('VTT collaboration stale role session teardown failed', err);
-                }
-                if (vttCollabSession === session) vttCollabSession = null;
-            }
-            return null;
-        }
-        if (session && typeof session.handleAuthorityChanged === 'function') {
-            session.handleAuthorityChanged();
-        }
-        return session;
+        return resources.sessionControllerPromise;
     };
 
     const applyVTTCollabSnapshot = (payload, caseId = getActiveCaseId()) => {
         const targetCaseId = String(caseId || '').trim();
-        if (!targetCaseId || targetCaseId !== getActiveCaseId() || (pendingVTTCaseId && pendingVTTCaseId !== targetCaseId)) return;
+        if (!targetCaseId || targetCaseId !== getActiveCaseId() || (sessionState.pendingCaseId && sessionState.pendingCaseId !== targetCaseId)) return;
         const store = getStore();
         const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
             ? store.normalizeVTTStateSnapshot(payload)
             : deepClone(payload);
         reconcileSnapshotWithRecentLocalDragDrops(clean);
-        const changedSceneIds = getSnapshotChangedSceneIds(vttState, clean);
-        if (initialVTTLoadPending) {
-            initialVTTLoadPending = false;
+        const changedSceneIds = getSnapshotChangedSceneIds(sessionState.snapshot, clean);
+        if (sessionState.initialLoadPending) {
+            sessionState.initialLoadPending = false;
         }
-        if (dragState) {
+        if (stageState.pointer.drag) {
             syncRosterLinkedPlayerPresentation(clean);
-            pendingRemoteVTTSnapshot = clean;
+            sessionState.pendingRemoteSnapshot = clean;
             return;
         }
         const synced = ensureRosterLinkedPlayerPresentationPersisted(clean, { reason: 'roster-player-presentation-sync' });
-        queueRemoteTweensFromSnapshots(vttState, clean);
-        pendingRemoteVTTSnapshot = null;
-        vttState = deepClone(synced.snapshot);
-        vttStateCaseId = targetCaseId;
-        maybeFollowRemoteActivityForDM(changedSceneIds, vttState);
+        queueRemoteTweensFromSnapshots(sessionState.snapshot, clean);
+        sessionState.pendingRemoteSnapshot = null;
+        sessionState.snapshot = deepClone(synced.snapshot);
+        sessionState.stateCaseId = targetCaseId;
+        maybeFollowRemoteActivityForDM(changedSceneIds, sessionState.snapshot);
         normalizeSelections();
         render();
     };
 
     const applyPendingRemoteVTTSnapshot = () => {
-        if (dragState || !pendingRemoteVTTSnapshot) return false;
-        if (!vttCollabSession || vttCollabSession.caseId !== getActiveCaseId()) return false;
-        const sessionSnapshot = isVTTCollabReady() && typeof vttCollabSession.getSnapshot === 'function'
-            ? vttCollabSession.getSnapshot()
+        if (stageState.pointer.drag || !sessionState.pendingRemoteSnapshot) return false;
+        const collabTransport = getVTTCollabTransport();
+        if (!collabTransport || collabTransport.caseId !== getActiveCaseId()) return false;
+        const sessionSnapshot = isVTTCollabReady() && typeof collabTransport.getSnapshot === 'function'
+            ? collabTransport.getSnapshot()
             : null;
-        const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : pendingRemoteVTTSnapshot;
+        const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : sessionState.pendingRemoteSnapshot;
         reconcileSnapshotWithRecentLocalDragDrops(nextSnapshot);
-        const changedSceneIds = getSnapshotChangedSceneIds(vttState, nextSnapshot);
-        queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
+        const changedSceneIds = getSnapshotChangedSceneIds(sessionState.snapshot, nextSnapshot);
+        queueRemoteTweensFromSnapshots(sessionState.snapshot, nextSnapshot);
         const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
-        vttState = deepClone(synced.snapshot);
-        vttStateCaseId = getActiveCaseId();
-        pendingRemoteVTTSnapshot = null;
-        maybeFollowRemoteActivityForDM(changedSceneIds, vttState);
+        sessionState.snapshot = deepClone(synced.snapshot);
+        sessionState.stateCaseId = getActiveCaseId();
+        sessionState.pendingRemoteSnapshot = null;
+        maybeFollowRemoteActivityForDM(changedSceneIds, sessionState.snapshot);
         normalizeSelections();
         render();
         return true;
@@ -5786,14 +3120,14 @@
 
     const applyVTTCollabPositionChanges = (changes = [], meta = {}, caseId = getActiveCaseId()) => {
         const targetCaseId = String(caseId || '').trim();
-        if (!targetCaseId || targetCaseId !== getActiveCaseId() || (pendingVTTCaseId && pendingVTTCaseId !== targetCaseId)) return;
-        if (dragState) {
+        if (!targetCaseId || targetCaseId !== getActiveCaseId() || (sessionState.pendingCaseId && sessionState.pendingCaseId !== targetCaseId)) return;
+        if (stageState.pointer.drag) {
             if (meta && meta.snapshot) {
                 const store = getStore();
-                pendingRemoteVTTSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
+                sessionState.pendingRemoteSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
                     ? store.normalizeVTTStateSnapshot(meta.snapshot)
                     : deepClone(meta.snapshot);
-                syncRosterLinkedPlayerPresentation(pendingRemoteVTTSnapshot);
+                syncRosterLinkedPlayerPresentation(sessionState.pendingRemoteSnapshot);
             }
             return;
         }
@@ -5803,20 +3137,20 @@
                 ? store.normalizeVTTStateSnapshot(meta.snapshot)
                 : meta.snapshot;
             reconcileSnapshotWithRecentLocalDragDrops(nextSnapshot);
-            if (initialVTTLoadPending) {
-                initialVTTLoadPending = false;
+            if (sessionState.initialLoadPending) {
+                sessionState.initialLoadPending = false;
             }
-            queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
+            queueRemoteTweensFromSnapshots(sessionState.snapshot, nextSnapshot);
             const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
-            vttState = deepClone(synced.snapshot);
-            vttStateCaseId = targetCaseId;
+            sessionState.snapshot = deepClone(synced.snapshot);
+            sessionState.stateCaseId = targetCaseId;
             const remoteSceneIds = new Set(
                 (Array.isArray(changes) ? changes : [])
                     .map((change) => String(change && change.sceneId || '').trim())
                     .filter(Boolean)
             );
-            if (!remoteSceneIds.size) remoteSceneIds.add(getSharedSceneId(vttState));
-            const followedRemoteScene = maybeFollowRemoteActivityForDM(remoteSceneIds, vttState);
+            if (!remoteSceneIds.size) remoteSceneIds.add(getSharedSceneId(sessionState.snapshot));
+            const followedRemoteScene = maybeFollowRemoteActivityForDM(remoteSceneIds, sessionState.snapshot);
             normalizeSelections();
             if (followedRemoteScene) render();
             else renderStage();
@@ -5824,10 +3158,10 @@
             positionInitiativeDetail();
             return;
         }
-        if (!vttState) return;
+        if (!sessionState.snapshot) return;
         const sceneMap = new Map(
-            Array.isArray(vttState.scenes)
-                ? vttState.scenes.map((scene) => [scene.id, scene])
+            Array.isArray(sessionState.snapshot.scenes)
+                ? sessionState.snapshot.scenes.map((scene) => [scene.id, scene])
                 : []
         );
         let mutated = false;
@@ -5852,13 +3186,13 @@
             queuedTweens.push({ sceneId: scene.id, tokenId: token.id, fromX, fromY, toX: nextX, toY: nextY });
         });
         if (!mutated) return;
-        if (initialVTTLoadPending) {
-            initialVTTLoadPending = false;
+        if (sessionState.initialLoadPending) {
+            sessionState.initialLoadPending = false;
         }
         queuedTweens.forEach((tween) => {
             queueRemoteTokenTween(tween.sceneId, tween.tokenId, tween.fromX, tween.fromY, tween.toX, tween.toY);
         });
-        const followedRemoteScene = maybeFollowRemoteActivityForDM(new Set(queuedTweens.map((tween) => tween.sceneId)), vttState);
+        const followedRemoteScene = maybeFollowRemoteActivityForDM(new Set(queuedTweens.map((tween) => tween.sceneId)), sessionState.snapshot);
         normalizeSelections();
         if (followedRemoteScene) render();
         else renderStage();
@@ -5866,511 +3200,93 @@
         positionInitiativeDetail();
     };
 
-    const initVTTCollab = async () => {
-        const sessionCaseId = getActiveCaseId();
-        const sessionTransitionId = vttCaseTransitionId;
-        const sessionAuthorityTransitionId = vttAuthorityTransitionId;
-        const sessionRole = localRole;
-        const isCurrentSessionRequest = () => (
-            sessionCaseId === getActiveCaseId()
-            && sessionTransitionId === vttCaseTransitionId
-            && sessionAuthorityTransitionId === vttAuthorityTransitionId
-            && sessionRole === localRole
-        );
-        if (vttCollabSession
-            && vttCollabSession.caseId === sessionCaseId
-            && vttCollabSessionAuthorityTransitionId === sessionAuthorityTransitionId
-            && (typeof vttCollabSession.isActive !== 'function' || vttCollabSession.isActive())) {
-            return vttCollabSession;
-        }
-        if (vttCollabInitPromise && vttCollabInitCaseId === sessionCaseId) return vttCollabInitPromise;
-        if (vttCollabInitPromise && vttCollabInitCaseId !== sessionCaseId) {
-            vttCollabInitPromise = null;
-            vttCollabInitCaseId = '';
+    const getVTTCollabPendingStatus = () => (
+        resources.sessionController && typeof resources.sessionController.getPendingStatus === 'function'
+            ? resources.sessionController.getPendingStatus()
+            : null
+    );
+    const setVTTCollabStatus = (status = {}) => (
+        resources.sessionController && typeof resources.sessionController.setStatus === 'function'
+            ? resources.sessionController.setStatus(status)
+            : null
+    );
+    const updateStoreSyncChip = (status) => (
+        resources.sessionController && typeof resources.sessionController.updateStoreStatus === 'function'
+            ? resources.sessionController.updateStoreStatus(status)
+            : null
+    );
+    const hasLiveVTTConfig = () => {
+        if (resources.sessionController && typeof resources.sessionController.hasLiveConfig === 'function') {
+            return resources.sessionController.hasLiveConfig();
         }
         const store = getStore();
-        if (!store || !window.RTF_VTT_COLLAB_READY || typeof window.RTF_VTT_COLLAB_READY.then !== 'function') {
-            setVTTCollabStatus({
-                state: 'local',
-                detail: 'Shared sync is off. VTT changes stay on this device.',
-                peerCount: 0
-            });
-            return null;
-        }
-        if (!hasLiveVTTConfig()) {
-            updateStoreSyncChip(store && typeof store.getSyncStatus === 'function' ? store.getSyncStatus() : { connected: false });
-            return null;
-        }
-
-        setVTTCollabStatus({
-            state: 'connecting',
-            detail: 'Connecting live VTT...',
-            peerCount: 0
-        });
-
-        const initPromise = Promise.resolve(window.RTF_VTT_COLLAB_READY)
-            .then((api) => {
-                if (!api || typeof api.createSession !== 'function') return null;
-                return api.createSession({
-                    store,
-                    roomId: getVTTCollabRoomId(sessionCaseId),
-                    caseId: sessionCaseId,
-                    preferCloudRoomSnapshot: sessionRole !== 'dm',
-                    canSaveRoom: () => sessionRole === 'dm' && isCurrentSessionRequest(),
-                    canSeedRelayRoom: () => sessionRole === 'dm' && isCurrentSessionRequest(),
-                    canLoadColdSnapshot: () => sessionRole === 'dm' && isCurrentSessionRequest(),
-                    getSeedPayload: () => sessionRole === 'dm'
-                        ? (readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE))
-                        : deepClone(DEFAULT_VTT_STATE),
-                    getCurrentPayload: () => sessionRole === 'dm'
-                        ? (readSharedVTTSnapshot() || deepClone(DEFAULT_VTT_STATE))
-                        : deepClone(DEFAULT_VTT_STATE),
-                    applySnapshot: (payload) => {
-                        if (isCurrentSessionRequest()) applyVTTCollabSnapshot(payload, sessionCaseId);
-                    },
-                    applyPositionChanges: (changes, meta) => {
-                        if (isCurrentSessionRequest()) applyVTTCollabPositionChanges(changes, meta, sessionCaseId);
-                    },
-                    onStatusChange: (status) => {
-                        if (isCurrentSessionRequest()) {
-                            setVTTCollabStatus(status);
-                        }
-                    }
-                });
-            })
-            .then((session) => {
-                if (!isCurrentSessionRequest()) {
-                    if (session && typeof session.destroy === 'function') session.destroy().catch(() => { });
-                    return null;
-                }
-                if (!session || (typeof session.isActive === 'function' && !session.isActive())) {
-                    vttCollabSession = null;
-                    updateStoreSyncChip(store && typeof store.getSyncStatus === 'function' ? store.getSyncStatus() : { connected: false });
-                    return null;
-                }
-                vttCollabSession = session;
-                vttCollabSessionAuthorityTransitionId = sessionAuthorityTransitionId;
-                setVTTCollabStatus(session.getStatus ? session.getStatus() : {
-                    state: 'live',
-                    detail: 'Live VTT connected.',
-                    peerCount: 0
-                });
-                return session;
-            })
-            .catch((err) => {
-                console.warn('VTT collaboration init failed', err);
-                if (!isCurrentSessionRequest()) return null;
-                vttCollabSession = null;
-                vttCollabSessionAuthorityTransitionId = -1;
-                setVTTCollabStatus({
-                    state: 'degraded',
-                    detail: 'Live VTT unavailable. Shared VTT mirror still works.',
-                    peerCount: 0
-                });
-                return null;
-            })
-            .finally(() => {
-                if (vttCollabInitPromise === initPromise) {
-                    vttCollabInitPromise = null;
-                    vttCollabInitCaseId = '';
-                }
-            });
-
-        vttCollabInitPromise = initPromise;
-        vttCollabInitCaseId = sessionCaseId;
-        return initPromise;
+        if (!store || typeof store.getSyncConfig !== 'function') return false;
+        const config = store.getSyncConfig();
+        return !!(config
+            && config.enabled
+            && config.supabaseUrl
+            && config.anonKey
+            && config.campaignId
+            && String(config.collabRelayUrl || '').trim());
     };
-
-    const refreshVTTCollabRoomIfNeeded = async (requestedCaseId = getActiveCaseId(), transitionId = vttCaseTransitionId) => {
-        const expectedCaseId = String(requestedCaseId || getActiveCaseId()).trim();
-        if (!expectedCaseId || expectedCaseId !== getActiveCaseId() || transitionId !== vttCaseTransitionId) return null;
-        if (!vttCollabSession) return initVTTCollab();
-        const expectedRoomId = getVTTCollabRoomId(expectedCaseId);
-        if (vttCollabSession.roomId === expectedRoomId && vttCollabSession.caseId === expectedCaseId) {
-            return vttCollabSession;
-        }
-
-        setVTTCollabStatus({
-            state: 'connecting',
-            detail: 'Switching live VTT room...',
-            peerCount: 0
-        });
-
-        try {
-            if (typeof vttCollabSession.destroy === 'function') {
-                await vttCollabSession.destroy();
-            }
-        } catch (err) {
-            console.warn('VTT collaboration room refresh failed', err);
-        }
-
-        vttCollabSession = null;
-        vttCollabInitPromise = null;
-        vttCollabInitCaseId = '';
-        pendingRemoteVTTSnapshot = null;
-        const store = getStore();
-        if (store) {
-            const nextSnapshot = await loadInitialVTTSnapshot(store, expectedCaseId);
-            if (expectedCaseId !== getActiveCaseId() || transitionId !== vttCaseTransitionId) return null;
-            if (nextSnapshot) {
-                vttState = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' }).snapshot;
-                vttStateCaseId = expectedCaseId;
-                normalizeSelections();
-                render();
-            } else {
-                vttState = null;
-                vttStateCaseId = expectedCaseId;
-                initialVTTLoadPending = true;
-                normalizeSelections();
-                return null;
-            }
-        }
-        return initVTTCollab();
-    };
-
-    const initVTTCollabWithRetry = async (attempts = 3, delayMs = 400) => {
-        const maxAttempts = Math.max(1, Math.round(toNumber(attempts, 3)));
-        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-            const session = await initVTTCollab();
-            if (session) return session;
-            if (!hasLiveVTTConfig() || attempt >= maxAttempts - 1) return null;
-            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
-        }
-        return null;
-    };
-
-    const recoverInitialVTTRoomIfNeeded = async () => {
-        if (!initialVTTLoadPending || vttState || vttInitialRoomRecoveryPromise) {
-            return vttInitialRoomRecoveryPromise;
-        }
-        const store = getStore();
-        if (!store) return null;
-        const caseId = getActiveCaseId();
-        const caseTransitionId = vttCaseTransitionId;
-        const authorityTransitionId = vttAuthorityTransitionId;
-        const requestedRole = localRole;
-        const isCurrentRequest = () => (
-            caseId === getActiveCaseId()
-            && caseTransitionId === vttCaseTransitionId
-            && authorityTransitionId === vttAuthorityTransitionId
-            && requestedRole === localRole
-        );
-
-        const recoveryPromise = (async () => {
-            setVTTCollabStatus({
-                state: 'connecting',
-                detail: 'Cloud access is ready. Retrying the initial VTT room load.',
-                peerCount: 0
-            });
-            const snapshot = await loadInitialVTTSnapshot(store, caseId);
-            if (!snapshot || !isCurrentRequest()) return null;
-            const fogMigrated = coerceSnapshotFogToCellMasks(snapshot);
-            let synced = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
-                persist: isDM(),
-                reason: fogMigrated ? 'fog-mask-migration' : 'roster-player-presentation-sync'
-            }).snapshot;
-            vttState = deepClone(synced);
-            vttStateCaseId = caseId;
-            initialVTTLoadPending = false;
-            normalizeSelections();
-            render();
-            const session = await initVTTCollabWithRetry();
-            if (session && isCurrentRequest()) processInitiativeQueue();
-            fitViewToWorld();
-            return session;
-        })().finally(() => {
-            if (vttInitialRoomRecoveryPromise === recoveryPromise) {
-                vttInitialRoomRecoveryPromise = null;
-            }
-        });
-        vttInitialRoomRecoveryPromise = recoveryPromise;
-        return recoveryPromise;
-    };
-
-    const handleVTTStoreSyncStatus = (status) => {
-        updateStoreSyncChip(status);
-        if (status && status.connected && initialVTTLoadPending && !vttState) {
-            recoverInitialVTTRoomIfNeeded().catch((err) => {
-                console.warn('Initial VTT room recovery failed', err);
-            });
-        }
-    };
-
-    const retryVTTCollabConnection = async () => {
-        if (!hasLiveVTTConfig()) {
-            setVTTCollabStatus({
-                state: 'local',
-                detail: 'Shared sync is not configured for live VTT on this browser.',
-                peerCount: 0
-            });
-            return null;
-        }
-        if (syncChipEl && String(syncChipEl.dataset.state || '') === 'connecting') {
-            return null;
-        }
-
-        setVTTCollabStatus({
-            state: 'connecting',
-            detail: 'Retrying live VTT connection...',
-            peerCount: 0
-        });
-
-        if (vttCollabSession && typeof vttCollabSession.destroy === 'function') {
-            try {
-                await vttCollabSession.destroy();
-            } catch (err) {
-                console.warn('VTT collaboration retry cleanup failed', err);
-            }
-        }
-
-        vttCollabSession = null;
-        vttCollabInitPromise = null;
-        vttCollabInitCaseId = '';
-        pendingRemoteVTTSnapshot = null;
-
-        if (initialVTTLoadPending || !vttState) {
-            const store = getStore();
-            const activeCaseId = getActiveCaseId();
-            const snapshot = await loadInitialVTTSnapshot(store, activeCaseId);
-            if (!snapshot) return null;
-            vttState = ensureRosterLinkedPlayerPresentationPersisted(snapshot, {
-                persist: isDM(),
-                reason: 'roster-player-presentation-sync'
-            }).snapshot;
-            vttStateCaseId = activeCaseId;
-            initialVTTLoadPending = false;
-            normalizeSelections();
-            render();
-        }
-
-        return initVTTCollab();
-    };
-
-    const forceDMVTTAuthoritative = async () => {
-        if (!isDM()) return false;
-        const ok = confirm(
-            'Force this DM browser as the authoritative VTT state?\n\n'
-            + 'This publishes exactly what this browser currently shows as the durable VTT snapshot players will pick up next time they open the table.'
-        );
-        if (!ok) return false;
-
-        closeViewMenu();
-        closeToolsMenu();
-        setSyncChipState({
-            state: 'connecting',
-            label: 'Forcing...',
-            detail: 'Publishing this DM VTT snapshot as authoritative.',
-            retryable: false
-        });
-
-        const store = getStore();
-        if (!store) throw new Error('Shared store is unavailable.');
-
-        const activeCaseId = getActiveCaseId();
-        const roomId = getVTTCollabRoomId(activeCaseId);
-        if (!vttState || vttStateCaseId !== activeCaseId) throw new Error('VTT state for this case has not loaded yet.');
-        const snapshot = deepClone(vttState);
-        syncRosterLinkedPlayerPresentation(snapshot);
-        coerceSnapshotFogToCellMasks(snapshot);
-        snapshot.updatedAt = Date.now();
-
-        let result = null;
-        const session = await initVTTCollab();
-        if (session && typeof session.forceAuthoritativeSnapshot === 'function') {
-            result = await session.forceAuthoritativeSnapshot(snapshot, { reason: 'dm-authoritative' });
-            vttState = deepClone(session.getSnapshot ? session.getSnapshot() : snapshot);
-            vttStateCaseId = activeCaseId;
-        } else {
-            result = {
-                ok: false,
-                reason: 'room-unavailable',
-                error: 'Live VTT room is not available, so the DM snapshot was not saved to Supabase.'
-            };
-        }
-
-        if (!result || !result.ok) {
-            throw new Error(result && (result.error || result.reason) ? (result.error || result.reason) : 'Failed to publish the DM VTT snapshot.');
-        }
-
-        normalizeSelections();
-        render();
-        setSyncChipState({
-            state: 'live',
-            label: 'Forced',
-            detail: `DM VTT snapshot is authoritative for room ${roomId}.`,
-            retryable: false
-        });
-        alert('DM VTT snapshot is now authoritative.');
-        return true;
-    };
-
-    const bustVTTLiveCache = async () => {
-        if (!isDM()) return false;
-        const ok = confirm(
-            'Bust the warm live VTT cache for this case?\n\n'
-            + 'This resets the Render live-room cache without deleting the durable snapshot. Use Force DM Authoritative to publish prep for the next player session.'
-        );
-        if (!ok) return false;
-
-        closeViewMenu();
-        closeToolsMenu();
-        setSyncChipState({
-            state: 'degraded',
-            label: 'Busting...',
-            detail: 'Busting the live VTT room cache.',
-            retryable: false
-        });
-
-        const activeCaseId = getActiveCaseId();
-        const roomId = getVTTCollabRoomId(activeCaseId);
-        const store = getStore();
-        const session = isVTTCollabReady() ? vttCollabSession : await initVTTCollab();
-        let relayResult = null;
-        if (session && typeof session.bustLiveRoomCache === 'function') {
-            relayResult = await session.bustLiveRoomCache({ reason: 'dm-cache-bust' });
-        }
-        if (store && typeof store.invalidateSyncQueryCache === 'function' && typeof store.getVTTRoomSnapshotCacheKey === 'function') {
-            store.invalidateSyncQueryCache(store.getVTTRoomSnapshotCacheKey({ caseId: activeCaseId, roomId }));
-        }
-        setVTTCollabStatus({
-            state: 'degraded',
-            detail: `Warm VTT cache busted for ${roomId}. Durable snapshots were left intact.`,
-            peerCount: relayResult && relayResult.broadcastOk ? 0 : undefined
-        });
-        alert('Warm VTT cache busted. The durable VTT snapshot was not deleted.');
-        return true;
-    };
-
+    const loadInitialVTTSnapshot = (_store, requestedCaseId = getActiveCaseId()) => (
+        ensureVTTSessionController().then((controller) => controller.loadInitialSnapshot(requestedCaseId))
+    );
+    const refreshVTTCollabRoomIfNeeded = (requestedCaseId = getActiveCaseId(), transitionId = sessionState.caseTransitionId) => (
+        ensureVTTSessionController().then((controller) => controller.refreshRoomIfNeeded(requestedCaseId, transitionId))
+    );
+    const initVTTCollabWithRetry = (attempts = 3, delayMs = 400) => (
+        ensureVTTSessionController().then((controller) => controller.initWithRetry(attempts, delayMs))
+    );
+    const recoverInitialVTTRoomIfNeeded = () => (
+        ensureVTTSessionController().then((controller) => controller.recoverInitialRoomIfNeeded())
+    );
+    const handleVTTStoreSyncStatus = (status) => (
+        resources.sessionController && typeof resources.sessionController.handleStoreStatus === 'function'
+            ? resources.sessionController.handleStoreStatus(status)
+            : updateStoreSyncChip(status)
+    );
+    const forceDMVTTAuthoritative = () => (
+        ensureVTTSessionController().then((controller) => controller.forceAuthoritative())
+    );
+    const bustVTTLiveCache = () => (
+        ensureVTTSessionController().then((controller) => controller.bustLiveCache())
+    );
     const reportVTTAdminActionError = (err, fallback = 'VTT admin action failed.') => {
+        if (resources.sessionController && typeof resources.sessionController.reportAdminActionError === 'function') {
+            resources.sessionController.reportAdminActionError(err, fallback);
+            return;
+        }
         const message = err && err.message ? err.message : fallback;
         console.warn(fallback, err);
-        setVTTCollabStatus({
-            state: 'degraded',
-            detail: message,
-            peerCount: 0
-        });
-        alert(message);
+        window.alert(message);
     };
-
     const bindSyncChipActions = () => {
-        if (!syncChipEl || syncChipEl.dataset.bound === '1') return;
-        syncChipEl.dataset.bound = '1';
-
-        syncChipEl.addEventListener('click', () => {
-            if (syncChipEl.dataset.retryable !== 'true') return;
-            retryVTTCollabConnection().catch((err) => {
-                console.warn('VTT collaboration retry failed', err);
-            });
-        });
-
-        syncChipEl.addEventListener('keydown', (event) => {
-            if (syncChipEl.dataset.retryable !== 'true') return;
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            retryVTTCollabConnection().catch((err) => {
-                console.warn('VTT collaboration retry failed', err);
-            });
-        });
+        if (resources.sessionController && typeof resources.sessionController.bindSyncActions === 'function') {
+            resources.sessionController.bindSyncActions();
+        }
     };
 
     const bindAccentControls = () => {
-        if (accentButtonEl && accentButtonEl.dataset.bound !== '1') {
-            accentButtonEl.dataset.bound = '1';
-            accentButtonEl.addEventListener('click', () => {
+        if (dom.accentButtonEl && dom.accentButtonEl.dataset.bound !== '1') {
+            dom.accentButtonEl.dataset.bound = '1';
+            dom.accentButtonEl.addEventListener('click', () => {
                 if (typeof window.triggerAccentPicker === 'function') window.triggerAccentPicker();
             });
         }
-        if (accentPickerEl && accentPickerEl.dataset.bound !== '1') {
-            accentPickerEl.dataset.bound = '1';
-            accentPickerEl.addEventListener('change', (event) => {
+        if (dom.accentPickerEl && dom.accentPickerEl.dataset.bound !== '1') {
+            dom.accentPickerEl.dataset.bound = '1';
+            dom.accentPickerEl.addEventListener('change', (event) => {
                 const value = event.target && 'value' in event.target ? event.target.value : '';
                 if (typeof window.setAccentColor === 'function') window.setAccentColor(value);
             });
         }
     };
 
-    const loadMapForScene = (scene) => {
-        if (!scene || !mapImageEl) return;
-        if (!scene.mapImageUrl) {
-            mapSize = { width: 0, height: 0 };
-            mapLoadState = { url: '', loaded: false };
-            worldSize = getWorldSizeForScene(scene);
-            mapImageEl.removeAttribute('src');
-            mapImageEl.style.width = '0px';
-            mapImageEl.style.height = '0px';
-            mapImageEl.style.display = 'none';
-            if (fitViewOnNextMapLoad) {
-                fitViewOnNextMapLoad = false;
-                fitViewToWorld();
-            }
-            return;
-        }
-
-        const requestedUrl = getUsableMediaUrl(scene.mapImageUrl);
-        if (!requestedUrl) {
-            mapSize = { width: 0, height: 0 };
-            mapLoadState = { url: String(scene.mapImageUrl || ''), loaded: false };
-            worldSize = getWorldSizeForScene(scene);
-            mapImageEl.removeAttribute('src');
-            mapImageEl.style.width = '0px';
-            mapImageEl.style.height = '0px';
-            mapImageEl.style.display = 'none';
-            return;
-        }
-
-        if (mapLoadState.url === requestedUrl) return;
-
-        mapSize = { width: 0, height: 0 };
-        mapLoadState = { url: requestedUrl, loaded: false };
-        mapImageEl.src = requestedUrl;
-        mapImageEl.style.display = 'none';
-        const probe = new Image();
-        probe.onload = () => {
-            if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberSuccess === 'function') {
-                window.RTF_MEDIA_CACHE.rememberSuccess(requestedUrl);
-            }
-            if (!vttState) return;
-            const active = getActiveScene();
-            if (!active || getUsableMediaUrl(active.mapImageUrl) !== requestedUrl) return;
-            mapSize = {
-                width: Math.max(1, Math.round(probe.naturalWidth || 1)),
-                height: Math.max(1, Math.round(probe.naturalHeight || 1))
-            };
-            mapLoadState = { url: requestedUrl, loaded: true };
-            worldSize = getWorldSizeForScene(active);
-            mapImageEl.style.display = 'block';
-            if (fitViewOnNextMapLoad) {
-                fitViewOnNextMapLoad = false;
-                fitViewToWorld();
-            }
-            renderStage();
-        };
-        probe.onerror = () => {
-            if (window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberFailure === 'function') {
-                window.RTF_MEDIA_CACHE.rememberFailure(requestedUrl);
-            }
-            const active = getActiveScene();
-            if (!active || getUsableMediaUrl(active.mapImageUrl) !== requestedUrl) return;
-            mapSize = { width: 0, height: 0 };
-            worldSize = getWorldSizeForScene(active);
-            mapLoadState = { url: requestedUrl, loaded: false };
-            mapImageEl.removeAttribute('src');
-            mapImageEl.style.width = '0px';
-            mapImageEl.style.height = '0px';
-            mapImageEl.style.display = 'none';
-            if (fitViewOnNextMapLoad) {
-                fitViewOnNextMapLoad = false;
-                fitViewToWorld();
-            }
-            renderStage();
-        };
-        probe.src = requestedUrl;
-    };
-
     const renderSpawnLists = () => {
-        if (playerSpawnListEl) {
+        if (dom.playerSpawnListEl) {
             const players = getPlayers();
-            playerSpawnListEl.innerHTML = [
+            dom.playerSpawnListEl.innerHTML = [
                 `
                     <button class="vtt-token-spawn" type="button" data-spawn-kind="custom">
                         <span class="vtt-token-spawn-name">Custom Token</span>
@@ -6389,18 +3305,18 @@
     };
 
     const renderNPCSearchPopover = () => {
-        if (!npcSearchPopoverEl || !npcSearchListEl) return;
-        const isOpen = npcSearchOpen && isDM();
-        if (npcSearchToggleEl) npcSearchToggleEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-        npcSearchPopoverEl.hidden = !isOpen;
+        if (!dom.npcSearchPopoverEl || !dom.npcSearchListEl) return;
+        const isOpen = uiRuntime.npcSearch.open && isDM();
+        if (dom.npcSearchToggleEl) dom.npcSearchToggleEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        dom.npcSearchPopoverEl.hidden = !isOpen;
 
-        if (npcSearchInputEl && document.activeElement !== npcSearchInputEl) {
-            npcSearchInputEl.value = npcSearchQuery;
+        if (dom.npcSearchInputEl && document.activeElement !== dom.npcSearchInputEl) {
+            dom.npcSearchInputEl.value = uiRuntime.npcSearch.query;
         }
 
         if (!isOpen) return;
 
-        const query = npcSearchQuery.trim().toLowerCase();
+        const query = uiRuntime.npcSearch.query.trim().toLowerCase();
         const npcs = getNPCs().filter((npc) => {
             if (!query) return true;
             const name = String(npc && npc.name || '').toLowerCase();
@@ -6416,8 +3332,8 @@
                 monster && monster.challengeRating
             ].map((entry) => String(entry || '').toLowerCase()).join(' ');
             return haystack.includes(query);
-        }).slice(0, MONSTER_SEARCH_RESULT_LIMIT);
-        const loadingMessage = npcSearchLoading || monsterDirectoryLoading
+        }).slice(0, C.MONSTER_SEARCH_RESULT_LIMIT);
+        const loadingMessage = resources.npcSearch.loading || resources.monsters.loading
             ? '<div class="vtt-empty">Refreshing NPC and SRD monster lists...</div>'
             : '';
 
@@ -6427,7 +3343,7 @@
                     ${npcs.map((npc) => `
                     <button class="vtt-token-spawn" type="button" data-action="spawn-npc" data-id="${escapeHtml(String(npc.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(npc.name || 'NPC')}</span>
-                        <span class="vtt-token-spawn-meta">${escapeHtml(npcSearchState && npcSearchState.worldPoint ? 'Spawn here' : 'Spawn token')}${npc.guild ? ` · ${escapeHtml(npc.guild)}` : ''}</span>
+                        <span class="vtt-token-spawn-meta">${escapeHtml(uiRuntime.npcSearch.state && uiRuntime.npcSearch.state.worldPoint ? 'Spawn here' : 'Spawn token')}${npc.guild ? ` · ${escapeHtml(npc.guild)}` : ''}</span>
                     </button>
                 `).join('')}
                 `
@@ -6438,7 +3354,7 @@
                     ${monsters.map((monster) => `
                     <button class="vtt-token-spawn" type="button" data-action="spawn-monster" data-id="${escapeHtml(String(monster.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(monster.name || 'Monster')}</span>
-                        <span class="vtt-token-spawn-meta">${escapeHtml(npcSearchState && npcSearchState.worldPoint ? 'Spawn here' : 'Spawn token')} · CR ${escapeHtml(monster.challengeRating || '?')}${monster.type ? ` · ${escapeHtml(monster.type)}` : ''}</span>
+                        <span class="vtt-token-spawn-meta">${escapeHtml(uiRuntime.npcSearch.state && uiRuntime.npcSearch.state.worldPoint ? 'Spawn here' : 'Spawn token')} · CR ${escapeHtml(monster.challengeRating || '?')}${monster.type ? ` · ${escapeHtml(monster.type)}` : ''}</span>
                     </button>
                 `).join('')}
                 `
@@ -6446,22 +3362,22 @@
         const emptyMessage = !npcMarkup && !monsterMarkup && !loadingMessage
             ? `<div class="vtt-empty">${query ? 'No NPCs or SRD monsters match that search.' : 'No NPCs in the shared store yet. SRD monsters load from the local monsters folder.'}</div>`
             : '';
-        npcSearchListEl.innerHTML = `${loadingMessage}${npcMarkup}${monsterMarkup}${emptyMessage}`;
+        dom.npcSearchListEl.innerHTML = `${loadingMessage}${npcMarkup}${monsterMarkup}${emptyMessage}`;
         positionNPCSearchPopover();
     };
 
     const renderQuickSpawnMenu = () => {
-        if (!quickSpawnMenuEl) return;
-        if (!quickSpawnMenuState || !isDM() || !stageEl) {
-            quickSpawnMenuEl.hidden = true;
-            quickSpawnMenuEl.innerHTML = '';
+        if (!dom.quickSpawnMenuEl) return;
+        if (!uiRuntime.overlays.quickSpawn || !isDM() || !dom.stageEl) {
+            dom.quickSpawnMenuEl.hidden = true;
+            dom.quickSpawnMenuEl.innerHTML = '';
             return;
         }
 
         const players = getPlayers();
         const playerCount = players.length;
-        quickSpawnMenuEl.hidden = false;
-        quickSpawnMenuEl.innerHTML = `
+        dom.quickSpawnMenuEl.hidden = false;
+        dom.quickSpawnMenuEl.innerHTML = `
             <div class="vtt-quick-spawn-title">Quick Spawn</div>
             <div class="vtt-quick-spawn-list">
                 <button class="vtt-token-spawn" type="button" data-action="quick-spawn-all-players"${playerCount ? '' : ' disabled'}>
@@ -6491,10 +3407,10 @@
             </div>
         `;
 
-        const stageRect = stageEl.getBoundingClientRect();
-        const menuWidth = quickSpawnMenuEl.offsetWidth || 280;
-        const menuHeight = quickSpawnMenuEl.offsetHeight || 0;
-        const left = clamp(quickSpawnMenuState.stageX, 12, Math.max(12, stageRect.width - menuWidth - 12));
+        const stageRect = dom.stageEl.getBoundingClientRect();
+        const menuWidth = dom.quickSpawnMenuEl.offsetWidth || 280;
+        const menuHeight = dom.quickSpawnMenuEl.offsetHeight || 0;
+        const left = clamp(uiRuntime.overlays.quickSpawn.stageX, 12, Math.max(12, stageRect.width - menuWidth - 12));
         let maxTop = Math.max(12, stageRect.height - menuHeight - 12);
         if (window.matchMedia('(min-width: 861px)').matches) {
             const tableHud = document.getElementById('vtt-table-hud');
@@ -6503,21 +3419,21 @@
                 maxTop = Math.min(maxTop, Math.max(12, hudRect.top - stageRect.top - menuHeight - 12));
             }
         }
-        const top = clamp(quickSpawnMenuState.stageY, 12, maxTop);
-        quickSpawnMenuEl.style.left = `${left}px`;
-        quickSpawnMenuEl.style.top = `${top}px`;
+        const top = clamp(uiRuntime.overlays.quickSpawn.stageY, 12, maxTop);
+        dom.quickSpawnMenuEl.style.left = `${left}px`;
+        dom.quickSpawnMenuEl.style.top = `${top}px`;
     };
 
     const renderStageContextMenu = () => {
-        if (!stageContextMenuEl) return;
-        if (!stageContextMenuState || !stageEl) {
-            if (body) delete body.dataset.vttContextTarget;
-            stageContextMenuEl.hidden = true;
-            stageContextMenuEl.innerHTML = '';
+        if (!dom.stageContextMenuEl) return;
+        if (!uiRuntime.overlays.stageContextMenu || !dom.stageEl) {
+            if (dom.body) delete dom.body.dataset.vttContextTarget;
+            dom.stageContextMenuEl.hidden = true;
+            dom.stageContextMenuEl.innerHTML = '';
             return;
         }
-        const token = stageContextMenuState.tokenId ? getTokenById(stageContextMenuState.tokenId) : null;
-        const note = stageContextMenuState.noteId ? getEvidenceNoteById(stageContextMenuState.noteId) : null;
+        const token = uiRuntime.overlays.stageContextMenu.tokenId ? getTokenById(uiRuntime.overlays.stageContextMenu.tokenId) : null;
+        const note = uiRuntime.overlays.stageContextMenu.noteId ? getEvidenceNoteById(uiRuntime.overlays.stageContextMenu.noteId) : null;
         const tokenSourceType = String(token && token.sourceType || '').trim().toLowerCase();
         const canRollFromSheet = (isDM() && tokenSourceType === 'player')
             || (isPlayer() && canUseSharedPlayerTools());
@@ -6528,10 +3444,10 @@
         const canEditNote = !!(isDM() && note);
         const activeScene = getActiveScene();
         const fogCount = activeScene && Array.isArray(activeScene.fog) ? activeScene.fog.length : 0;
-        const contextLabel = stageContextMenuState.source === 'touch' ? 'Touch actions' : 'Right-click actions';
-        if (body) body.dataset.vttContextTarget = note ? 'note' : (token ? 'token' : 'stage');
-        stageContextMenuEl.hidden = false;
-        stageContextMenuEl.innerHTML = note ? `
+        const contextLabel = uiRuntime.overlays.stageContextMenu.source === 'touch' ? 'Touch actions' : 'Right-click actions';
+        if (dom.body) dom.body.dataset.vttContextTarget = note ? 'note' : (token ? 'token' : 'stage');
+        dom.stageContextMenuEl.hidden = false;
+        dom.stageContextMenuEl.innerHTML = note ? `
             <div class="vtt-stage-context-head">
                 <strong>${escapeHtml(getEvidenceNoteDisplayTitle(note))}</strong>
                 <span>${escapeHtml(`${getEvidenceNoteShapeLabel(note)} · ${buildEvidenceNoteAreaLabel(note, activeScene)} · ${note.hidden ? 'DM only' : 'Visible to players'}`)}</span>
@@ -6556,7 +3472,7 @@
                 ${canRollStatBlock ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-stat-block">Roll stat block / NPC</button>' : ''}
                 ${canEditToken ? `<button class="vtt-stage-context-item" type="button" data-action="context-token-inspector">Token inspector</button>` : ''}
                 ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-inspector">Zone inspector</button>` : ''}
-                ${canPreview ? `<button class="vtt-stage-context-item" type="button" data-action="context-preview-token">${token.id === previewTokenId ? 'Hide portrait' : 'Preview portrait'}</button>` : ''}
+                ${canPreview ? `<button class="vtt-stage-context-item" type="button" data-action="context-preview-token">${token.id === stageState.preview.tokenId ? 'Hide portrait' : 'Preview portrait'}</button>` : ''}
                 ${isDM() && !token ? '<button class="vtt-stage-context-item" type="button" data-action="context-quick-spawn">Quick spawn here</button><button class="vtt-stage-context-item" type="button" data-action="context-npc-search">NPC search here</button>' : ''}
             </div>
             <details class="vtt-stage-context-details">
@@ -6572,7 +3488,7 @@
                 </div>
                 <label class="vtt-stage-context-size">
                     <span>Template size</span>
-                    <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="${escapeHtml(String(localToolState.sizeCells))}" aria-label="Circle radius and cone length in squares">
+                    <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="${escapeHtml(String(stageState.tool.current.sizeCells))}" aria-label="Circle radius and cone length in squares">
                     <small>Circle radius / cone length, in squares</small>
                 </label>
                 ${isDM() ? `
@@ -6595,14 +3511,14 @@
     };
 
     const openStageContextMenu = (clientX, clientY, options = {}) => {
-        if (!stageEl) return false;
+        if (!dom.stageEl) return false;
         closeQuickSpawnMenu();
         closeNPCSearch();
         closeTokenInspectorPopover();
         closeSheetActionPopover();
         closeNPCRollPopover();
         closeInitiativeDetail();
-        stageContextMenuState = {
+        uiRuntime.overlays.stageContextMenu = {
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2)),
             worldPoint: options.worldPoint || screenToWorld(clientX, clientY),
@@ -6615,22 +3531,22 @@
     };
 
     const renderSpawnGhost = () => {
-        if (!spawnGhostEl) return;
-        if (!spawnDragState || !isDM()) {
-            spawnGhostEl.hidden = true;
-            spawnGhostEl.innerHTML = '';
-            if (body) body.dataset.spawnDragging = '0';
+        if (!dom.spawnGhostEl) return;
+        if (!stageState.pointer.spawnDrag || !isDM()) {
+            dom.spawnGhostEl.hidden = true;
+            dom.spawnGhostEl.innerHTML = '';
+            if (dom.body) dom.body.dataset.spawnDragging = '0';
             return;
         }
-        spawnGhostEl.hidden = false;
-        spawnGhostEl.dataset.overStage = spawnDragState.overStage ? 'true' : 'false';
-        spawnGhostEl.style.left = `${Math.round(spawnDragState.clientX + 18)}px`;
-        spawnGhostEl.style.top = `${Math.round(spawnDragState.clientY + 18)}px`;
-        spawnGhostEl.innerHTML = `
-            <div class="vtt-spawn-ghost-name">${escapeHtml(spawnDragState.label || 'Token')}</div>
-            <div class="vtt-spawn-ghost-meta">${spawnDragState.overStage ? 'Release to spawn' : 'Drag onto the stage'}</div>
+        dom.spawnGhostEl.hidden = false;
+        dom.spawnGhostEl.dataset.overStage = stageState.pointer.spawnDrag.overStage ? 'true' : 'false';
+        dom.spawnGhostEl.style.left = `${Math.round(stageState.pointer.spawnDrag.clientX + 18)}px`;
+        dom.spawnGhostEl.style.top = `${Math.round(stageState.pointer.spawnDrag.clientY + 18)}px`;
+        dom.spawnGhostEl.innerHTML = `
+            <div class="vtt-spawn-ghost-name">${escapeHtml(stageState.pointer.spawnDrag.label || 'Token')}</div>
+            <div class="vtt-spawn-ghost-meta">${stageState.pointer.spawnDrag.overStage ? 'Release to spawn' : 'Drag onto the stage'}</div>
         `;
-        if (body) body.dataset.spawnDragging = '1';
+        if (dom.body) dom.body.dataset.spawnDragging = '1';
     };
 
     const describeScene = (scene) => {
@@ -6640,70 +3556,52 @@
         return `${scene && scene.mapImageUrl ? 'Map linked' : 'No map'} - ${tokenCount} token${tokenCount === 1 ? '' : 's'} - ${evidenceNoteCount} zone${evidenceNoteCount === 1 ? '' : 's'} - ${clockCount} clock${clockCount === 1 ? '' : 's'}`;
     };
 
-    const getSheetActionSearchResults = () => {
-        const tokens = normalizeSearchText(sheetActionQuery).split(' ').filter(Boolean);
-        return buildSheetActionCatalog()
-            .filter((item) => !tokens.length || tokens.every((token) => item.searchText.includes(token)))
-            .sort((a, b) => {
-                const scoreA = (Number.isFinite(a.priority) ? a.priority : 0) + (tokens.some((token) => normalizeSearchText(a.label).startsWith(token)) ? 100 : 0);
-                const scoreB = (Number.isFinite(b.priority) ? b.priority : 0) + (tokens.some((token) => normalizeSearchText(b.label).startsWith(token)) ? 100 : 0);
-                if (scoreA !== scoreB) return scoreB - scoreA;
-                return a.label.localeCompare(b.label);
-            })
-            .slice(0, QUICK_ACTION_SEARCH_RESULT_LIMIT);
-    };
+    const getSheetActionSearchResults = () => vttRolls.searchSheetActions(
+        buildSheetActionCatalog(),
+        uiRuntime.queries.sheetAction,
+        { limit: C.QUICK_ACTION_SEARCH_RESULT_LIMIT }
+    );
 
     const getPlayerRollSearchResults = () => {
-        const tokens = normalizeSearchText(playerRollSearchQuery).split(' ').filter(Boolean);
         const catalog = buildSheetActionCatalog();
-        if (!tokens.length) {
-            return getFocusQuickRollKeys()
-                .map((key) => catalog.find((item) => item && item.key === key))
-                .filter(Boolean);
-        }
-        return catalog
-            .filter((item) => tokens.every((token) => item.searchText.includes(token)))
-            .sort((a, b) => {
-                const scoreA = (Number.isFinite(a.priority) ? a.priority : 0) + (tokens.some((token) => normalizeSearchText(a.label).startsWith(token)) ? 100 : 0);
-                const scoreB = (Number.isFinite(b.priority) ? b.priority : 0) + (tokens.some((token) => normalizeSearchText(b.label).startsWith(token)) ? 100 : 0);
-                if (scoreA !== scoreB) return scoreB - scoreA;
-                return a.label.localeCompare(b.label);
-            })
-            .slice(0, QUICK_ACTION_SEARCH_RESULT_LIMIT);
+        return vttRolls.searchSheetActions(catalog, uiRuntime.queries.playerRoll, {
+            limit: C.QUICK_ACTION_SEARCH_RESULT_LIMIT,
+            preferredKeys: vttRolls.getFocusQuickRollKeys(catalog)
+        });
     };
 
     const isRollActionGuarded = (key, sourceEl = null) => {
         const guardKey = String(key || '').trim();
         if (!guardKey) return false;
         const now = Date.now();
-        const previousAt = Number(rollActionGuard.get(guardKey) || 0);
-        if (previousAt && now - previousAt < ROLL_ACTION_GUARD_MS) return true;
-        rollActionGuard.set(guardKey, now);
+        const previousAt = Number(resources.rollActionGuard.get(guardKey) || 0);
+        if (previousAt && now - previousAt < C.ROLL_ACTION_GUARD_MS) return true;
+        resources.rollActionGuard.set(guardKey, now);
         window.setTimeout(() => {
-            if (Number(rollActionGuard.get(guardKey) || 0) === now) rollActionGuard.delete(guardKey);
-        }, ROLL_ACTION_GUARD_MS + 50);
+            if (Number(resources.rollActionGuard.get(guardKey) || 0) === now) resources.rollActionGuard.delete(guardKey);
+        }, C.ROLL_ACTION_GUARD_MS + 50);
         if (sourceEl instanceof HTMLButtonElement) {
             sourceEl.disabled = true;
             window.setTimeout(() => {
                 sourceEl.disabled = false;
-            }, ROLL_ACTION_GUARD_MS);
+            }, C.ROLL_ACTION_GUARD_MS);
         }
         return false;
     };
 
     const renderSheetActionPopover = () => {
-        if (!sheetActionPopoverEl) return;
-        if (!sheetActionState) {
-            sheetActionPopoverEl.hidden = true;
-            sheetActionPopoverEl.innerHTML = '';
+        if (!dom.sheetActionPopoverEl) return;
+        if (!uiRuntime.overlays.sheetAction) {
+            dom.sheetActionPopoverEl.hidden = true;
+            dom.sheetActionPopoverEl.innerHTML = '';
             return;
         }
-        const bundle = getActiveSheetBundle(sheetActionState && sheetActionState.sheetKey);
+        const bundle = getActiveSheetBundle(uiRuntime.overlays.sheetAction && uiRuntime.overlays.sheetAction.sheetKey);
         const character = bundle && bundle.character ? bundle.character : null;
         const results = character ? getSheetActionSearchResults() : [];
-        const isRequestMode = String(sheetActionState.mode || '').trim() === 'request';
-        sheetActionPopoverEl.hidden = false;
-        sheetActionPopoverEl.innerHTML = `
+        const isRequestMode = String(uiRuntime.overlays.sheetAction.mode || '').trim() === 'request';
+        dom.sheetActionPopoverEl.hidden = false;
+        dom.sheetActionPopoverEl.innerHTML = `
             <div class="vtt-popover-head">
                 <div>
                     <strong>${isRequestMode ? 'Ask Roll' : 'Sheet Actions'}</strong>
@@ -6713,7 +3611,7 @@
             </div>
             <label class="vtt-field vtt-field-tight">
                 <span>Search</span>
-                <input type="search" data-sheet-action-search value="${escapeHtml(sheetActionQuery)}" placeholder="attack, save, spell, skill">
+                <input type="search" data-sheet-action-search value="${escapeHtml(uiRuntime.queries.sheetAction)}" placeholder="attack, save, spell, skill">
             </label>
             ${isRequestMode ? `
                 <div class="vtt-chip-row">
@@ -6731,17 +3629,17 @@
                     </button>
                 `).join('') : `<div class="vtt-empty">${character ? 'No matching sheet actions.' : 'No local character sheet data found.'}</div>`}
             </div>
-            ${sheetActionState.lastResult ? `
-                <div class="vtt-sheet-action-result${sheetActionState.lastResult.ok ? '' : ' vtt-sheet-action-result-muted'}">
-                    <strong>${escapeHtml(String(sheetActionState.lastResult.total))}</strong>
-                    <span>${escapeHtml(`${sheetActionState.lastResult.label || 'Roll'} - ${sheetActionState.lastResult.formula || ''}`)}</span>
+            ${uiRuntime.overlays.sheetAction.lastResult ? `
+                <div class="vtt-sheet-action-result${uiRuntime.overlays.sheetAction.lastResult.ok ? '' : ' vtt-sheet-action-result-muted'}">
+                    <strong>${escapeHtml(String(uiRuntime.overlays.sheetAction.lastResult.total))}</strong>
+                    <span>${escapeHtml(`${uiRuntime.overlays.sheetAction.lastResult.label || 'Roll'} - ${uiRuntime.overlays.sheetAction.lastResult.formula || ''}`)}</span>
                 </div>
             ` : ''}
         `;
-        const input = sheetActionPopoverEl.querySelector('[data-sheet-action-search]');
+        const input = dom.sheetActionPopoverEl.querySelector('[data-sheet-action-search]');
         if (input && document.activeElement !== input) {
             requestAnimationFrame(() => {
-                const activeInput = sheetActionPopoverEl.querySelector('[data-sheet-action-search]');
+                const activeInput = dom.sheetActionPopoverEl.querySelector('[data-sheet-action-search]');
                 if (activeInput && document.activeElement !== activeInput) activeInput.focus();
             });
         }
@@ -6751,14 +3649,14 @@
     const openSheetActionPopover = (token = null, clientX, clientY, options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
         const rosterPlayer = token ? getRosterPlayerForRecord(token) : null;
-        sheetActionState = {
+        uiRuntime.overlays.sheetAction = {
             tokenId: token && token.id ? token.id : '',
             sheetKey: String(rosterPlayer && rosterPlayer.sheetKey || '').trim(),
             mode: opts.mode === 'request' ? 'request' : 'roll',
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
             clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
         };
-        sheetActionQuery = '';
+        uiRuntime.queries.sheetAction = '';
         closeNPCRollPopover();
         renderSheetActionPopover();
         return true;
@@ -6770,9 +3668,9 @@
         const guardContext = [
             'sheet-action',
             item.key,
-            sheetActionState && sheetActionState.mode || '',
-            sheetActionState && sheetActionState.tokenId || '',
-            sheetActionState && sheetActionState.sheetKey || ''
+            uiRuntime.overlays.sheetAction && uiRuntime.overlays.sheetAction.mode || '',
+            uiRuntime.overlays.sheetAction && uiRuntime.overlays.sheetAction.tokenId || '',
+            uiRuntime.overlays.sheetAction && uiRuntime.overlays.sheetAction.sheetKey || ''
         ].join(':');
         if (isRollActionGuarded(guardContext)) return false;
         const directResult = runSheetActionDirect(item);
@@ -6780,11 +3678,11 @@
             if (isInitiativeSheetAction(item)) {
                 applySheetInitiativeRollToTracker(directResult);
             }
-            sheetActionState = {
-                ...(sheetActionState || {}),
+            uiRuntime.overlays.sheetAction = {
+                ...(uiRuntime.overlays.sheetAction || {}),
                 lastResult: directResult
             };
-            playerFocusLastResult = directResult;
+            uiRuntime.playerRoll.lastResult = directResult;
             renderSheetActionPopover();
             renderPlayerRollMenu();
             postSheetDiscordRoll(directResult.character, directResult.label, directResult.total, directResult.formula, directResult.type, directResult.detail).catch((err) => {
@@ -6795,8 +3693,8 @@
         const message = directResult && directResult.reason === 'missing-character'
             ? 'No linked local character sheet data.'
             : 'That sheet action needs the Character Sheet.';
-        sheetActionState = {
-            ...(sheetActionState || {}),
+        uiRuntime.overlays.sheetAction = {
+            ...(uiRuntime.overlays.sheetAction || {}),
             lastResult: {
                 ok: false,
                 label: item.label,
@@ -6804,7 +3702,7 @@
                 formula: message
             }
         };
-        playerFocusLastResult = sheetActionState.lastResult;
+        uiRuntime.playerRoll.lastResult = uiRuntime.overlays.sheetAction.lastResult;
         renderSheetActionPopover();
         renderPlayerRollMenu();
         return false;
@@ -6832,7 +3730,7 @@
         if (!canLocalRollAskRollRequest(request)) return false;
         const point = worldToScreen({ x: ping && ping.x, y: ping && ping.y });
         openSheetActionPopover(null, point.x, point.y, { mode: 'roll' });
-        sheetActionQuery = String(request && request.label || '').trim();
+        uiRuntime.queries.sheetAction = String(request && request.label || '').trim();
         renderSheetActionPopover();
         return true;
     };
@@ -6848,7 +3746,7 @@
         if (!actionKey) return openAskRollSearchFromPing(ping, request);
         const context = getLocalPlayerFocusContext();
         const point = worldToScreen({ x: ping.x, y: ping.y });
-        sheetActionState = {
+        uiRuntime.overlays.sheetAction = {
             tokenId: context && context.token && context.token.id ? context.token.id : '',
             sheetKey: String(context && context.linkedPlayer && context.linkedPlayer.sheetKey || '').trim(),
             mode: 'roll',
@@ -6872,52 +3770,6 @@
         return removed;
     };
 
-    const getSheetMod = (character, stat) => Math.floor(((character && character.stats && character.stats[stat] ? Number(character.stats[stat].val) : 10) - 10) / 2);
-    const getSheetPB = (character) => Math.floor(((character && character.meta ? parseInt(character.meta.level, 10) : 1) - 1) / 4) + 2;
-    const getSheetSkillMiscBonus = (character, skillName) => {
-        const raw = character && character.skillMisc ? String(character.skillMisc[skillName] || '').trim().toLowerCase() : '';
-        if (!raw) return 0;
-        if (DEFENCE_KEYS.includes(raw)) return getSheetMod(character, raw);
-        return parseInt(raw, 10) || 0;
-    };
-    const getSheetSkillBonus = (character, skillName) => {
-        const skill = String(skillName || '').trim().toLowerCase();
-        const stat = character && character.skillOverrides && character.skillOverrides[skill]
-            ? character.skillOverrides[skill]
-            : sheetSkillsMap[skill];
-        if (!stat) return 0;
-        const profLevel = character && character.skills && Number.isFinite(Number(character.skills[skill]))
-            ? Number(character.skills[skill])
-            : 0;
-        return getSheetMod(character, stat) + (profLevel * getSheetPB(character)) + getSheetSkillMiscBonus(character, skill);
-    };
-    const getSheetArmorClass = (character) => {
-        const ac = character && character.ac && typeof character.ac === 'object' ? character.ac : {};
-        const bonuses = Array.isArray(ac.bonuses) ? ac.bonuses : [];
-        const bonusTotal = bonuses.reduce((sum, bonus) => (
-            bonus && bonus.active ? sum + Math.round(toNumber(bonus.val, 0)) : sum
-        ), 0);
-        if (String(ac.mode || 'std') === 'custom') {
-            const stat1 = DEFENCE_KEYS.includes(String(ac.customStat1 || '').trim()) ? String(ac.customStat1).trim() : 'dex';
-            const stat2 = DEFENCE_KEYS.includes(String(ac.customStat2 || '').trim()) ? String(ac.customStat2).trim() : '';
-            return clamp(Math.round(10 + getSheetMod(character, stat1) + (stat2 ? getSheetMod(character, stat2) : 0) + bonusTotal), 0, 99);
-        }
-        const rawDex = getSheetMod(character, 'dex');
-        const dexCap = Number.isFinite(Number(ac.dexCap)) ? Number(ac.dexCap) : 100;
-        const effectiveDex = dexCap === 100 ? rawDex : (dexCap === 0 ? 0 : Math.min(rawDex, dexCap));
-        return clamp(Math.round(toNumber(ac.base, 10) + effectiveDex + bonusTotal), 0, 99);
-    };
-    const getSheetDefences = (character) => DEFENCE_KEYS.reduce((out, stat) => {
-        const statRow = character && character.stats && character.stats[stat] ? character.stats[stat] : { val: 10, save: false };
-        const saveBonus = getSheetMod(character, stat) + (statRow.save ? getSheetPB(character) : 0);
-        out[stat] = clamp(Math.round(11 + saveBonus), 0, 99);
-        return out;
-    }, {});
-    const getSheetStealthRoll = (character) => {
-        const raw = character && character.meta ? character.meta.stealthRoll : null;
-        if (raw === null || raw === undefined || raw === '') return null;
-        return clamp(Math.round(toNumber(raw, 0)), 0, 99);
-    };
     const findRosterPlayerBySheetKey = (sheetKey) => {
         const cleanSheetKey = String(sheetKey || '').trim();
         if (!cleanSheetKey) return null;
@@ -6956,13 +3808,13 @@
                 && !isTokenHiddenForRole(entry, scene, 'player')
             ) || null
             : null;
-        const entry = token ? findEntryForToken(token.id) : (playerId && vttState && vttState.initiative && Array.isArray(vttState.initiative.entries)
-            ? vttState.initiative.entries.find((candidate) =>
+        const entry = token ? findEntryForToken(token.id) : (playerId && sessionState.snapshot && sessionState.snapshot.initiative && Array.isArray(sessionState.snapshot.initiative.entries)
+            ? sessionState.snapshot.initiative.entries.find((candidate) =>
                 String(candidate && candidate.sourceType || '').trim() === 'player'
                 && String(candidate && candidate.sourceId || '').trim() === playerId
             ) || null
             : null);
-        const activeEntryId = String(vttState && vttState.initiative && vttState.initiative.activeEntryId || '').trim();
+        const activeEntryId = String(sessionState.snapshot && sessionState.snapshot.initiative && sessionState.snapshot.initiative.activeEntryId || '').trim();
         return {
             identity,
             linkedPlayer,
@@ -6991,41 +3843,41 @@
     };
 
     const closeRosterSelfModal = ({ restoreFocus = false } = {}) => {
-        if (!rosterSelfModalEl) return false;
-        const wasOpen = !rosterSelfModalEl.hidden;
-        rosterSelfModalEl.hidden = true;
-        rosterSelfModalError = '';
-        if (rosterSelfErrorEl) {
-            rosterSelfErrorEl.hidden = true;
-            rosterSelfErrorEl.textContent = '';
+        if (!dom.rosterSelfModalEl) return false;
+        const wasOpen = !dom.rosterSelfModalEl.hidden;
+        dom.rosterSelfModalEl.hidden = true;
+        uiRuntime.modals.rosterSelf.error = '';
+        if (dom.rosterSelfErrorEl) {
+            dom.rosterSelfErrorEl.hidden = true;
+            dom.rosterSelfErrorEl.textContent = '';
         }
-        if (restoreFocus && rosterSelfModalReturnFocusEl && typeof rosterSelfModalReturnFocusEl.focus === 'function') {
-            rosterSelfModalReturnFocusEl.focus();
+        if (restoreFocus && uiRuntime.modals.rosterSelf.returnFocusEl && typeof uiRuntime.modals.rosterSelf.returnFocusEl.focus === 'function') {
+            uiRuntime.modals.rosterSelf.returnFocusEl.focus();
         }
-        rosterSelfModalReturnFocusEl = null;
+        uiRuntime.modals.rosterSelf.returnFocusEl = null;
         return wasOpen;
     };
 
-    const isRosterSelfModalOpen = () => !!(rosterSelfModalEl && !rosterSelfModalEl.hidden);
+    const isRosterSelfModalOpen = () => !!(dom.rosterSelfModalEl && !dom.rosterSelfModalEl.hidden);
 
     const renderRosterSelfModal = () => {
-        if (!rosterSelfModalEl) return;
+        if (!dom.rosterSelfModalEl) return;
         const context = getRosterSelfPromptContext();
         if (!context.shouldPrompt) {
             closeRosterSelfModal();
-            rosterSelfModalSelectedId = '';
+            uiRuntime.modals.rosterSelf.selectedId = '';
             return;
         }
 
         const players = context.players || [];
         const identity = context.identity || getLocalSheetIdentity();
-        const selectedStillValid = players.some((player) => String(player && player.id || '').trim() === rosterSelfModalSelectedId);
+        const selectedStillValid = players.some((player) => String(player && player.id || '').trim() === uiRuntime.modals.rosterSelf.selectedId);
         if (!selectedStillValid) {
             const suggested = getRosterSelfSuggestedPlayer(players, identity);
-            rosterSelfModalSelectedId = String(suggested && suggested.id || players[0] && players[0].id || '').trim();
+            uiRuntime.modals.rosterSelf.selectedId = String(suggested && suggested.id || players[0] && players[0].id || '').trim();
         }
 
-        const wasHidden = rosterSelfModalEl.hidden;
+        const wasHidden = dom.rosterSelfModalEl.hidden;
         if (wasHidden) {
             closeNPCSearch();
             closeViewMenu();
@@ -7037,17 +3889,17 @@
             closeNPCRollPopover();
             clearSpawnDrag();
             clearTemplatePlacementState();
-            rosterSelfModalReturnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            uiRuntime.modals.rosterSelf.returnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         }
 
-        if (rosterSelfDetailEl) {
-            rosterSelfDetailEl.textContent = `Link ${identity.characterName} to your player roster entry so the VTT can resolve your token and sheet rolls.`;
+        if (dom.rosterSelfDetailEl) {
+            dom.rosterSelfDetailEl.textContent = `Link ${identity.characterName} to your player roster entry so the VTT can resolve your token and sheet rolls.`;
         }
-        if (rosterSelfListEl) {
-            rosterSelfListEl.innerHTML = players.map((player) => {
+        if (dom.rosterSelfListEl) {
+            dom.rosterSelfListEl.innerHTML = players.map((player) => {
                 const playerId = String(player && player.id || '').trim();
                 const playerSheetKey = String(player && player.sheetKey || '').trim();
-                const selected = playerId && playerId === rosterSelfModalSelectedId;
+                const selected = playerId && playerId === uiRuntime.modals.rosterSelf.selectedId;
                 const status = playerSheetKey === identity.sheetKey
                     ? 'Already linked to this sheet'
                     : (playerSheetKey ? 'Linked to another local sheet' : 'Available');
@@ -7066,19 +3918,19 @@
                 `;
             }).join('');
         }
-        if (rosterSelfErrorEl) {
-            rosterSelfErrorEl.hidden = !rosterSelfModalError;
-            rosterSelfErrorEl.textContent = rosterSelfModalError;
+        if (dom.rosterSelfErrorEl) {
+            dom.rosterSelfErrorEl.hidden = !uiRuntime.modals.rosterSelf.error;
+            dom.rosterSelfErrorEl.textContent = uiRuntime.modals.rosterSelf.error;
         }
-        if (rosterSelfConfirmEl) {
-            rosterSelfConfirmEl.disabled = !rosterSelfModalSelectedId;
+        if (dom.rosterSelfConfirmEl) {
+            dom.rosterSelfConfirmEl.disabled = !uiRuntime.modals.rosterSelf.selectedId;
         }
-        rosterSelfModalEl.hidden = false;
+        dom.rosterSelfModalEl.hidden = false;
 
         if (wasHidden) {
             window.requestAnimationFrame(() => {
-                const selectedButton = rosterSelfListEl ? rosterSelfListEl.querySelector('[aria-pressed="true"]') : null;
-                const focusTarget = selectedButton || rosterSelfConfirmEl;
+                const selectedButton = dom.rosterSelfListEl ? dom.rosterSelfListEl.querySelector('[aria-pressed="true"]') : null;
+                const focusTarget = selectedButton || dom.rosterSelfConfirmEl;
                 if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
             });
         }
@@ -7088,8 +3940,8 @@
         const cleanPlayerId = String(playerId || '').trim();
         const players = getPlayers();
         if (!players.some((player) => String(player && player.id || '').trim() === cleanPlayerId)) return false;
-        rosterSelfModalSelectedId = cleanPlayerId;
-        rosterSelfModalError = '';
+        uiRuntime.modals.rosterSelf.selectedId = cleanPlayerId;
+        uiRuntime.modals.rosterSelf.error = '';
         renderRosterSelfModal();
         return true;
     };
@@ -7097,21 +3949,21 @@
     const linkRosterSelfSelection = () => {
         const store = getStore();
         const identity = getLocalSheetIdentity();
-        const playerId = String(rosterSelfModalSelectedId || '').trim();
+        const playerId = String(uiRuntime.modals.rosterSelf.selectedId || '').trim();
         if (!identity.sheetKey) {
-            rosterSelfModalError = 'Open or create a local character sheet first, then return to the VTT.';
+            uiRuntime.modals.rosterSelf.error = 'Open or create a local character sheet first, then return to the VTT.';
             renderRosterSelfModal();
             return false;
         }
         if (!store || typeof store.updatePlayer !== 'function') {
-            rosterSelfModalError = 'The roster store is not available yet.';
+            uiRuntime.modals.rosterSelf.error = 'The roster store is not available yet.';
             renderRosterSelfModal();
             return false;
         }
         const players = getPlayers();
         const selected = players.find((player) => String(player && player.id || '').trim() === playerId);
         if (!selected) {
-            rosterSelfModalError = 'Choose a player roster entry.';
+            uiRuntime.modals.rosterSelf.error = 'Choose a player roster entry.';
             renderRosterSelfModal();
             return false;
         }
@@ -7130,15 +3982,15 @@
         });
         const updated = store.updatePlayer(playerId, { sheetKey: identity.sheetKey });
         if (!updated) {
-            rosterSelfModalError = 'Could not update that roster entry.';
+            uiRuntime.modals.rosterSelf.error = 'Could not update that roster entry.';
             renderRosterSelfModal();
             return false;
         }
 
-        rosterSelfModalSelectedId = '';
+        uiRuntime.modals.rosterSelf.selectedId = '';
         closeRosterSelfModal({ restoreFocus: true });
         refreshPlayerImageCache();
-        if (vttState && syncRosterLinkedPlayerPresentation(vttState)) {
+        if (sessionState.snapshot && syncRosterLinkedPlayerPresentation(sessionState.snapshot)) {
             normalizeSelections();
         }
         render();
@@ -7147,7 +3999,7 @@
     const rollSheetD20 = (character, bonus, label, options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
         const allowAdvantage = opts.allowAdvantage !== false;
-        const mode = allowAdvantage ? normalizeRollMode(opts.rollMode || localRollMode || (character && character.rollMode) || 'norm') : 'norm';
+        const mode = allowAdvantage ? normalizeRollMode(opts.rollMode || uiRuntime.playerRoll.mode || (character && character.rollMode) || 'norm') : 'norm';
         let result = null;
         if (allowAdvantage && (mode === 'adv' || mode === 'dis')) {
             const first = randomIntInclusive(1, 20);
@@ -7205,7 +4057,7 @@
             isFail: result.isFail
         };
     };
-    const rollRawD20WithMode = (mode = localRollMode) => {
+    const rollRawD20WithMode = (mode = uiRuntime.playerRoll.mode) => {
         const cleanMode = normalizeRollMode(mode);
         if (cleanMode === 'adv' || cleanMode === 'dis') {
             const first = randomIntInclusive(1, 20);
@@ -7247,7 +4099,7 @@
         if (!parsed.text) return { ok: false, reason: 'invalid' };
         const opts = options && typeof options === 'object' ? options : {};
         const ability = String(opts.ability || '').trim().toLowerCase();
-        const abilityBonus = DEFENCE_KEYS.includes(ability) ? getSheetMod(character, ability) : 0;
+        const abilityBonus = C.DEFENCE_KEYS.includes(ability) ? getSheetMod(character, ability) : 0;
         const total = parsed.total + abilityBonus;
         const formula = `${parsed.text}${abilityBonus ? ` ${abilityBonus >= 0 ? '+' : ''}${abilityBonus} (${ability.toUpperCase()})` : ''}`;
         return {
@@ -7261,7 +4113,7 @@
         };
     };
     const runSheetActionDirect = (item) => {
-        const bundle = getActiveSheetBundle(sheetActionState && sheetActionState.sheetKey);
+        const bundle = getActiveSheetBundle(uiRuntime.overlays.sheetAction && uiRuntime.overlays.sheetAction.sheetKey);
         const character = bundle && bundle.character ? bundle.character : null;
         if (!character || !item || !item.action) return { ok: false, reason: 'missing-character' };
         const action = item.action;
@@ -7308,7 +4160,7 @@
         if (match) {
             const attack = Array.isArray(character.attacks) ? character.attacks[parseInt(match[1], 10)] : null;
             if (!attack) return { ok: false, reason: 'missing-attack' };
-            const stat = DEFENCE_KEYS.includes(attack.atkStat) ? attack.atkStat : (DEFENCE_KEYS.includes(attack.stat) ? attack.stat : '');
+            const stat = C.DEFENCE_KEYS.includes(attack.atkStat) ? attack.atkStat : (C.DEFENCE_KEYS.includes(attack.stat) ? attack.stat : '');
             const bonus = (stat ? getSheetMod(character, stat) : 0) + getSheetPB(character) + (parseInt(attack.atkBonus, 10) || 0);
             return rollSheetD20(character, bonus, `${attack.name || 'Weapon'} Atk`, { type: 'atk', detail: attack.desc || '' });
         }
@@ -7316,7 +4168,7 @@
         if (match) {
             const attack = Array.isArray(character.attacks) ? character.attacks[parseInt(match[1], 10)] : null;
             if (!attack) return { ok: false, reason: 'missing-attack' };
-            const stat = DEFENCE_KEYS.includes(attack.dmgStat) ? attack.dmgStat : (DEFENCE_KEYS.includes(attack.stat) ? attack.stat : '');
+            const stat = C.DEFENCE_KEYS.includes(attack.dmgStat) ? attack.dmgStat : (C.DEFENCE_KEYS.includes(attack.stat) ? attack.stat : '');
             const formula = `${attack.dmg || ''} ${typeof attack.dmgBonus === 'string' ? attack.dmgBonus : ''}`.trim();
             return rollSheetFormula(character, `${attack.name || 'Weapon'} Dmg`, formula, { type: 'dmg', ability: stat, detail: attack.desc || '' });
         }
@@ -7328,19 +4180,14 @@
         }
         return { ok: false, reason: 'unsupported' };
     };
-    const isInitiativeSheetAction = (item) => {
-        const action = item && item.action ? item.action : {};
-        return String(item && item.key || '').trim() === 'core:initiative'
-            || String(action.code || '').trim() === 'rollInitiative()'
-            || String(item && item.label || '').trim().toLowerCase() === 'initiative';
-    };
+    const isInitiativeSheetAction = vttRolls.isInitiativeSheetAction;
     const buildDeterministicInitiativeEntryId = (sourceType, sourceId) => {
         const type = String(sourceType || '').trim();
         const id = String(sourceId || '').trim();
         if (!type || !id) return '';
         return String(`init_${type}_${id}`).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 120);
     };
-    const hasDefenceValues = (defences) => DEFENCE_KEYS.some((key) => hasValue(defences && defences[key]));
+    const hasDefenceValues = (defences) => C.DEFENCE_KEYS.some((key) => hasValue(defences && defences[key]));
     const upsertRolledInitiativeEntry = (roll) => {
         const packet = roll && typeof roll === 'object' ? roll : null;
         if (!packet) return false;
@@ -7430,8 +4277,8 @@
             else entries.push(nextEntry);
             sortInitiativeEntries(entries);
             if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
-            selectedEntryId = nextEntry.id;
-            selectedTokenId = linkedToken ? linkedToken.id : selectedTokenId;
+            stageState.selection.entryId = nextEntry.id;
+            stageState.selection.tokenId = linkedToken ? linkedToken.id : stageState.selection.tokenId;
             applied = true;
         }, { reason: 'vtt-initiative-roll' });
 
@@ -7441,8 +4288,8 @@
         const character = result && result.character ? result.character : null;
         if (!character) return false;
         const sheetKey = String(character.meta && character.meta.sheetKey || '').trim();
-        const tokenId = String(sheetActionState && sheetActionState.tokenId || '').trim();
-        const token = tokenId ? findTokenByIdAcrossScenes(vttState, tokenId) : null;
+        const tokenId = String(uiRuntime.overlays.sheetAction && uiRuntime.overlays.sheetAction.tokenId || '').trim();
+        const token = tokenId ? findTokenByIdAcrossScenes(sessionState.snapshot, tokenId) : null;
         const rosterPlayer = getRosterPlayerForRecord(token) || findRosterPlayerBySheetKey(sheetKey);
         const tokenSourceType = String(token && token.sourceType || '').trim();
         const tokenSourceId = String(token && token.sourceId || '').trim();
@@ -7522,620 +4369,74 @@
         });
     };
 
-    const applyRollModeToD20Formula = (formula, mode = localRollMode) => {
-        const cleanMode = normalizeRollMode(mode);
-        const source = String(formula || '').trim();
-        if (!source || cleanMode === 'norm') return source;
-        return source.replace(/\b1d20\b(?!\s*(?:kh|k|dl|d|r)\d*)/gi, cleanMode === 'adv' ? '2d20kh1' : '2d20dl1');
-    };
+    const applyRollModeToD20Formula = (formula, mode = uiRuntime.playerRoll.mode) => (
+        vttRolls.applyRollModeToD20Formula(formula, mode)
+    );
 
     const gmCoreRoll = (count, sides, mods = {}) => {
         const result = Dice.coreRoll(count, sides, 'norm', mods);
         return { total: result.total, formula: result.formula };
     };
 
-    const getProximitySeenStorageKey = () => `${PROXIMITY_PROMPT_STORAGE_PREFIX}${getActiveCaseId() || 'case'}`;
-    const readProximitySeenMap = () => {
-        const raw = readJSONStorage(getProximitySeenStorageKey(), {});
-        return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    };
-    const writeProximitySeenMap = (seenMap) => {
-        try {
-            localStorage.setItem(getProximitySeenStorageKey(), JSON.stringify(seenMap && typeof seenMap === 'object' ? seenMap : {}));
-        } catch (err) { }
-    };
-    const getTokenCellRect = (token) => {
-        if (!token) return null;
-        const left = toNumber(token.x, 0);
-        const top = toNumber(token.y, 0);
-        const width = Math.max(1, toNumber(token.w, 1));
-        const height = Math.max(1, toNumber(token.h, 1));
-        return { left, top, right: left + width, bottom: top + height, width, height };
-    };
-    const getEvidenceNoteTriggerRect = (scene, note) => {
-        const bounds = getEvidenceNoteCellBounds(scene, note);
-        if (!bounds) return null;
-        return {
-            left: bounds.left,
-            top: bounds.top,
-            right: bounds.right,
-            bottom: bounds.bottom,
-            width: bounds.widthCells,
-            height: bounds.heightCells
-        };
-    };
-    const doCellRectsOverlap = (left, right) => !!(
-        left && right
-        && left.left < right.right
-        && left.right > right.left
-        && left.top < right.bottom
-        && left.bottom > right.top
-    );
-    const getCellRectDistance = (left, right) => {
-        if (!left || !right) return Infinity;
-        if (doCellRectsOverlap(left, right)) return 0;
-        const dx = Math.max(0, right.left - left.right, left.left - right.right);
-        const dy = Math.max(0, right.top - left.bottom, left.top - right.bottom);
-        return Math.hypot(dx, dy);
-    };
-    const getCellRectCenter = (rect) => {
-        if (!rect) return null;
-        return {
-            x: toNumber(rect.left, 0) + Math.max(1, toNumber(rect.width, 1)) / 2,
-            y: toNumber(rect.top, 0) + Math.max(1, toNumber(rect.height, 1)) / 2
-        };
-    };
-    const getCellRectCenterDistance = (left, right) => {
-        const leftCenter = getCellRectCenter(left);
-        const rightCenter = getCellRectCenter(right);
-        if (!leftCenter || !rightCenter) return Infinity;
-        return Math.hypot(rightCenter.x - leftCenter.x, rightCenter.y - leftCenter.y);
-    };
-    const isWithinProximityRadius = (sourceRect, targetRect, radiusCells = 0) => {
-        const radius = Math.max(0, Math.round(toNumber(radiusCells, 0)));
-        return radius <= 0
-            ? doCellRectsOverlap(sourceRect, targetRect)
-            : getCellRectDistance(sourceRect, targetRect) <= radius;
-    };
-    const isWithinTokenProximityRadius = (sourceRect, targetRect, radiusCells = 0) => {
-        const radius = Math.max(0, Math.round(toNumber(radiusCells, 0)));
-        return getCellRectCenterDistance(sourceRect, targetRect) <= radius;
-    };
-    const isPlayerFacingToken = (token) => {
-        const side = String(token && token.side || '').trim().toLowerCase();
-        const sourceType = String(token && token.sourceType || '').trim().toLowerCase();
-        return side === 'player' || sourceType === 'player';
-    };
-    const getProximityTargetTokens = (scene, trigger, sourceToken = null) => {
-        const visibleTokens = getVisibleTokensForRole(scene, 'player');
-        const target = String(trigger && trigger.target || 'playerTokens').trim();
-        return visibleTokens.filter((token) => {
-            if (!token || (sourceToken && token.id === sourceToken.id)) return false;
-            if (target === 'anyVisibleToken') return true;
-            return isPlayerFacingToken(token);
-        });
-    };
-    const getProximityPromptSeenKey = (scene, sourceKind, sourceId, trigger, token) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        const tokenPart = normalized.repeat === 'oncePerScene'
-            ? 'scene'
-            : String(token && token.id || 'token').trim();
-        return [
-            String(scene && scene.id || '').trim(),
-            String(sourceKind || '').trim(),
-            String(sourceId || '').trim(),
-            normalized.id,
-            tokenPart
-        ].join('|');
-    };
-    const getProximitySeenEntry = (seenMap, key) => {
-        if (!seenMap || !key || !seenMap[key]) return null;
-        const entry = seenMap[key];
-        if (entry && typeof entry === 'object' && !Array.isArray(entry)) return entry;
-        return { at: Number.isFinite(Number(entry)) ? Number(entry) : Date.now() };
-    };
-    const getProximityPromptStateEntry = (source, key) => {
-        const cleanKey = String(key || '').trim();
-        if (!source || !cleanKey) return null;
-        return normalizeProximityPromptStates(source.proximityPromptStates)
-            .find((entry) => entry.key === cleanKey) || null;
-    };
-    const getPersistedProximityResult = (source, seenMap, key, trigger) => {
-        const stateEntry = getProximityPromptStateEntry(source, key);
-        const stateResult = normalizeProximityPromptResult(stateEntry && stateEntry.result, trigger);
-        if (stateResult) return { ...stateResult, persisted: true };
-        const legacyEntry = getProximitySeenEntry(seenMap, key);
-        const legacyResult = normalizeProximityPromptResult(legacyEntry && legacyEntry.result, trigger);
-        return legacyResult ? { ...legacyResult, persisted: true } : null;
-    };
-    const isProximityPromptSeen = (source, seenMap, key, trigger) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        if (suppressedProximityPromptKeys.has(key)) return true;
-        if (normalized.repeat === 'always') return false;
-        const stateEntry = getProximityPromptStateEntry(source, key);
-        if (stateEntry && stateEntry.result) return false;
-        if (stateEntry) return true;
-        const legacyEntry = getProximitySeenEntry(seenMap, key);
-        if (legacyEntry && legacyEntry.result) return false;
-        return !!legacyEntry;
-    };
-    const writeLocalProximityPromptState = (entry) => {
-        const normalized = normalizeProximityPromptStateEntry(entry);
-        if (!normalized.key) return;
-        const seenMap = readProximitySeenMap();
-        const previous = getProximitySeenEntry(seenMap, normalized.key) || {};
-        seenMap[normalized.key] = {
-            ...previous,
-            ...normalized,
-            at: previous.at || normalized.at || Date.now()
-        };
-        writeProximitySeenMap(seenMap);
-    };
-    const findProximityPromptSource = (scene, prompt) => {
-        if (!scene || !prompt) return null;
-        const sourceId = String(prompt.sourceId || '').trim();
-        if (!sourceId) return null;
-        if (prompt.sourceKind === 'token') {
-            const tokens = Array.isArray(scene.tokens) ? scene.tokens : [];
-            return tokens.find((token) => String(token && token.id || '').trim() === sourceId) || null;
-        }
-        if (prompt.sourceKind === 'note') {
-            const notes = Array.isArray(scene.evidenceNotes) ? scene.evidenceNotes : [];
-            return notes.find((note) => String(note && note.id || '').trim() === sourceId) || null;
-        }
-        return null;
-    };
-    const upsertProximityPromptState = (source, entry) => {
-        if (!source || !entry || !entry.key) return false;
-        const states = normalizeProximityPromptStates(source.proximityPromptStates);
-        const idx = states.findIndex((candidate) => candidate.key === entry.key);
-        const previous = idx >= 0 ? states[idx] : {};
-        const merged = {
-            ...previous,
-            ...entry,
-            at: previous.at || entry.at || Date.now()
-        };
-        if (!Object.prototype.hasOwnProperty.call(entry, 'result')) {
-            merged.result = previous.result || null;
-        }
-        const next = normalizeProximityPromptStateEntry({
-            ...merged
-        }, idx >= 0 ? idx : states.length);
-        if (idx >= 0) states[idx] = next;
-        else states.push(next);
-        source.proximityPromptStates = normalizeProximityPromptStates(states);
-        return true;
-    };
-    const buildProximityPromptStateEntry = (prompt, patch = {}) => {
-        const trigger = normalizeProximityTrigger((patch && patch.trigger) || (prompt && prompt.trigger));
-        const hasResultPatch = patch && Object.prototype.hasOwnProperty.call(patch, 'result');
-        const entry = normalizeProximityPromptStateEntry({
-            key: prompt && prompt.key,
-            sceneId: prompt && prompt.sceneId,
-            triggerId: trigger.id,
-            tokenId: prompt && prompt.tokenId,
-            at: Date.now(),
-            ...patch,
-            result: hasResultPatch ? normalizeProximityPromptResult(patch.result, trigger) : undefined
-        });
-        if (!hasResultPatch) delete entry.result;
-        return entry;
-    };
-    const persistProximityPromptState = (prompt, patch = {}, options = {}) => {
-        if (!prompt || !prompt.key) return false;
-        const entry = buildProximityPromptStateEntry(prompt, patch);
-        let wroteSourceState = false;
-        const persisted = withDraft((draft) => {
-            const scene = getSceneById(prompt.sceneId, draft) || getActiveScene(draft);
-            const source = findProximityPromptSource(scene, prompt);
-            if (!source) return;
-            wroteSourceState = upsertProximityPromptState(source, entry);
-        }, { reason: options.reason || 'proximity-prompt-state' });
-        if (!persisted || !wroteSourceState) writeLocalProximityPromptState(entry);
-        return !!(persisted && wroteSourceState);
-    };
-    const persistProximityPromptResult = (prompt, result, trigger) => {
-        if (!prompt || !prompt.key || !result) return false;
-        return persistProximityPromptState(prompt, {
-            trigger,
-            resolvedAt: Date.now(),
-            dismissed: false,
-            dismissedAt: 0,
-            result
-        }, { reason: 'proximity-prompt-result' });
-    };
-    const markProximityPromptDismissed = (prompt) => {
-        if (!prompt || !prompt.key) return false;
-        if (prompt.result) return false;
-        return persistProximityPromptState(prompt, {
-            dismissed: true,
-            dismissedAt: Date.now()
-        }, { reason: 'proximity-prompt-dismissed' });
-    };
-    const getProximitySourceAnchorCells = (scene, sourceKind, source, sourceRect = null) => {
-        if (!source) return null;
-        const rect = sourceRect || (sourceKind === 'note'
-            ? getEvidenceNoteTriggerRect(scene, source)
-            : getTokenCellRect(source));
-        if (!rect) return null;
-        return {
-            x: toNumber(rect.left, 0) + Math.max(1, toNumber(rect.width, 1)) / 2,
-            y: toNumber(rect.top, 0)
-        };
-    };
-    const buildProximityCandidate = ({ scene, sourceKind, source, sourceRect = null, trigger, token, distance, result = null }) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        const sourceId = String(source && source.id || '').trim();
-        const key = getProximityPromptSeenKey(scene, sourceKind, sourceId, normalized, token);
-        const sourceAnchor = getProximitySourceAnchorCells(scene, sourceKind, source, sourceRect);
-        return {
-            key,
-            sceneId: String(scene && scene.id || '').trim(),
-            sourceKind,
-            sourceId,
-            sourceLabel: sourceKind === 'note'
-                ? getEvidenceNoteDisplayTitle(source)
-                : String(source && source.label || 'Token').trim(),
-            tokenId: String(token && token.id || '').trim(),
-            tokenLabel: String(token && token.label || 'Token').trim(),
-            tokenAnchorCellX: toNumber(token && token.x, 0) + Math.max(1, toNumber(token && token.w, 1)) / 2,
-            tokenAnchorCellY: toNumber(token && token.y, 0),
-            sourceAnchorCellX: sourceAnchor ? sourceAnchor.x : null,
-            sourceAnchorCellY: sourceAnchor ? sourceAnchor.y : null,
-            distance: Number.isFinite(distance) ? distance : 0,
-            trigger: normalized,
-            result
-        };
-    };
-    const getProximityPromptToken = (scene, prompt = activeProximityPrompt) => {
-        const tokenId = String(prompt && prompt.tokenId || '').trim();
-        if (!scene || !tokenId) return null;
-        return getVisibleTokensForRole(scene, 'player').find((token) => String(token && token.id || '').trim() === tokenId) || null;
-    };
-    const canInteractWithProximityPrompt = (prompt = activeProximityPrompt) => {
-        if (!isPlayer() || !prompt) return false;
-        const token = getTokenById(prompt.tokenId);
-        return !!(token && canRoleMoveToken(token, 'player'));
-    };
-    const getProximityPromptSourceToken = (scene, prompt = activeProximityPrompt) => {
-        if (!scene || !prompt || prompt.sourceKind !== 'token') return null;
-        const sourceId = String(prompt.sourceId || '').trim();
-        if (!sourceId) return null;
-        return getVisibleTokensForRole(scene, 'player').find((token) => String(token && token.id || '').trim() === sourceId) || null;
-    };
-    const getProximityPromptAnchorWorldPoint = (scene, prompt = activeProximityPrompt) => {
-        if (!scene || !scene.grid) return null;
-        const cellPx = getSceneCellPx(scene);
-        const sourceToken = getProximityPromptSourceToken(scene, prompt);
-        if (sourceToken) {
-            const renderedCells = getRenderableTokenCells(sourceToken, scene, Date.now());
-            return {
-                x: toNumber(scene.grid.offsetX, 0) + (toNumber(renderedCells.x, sourceToken.x) + Math.max(1, toNumber(sourceToken.w, 1)) / 2) * cellPx,
-                y: toNumber(scene.grid.offsetY, 0) + toNumber(renderedCells.y, sourceToken.y) * cellPx
-            };
-        }
-        if (prompt && prompt.sourceKind === 'note') {
-            const sourceNote = findProximityPromptSource(scene, prompt);
-            const sourceAnchor = sourceNote ? getProximitySourceAnchorCells(scene, 'note', sourceNote) : null;
-            if (sourceAnchor) {
-                return {
-                    x: toNumber(scene.grid.offsetX, 0) + sourceAnchor.x * cellPx,
-                    y: toNumber(scene.grid.offsetY, 0) + sourceAnchor.y * cellPx
-                };
-            }
-        }
-        if (!Number.isFinite(Number(prompt && prompt.sourceAnchorCellX)) || !Number.isFinite(Number(prompt && prompt.sourceAnchorCellY))) return null;
-        return {
-            x: toNumber(scene.grid.offsetX, 0) + toNumber(prompt.sourceAnchorCellX, 0) * cellPx,
-            y: toNumber(scene.grid.offsetY, 0) + toNumber(prompt.sourceAnchorCellY, 0) * cellPx
-        };
-    };
-    const positionProximityPrompt = (scene = getActiveScene()) => {
-        if (!proximityPromptStackEl || !activeProximityPrompt || proximityPromptStackEl.hidden) return false;
-        const anchor = getProximityPromptAnchorWorldPoint(scene, activeProximityPrompt);
-        if (!anchor) {
-            proximityPromptStackEl.hidden = true;
-            return false;
-        }
-        proximityPromptStackEl.dataset.worldLeft = String(anchor.x);
-        proximityPromptStackEl.dataset.worldTop = String(anchor.y);
-        proximityPromptStackEl.style.left = `${scaleForZoom(anchor.x)}px`;
-        proximityPromptStackEl.style.top = `${scaleForZoom(anchor.y)}px`;
-        if (stageEl) {
-            const stageRect = stageEl.getBoundingClientRect();
-            const anchorStageY = localView.y + scaleForZoom(anchor.y);
-            const useBelow = anchorStageY < Math.min(180, stageRect.height * 0.24);
-            proximityPromptStackEl.dataset.placement = useBelow ? 'below' : 'above';
-        } else {
-            proximityPromptStackEl.dataset.placement = 'above';
-        }
-        return true;
-    };
-    const collectProximityPromptCandidates = (scene) => {
-        if (!scene) return [];
-        const seenMap = readProximitySeenMap();
-        const candidates = [];
-        const visibleTokens = getVisibleTokensForRole(scene, 'player');
-        const playerFogCellSet = collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
-        const sourceNotes = getSceneEvidenceNotes(scene);
-        sourceNotes.forEach((note) => {
-            const sourceRect = getEvidenceNoteTriggerRect(scene, note);
-            if (!sourceRect) return;
-            const noteVisible = isEvidenceNoteVisibleToRole(note, scene, 'player', playerFogCellSet);
-            normalizeProximityTriggers(note.triggers)
-                .filter((trigger) => trigger.enabled && trigger.trigger === 'enter')
-                .forEach((trigger) => {
-                    if (!noteVisible && !(trigger.kind === 'skillRoll' && trigger.revealOnSuccess)) return;
-                    getProximityTargetTokens(scene, trigger).forEach((token) => {
-                        const tokenRect = getTokenCellRect(token);
-                        if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
-                        const key = getProximityPromptSeenKey(scene, 'note', note.id, trigger, token);
-                        if (suppressedProximityPromptKeys.has(key)) return;
-                        const persistedResult = getPersistedProximityResult(note, seenMap, key, trigger);
-                        if (persistedResult) {
-                            candidates.push(buildProximityCandidate({
-                                scene,
-                                sourceKind: 'note',
-                                source: note,
-                                sourceRect,
-                                trigger,
-                                token,
-                                distance: getCellRectDistance(sourceRect, tokenRect),
-                                result: persistedResult
-                            }));
-                            return;
-                        }
-                        if (isProximityPromptSeen(note, seenMap, key, trigger)) return;
-                        candidates.push(buildProximityCandidate({
-                            scene,
-                            sourceKind: 'note',
-                            source: note,
-                            sourceRect,
-                            trigger,
-                            token,
-                            distance: getCellRectDistance(sourceRect, tokenRect)
-                        }));
-                    });
-                });
-        });
-        visibleTokens.forEach((sourceToken) => {
-            const sourceRect = getTokenCellRect(sourceToken);
-            if (!sourceRect) return;
-            normalizeProximityTriggers(sourceToken.triggers)
-                .filter((trigger) => trigger.enabled && trigger.trigger === 'enter')
-                .forEach((trigger) => {
-                    getProximityTargetTokens(scene, trigger, sourceToken).forEach((token) => {
-                        const tokenRect = getTokenCellRect(token);
-                        if (!isWithinTokenProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
-                        const key = getProximityPromptSeenKey(scene, 'token', sourceToken.id, trigger, token);
-                        if (suppressedProximityPromptKeys.has(key)) return;
-                        const persistedResult = getPersistedProximityResult(sourceToken, seenMap, key, trigger);
-                        if (persistedResult) {
-                            candidates.push(buildProximityCandidate({
-                                scene,
-                                sourceKind: 'token',
-                                source: sourceToken,
-                                sourceRect,
-                                trigger,
-                                token,
-                                distance: getCellRectCenterDistance(sourceRect, tokenRect),
-                                result: persistedResult
-                            }));
-                            return;
-                        }
-                        if (isProximityPromptSeen(sourceToken, seenMap, key, trigger)) return;
-                        candidates.push(buildProximityCandidate({
-                            scene,
-                            sourceKind: 'token',
-                            source: sourceToken,
-                            sourceRect,
-                            trigger,
-                            token,
-                            distance: getCellRectCenterDistance(sourceRect, tokenRect)
-                        }));
-                    });
-                });
-        });
-        return candidates.sort((left, right) => left.distance - right.distance);
-    };
-    const evaluateProximityTriggers = () => {
-        if (dragState) return;
-        if (initialVTTLoadPending) {
-            activeProximityPrompt = null;
-            return;
-        }
-        const scene = getActiveScene();
-        if (!scene) {
-            activeProximityPrompt = null;
-            return;
-        }
-        const candidates = collectProximityPromptCandidates(scene);
-        if (activeProximityPrompt && activeProximityPrompt.sceneId === scene.id) {
-            const preferred = candidates.find((candidate) => canInteractWithProximityPrompt(candidate)) || null;
-            const current = candidates.find((candidate) => candidate.key === activeProximityPrompt.key) || null;
-            if (preferred && (!current || preferred.key !== current.key)) {
-                activeProximityPrompt = preferred;
-                return;
-            }
-            if (current) {
-                activeProximityPrompt = {
-                    ...current,
-                    result: current.result || activeProximityPrompt.result || null
-                };
-                return;
-            }
-            activeProximityPrompt = preferred || candidates[0] || null;
-            return;
-        }
-        activeProximityPrompt = candidates.find((candidate) => canInteractWithProximityPrompt(candidate)) || candidates[0] || null;
-    };
-    const renderProximityPrompt = () => {
-        if (!proximityPromptStackEl) return;
-        if (dragState) return;
-        if (!activeProximityPrompt) {
-            proximityPromptStackEl.innerHTML = '';
-            proximityPromptStackEl.hidden = true;
-            return;
-        }
-        const scene = getActiveScene();
-        const prompt = activeProximityPrompt;
-        const trigger = normalizeProximityTrigger(prompt.trigger);
-        const isSkillRoll = trigger.kind === 'skillRoll';
-        const skillLabel = getProximitySkillLabel(trigger.skill);
-        const dcLabel = isSkillRoll && trigger.dc !== null && trigger.dcVisible ? `DC ${trigger.dc}` : '';
-        const narratorLabel = `Narrator${dcLabel ? ` - ${dcLabel}` : ''}`;
-        const rollMode = normalizeRollMode(localRollMode);
-        const rollModeLabel = getRollModeLabel(rollMode);
-        const result = prompt.result || null;
-        const resultText = result
-            ? `${result.total} - ${result.formula || skillLabel}`
-            : '';
-        const outcomeText = result && result.success === true
-            ? (trigger.successText || 'Success.')
-            : (result && result.success === false ? (trigger.failText || 'Miss.') : '');
-        const narratorBody = result && outcomeText ? outcomeText : trigger.body;
-        const canInteract = canInteractWithProximityPrompt(prompt);
-        const observerNote = canInteract || result
-            ? ''
-            : 'Only a linked player token in range can respond.';
-        proximityPromptStackEl.hidden = false;
-        proximityPromptStackEl.innerHTML = `
-            <div class="vtt-proximity-prompt-card">
-                <div class="vtt-proximity-prompt-top">
-                    <div>
-                        <span class="vtt-proximity-eyebrow">${escapeHtml(narratorLabel)}</span>
-                        <strong>${escapeHtml(trigger.title)}</strong>
-                    </div>
-                    ${canInteract ? '<button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="dismiss-proximity-prompt" aria-label="Dismiss proximity prompt">X</button>' : ''}
-                </div>
-                ${narratorBody ? `<div class="vtt-proximity-prompt-body">${escapeHtml(narratorBody)}</div>` : ''}
-                ${result ? `
-                    <div class="vtt-proximity-prompt-result">
-                        <strong>${escapeHtml(String(result.total))}</strong>
-                        <span>${escapeHtml(resultText)}</span>
-                    </div>
-                ` : ''}
-                ${canInteract ? `
-                    <div class="vtt-proximity-prompt-actions">
-                        ${isSkillRoll && !result ? `
-                        <button class="vtt-chip-btn strong" type="button" data-action="resolve-proximity-roll">Roll ${escapeHtml(skillLabel)}${rollMode === 'norm' ? '' : ` (${escapeHtml(rollModeLabel)})`}</button>
-                        <div class="vtt-roll-mode-toggle vtt-proximity-roll-mode-toggle" role="group" aria-label="Roll mode">
-                            ${['adv', 'norm', 'dis'].map((mode) => `
-                                <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="${escapeHtml(mode)}" aria-pressed="${mode === rollMode ? 'true' : 'false'}">${escapeHtml(getRollModeLabel(mode))}</button>
-                            `).join('')}
-                        </div>
-                        ` : ''}
-                        <button class="vtt-chip-btn" type="button" data-action="dismiss-proximity-prompt">${result || !isSkillRoll ? 'Done' : 'Pass'}</button>
-                    </div>
-                ` : (observerNote ? `<div class="vtt-proximity-prompt-note">${escapeHtml(observerNote)}</div>` : '')}
-            </div>
-        `;
-        if (!positionProximityPrompt(scene)) {
-            proximityPromptStackEl.innerHTML = '';
-            proximityPromptStackEl.hidden = true;
-        }
-    };
-    const dismissActiveProximityPrompt = () => {
-        if (!canInteractWithProximityPrompt(activeProximityPrompt)) return false;
-        if (activeProximityPrompt && activeProximityPrompt.key) {
-            suppressedProximityPromptKeys.add(activeProximityPrompt.key);
-            const trigger = normalizeProximityTrigger(activeProximityPrompt.trigger);
-            if (!activeProximityPrompt.result && trigger.repeat !== 'always') {
-                markProximityPromptDismissed(activeProximityPrompt);
-            }
-        }
-        activeProximityPrompt = null;
-        renderProximityPrompt();
-        return true;
-    };
-    const rollProximitySkillCheck = (token, trigger, rollMode = localRollMode) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        const cleanRollMode = normalizeRollMode(rollMode);
-        const skill = normalizeProximityTriggerSkill(normalized.skill);
-        const skillLabel = getProximitySkillLabel(skill);
-        const rosterPlayer = getRosterPlayerForRecord(token);
-        const bundle = getActiveSheetBundle(rosterPlayer && rosterPlayer.sheetKey);
-        const character = bundle && bundle.character ? bundle.character : null;
-        if (!character) {
-            const roll = rollRawD20WithMode(cleanRollMode);
-            return {
-                ok: true,
-                character: null,
-                label: skillLabel,
-                total: roll.total,
-                formula: roll.formula,
-                type: 'check',
-                detail: '',
-                rollMode: cleanRollMode
-            };
-        }
-        const stat = character.skillOverrides && character.skillOverrides[skill] ? character.skillOverrides[skill] : sheetSkillsMap[skill];
-        const profLevel = character.skills && Number.isFinite(Number(character.skills[skill])) ? Number(character.skills[skill]) : 0;
-        const bonus = getSheetMod(character, stat) + (profLevel * getSheetPB(character)) + getSheetSkillMiscBonus(character, skill);
-        return rollSheetD20(character, bonus, `${skillLabel} (${String(stat || '').toUpperCase()})`, { type: 'check', rollMode: cleanRollMode });
-    };
-    const applyProximityResolutionEffects = (prompt, trigger, result) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        const success = result && result.success === true ? true : (result && result.success === false ? false : null);
-        if (success === null) return false;
-        const clockDelta = success ? normalized.clockSuccessDelta : normalized.clockFailDelta;
-        const shouldRevealSource = success && normalized.revealOnSuccess && prompt && prompt.sourceKind === 'note';
-        const shouldUpdateClock = !!normalized.clockId && !!clockDelta;
-        if (!shouldRevealSource && !shouldUpdateClock) return false;
-        return withDraft((draft) => {
-            const scene = getSceneById(prompt && prompt.sceneId, draft) || getActiveScene(draft);
-            if (!scene) return;
-            if (shouldRevealSource && Array.isArray(scene.evidenceNotes)) {
-                const note = scene.evidenceNotes.find((entry) => String(entry && entry.id || '').trim() === String(prompt && prompt.sourceId || '').trim());
-                if (note) note.hidden = false;
-            }
-            if (shouldUpdateClock && Array.isArray(scene.clocks)) {
-                const clock = scene.clocks.find((entry) => String(entry && entry.id || '').trim() === normalized.clockId);
-                if (clock) {
-                    const max = normalizeClockMax(clock.max, 4);
-                    clock.max = max;
-                    clock.current = normalizeClockCurrent(toNumber(clock.current, 0) + clockDelta, max, 0);
-                }
-            }
-        }, { reason: 'proximity-resolution-effects' });
-    };
-    const resolveActiveProximityRoll = () => {
-        if (!activeProximityPrompt) return false;
-        if (!canInteractWithProximityPrompt(activeProximityPrompt)) return false;
-        const trigger = normalizeProximityTrigger(activeProximityPrompt.trigger);
-        if (trigger.kind !== 'skillRoll') return false;
-        const token = getTokenById(activeProximityPrompt.tokenId);
-        const rollMode = normalizeRollMode(localRollMode);
-        const result = rollProximitySkillCheck(token, trigger, rollMode);
-        const hasDc = trigger.dc !== null && trigger.dc !== undefined;
-        activeProximityPrompt = {
-            ...activeProximityPrompt,
-            result: {
-                ok: !!(result && result.ok),
-                total: result && result.ok ? result.total : 'VTT',
-                formula: result && result.ok ? result.formula : 'No roll available',
-                label: result && result.label ? result.label : getProximitySkillLabel(trigger.skill),
-                success: result && result.ok && hasDc ? result.total >= trigger.dc : null,
-                rollMode
-            }
-        };
-        persistProximityPromptResult(activeProximityPrompt, activeProximityPrompt.result, trigger);
-        applyProximityResolutionEffects(activeProximityPrompt, trigger, activeProximityPrompt.result);
-        if (result && result.ok && result.character) {
-            postSheetDiscordRoll(result.character, result.label, result.total, result.formula, result.type, result.detail).catch((err) => {
-                console.warn('VTT proximity roll Discord post failed', err);
-            });
-        }
-        renderProximityPrompt();
-        return true;
-    };
+    const vttProximityController = vttProximityFactory.createController({
+        canRoleMoveToken,
+        collectFogCellSet,
+        escapeHtml,
+        getActiveCaseId,
+        getActiveScene,
+        getActiveSheetBundle,
+        getEvidenceNoteCellBounds,
+        getEvidenceNoteDisplayTitle,
+        getLocalRollMode: () => uiRuntime.playerRoll.mode,
+        getLocalView: () => stageState.view.local,
+        getProximitySkillLabel,
+        getRenderableTokenCells,
+        getRollModeLabel,
+        getRosterPlayerForRecord,
+        getSceneById,
+        getSceneCellPx,
+        getSceneEvidenceNotes,
+        getSheetMod,
+        getSheetPB,
+        getSheetSkillMiscBonus,
+        getTokenById,
+        getVisibleTokensForRole,
+        isDragging: () => !!stageState.pointer.drag,
+        isEvidenceNoteVisibleToRole,
+        isInitialLoadPending: () => sessionState.initialLoadPending,
+        isPlayer,
+        normalizeClockCurrent,
+        normalizeClockMax,
+        normalizeProximityPromptResult,
+        normalizeProximityPromptStateEntry,
+        normalizeProximityPromptStates,
+        normalizeProximityTrigger,
+        normalizeProximityTriggers,
+        normalizeProximityTriggerSkill,
+        normalizeRollMode,
+        postSheetDiscordRoll,
+        promptStackEl: dom.proximityPromptStackEl,
+        readJSONStorage,
+        rollRawD20WithMode,
+        rollSheetD20,
+        scaleForZoom,
+        sheetSkillsMap,
+        stageEl: dom.stageEl,
+        toNumber,
+        withDraft
+    });
+    const dismissActiveProximityPrompt = vttProximityController.dismissActiveProximityPrompt;
+    const evaluateProximityTriggers = vttProximityController.evaluateProximityTriggers;
+    const getActiveProximityPrompt = vttProximityController.getActivePrompt;
+    const renderProximityPrompt = vttProximityController.renderProximityPrompt;
+    const resolveActiveProximityRoll = vttProximityController.resolveActiveProximityRoll;
 
     const gmParseComplexFormula = (value = '') => {
         return Dice.parseComplexBonus(value);
     };
 
     const getGMDiscordSettings = () => {
-        const gmData = readJSONStorage(GM_STORAGE_KEY, {});
+        const gmData = readJSONStorage(C.GM_STORAGE_KEY, {});
         return {
             active: !!(gmData && gmData.discordActive),
             webhook: String(gmData && gmData.webhook || '').trim()
@@ -8171,152 +4472,30 @@
         });
     };
 
-    const getMonsterStatBlockForToken = (token) => {
-        if (!token) return null;
-        if (token.monster && typeof token.monster === 'object') {
-            return normalizeMonsterRecord(token.monster, token.monster.id || token.sourceId || token.label);
-        }
-        if (String(token.sourceType || '').trim() === 'monster') return findMonsterById(token.sourceId);
-        return null;
-    };
-
-    const buildMonsterRollPresets = (token) => {
-        const monster = getMonsterStatBlockForToken(token);
-        if (!monster) return [];
-        const presets = [];
-        presets.push({
-            key: 'core:initiative',
-            label: 'Initiative',
-            baseLabel: 'Initiative',
-            formula: `1d20 ${formatSignedBonus(monster.initiative)}`,
-            baseFormula: `1d20 ${formatSignedBonus(monster.initiative)}`,
-            category: 'Core',
-            type: 'check',
-            baseType: 'check',
-            detail: '',
-            baseDetail: ''
-        });
-        DEFENCE_KEYS.forEach((key) => {
-            const score = monster.abilities && Number.isFinite(Number(monster.abilities[key])) ? Number(monster.abilities[key]) : 10;
-            const abilityMod = abilityModFromScore(score);
-            const saveBonus = monster.saves && hasValue(monster.saves[key]) ? monster.saves[key] : abilityMod;
-            const label = sheetStatNames[key] || key.toUpperCase();
-            presets.push({
-                key: `check:${key}`,
-                label: `${label} Check`,
-                baseLabel: `${label} Check`,
-                formula: `1d20 ${formatSignedBonus(abilityMod)}`,
-                baseFormula: `1d20 ${formatSignedBonus(abilityMod)}`,
-                category: 'Checks',
-                type: 'check',
-                baseType: 'check',
-                detail: '',
-                baseDetail: ''
-            });
-            presets.push({
-                key: `save:${key}`,
-                label: `${label} Save`,
-                baseLabel: `${label} Save`,
-                formula: `1d20 ${formatSignedBonus(saveBonus)}`,
-                baseFormula: `1d20 ${formatSignedBonus(saveBonus)}`,
-                category: 'Saves',
-                type: 'save',
-                baseType: 'save',
-                detail: '',
-                baseDetail: ''
-            });
-        });
-        Object.entries(monster.skills || {}).forEach(([skillName, bonus]) => {
-            const label = toTitleCaseWords(skillName);
-            presets.push({
-                key: `skill:${normalizeMonsterRollKeyPart(skillName)}`,
-                label,
-                baseLabel: label,
-                formula: `1d20 ${formatSignedBonus(bonus)}`,
-                baseFormula: `1d20 ${formatSignedBonus(bonus)}`,
-                category: 'Skills',
-                type: 'check',
-                baseType: 'check',
-                detail: '',
-                baseDetail: ''
-            });
-        });
-        (Array.isArray(monster.actions) ? monster.actions : []).forEach((action, actionIdx) => {
-            const actionKey = `action:${actionIdx}:${normalizeMonsterRollKeyPart(action.name)}`;
-            if (hasValue(action.attackBonus)) {
-                const label = `${action.name} Attack`;
-                const formula = `1d20 ${formatSignedBonus(action.attackBonus)}`;
-                presets.push({
-                    key: `${actionKey}:attack`,
-                    label,
-                    baseLabel: label,
-                    formula,
-                    baseFormula: formula,
-                    category: 'Actions',
-                    type: 'atk',
-                    baseType: 'atk',
-                    detail: action.desc || '',
-                    baseDetail: action.desc || ''
-                });
-            }
-            if (String(action.damageFormula || '').trim()) {
-                const label = `${action.name} Damage`;
-                const formula = String(action.damageFormula || '').trim();
-                presets.push({
-                    key: `${actionKey}:damage`,
-                    label,
-                    baseLabel: label,
-                    formula,
-                    baseFormula: formula,
-                    category: 'Actions',
-                    type: 'dmg',
-                    baseType: 'dmg',
-                    detail: action.damageType ? `${action.damageType} damage` : (action.desc || ''),
-                    baseDetail: action.damageType ? `${action.damageType} damage` : (action.desc || '')
-                });
-            }
-        });
-        return presets
-            .filter((preset) => preset && preset.key && preset.label && preset.formula)
-            .map((preset) => applyMonsterRollOverride(token, preset))
-            .slice(0, 48);
-    };
-    const filterMonsterRollPresets = (presets = [], query = '') => {
-        const tokens = normalizeSearchText(query).split(' ').filter(Boolean);
-        if (!tokens.length) return presets;
-        return (Array.isArray(presets) ? presets : []).filter((preset) => {
-            const haystack = normalizeSearchText([
-                preset && preset.label,
-                preset && preset.baseLabel,
-                preset && preset.category,
-                preset && preset.formula,
-                preset && preset.type
-            ].join(' '));
-            return tokens.every((token) => haystack.includes(token));
-        });
-    };
+    const getMonsterStatBlockForToken = (token) => vttRules.getMonsterStatBlockForToken(token, findMonsterById);
+    const buildMonsterRollPresets = (token) => vttRules.buildMonsterRollPresets(token, findMonsterById);
 
     const renderNPCRollPopover = (result = null) => {
-        if (!npcRollPopoverEl) return;
-        if (!npcRollState) {
-            npcRollPopoverEl.hidden = true;
-            npcRollPopoverEl.innerHTML = '';
+        if (!dom.npcRollPopoverEl) return;
+        if (!uiRuntime.overlays.npcRoll) {
+            dom.npcRollPopoverEl.hidden = true;
+            dom.npcRollPopoverEl.innerHTML = '';
             return;
         }
-        const token = getTokenById(npcRollState.tokenId) || {};
-        const tokenName = String(token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
-        const isCustomRoll = String(npcRollState.mode || '').trim().toLowerCase() === 'custom';
+        const token = getTokenById(uiRuntime.overlays.npcRoll.tokenId) || {};
+        const tokenName = String(token.label || uiRuntime.overlays.npcRoll.tokenName || 'NPC').trim() || 'NPC';
+        const isCustomRoll = String(uiRuntime.overlays.npcRoll.mode || '').trim().toLowerCase() === 'custom';
         const monster = isCustomRoll ? null : getMonsterStatBlockForToken(token);
         const isMonsterIdentity = !isCustomRoll && (String(token && token.sourceType || '').trim().toLowerCase() === 'monster' || !!(token && token.monster));
-        if (isMonsterIdentity && !monster && !monsterDirectoryLoading && !monsterDirectory.length) {
+        if (isMonsterIdentity && !monster && !resources.monsters.loading && !resources.monsters.directory.length) {
             ensureMonsterDirectory().catch((err) => {
                 console.warn('Failed loading monster rolls', err);
             });
         }
         const monsterPresets = buildMonsterRollPresets(token);
-        const monsterRollQuery = String(npcRollState.monsterRollQuery || '').trim();
+        const monsterRollQuery = String(uiRuntime.overlays.npcRoll.monsterRollQuery || '').trim();
         const visibleMonsterPresets = filterMonsterRollPresets(monsterPresets, monsterRollQuery);
-        const editingPresetKey = String(npcRollState.editingPresetKey || '').trim();
+        const editingPresetKey = String(uiRuntime.overlays.npcRoll.editingPresetKey || '').trim();
         const editingPreset = editingPresetKey
             ? monsterPresets.find((preset) => preset && preset.key === editingPresetKey)
             : null;
@@ -8329,8 +4508,8 @@
                 hasValue(monster.hitPoints) ? `HP ${monster.hitPoints}` : ''
             ].filter(Boolean).join(' · ')
             : '';
-        npcRollPopoverEl.hidden = false;
-        npcRollPopoverEl.innerHTML = `
+        dom.npcRollPopoverEl.hidden = false;
+        dom.npcRollPopoverEl.innerHTML = `
             <div class="vtt-popover-head">
                 <div>
                     <strong>${isCustomRoll ? 'Custom Roll (Any Dice)' : (monster ? 'Roll For Monster' : 'Roll For NPC')}</strong>
@@ -8338,7 +4517,7 @@
                 </div>
                 <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-npc-roll" aria-label="Close NPC roll">X</button>
             </div>
-            ${isMonsterIdentity && !monsterPresets.length && (monsterDirectoryLoading || !monsterDirectory.length) ? '<div class="vtt-empty">Loading SRD monster rolls...</div>' : ''}
+            ${isMonsterIdentity && !monsterPresets.length && (resources.monsters.loading || !resources.monsters.directory.length) ? '<div class="vtt-empty">Loading SRD monster rolls...</div>' : ''}
             ${monsterPresets.length ? `
                 <div class="vtt-menu-title">Stat Block Rolls</div>
                 <label class="vtt-field vtt-field-tight">
@@ -8375,11 +4554,11 @@
             <div class="vtt-npc-roll-grid">
                 <label class="vtt-field vtt-field-tight">
                     <span>Label</span>
-                    <input type="text" data-npc-roll-field="label" value="${escapeHtml(npcRollState.label || tokenName)}" ${monster ? 'readonly' : ''}>
+                    <input type="text" data-npc-roll-field="label" value="${escapeHtml(uiRuntime.overlays.npcRoll.label || tokenName)}" ${monster ? 'readonly' : ''}>
                 </label>
                 <label class="vtt-field vtt-field-tight">
                     <span>Formula</span>
-                    <input type="text" data-npc-roll-field="formula" value="${escapeHtml(npcRollState.formula || '1d20')}" ${monster ? 'readonly' : ''}>
+                    <input type="text" data-npc-roll-field="formula" value="${escapeHtml(uiRuntime.overlays.npcRoll.formula || '1d20')}" ${monster ? 'readonly' : ''}>
                 </label>
             </div>
             ${monster ? '<div class="vtt-detail-note">Use Edit on a stat block roll to rename or change its formula for this token.</div>' : ''}
@@ -8399,14 +4578,14 @@
     const openNPCRollPopover = (token, clientX, clientY) => {
         if (!token || !isDM()) return false;
         const isMonsterIdentity = String(token && token.sourceType || '').trim().toLowerCase() === 'monster' || !!(token && token.monster);
-        if (isMonsterIdentity && !getMonsterStatBlockForToken(token) && !monsterDirectoryLoading && !monsterDirectory.length) {
+        if (isMonsterIdentity && !getMonsterStatBlockForToken(token) && !resources.monsters.loading && !resources.monsters.directory.length) {
             ensureMonsterDirectory().catch((err) => {
                 console.warn('Failed loading monster roll directory', err);
             });
         }
         const monsterPresets = buildMonsterRollPresets(token);
         const defaultPreset = monsterPresets[0] || null;
-        npcRollState = {
+        uiRuntime.overlays.npcRoll = {
             tokenId: token.id,
             tokenName: token.label || 'NPC',
             label: defaultPreset ? defaultPreset.label : (token.label || 'NPC'),
@@ -8426,7 +4605,7 @@
 
     const openCustomRollPopover = (token = null, clientX, clientY) => {
         const tokenName = String(token && token.label || '').trim();
-        npcRollState = {
+        uiRuntime.overlays.npcRoll = {
             mode: 'custom',
             tokenId: token && token.id ? token.id : '',
             tokenName: tokenName || 'VTT',
@@ -8455,22 +4634,22 @@
     };
 
     const renderSceneList = () => {
-        if (!sceneListEl) return;
+        if (!dom.sceneListEl) return;
         const activeCaseId = getActiveCaseId();
-        const isCurrentCaseSnapshot = !!(vttState && vttStateCaseId === activeCaseId && !pendingVTTCaseId);
-        const scenes = isCurrentCaseSnapshot && Array.isArray(vttState.scenes) ? vttState.scenes : [];
+        const isCurrentCaseSnapshot = !!(sessionState.snapshot && sessionState.stateCaseId === activeCaseId && !sessionState.pendingCaseId);
+        const scenes = isCurrentCaseSnapshot && Array.isArray(sessionState.snapshot.scenes) ? sessionState.snapshot.scenes : [];
         const cases = getCaseSwitcherEntries();
         const activeCaseName = getActiveCaseName();
         const caseOptions = cases.length ? cases : [{ id: activeCaseId, name: activeCaseName }];
-        const sharedSceneId = getSharedSceneId(vttState);
-        const viewedSceneId = getViewedSceneId(vttState, localRole);
-        const sharedScene = getSceneById(sharedSceneId, vttState);
-        const viewedScene = getSceneById(viewedSceneId, vttState) || scenes[0] || null;
-        const isLocalView = isUsingLocalSceneView(vttState, localRole);
+        const sharedSceneId = getSharedSceneId(sessionState.snapshot);
+        const viewedSceneId = getViewedSceneId(sessionState.snapshot, sessionState.role);
+        const sharedScene = getSceneById(sharedSceneId, sessionState.snapshot);
+        const viewedScene = getSceneById(viewedSceneId, sessionState.snapshot) || scenes[0] || null;
+        const isLocalView = isUsingLocalSceneView(sessionState.snapshot, sessionState.role);
         const routeNote = isLocalView
             ? `DM previewing ${viewedScene && viewedScene.name ? viewedScene.name : 'a scene'}. Players remain on ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}.`
             : `Players are following ${sharedScene && sharedScene.name ? sharedScene.name : 'the shared scene'}. Use Show Everyone when the table should move.`;
-        sceneListEl.innerHTML = `
+        dom.sceneListEl.innerHTML = `
             <div class="vtt-scene-manager" data-active-case-id="${escapeHtml(activeCaseId)}">
                 <div class="vtt-scene-select-grid vtt-case-select-grid">
                     <label class="vtt-field vtt-field-tight vtt-scene-select-field">
@@ -8545,8 +4724,8 @@
     };
 
     const getYouTubeMusicFrame = () => (
-        youtubeAudioPlayerEl
-            ? youtubeAudioPlayerEl.querySelector('iframe[data-youtube-music-frame="1"]')
+        dom.youtubeAudioPlayerEl
+            ? dom.youtubeAudioPlayerEl.querySelector('iframe[data-youtube-music-frame="1"]')
             : null
     );
 
@@ -8566,20 +4745,20 @@
     };
 
     const setYouTubeMusicVolume = (volume) => {
-        youtubeMusicVolume = Math.max(0, Math.min(100, Math.round(Number(volume) || 0)));
-        sendYouTubeMusicCommand('setVolume', [youtubeMusicVolume]);
-        const volumeEl = youtubeAudioPlayerEl
-            ? youtubeAudioPlayerEl.querySelector('[data-youtube-volume]')
+        uiRuntime.music.volume = Math.max(0, Math.min(100, Math.round(Number(volume) || 0)));
+        sendYouTubeMusicCommand('setVolume', [uiRuntime.music.volume]);
+        const volumeEl = dom.youtubeAudioPlayerEl
+            ? dom.youtubeAudioPlayerEl.querySelector('[data-youtube-volume]')
             : null;
         if (volumeEl instanceof HTMLInputElement && document.activeElement !== volumeEl) {
-            volumeEl.value = String(youtubeMusicVolume);
+            volumeEl.value = String(uiRuntime.music.volume);
         }
     };
 
     const stopYouTubeMusicFrame = () => {
         sendYouTubeMusicCommand('stopVideo');
-        if (!youtubeAudioPlayerEl) return;
-        youtubeAudioPlayerEl.querySelectorAll('iframe[data-youtube-music-frame="1"]').forEach((frame) => {
+        if (!dom.youtubeAudioPlayerEl) return;
+        dom.youtubeAudioPlayerEl.querySelectorAll('iframe[data-youtube-music-frame="1"]').forEach((frame) => {
             frame.src = 'about:blank';
             frame.remove();
         });
@@ -8597,21 +4776,21 @@
         <label class="vtt-audio-volume">
             <span>Vol</span>
             <input type="range" min="0" max="100" step="1"
-                value="${escapeHtml(String(youtubeMusicVolume))}"
+                value="${escapeHtml(String(uiRuntime.music.volume))}"
                 data-youtube-volume="1"
                 aria-label="Scene music volume">
         </label>
     `;
 
     const renderYouTubeAudioPlayer = (scene) => {
-        if (!youtubeAudioPlayerEl) return;
+        if (!dom.youtubeAudioPlayerEl) return;
         const summary = getSceneMusicSummary(scene);
         const playerKey = `${summary.tension}:${summary.videoId || 'empty'}`;
-        const isCurrentTrack = !!summary.videoId && youtubeMusicState.key === playerKey;
-        const status = isCurrentTrack ? youtubeMusicState.status : 'stopped';
+        const isCurrentTrack = !!summary.videoId && uiRuntime.music.commandState.key === playerKey;
+        const status = isCurrentTrack ? uiRuntime.music.commandState.status : 'stopped';
         const isLoaded = status === 'playing' || status === 'paused';
         const renderKey = `${playerKey}:${status}:${summary.title}`;
-        if (youtubeAudioPlayerEl.dataset.musicKey === renderKey) return;
+        if (dom.youtubeAudioPlayerEl.dataset.musicKey === renderKey) return;
         const existingFrame = getYouTubeMusicFrame();
         const reusableFrame = isLoaded
             && existingFrame
@@ -8619,7 +4798,7 @@
             ? existingFrame
             : null;
         if (reusableFrame) {
-            const shell = youtubeAudioPlayerEl.querySelector('.vtt-audio-shell');
+            const shell = dom.youtubeAudioPlayerEl.querySelector('.vtt-audio-shell');
             const copyEl = shell ? shell.querySelector('.vtt-audio-copy') : null;
             const controlsEl = shell ? shell.querySelector('.vtt-audio-controls') : null;
             if (shell && copyEl && controlsEl) {
@@ -8630,19 +4809,19 @@
                     <small>${status === 'paused' ? 'Paused' : 'Playing'}</small>
                 `;
                 controlsEl.innerHTML = renderYouTubeAudioControls(status, playerKey);
-                youtubeAudioPlayerEl.dataset.musicKey = renderKey;
-                setYouTubeMusicVolume(youtubeMusicVolume);
+                dom.youtubeAudioPlayerEl.dataset.musicKey = renderKey;
+                setYouTubeMusicVolume(uiRuntime.music.volume);
                 return;
             }
         }
-        if (youtubeMusicState.key && youtubeMusicState.key !== playerKey) {
+        if (uiRuntime.music.commandState.key && uiRuntime.music.commandState.key !== playerKey) {
             stopYouTubeMusicFrame();
-            youtubeMusicState = { key: '', status: 'stopped' };
+            uiRuntime.music.commandState = { key: '', status: 'stopped' };
         }
-        youtubeAudioPlayerEl.dataset.musicKey = renderKey;
+        dom.youtubeAudioPlayerEl.dataset.musicKey = renderKey;
         if (!summary.trackUrl || !summary.videoId) {
             stopYouTubeMusicFrame();
-            youtubeAudioPlayerEl.innerHTML = `
+            dom.youtubeAudioPlayerEl.innerHTML = `
                 <div class="vtt-audio-empty">
                     <span>${escapeHtml(summary.label)}</span>
                     <strong>No track assigned</strong>
@@ -8652,7 +4831,7 @@
         }
         if (!isLoaded) {
             stopYouTubeMusicFrame();
-            youtubeAudioPlayerEl.innerHTML = `
+            dom.youtubeAudioPlayerEl.innerHTML = `
                 <div class="vtt-audio-shell" data-tension="${escapeHtml(summary.tension)}">
                     <div class="vtt-audio-copy">
                         <span>${escapeHtml(summary.label)}</span>
@@ -8677,7 +4856,7 @@
                 referrerpolicy="strict-origin-when-cross-origin"
                 aria-hidden="true"></iframe>
         `;
-        youtubeAudioPlayerEl.innerHTML = `
+        dom.youtubeAudioPlayerEl.innerHTML = `
             <div class="vtt-audio-shell" data-tension="${escapeHtml(summary.tension)}">
                 <div class="vtt-audio-copy">
                     <span>${escapeHtml(summary.label)}</span>
@@ -8693,603 +4872,78 @@
             </div>
         `;
         if (reusableFrame) {
-            const frameHost = youtubeAudioPlayerEl.querySelector('.vtt-youtube-hidden-frame');
+            const frameHost = dom.youtubeAudioPlayerEl.querySelector('.vtt-youtube-hidden-frame');
             if (frameHost) frameHost.appendChild(reusableFrame);
         } else {
-            window.setTimeout(() => setYouTubeMusicVolume(youtubeMusicVolume), 250);
+            window.setTimeout(() => setYouTubeMusicVolume(uiRuntime.music.volume), 250);
         }
     };
 
-    const buildProximityTriggerSeedButtons = (ownerKind, ownerId) => `
-        <div class="vtt-chip-row vtt-proximity-seeds">
-            ${['perception', 'investigation', 'insight', 'arcana', 'stealth'].map((skill) => `
-                <button class="vtt-chip-btn" type="button"
-                    data-action="seed-proximity-trigger"
-                    data-owner-kind="${escapeHtml(ownerKind)}"
-                    data-owner-id="${escapeHtml(ownerId)}"
-                    data-seed="${escapeHtml(skill)}">${escapeHtml(getProximitySkillLabel(skill))}</button>
-            `).join('')}
-            <button class="vtt-chip-btn" type="button"
-                data-action="seed-proximity-trigger"
-                data-owner-kind="${escapeHtml(ownerKind)}"
-                data-owner-id="${escapeHtml(ownerId)}"
-                data-seed="fiction">Fiction</button>
-        </div>
-    `;
-
-    const buildProximityTriggerFieldAttrs = (ownerKind, ownerId, trigger, field) => `
-        data-proximity-trigger-field="${escapeHtml(field)}"
-        data-owner-kind="${escapeHtml(ownerKind)}"
-        data-owner-id="${escapeHtml(ownerId)}"
-        data-trigger-id="${escapeHtml(trigger.id)}"
-    `;
-
-    const buildProximityTriggerEditorRow = (ownerKind, ownerId, trigger) => {
-        const normalized = normalizeProximityTrigger(trigger);
-        const isSkillRoll = normalized.kind === 'skillRoll';
-        const sceneClocks = getSceneClocks(getActiveScene());
-        const hasClock = !!normalized.clockId;
-        return `
-            <div class="vtt-proximity-trigger-row" data-trigger-id="${escapeHtml(normalized.id)}">
-                <div class="vtt-proximity-trigger-head">
-                    <label class="vtt-inspector-check">
-                        <input type="checkbox" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'enabled')} ${normalized.enabled ? ' checked' : ''}>
-                        <span>Enabled</span>
-                    </label>
-                    <button class="vtt-inline-btn danger" type="button"
-                        data-action="delete-proximity-trigger"
-                        data-owner-kind="${escapeHtml(ownerKind)}"
-                        data-owner-id="${escapeHtml(ownerId)}"
-                        data-trigger-id="${escapeHtml(normalized.id)}">Delete</button>
-                </div>
-                <label class="vtt-field">
-                    <span>Prompt</span>
-                    <input class="vtt-inspector-input" type="text" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'title')} value="${escapeHtml(normalized.title)}">
-                </label>
-                <div class="vtt-inspector-grid">
-                    <label class="vtt-field">
-                        <span>Kind</span>
-                        <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'kind')}>
-                            <option value="skillRoll"${isSkillRoll ? ' selected' : ''}>Skill Roll</option>
-                            <option value="fiction"${normalized.kind === 'fiction' ? ' selected' : ''}>Fiction</option>
-                        </select>
-                    </label>
-                    ${isSkillRoll ? `
-                        <label class="vtt-field">
-                            <span>Skill</span>
-                            <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'skill')}>
-                                ${PROXIMITY_TRIGGER_SKILL_OPTIONS.map((skill) => `
-                                    <option value="${escapeHtml(skill)}"${normalized.skill === skill ? ' selected' : ''}>${escapeHtml(getProximitySkillLabel(skill))}</option>
-                                `).join('')}
-                            </select>
-                        </label>
-                    ` : ''}
-                    <label class="vtt-field">
-                        <span>Radius</span>
-                        <input class="vtt-inspector-input" type="number" min="0" max="24" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'radiusCells')} value="${escapeHtml(String(normalized.radiusCells))}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Target</span>
-                        <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'target')}>
-                            <option value="playerTokens"${normalized.target === 'playerTokens' ? ' selected' : ''}>Player Tokens</option>
-                            <option value="anyVisibleToken"${normalized.target === 'anyVisibleToken' ? ' selected' : ''}>Any Visible Token</option>
-                        </select>
-                    </label>
-                    <label class="vtt-field">
-                        <span>Repeat</span>
-                        <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'repeat')}>
-                            <option value="oncePerToken"${normalized.repeat === 'oncePerToken' ? ' selected' : ''}>Once / Token</option>
-                            <option value="oncePerScene"${normalized.repeat === 'oncePerScene' ? ' selected' : ''}>Once / Scene</option>
-                            <option value="always"${normalized.repeat === 'always' ? ' selected' : ''}>Always</option>
-                        </select>
-                    </label>
-                    ${isSkillRoll ? `
-                        <label class="vtt-field">
-                            <span>DC</span>
-                            <input class="vtt-inspector-input" type="number" min="1" max="40" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'dc')} value="${normalized.dc === null ? '' : escapeHtml(String(normalized.dc))}">
-                        </label>
-                        <label class="vtt-inspector-check">
-                            <input type="checkbox" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'dcVisible')} ${normalized.dcVisible ? ' checked' : ''}>
-                            <span>Show DC</span>
-                        </label>
-                        ${ownerKind === 'note' ? `
-                            <label class="vtt-inspector-check">
-                                <input type="checkbox" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'revealOnSuccess')} ${normalized.revealOnSuccess ? ' checked' : ''}>
-                                <span>Reveal marker on pass</span>
-                            </label>
-                        ` : ''}
-                        <label class="vtt-field">
-                            <span>Clock</span>
-                            <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'clockId')}>
-                                <option value=""${hasClock ? '' : ' selected'}>No Clock</option>
-                                ${sceneClocks.map((clock) => `
-                                    <option value="${escapeHtml(String(clock.id || ''))}"${normalized.clockId === String(clock.id || '') ? ' selected' : ''}>${escapeHtml(clock.title || 'Scene Clock')}</option>
-                                `).join('')}
-                            </select>
-                        </label>
-                        ${hasClock ? `
-                            <label class="vtt-field">
-                                <span>Pass Delta</span>
-                                <input class="vtt-inspector-input" type="number" min="-20" max="20" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'clockSuccessDelta')} value="${escapeHtml(String(normalized.clockSuccessDelta))}">
-                            </label>
-                            <label class="vtt-field">
-                                <span>Miss Delta</span>
-                                <input class="vtt-inspector-input" type="number" min="-20" max="20" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'clockFailDelta')} value="${escapeHtml(String(normalized.clockFailDelta))}">
-                            </label>
-                        ` : ''}
-                    ` : ''}
-                </div>
-                <label class="vtt-field">
-                    <span>Fiction</span>
-                    <textarea class="vtt-inspector-textarea vtt-proximity-textarea" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'body')}>${escapeHtml(normalized.body)}</textarea>
-                </label>
-                ${isSkillRoll ? `
-                    <div class="vtt-inspector-grid">
-                        <label class="vtt-field">
-                            <span>Success</span>
-                            <textarea class="vtt-inspector-textarea vtt-proximity-textarea" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'successText')}>${escapeHtml(normalized.successText)}</textarea>
-                        </label>
-                        <label class="vtt-field">
-                            <span>Miss</span>
-                            <textarea class="vtt-inspector-textarea vtt-proximity-textarea" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'failText')}>${escapeHtml(normalized.failText)}</textarea>
-                        </label>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    };
-
-    const buildProximityTriggerEditor = (ownerKind, ownerId, triggers = []) => {
-        const normalized = normalizeProximityTriggers(triggers);
-        return `
-            <div class="vtt-proximity-editor">
-                ${buildProximityTriggerSeedButtons(ownerKind, ownerId)}
-                ${normalized.length
-                    ? normalized.map((trigger) => buildProximityTriggerEditorRow(ownerKind, ownerId, trigger)).join('')
-                    : '<div class="vtt-empty">No proximity prompts yet.</div>'}
-            </div>
-        `;
-    };
-
-    const buildDMTokenInspectorContent = (token) => {
-        const rosterPlayer = getRosterPlayerForRecord(token);
-        const isRosterManagedPlayer = !!rosterPlayer;
-        const imageUrlValue = isRosterManagedPlayer
-            ? String(rosterPlayer.imageUrl || '').trim()
-            : String(token.imageUrl || '').trim();
-        const supportsSightCone = !!(token && (token.side === 'enemy' || token.side === 'neutral'));
-        const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
-        const moodLabel = normalizeMoodLabel(token && token.moodLabel);
-        const monster = getMonsterStatBlockForToken(token);
-        const monsterMeta = monster
-            ? [
-                monster.size,
-                monster.type,
-                monster.challengeRating ? `CR ${monster.challengeRating}` : '',
-                monster.hitDice ? `HD ${monster.hitDice}` : ''
-            ].filter(Boolean).join(' · ')
-            : '';
-        const moodOptions = MOOD_EMOJI_OPTIONS.includes(moodEmoji) || !moodEmoji
-            ? MOOD_EMOJI_OPTIONS
-            : [moodEmoji, ...MOOD_EMOJI_OPTIONS];
-        const monsters = getMonsterDirectory();
-        if (!monsters.length && !monsterDirectoryLoading) {
-            ensureMonsterDirectory().catch((err) => {
-                console.warn('Failed loading monster selector data', err);
-            });
-        }
-        const selectedMonsterId = monster ? String(monster.id || '').trim() : '';
-        const monsterAssignQuery = monster ? String(monster.name || '').trim() : '';
-        return `
-            <div class="vtt-inspector-stack">
-                <details class="vtt-inspector-section" open>
-                    <summary>Identity & Appearance</summary>
-                    <div class="vtt-inspector-section-body">
-                <label class="vtt-field">
-                    <span>Label</span>
-                    <input class="vtt-inspector-input" type="text" ${isRosterManagedPlayer ? 'readonly' : 'data-token-field="label"'} value="${escapeHtml(token.label)}">
-                </label>
-                <div class="vtt-subhead">Hover Mood</div>
-                <div class="vtt-inspector-grid">
-                    <label class="vtt-field">
-                        <span>Emoji</span>
-                        <select class="vtt-inspector-select" data-token-field="moodEmoji">
-                            <option value=""${moodEmoji ? '' : ' selected'}>None</option>
-                            ${moodOptions.map((emoji) => `<option value="${escapeHtml(emoji)}"${moodEmoji === emoji ? ' selected' : ''}>${escapeHtml(emoji)}</option>`).join('')}
-                        </select>
-                    </label>
-                    <label class="vtt-field">
-                        <span>Word</span>
-                        <input class="vtt-inspector-input" type="text" data-token-field="moodLabel" value="${escapeHtml(moodLabel)}" placeholder="Suspicious">
-                    </label>
-                </div>
-                <div class="vtt-inspector-grid">
-                    <label class="vtt-field">
-                        <span>Side</span>
-                        <select class="vtt-inspector-select" data-token-field="side">
-                            ${SIDE_OPTIONS.map((side) => `<option value="${side}"${token.side === side ? ' selected' : ''}>${side}</option>`).join('')}
-                        </select>
-                    </label>
-                    <label class="vtt-field">
-                        <span>Movement</span>
-                        <select class="vtt-inspector-select" data-token-field="moveAccess">
-                            <option value="dm"${normalizeMoveAccess(token.moveAccess, 'dm') === 'dm' ? ' selected' : ''}>DM Only</option>
-                            <option value="player"${normalizeMoveAccess(token.moveAccess, token.sourceType === 'player' ? 'player' : 'dm') === 'player' ? ' selected' : ''}>Players Can Move</option>
-                        </select>
-                    </label>
-                    <label class="vtt-field">
-                        <span>Image URL</span>
-                        <input class="vtt-inspector-input" type="text" data-token-field="imageUrl" value="${escapeHtml(imageUrlValue)}">
-                    </label>
-                </div>
-                    </div>
-                </details>
-                <details class="vtt-inspector-section">
-                    <summary>Stats & Size</summary>
-                    <div class="vtt-inspector-section-body">
-                <div class="vtt-inspector-grid">
-                    <label class="vtt-field">
-                        <span>HP Current</span>
-                        <input class="vtt-inspector-input" type="number" data-token-field="hpCurrent" value="${token.hpCurrent ?? ''}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>HP Max</span>
-                        <input class="vtt-inspector-input" type="number" data-token-field="hpMax" value="${token.hpMax ?? ''}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>AC</span>
-                        <input class="vtt-inspector-input" type="number" data-token-field="ac" value="${token.ac ?? ''}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Passive Perception</span>
-                        <input class="vtt-inspector-input" type="number" data-token-field="passivePerception" value="${token.passivePerception ?? ''}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Stealth Roll</span>
-                        <input class="vtt-inspector-input" type="number" data-token-field="stealthRoll" value="${getTokenStealthRoll(token) ?? ''}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Width</span>
-                        <input class="vtt-inspector-input" type="number" data-token-field="w" min="1" value="${escapeHtml(String(token.w || 1))}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Height</span>
-                        <input class="vtt-inspector-input" type="number" data-token-field="h" min="1" value="${escapeHtml(String(token.h || 1))}">
-                    </label>
-                </div>
-                <div class="vtt-chip-row">
-                    <button class="vtt-chip-btn" data-action="token-retry-image" data-id="${escapeHtml(token.id)}" data-image-url="${escapeHtml(imageUrlValue)}"${imageUrlValue ? '' : ' disabled'}>Retry Image</button>
-                    <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="1">1x1</button>
-                    <button class="vtt-chip-btn" data-action="set-token-size" data-id="${escapeHtml(token.id)}" data-size="2">2x2</button>
-                </div>
-                    </div>
-                </details>
-                <details class="vtt-inspector-section">
-                    <summary>Combat Actions</summary>
-                    <div class="vtt-inspector-section-body">
-                <div class="vtt-subhead">Quick Actions</div>
-                <div class="vtt-chip-row vtt-inspector-quick-row">
-                    <button class="vtt-chip-btn" data-action="token-adjust-hp" data-id="${escapeHtml(token.id)}" data-delta="-5">-5 HP</button>
-                    <button class="vtt-chip-btn" data-action="token-adjust-hp" data-id="${escapeHtml(token.id)}" data-delta="+5">+5 HP</button>
-                    <button class="vtt-chip-btn" data-action="token-set-bloodied" data-id="${escapeHtml(token.id)}">Bloodied</button>
-                    <button class="vtt-chip-btn" data-action="token-set-full-hp" data-id="${escapeHtml(token.id)}">Full HP</button>
-                </div>
-                <div class="vtt-chip-row vtt-inspector-quick-row">
-                    <button class="vtt-chip-btn" data-action="toggle-token-hidden-quick" data-id="${escapeHtml(token.id)}">${token.hidden ? 'Reveal' : 'Hide'}</button>
-                    <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Prone">Prone</button>
-                    <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Stunned">Stunned</button>
-                    <button class="vtt-chip-btn" data-action="token-apply-condition" data-id="${escapeHtml(token.id)}" data-condition="Poisoned">Poisoned</button>
-                    <button class="vtt-chip-btn" data-action="token-clear-conditions" data-id="${escapeHtml(token.id)}">Clear Cond</button>
-                </div>
-                    </div>
-                </details>
-                <details class="vtt-inspector-section">
-                    <summary>Automation</summary>
-                    <div class="vtt-inspector-section-body">
-                <div class="vtt-subhead">Proximity Prompts</div>
-                ${buildProximityTriggerEditor('token', token.id, token.triggers)}
-                    </div>
-                </details>
-                <details class="vtt-inspector-section">
-                    <summary>Monster & Stat Block</summary>
-                    <div class="vtt-inspector-section-body">
-                ${monster ? `
-                    <div class="vtt-subhead">Monster</div>
-                    <div class="vtt-detail-note">${escapeHtml(monsterMeta || monster.name)}. Right-click the token and choose Roll stat block / NPC for checks, saves, attacks, and damage.</div>
-                ` : ''}
-                <div class="vtt-subhead">Assign Monster</div>
-                <label class="vtt-field">
-                    <span>SRD Stat Block</span>
-                    <input class="vtt-inspector-input" type="search" data-token-monster-search placeholder="Filter monsters..." value="${escapeHtml(monsterAssignQuery)}"${monsterDirectoryLoading || !monsters.length ? ' disabled' : ''}>
-                    <input type="hidden" data-token-monster-id value="${escapeHtml(selectedMonsterId)}">
-                </label>
-                <div class="vtt-monster-assign-results" data-token-monster-results>
-                    ${buildMonsterAssignResultsMarkup(monsterAssignQuery, selectedMonsterId)}
-                </div>
-                <div class="vtt-inspector-grid">
-                    <label class="vtt-inspector-check">
-                        <input type="checkbox" data-token-monster-option="stats" checked>
-                        <span>Apply HP / AC / saves</span>
-                    </label>
-                    <label class="vtt-inspector-check">
-                        <input type="checkbox" data-token-monster-option="rename">
-                        <span>Rename token</span>
-                    </label>
-                    <label class="vtt-inspector-check">
-                        <input type="checkbox" data-token-monster-option="resize">
-                        <span>Resize token</span>
-                    </label>
-                </div>
-                <div class="vtt-chip-row">
-                    <button class="vtt-chip-btn strong" type="button" data-action="assign-token-monster" data-id="${escapeHtml(token.id)}"${monsters.length ? '' : ' disabled'}>Assign Monster</button>
-                    <button class="vtt-chip-btn" type="button" data-action="clear-token-monster" data-id="${escapeHtml(token.id)}"${monster ? '' : ' disabled'}>Clear Monster</button>
-                </div>
-                    </div>
-                </details>
-                <details class="vtt-inspector-section">
-                    <summary>Visibility & Advanced</summary>
-                    <div class="vtt-inspector-section-body">
-                <label class="vtt-inspector-check">
-                    <input type="checkbox" data-token-field="hidden"${token.hidden ? ' checked' : ''}>
-                    <span>Hidden In Player Mode</span>
-                </label>
-                <label class="vtt-field">
-                    <span>Conditions</span>
-                    <textarea class="vtt-inspector-textarea" data-token-field="conditions">${escapeHtml(serializeConditions(token.conditions))}</textarea>
-                </label>
-                ${supportsSightCone ? `
-                    <div class="vtt-subhead">Sight Cone</div>
-                    <div class="vtt-inspector-grid">
-                        <label class="vtt-inspector-check">
-                            <input type="checkbox" data-token-vision-field="enabled"${token.vision && token.vision.enabled ? ' checked' : ''}>
-                            <span>Enabled</span>
-                        </label>
-                        <label class="vtt-field">
-                            <span>Facing</span>
-                            <input class="vtt-inspector-input" type="number" data-token-vision-field="facingDeg" value="${escapeHtml(String(token.vision && token.vision.facingDeg !== undefined ? token.vision.facingDeg : 0))}">
-                        </label>
-                        <label class="vtt-field">
-                            <span>Angle</span>
-                            <input class="vtt-inspector-input" type="number" data-token-vision-field="arcDeg" min="1" max="360" value="${escapeHtml(String(token.vision && token.vision.arcDeg !== undefined ? token.vision.arcDeg : 90))}">
-                        </label>
-                        <label class="vtt-field">
-                            <span>Range</span>
-                            <input class="vtt-inspector-input" type="number" data-token-vision-field="baseRangeCells" min="0" max="99" value="${escapeHtml(String(token.vision && token.vision.baseRangeCells !== undefined ? token.vision.baseRangeCells : 6))}">
-                        </label>
-                    </div>
-                ` : ''}
-                ${isRosterManagedPlayer ? '<div class="vtt-detail-note">Player token name stays synced from the roster. Updating portrait here also updates that roster entry.</div>' : ''}
-                    </div>
-                </details>
-                <div class="vtt-inspector-actions">
-                    <button class="vtt-inline-btn" data-action="clone-token" data-id="${escapeHtml(token.id)}">Clone Token</button>
-                    <button class="vtt-inline-btn" data-action="add-token-to-initiative" data-id="${escapeHtml(token.id)}">Add To Initiative</button>
-                    <button class="vtt-inline-btn danger" data-action="delete-token" data-id="${escapeHtml(token.id)}">Delete Token</button>
-                </div>
-            </div>
-        `;
-    };
-
-    const buildDMEvidenceNoteInspectorContent = (note, scene) => {
-        const bounds = getEvidenceNoteCellBounds(scene, note) || {
-            left: 0,
-            top: 0,
-            widthCells: 1,
-            heightCells: 1
-        };
-        const category = normalizeEvidenceNoteCategory(note && note.category);
-        const shape = normalizeEvidenceNoteShape(note && note.shape, EVIDENCE_NOTE_SHAPE_ZONE);
-        const pinPoint = shape === EVIDENCE_NOTE_SHAPE_PIN ? getEvidenceNoteCellPoint(scene, note) : null;
-        const displayGridX = pinPoint ? pinPoint.x : bounds.left;
-        const displayGridY = pinPoint ? pinPoint.y : bounds.top;
-        const shapeLabel = getEvidenceNoteShapeLabel(note);
-        return `
-            <div class="vtt-inspector-stack">
-                <label class="vtt-field">
-                    <span>Title</span>
-                    <input class="vtt-inspector-input" type="text" data-note-field="title" value="${escapeHtml(getEvidenceNoteDisplayTitle(note))}">
-                </label>
-                <div class="vtt-inspector-grid">
-                    <label class="vtt-field">
-                        <span>Shape</span>
-                        <select class="vtt-inspector-select" data-note-field="shape">
-                            <option value="pin"${shape === EVIDENCE_NOTE_SHAPE_PIN ? ' selected' : ''}>Pin</option>
-                            <option value="zone"${shape === EVIDENCE_NOTE_SHAPE_ZONE ? ' selected' : ''}>Zone</option>
-                        </select>
-                    </label>
-                    <label class="vtt-field">
-                        <span>Category</span>
-                        <select class="vtt-inspector-select" data-note-field="category">
-                            ${Object.entries(EVIDENCE_NOTE_CATEGORY_META).map(([value, meta]) => `
-                                <option value="${escapeHtml(value)}"${category === value ? ' selected' : ''}>${escapeHtml(meta.label)}</option>
-                            `).join('')}
-                        </select>
-                    </label>
-                    <label class="vtt-field">
-                        <span>Grid X</span>
-                        <input class="vtt-inspector-input" type="number" ${shape === EVIDENCE_NOTE_SHAPE_PIN ? 'step="0.001"' : 'step="1"'} data-note-field="gridX" value="${escapeHtml(String(displayGridX))}">
-                    </label>
-                    <label class="vtt-field">
-                        <span>Grid Y</span>
-                        <input class="vtt-inspector-input" type="number" ${shape === EVIDENCE_NOTE_SHAPE_PIN ? 'step="0.001"' : 'step="1"'} data-note-field="gridY" value="${escapeHtml(String(displayGridY))}">
-                    </label>
-                    ${shape === EVIDENCE_NOTE_SHAPE_ZONE ? `
-                        <label class="vtt-field">
-                            <span>Cells Wide</span>
-                            <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsWide" value="${escapeHtml(String(bounds.widthCells))}">
-                        </label>
-                        <label class="vtt-field">
-                            <span>Cells High</span>
-                            <input class="vtt-inspector-input" type="number" min="1" data-note-field="cellsHigh" value="${escapeHtml(String(bounds.heightCells))}">
-                        </label>
-                    ` : ''}
-                </div>
-                <label class="vtt-field">
-                    <span>Details</span>
-                    <textarea class="vtt-inspector-textarea" data-note-field="body" placeholder="What should this ${shapeLabel.toLowerCase()} communicate?">${escapeHtml(note.body || '')}</textarea>
-                </label>
-                <label class="vtt-inspector-check">
-                    <input type="checkbox" data-note-field="hidden"${note.hidden ? ' checked' : ''}>
-                    <span>Hidden In Player Mode</span>
-                </label>
-                <div class="vtt-detail-note">
-                    ${note.hidden
-                        ? `DM-only ${shapeLabel.toLowerCase()}s stay hidden until you reveal them.`
-                        : `Revealed ${shapeLabel.toLowerCase()}s still stay hidden from players while their tagged area is fully covered by fog.`}
-                </div>
-                <div class="vtt-subhead">Proximity Prompts</div>
-                ${buildProximityTriggerEditor('note', String(note.id || ''), note.triggers)}
-                <div class="vtt-inspector-actions">
-                    <button class="vtt-inline-btn" data-action="toggle-evidence-hidden-quick" data-id="${escapeHtml(String(note.id || ''))}">${note.hidden ? 'Reveal To Players' : 'Hide From Players'}</button>
-                    <button class="vtt-inline-btn danger" data-action="delete-evidence-note" data-id="${escapeHtml(String(note.id || ''))}">Delete ${shapeLabel}</button>
-                </div>
-            </div>
-        `;
-    };
-
-    const buildEvidenceNoteViewerContent = (note, scene) => `
-        <div class="vtt-inspector-stack">
-            <div class="vtt-subhead">${escapeHtml(getEvidenceNoteShapeLabel(note))} Indicator</div>
-            <div class="vtt-chip-row">
-                <span class="vtt-panel-pill">${escapeHtml(getEvidenceNoteCategoryLabel(note && note.category))}</span>
-                <span class="vtt-panel-pill">${escapeHtml(buildEvidenceNoteAreaLabel(note, scene))}</span>
-            </div>
-            <div class="vtt-note-view-body">${escapeHtml(note && note.body ? note.body : 'No marker details shared yet.')}</div>
-        </div>
-    `;
-
-    const renderTokenInspector = () => {
-        const token = getTokenById(selectedTokenId);
-        const scene = getActiveScene();
-        const note = getEvidenceNoteById(selectedEvidenceNoteId);
-        if (!selectionPillEl || !tokenInspectorEl) return;
-        if (!isDM() && token && token.hidden) {
-            selectionPillEl.textContent = 'No Selection';
-            tokenInspectorEl.innerHTML = '<div class="vtt-empty">Select a visible token or zone on the map to inspect it.</div>';
-            return;
-        }
-        if (note && !token) {
-            selectionPillEl.textContent = getEvidenceNoteDisplayTitle(note);
-            tokenInspectorEl.innerHTML = isDM() && tokenInspectorState && tokenInspectorState.kind === 'note' && tokenInspectorState.targetId === note.id
-                ? `
-                    <div class="vtt-inspector-stack">
-                        <div class="vtt-detail-note">Editing ${escapeHtml(getEvidenceNoteDisplayTitle(note))} in the floating inspector. Right-click another zone to move it, or press Escape to close it.</div>
-                    </div>
-                `
-                : (isDM()
-                    ? buildDMEvidenceNoteInspectorContent(note, scene)
-                    : buildEvidenceNoteViewerContent(note, scene));
-            return;
-        }
-        selectionPillEl.textContent = token ? token.label : 'No Selection';
-        if (!token) {
-            tokenInspectorEl.innerHTML = isDM()
-                ? '<div class="vtt-empty">Right-click a token, pin, or zone to edit it near your cursor, or click a map marker to edit it here.</div>'
-                : '<div class="vtt-empty">Select a token, pin, or zone on the map to inspect it.</div>';
-            return;
-        }
-
-        if (!isDM()) {
-            tokenInspectorEl.innerHTML = `
-                <div class="vtt-inspector-stack">
-                    <div class="vtt-defence-chip-row">
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">AC</span><strong>${escapeHtml(String(token.ac ?? '-'))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
-                    </div>
-                    <div class="vtt-detail-note">${escapeHtml(token.label)} is selected. DM-only editing controls are hidden in Player mode.</div>
-                </div>
-            `;
-            return;
-        }
-
-        tokenInspectorEl.innerHTML = tokenInspectorState && tokenInspectorState.kind === 'token' && tokenInspectorState.targetId === token.id
-            ? `
-                <div class="vtt-inspector-stack">
-                    <div class="vtt-defence-chip-row">
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">AC</span><strong>${escapeHtml(String(token.ac ?? '-'))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
-                    </div>
-                    <div class="vtt-detail-note">Editing ${escapeHtml(token.label)} in the floating inspector. Right-click another token to move it, or press Escape to close it.</div>
-                </div>
-            `
-            : `
-                <div class="vtt-inspector-stack">
-                    <div class="vtt-defence-chip-row">
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">AC</span><strong>${escapeHtml(String(token.ac ?? '-'))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">HP</span><strong>${escapeHtml(serializeHp(token.hpCurrent, token.hpMax).replace('HP ', ''))}</strong></div>
-                        <div class="vtt-defence-chip"><span class="vtt-inspector-label">PP</span><strong>${escapeHtml(String(token.passivePerception ?? '-'))}</strong></div>
-                    </div>
-                    <div class="vtt-detail-note">Double-click ${escapeHtml(token.label)} on the map to edit it at your cursor.</div>
-                </div>
-            `;
-    };
-
-    const renderTokenInspectorPopover = () => {
-        if (!tokenInspectorPopoverEl) return;
-        const activePopoverKind = tokenInspectorState && tokenInspectorState.kind === 'note' ? 'note' : 'token';
-        const activePopoverId = tokenInspectorState
-            ? String(tokenInspectorState.targetId || tokenInspectorState.tokenId || '').trim()
-            : '';
-        const scene = getActiveScene();
-        const token = activePopoverKind === 'token' ? getTokenById(activePopoverId) : null;
-        const note = activePopoverKind === 'note' ? getEvidenceNoteById(activePopoverId) : null;
-        if (!tokenInspectorState || !isDM() || (!token && !note)) {
-            tokenInspectorPopoverEl.hidden = true;
-            return;
-        }
-        tokenInspectorPopoverEl.innerHTML = activePopoverKind === 'note'
-            ? `
-                <div class="vtt-panel-head vtt-popover-head">
-                    <h2>${escapeHtml(note ? getEvidenceNoteShapeLabel(note) : 'Zone')} Indicator</h2>
-                    <div class="vtt-panel-head-actions">
-                        <span class="vtt-panel-pill">${escapeHtml(note ? getEvidenceNoteDisplayTitle(note) : getDefaultEvidenceNoteTitle())}</span>
-                        <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close zone inspector">X</button>
-                    </div>
-                </div>
-                ${buildDMEvidenceNoteInspectorContent(note, scene)}
-            `
-            : `
-                <div class="vtt-panel-head vtt-popover-head">
-                    <h2>Token Inspector</h2>
-                    <div class="vtt-panel-head-actions">
-                        <span class="vtt-panel-pill">${escapeHtml(token.label || 'Token')}</span>
-                        <button class="vtt-inline-btn vtt-inline-btn-icon" type="button" data-action="close-token-inspector" aria-label="Close token inspector">X</button>
-                    </div>
-                </div>
-                ${buildDMTokenInspectorContent(token)}
-            `;
-        tokenInspectorPopoverEl.hidden = false;
-        positionTokenInspectorPopover();
-    };
-
-    const buildClockPieMarkup = (clock) => {
-        const max = normalizeClockMax(clock && clock.max, 4);
-        const current = normalizeClockCurrent(clock && clock.current, max, 0);
-        const progressDeg = max > 0 ? Math.round((current / max) * 3600) / 10 : 0;
-        const segmentDeg = Math.round((360 / max) * 1000) / 1000;
-        return `
-            <div class="vtt-clock-pie"
-                aria-label="${escapeHtml(`${current} of ${max}`)}"
-                style="--vtt-clock-progress-deg:${escapeHtml(String(progressDeg))}deg;--vtt-clock-segment-deg:${escapeHtml(String(segmentDeg))}deg;">
-                <span>${escapeHtml(String(current))}/${escapeHtml(String(max))}</span>
-            </div>
-        `;
-    };
+    const vttInspectorMarkupFactory = window.RTF_VTT_INSPECTOR_MARKUP;
+    if (!vttInspectorMarkupFactory || typeof vttInspectorMarkupFactory.create !== 'function') {
+        throw new Error('VTT inspector markup module failed to load.');
+    }
+    const vttInspectorMarkup = vttInspectorMarkupFactory.create({
+        buildEvidenceNoteAreaLabel,
+        buildMonsterAssignResultsMarkup,
+        ensureMonsterDirectory,
+        escapeHtml,
+        getActiveScene,
+        getDefaultEvidenceNoteTitle,
+        getEvidenceNoteById,
+        getEvidenceNoteCategoryLabel,
+        getEvidenceNoteCellBounds,
+        getEvidenceNoteCellPoint,
+        getEvidenceNoteDisplayTitle,
+        getEvidenceNoteShapeLabel,
+        getMonsterDirectory,
+        getMonsterStatBlockForToken,
+        getProximitySkillLabel,
+        getRosterPlayerForRecord,
+        getSceneClocks,
+        getSelectedEvidenceNoteId: () => stageState.selection.evidenceNoteId,
+        getSelectedTokenId: () => stageState.selection.tokenId,
+        getTokenById,
+        getTokenStealthRoll,
+        hasValue,
+        normalizeEvidenceNoteCategory,
+        normalizeEvidenceNoteShape,
+        normalizeMoodEmoji,
+        normalizeMoodLabel,
+        normalizeMoveAccess,
+        normalizeProximityTrigger,
+        normalizeProximityTriggers,
+        positionTokenInspectorPopover,
+        serializeConditions,
+        serializeHp,
+        isDM,
+        proximityTriggerSkillOptions: PROXIMITY_TRIGGER_SKILL_OPTIONS,
+        monsterResources: resources.monsters,
+        getInspectorState: () => uiRuntime.overlays.tokenInspector,
+        dom: {
+            selectionPillEl: dom.selectionPillEl,
+            tokenInspectorEl: dom.tokenInspectorEl,
+            tokenInspectorPopoverEl: dom.tokenInspectorPopoverEl
+        },
+        config: C
+    });
+    const {
+        renderTokenInspector,
+        renderTokenInspectorPopover
+    } = vttInspectorMarkup;
 
     const renderClockList = () => {
-        if (!clockListEl) return;
+        if (!dom.clockListEl) return;
         const scene = getActiveScene();
-        const clocks = getVisibleSceneClocksForRole(scene, localRole);
+        const clocks = getVisibleSceneClocksForRole(scene, sessionState.role);
         if (!scene || !clocks.length) {
-            clockListEl.innerHTML = isDM()
+            dom.clockListEl.innerHTML = isDM()
                 ? '<div class="vtt-empty">No scene clocks yet. Add one for objectives, alarms, rituals, hazards, or escape pressure.</div>'
                 : '<div class="vtt-empty">No scene clocks are visible.</div>';
             return;
         }
 
-        clockListEl.innerHTML = clocks.map((clock) => {
+        dom.clockListEl.innerHTML = clocks.map((clock) => {
             const max = normalizeClockMax(clock && clock.max, 4);
             const current = normalizeClockCurrent(clock && clock.current, max, 0);
             const title = normalizeClockTitle(clock && clock.title, 'Scene Clock');
@@ -9345,21 +4999,21 @@
     };
 
     const renderInitiativeList = () => {
-        if (!initiativeListEl || !roundPillEl) return;
-        const initiative = vttState && vttState.initiative ? vttState.initiative : { entries: [], round: 1, activeEntryId: '' };
-        const visibleEntries = getVisibleInitiativeEntriesForRole(vttState, localRole);
-        roundPillEl.textContent = `Round ${initiative.round || 1}`;
+        if (!dom.initiativeListEl || !dom.roundPillEl) return;
+        const initiative = sessionState.snapshot && sessionState.snapshot.initiative ? sessionState.snapshot.initiative : { entries: [], round: 1, activeEntryId: '' };
+        const visibleEntries = getVisibleInitiativeEntriesForRole(sessionState.snapshot, sessionState.role);
+        dom.roundPillEl.textContent = `Round ${initiative.round || 1}`;
         if (!Array.isArray(initiative.entries) || !initiative.entries.length) {
-            initiativeListEl.innerHTML = '<div class="vtt-empty">No combatants yet. Add a token to initiative or roll from the Character Sheet.</div>';
+            dom.initiativeListEl.innerHTML = '<div class="vtt-empty">No combatants yet. Add a token to initiative or roll from the Character Sheet.</div>';
             return;
         }
         if (!visibleEntries.length) {
-            initiativeListEl.innerHTML = '<div class="vtt-empty">No visible combatants right now.</div>';
+            dom.initiativeListEl.innerHTML = '<div class="vtt-empty">No visible combatants right now.</div>';
             return;
         }
 
-        initiativeListEl.innerHTML = visibleEntries.map((entry) => {
-            const isHiddenToPlayers = isEntryHiddenForRole(entry, vttState, 'player');
+        dom.initiativeListEl.innerHTML = visibleEntries.map((entry) => {
+            const isHiddenToPlayers = isEntryHiddenForRole(entry, sessionState.snapshot, 'player');
             const entryIdx = visibleEntries.findIndex((candidate) => candidate && candidate.id === entry.id);
             const activeVisibleIdx = visibleEntries.findIndex((candidate) => candidate && candidate.id === initiative.activeEntryId);
             const isActive = entry.id === initiative.activeEntryId;
@@ -9368,7 +5022,7 @@
             const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
             const isMine = !!(isPlayer() && localContext && localContext.playerId && rosterPlayer && String(rosterPlayer.id || '').trim() === localContext.playerId);
             return `
-            <div class="vtt-entry${entry.id === selectedEntryId ? ' is-selected' : ''}${isActive ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${isMine ? ' is-mine' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
+            <div class="vtt-entry${entry.id === stageState.selection.entryId ? ' is-selected' : ''}${isActive ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${isMine ? ' is-mine' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
                 <div class="vtt-entry-line">
                     <div class="vtt-entry-primary">
                         <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
@@ -9395,20 +5049,6 @@
         }).join('');
     };
 
-    const getFocusQuickRollKeys = () => {
-        const catalog = buildSheetActionCatalog();
-        const hasKey = (key) => catalog.some((item) => item && item.key === key);
-        const attack = catalog.find((item) => item && item.category === 'Attack');
-        const damage = catalog.find((item) => item && item.category === 'Damage');
-        return [
-            hasKey('core:initiative') ? 'core:initiative' : '',
-            hasKey('skill:perception') ? 'skill:perception' : '',
-            hasKey('skill:stealth') ? 'skill:stealth' : '',
-            attack ? attack.key : '',
-            damage ? damage.key : ''
-        ].filter(Boolean);
-    };
-
     const renderPlayerFocusPanelMarkup = () => {
         const context = getLocalPlayerFocusContext();
         const linkedName = context.linkedPlayer && context.linkedPlayer.name
@@ -9418,9 +5058,9 @@
             ? (context.token ? `${linkedName} ready${context.isTurn ? ' - your turn' : ''}` : `${linkedName} linked - no visible token`)
             : 'Link a roster entry to enable sheet-aware focus';
         const tokenActionLabel = context.token ? (context.isTurn ? 'Your Token' : 'Find Token') : 'No Token';
-        const rollMode = normalizeRollMode(localRollMode);
+        const rollMode = normalizeRollMode(uiRuntime.playerRoll.mode);
         const rollSearchResults = getPlayerRollSearchResults();
-        const isRollSearching = normalizeSearchText(playerRollSearchQuery).length > 0;
+        const isRollSearching = normalizeSearchText(uiRuntime.queries.playerRoll).length > 0;
         return `
             <div class="vtt-player-focus-status${context.isTurn ? ' is-turn' : ''}">
                 <span class="vtt-player-focus-kicker">${escapeHtml(context.isTurn ? 'Your Turn' : 'Player Controls')}</span>
@@ -9431,33 +5071,33 @@
             </div>
             <div class="vtt-player-focus-actions">
                 <button class="vtt-chip-btn strong" type="button" data-action="focus-own-token"${context.token ? '' : ' disabled'}>${escapeHtml(tokenActionLabel)}</button>
-                <button class="vtt-chip-btn" type="button" data-action="toggle-ruler-mode" aria-pressed="${localToolState.mode === TOOL_MODE_RULER ? 'true' : 'false'}">Measure</button>
-                <button class="vtt-chip-btn" type="button" data-action="start-ask-roll-pick" aria-pressed="${askRollPickMode ? 'true' : 'false'}">Ask To Roll</button>
+                <button class="vtt-chip-btn" type="button" data-action="toggle-ruler-mode" aria-pressed="${stageState.tool.current.mode === C.TOOL_MODE_RULER ? 'true' : 'false'}">Measure</button>
+                <button class="vtt-chip-btn" type="button" data-action="start-ask-roll-pick" aria-pressed="${stageState.tool.askRollPickMode ? 'true' : 'false'}">Ask To Roll</button>
             </div>
             <div class="vtt-player-focus-ping-picker" role="group" aria-label="Ping type">
-                ${Object.values(PING_VARIANT_OPTIONS).filter((option) => option.pickable !== false).map((option) => `
+                ${Object.values(C.PING_VARIANT_OPTIONS).filter((option) => option.pickable !== false).map((option) => `
                     <button class="vtt-ping-option is-${escapeHtml(option.variant)}" type="button"
                         data-action="set-ping-mode"
                         data-ping-variant="${escapeHtml(option.variant)}"
-                        aria-pressed="${normalizePingVariant(localPingVariant) === option.variant && localToolState.mode === TOOL_MODE_PING ? 'true' : 'false'}">
+                        aria-pressed="${normalizePingVariant(stageState.tool.pingVariant) === option.variant && stageState.tool.current.mode === C.TOOL_MODE_PING ? 'true' : 'false'}">
                         <span class="vtt-ping-option-icon">${escapeHtml(option.icon)}</span>
                         <span>${escapeHtml(option.label)}</span>
                     </button>
                 `).join('')}
             </div>
-            ${pendingAskRollRequest ? `<div class="vtt-player-focus-hint">Click the map to place an ask-to-roll marker for ${escapeHtml(pendingAskRollRequest.label)}.</div>` : ''}
-            ${playerFocusLastResult ? `
-                <div class="vtt-player-focus-result${playerFocusLastResult.ok ? '' : ' is-muted'}">
-                    <strong>${escapeHtml(String(playerFocusLastResult.total))}</strong>
-                    <span>${escapeHtml(`${playerFocusLastResult.label || 'Roll'} - ${playerFocusLastResult.formula || ''}`)}</span>
+            ${stageState.tool.pendingAskRollRequest ? `<div class="vtt-player-focus-hint">Click the map to place an ask-to-roll marker for ${escapeHtml(stageState.tool.pendingAskRollRequest.label)}.</div>` : ''}
+            ${uiRuntime.playerRoll.lastResult ? `
+                <div class="vtt-player-focus-result${uiRuntime.playerRoll.lastResult.ok ? '' : ' is-muted'}">
+                    <strong>${escapeHtml(String(uiRuntime.playerRoll.lastResult.total))}</strong>
+                    <span>${escapeHtml(`${uiRuntime.playerRoll.lastResult.label || 'Roll'} - ${uiRuntime.playerRoll.lastResult.formula || ''}`)}</span>
                 </div>
             ` : ''}
-            <div class="vtt-player-focus-dice${askRollPickMode ? ' is-ask-roll-picking' : ''}">
+            <div class="vtt-player-focus-dice${stageState.tool.askRollPickMode ? ' is-ask-roll-picking' : ''}">
                 <div class="vtt-player-focus-section is-dice-rolls">
                     <span class="vtt-player-focus-minihead">Dice Rolls</span>
-                    ${askRollPickMode ? '<button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-pick">Cancel</button>' : ''}
+                    ${stageState.tool.askRollPickMode ? '<button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-pick">Cancel</button>' : ''}
                 </div>
-                ${askRollPickMode ? '<div class="vtt-player-focus-hint">Pick a roll here, then click the map to place the ask-to-roll marker.</div>' : ''}
+                ${stageState.tool.askRollPickMode ? '<div class="vtt-player-focus-hint">Pick a roll here, then click the map to place the ask-to-roll marker.</div>' : ''}
                 <div class="vtt-roll-mode-toggle" role="group" aria-label="Roll mode">
                     ${['adv', 'norm', 'dis'].map((mode) => `
                         <button class="vtt-chip-btn" type="button" data-action="set-roll-mode" data-roll-mode="${escapeHtml(mode)}" aria-pressed="${mode === rollMode ? 'true' : 'false'}">${escapeHtml(getRollModeLabel(mode))}</button>
@@ -9465,111 +5105,31 @@
                 </div>
                 <label class="vtt-field vtt-field-tight vtt-player-roll-search">
                     <span>Search Rolls</span>
-                    <input type="search" data-player-roll-search value="${escapeHtml(playerRollSearchQuery)}" placeholder="attack, save, spell, skill">
+                    <input type="search" data-player-roll-search value="${escapeHtml(uiRuntime.queries.playerRoll)}" placeholder="attack, save, spell, skill">
                 </label>
                 <div class="vtt-player-focus-quick-rolls">
                     ${rollSearchResults.length ? rollSearchResults.map((item) => `
                         <button class="vtt-stage-context-item" type="button" data-action="quick-sheet-action" data-id="${escapeHtml(item.key)}">
                             <span class="vtt-action-search-kind">${escapeHtml(item.category)}</span>
                             <span class="vtt-action-search-label">${escapeHtml(item.label)}</span>
-                            ${askRollPickMode ? `<span class="vtt-action-search-summary">${escapeHtml(`Ask for ${item.label}`)}</span>` : ''}
+                            ${stageState.tool.askRollPickMode ? `<span class="vtt-action-search-summary">${escapeHtml(`Ask for ${item.label}`)}</span>` : ''}
                         </button>
                     `).join('') : `<div class="vtt-empty">${isRollSearching ? 'No matching sheet rolls.' : 'Open or link a Character Sheet to show quick rolls.'}</div>`}
                 </div>
-                <button class="vtt-stage-context-item" type="button" data-action="player-custom-roll">${escapeHtml(askRollPickMode ? 'Ask For Custom Roll' : 'Any Dice')}</button>
-                <button class="vtt-stage-context-item" type="button" data-action="player-roll-from-sheet">${escapeHtml(askRollPickMode ? 'Ask From Sheet Rolls' : 'More Sheet Rolls')}</button>
+                <button class="vtt-stage-context-item" type="button" data-action="player-custom-roll">${escapeHtml(stageState.tool.askRollPickMode ? 'Ask For Custom Roll' : 'Any Dice')}</button>
+                <button class="vtt-stage-context-item" type="button" data-action="player-roll-from-sheet">${escapeHtml(stageState.tool.askRollPickMode ? 'Ask From Sheet Rolls' : 'More Sheet Rolls')}</button>
             </div>
         `;
     };
 
-    const getQuickRollRequestActionKey = (label) => {
-        const clean = String(label || '').trim().toLowerCase();
-        if (!clean || ['custom', 'other'].includes(clean)) return '';
-        if (clean === 'initiative') return 'core:initiative';
-        if (sheetSkillsMap[clean]) return `skill:${clean}`;
-        return '';
-    };
-
-    const getAskRollRequestLabelForItem = (item) => {
-        if (!item) return 'that';
-        const label = String(item.label || '').replace(/^(Atk|Dmg):\s*/i, '').trim() || 'that';
-        const category = String(item.category || '').trim();
-        return category && !/^core$/i.test(category)
-            ? `${category}: ${label}`
-            : label;
-    };
-
-    const getRollRequestActionKey = (request = {}) => {
-        const directKey = String(request && request.actionKey || '').trim();
-        const catalog = buildSheetActionCatalog();
-        if (directKey && catalog.some((item) => item && item.key === directKey)) return directKey;
-        const quickKey = getQuickRollRequestActionKey(request && request.label);
-        if (quickKey && catalog.some((item) => item && item.key === quickKey)) return quickKey;
-        const cleanLabel = normalizeSearchText(request && request.label);
-        if (!cleanLabel) return '';
-        const exact = catalog.find((item) => normalizeSearchText(item && item.label) === cleanLabel);
-        if (exact) return exact.key;
-        const contained = catalog.find((item) => {
-            const text = normalizeSearchText(`${item && item.category || ''} ${item && item.label || ''}`);
-            return text === cleanLabel || text.includes(cleanLabel);
-        });
-        return contained ? contained.key : '';
-    };
-
-    const getAskRollRequestFromPing = (ping) => {
-        if (!ping || typeof ping !== 'object') return null;
-        if (ping.askRoll && typeof ping.askRoll === 'object') {
-            const label = String(ping.askRoll.label || '').trim().replace(/\s+/g, ' ').slice(0, 48);
-            if (!label) return null;
-            return {
-                label,
-                actionKey: String(ping.askRoll.actionKey || '').trim().slice(0, 120),
-                ownerPlayerId: String(ping.askRoll.ownerPlayerId || '').trim().slice(0, 120),
-                ownerSheetKey: String(ping.askRoll.ownerSheetKey || '').trim().slice(0, 160),
-                ownerName: String(ping.askRoll.ownerName || '').trim().replace(/\s+/g, ' ').slice(0, 80)
-            };
-        }
-        const variant = String(ping.variant || '').trim().toLowerCase();
-        const rawLabel = String(ping.label || '').trim();
-        const looksLikeLegacyAskRoll = variant === 'ask-roll'
-            || variant === 'roll-request'
-            || /\basks:\s*/i.test(rawLabel)
-            || /\broll\s+/i.test(rawLabel);
-        if (!looksLikeLegacyAskRoll) return null;
-        const ownerMatch = rawLabel.match(/^(.*?)\basks:\s*/i);
-        const ownerName = ownerMatch ? String(ownerMatch[1] || '').trim().replace(/\s+/g, ' ').slice(0, 80) : '';
-        const label = rawLabel
-            .replace(/^.*?\basks:\s*/i, '')
-            .replace(/^.*?\broll\s+/i, '')
-            .replace(/\?+$/g, '')
-            .trim()
-            .replace(/\s+/g, ' ')
-            .slice(0, 48);
-        return {
-            label: label || 'Roll?',
-            actionKey: '',
-            ownerPlayerId: '',
-            ownerSheetKey: '',
-            ownerName
-        };
-    };
-
-    const normalizeOwnerName = (value) => normalizeSearchText(String(value || '').replace(/\s+/g, ' ').trim());
-    const isLocalAskRollOwner = (request = {}) => {
-        if (!isPlayer()) return false;
-        const context = getLocalPlayerFocusContext();
-        const ownerPlayerId = String(request && request.ownerPlayerId || '').trim();
-        if (ownerPlayerId) return ownerPlayerId === String(context && context.playerId || '').trim();
-        const ownerSheetKey = String(request && request.ownerSheetKey || '').trim();
-        if (ownerSheetKey) return ownerSheetKey === String(context && context.identity && context.identity.sheetKey || '').trim();
-        const ownerName = normalizeOwnerName(request && request.ownerName);
-        if (!ownerName) return false;
-        const localNames = [
-            context && context.linkedPlayer && context.linkedPlayer.name,
-            context && context.identity && context.identity.characterName
-        ].map(normalizeOwnerName).filter(Boolean);
-        return localNames.includes(ownerName);
-    };
+    const getAskRollRequestLabelForItem = vttRolls.getAskRollRequestLabelForItem;
+    const getRollRequestActionKey = (request = {}) => (
+        vttRolls.getRollRequestActionKey(request, buildSheetActionCatalog())
+    );
+    const getAskRollRequestFromPing = vttRolls.getAskRollRequestFromPing;
+    const isLocalAskRollOwner = (request = {}) => (
+        isPlayer() && vttRolls.isAskRollOwner(request, getLocalPlayerFocusContext())
+    );
     const canLocalRollAskRollRequest = (request = {}) => isLocalAskRollOwner(request);
     const canLocalCancelAskRollRequest = (request = {}) => isDM() || isLocalAskRollOwner(request);
 
@@ -9584,44 +5144,31 @@
         if (!rollLabel) return false;
         if (isRollActionGuarded(`queue-roll:${opts.actionKey || rollLabel}`)) return false;
         const context = getLocalPlayerFocusContext();
-        const ownerName = context.linkedPlayer && context.linkedPlayer.name
-            ? String(context.linkedPlayer.name).trim()
-            : String(context.identity && context.identity.characterName || '').trim();
-        pendingAskRollRequest = {
-            label: rollLabel,
-            actionKey: String(opts.actionKey || getQuickRollRequestActionKey(rollLabel) || '').trim(),
-            ownerPlayerId: String(context.playerId || '').trim(),
-            ownerSheetKey: String(context.identity && context.identity.sheetKey || '').trim(),
-            ownerName
-        };
-        askRollPickMode = false;
-        localPingVariant = 'question';
-        setToolMode(TOOL_MODE_PING);
+        stageState.tool.pendingAskRollRequest = vttRolls.buildAskRollRequest(rollLabel, opts, context);
+        stageState.tool.askRollPickMode = false;
+        stageState.tool.pingVariant = 'question';
+        setToolMode(C.TOOL_MODE_PING);
         closeSheetActionPopover();
         render();
         return true;
     };
 
     const renderPlayerRollMenu = () => {
-        if (body) body.dataset.askRollPick = isPlayer() && askRollPickMode ? '1' : '0';
-        if (playerRollToggleEl) {
-            playerRollToggleEl.setAttribute('aria-expanded', playerRollMenuOpen ? 'true' : 'false');
-            playerRollToggleEl.textContent = playerRollMenuOpen ? 'Hide' : 'Show';
-        }
-        if (playerRollMenuEl) {
-            playerRollMenuEl.hidden = !isPlayer() || !playerRollMenuOpen;
+        if (dom.body) dom.body.dataset.askRollPick = isPlayer() && stageState.tool.askRollPickMode ? '1' : '0';
+        if (dom.playerRollMenuEl) {
+            dom.playerRollMenuEl.hidden = !isPlayer() || !uiRuntime.playerRoll.menuOpen;
             const shouldRefocusSearch = isPlayer()
                 && document.activeElement instanceof HTMLInputElement
                 && document.activeElement.dataset.playerRollSearch !== undefined;
-            if (isPlayer()) playerRollMenuEl.innerHTML = renderPlayerFocusPanelMarkup();
-            playerRollMenuEl.querySelectorAll('[data-roll-mode]').forEach((button) => {
+            if (isPlayer()) dom.playerRollMenuEl.innerHTML = renderPlayerFocusPanelMarkup();
+            dom.playerRollMenuEl.querySelectorAll('[data-roll-mode]').forEach((button) => {
                 if (!(button instanceof HTMLElement)) return;
                 const mode = normalizeRollMode(button.dataset.rollMode);
-                button.setAttribute('aria-pressed', mode === localRollMode ? 'true' : 'false');
+                button.setAttribute('aria-pressed', mode === uiRuntime.playerRoll.mode ? 'true' : 'false');
             });
             if (shouldRefocusSearch) {
                 requestAnimationFrame(() => {
-                    const input = playerRollMenuEl.querySelector('[data-player-roll-search]');
+                    const input = dom.playerRollMenuEl.querySelector('[data-player-roll-search]');
                     if (!(input instanceof HTMLInputElement)) return;
                     input.focus();
                     const end = input.value.length;
@@ -9629,28 +5176,28 @@
                 });
             }
         }
-        if (playerRollPanelEl) playerRollPanelEl.hidden = !isPlayer();
+        if (dom.playerRollPanelEl) dom.playerRollPanelEl.hidden = !isPlayer();
     };
 
     const renderInitiativeDetail = () => {
-        if (!initiativeDetailPanelEl) return;
-        const activePopoverId = initiativeDetailState && initiativeDetailState.entryId ? initiativeDetailState.entryId : '';
+        if (!dom.initiativeDetailPanelEl) return;
+        const activePopoverId = uiRuntime.overlays.initiativeDetail && uiRuntime.overlays.initiativeDetail.entryId ? uiRuntime.overlays.initiativeDetail.entryId : '';
         const entry = getEntryById(activePopoverId);
-        const assignedToken = getAssignedTokenForEntry(entry, vttState);
-        const assignedTokenScene = assignedToken ? findSceneForTokenId(vttState, assignedToken.id) : null;
+        const assignedToken = getAssignedTokenForEntry(entry, sessionState.snapshot);
+        const assignedTokenScene = assignedToken ? findSceneForTokenId(sessionState.snapshot, assignedToken.id) : null;
         const assignmentSummary = assignedToken
-            ? buildTokenAssignmentLabel(assignedToken, assignedTokenScene, vttState)
+            ? buildTokenAssignmentLabel(assignedToken, assignedTokenScene, sessionState.snapshot)
             : (entry && entry.linkedTokenId ? `Missing token (${entry.linkedTokenId})` : 'Unlinked');
-        const tokenAssignmentOptions = getInitiativeTokenAssignmentOptions(vttState);
-        const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
+        const tokenAssignmentOptions = getInitiativeTokenAssignmentOptions(sessionState.snapshot);
+        const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(sessionState.snapshot, entry && entry.linkedTokenId));
         const isRosterManagedPlayer = !!rosterPlayer;
         const players = getPlayers();
         const rosterPlayerId = rosterPlayer ? String(rosterPlayer.id || '').trim() : '';
-        if (!entry || !initiativeDetailState || !isDM()) {
-            initiativeDetailPanelEl.hidden = true;
+        if (!entry || !uiRuntime.overlays.initiativeDetail || !isDM()) {
+            dom.initiativeDetailPanelEl.hidden = true;
             return;
         }
-        initiativeDetailPanelEl.innerHTML = `
+        dom.initiativeDetailPanelEl.innerHTML = `
             <div class="vtt-panel-head vtt-popover-head">
                 <h2>Entry Details</h2>
                 <div class="vtt-panel-head-actions">
@@ -9715,13 +5262,13 @@
                     </label>
                 </div>
                 <div class="vtt-entry-actions">
-                    <button class="vtt-inline-btn" data-action="assign-entry-selected-token" data-id="${escapeHtml(entry.id)}"${selectedTokenId ? '' : ' disabled'}>${selectedTokenId ? 'Assign Selected Token' : 'Select A Token On The Map'}</button>
+                    <button class="vtt-inline-btn" data-action="assign-entry-selected-token" data-id="${escapeHtml(entry.id)}"${stageState.selection.tokenId ? '' : ' disabled'}>${stageState.selection.tokenId ? 'Assign Selected Token' : 'Select A Token On The Map'}</button>
                     ${isRosterManagedPlayer ? `<button class="vtt-inline-btn" data-action="clear-entry-roster-owner" data-id="${escapeHtml(entry.id)}">Clear Roster Owner</button>` : ''}
                 </div>
                 <div>
                     <div class="vtt-subhead">Defences</div>
                     <div class="vtt-defence-grid">
-                        ${DEFENCE_KEYS.map((key) => `
+                        ${C.DEFENCE_KEYS.map((key) => `
                             <label class="vtt-field">
                                 <span>${key.toUpperCase()}</span>
                                 <input class="vtt-entry-input" type="number" data-entry-defence="${key}" value="${entry.defences && entry.defences[key] !== null ? entry.defences[key] : ''}">
@@ -9738,535 +5285,176 @@
                 </div>
             </div>
         `;
-        initiativeDetailPanelEl.hidden = false;
+        dom.initiativeDetailPanelEl.hidden = false;
         positionInitiativeDetail();
     };
 
-    const buildVisionConeMarkup = (token, scene, sceneSize = worldSize, now = Date.now()) => {
-        const renderedToken = getRenderableVisionToken(token, scene, now);
-        const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
-        if (!geometry) return '';
-        const targetSummary = getStealthVisionTargetSummary(renderedToken, scene, vttState);
-        const hasDetectedTargets = targetSummary.detectedIds.length > 0;
-        const hasUnseenTargets = targetSummary.unseenIds.length > 0;
-        const fill = hasDetectedTargets
-            ? 'rgba(255, 102, 102, 0.24)'
-            : (hasUnseenTargets ? 'rgba(255, 211, 102, 0.24)' : 'rgba(94, 176, 255, 0.22)');
-        const stroke = hasDetectedTargets
-            ? 'rgba(255, 132, 132, 0.82)'
-            : (hasUnseenTargets ? 'rgba(255, 227, 163, 0.88)' : 'rgba(122, 194, 255, 0.78)');
-        const classes = ['vtt-overlay-item', 'vtt-vision-cone'];
-        const arcDeg = clamp(toNumber(geometry.arcDeg, 90), 1, 360);
-        const facingDeg = normalizeAngleDeg(toNumber(geometry.facingDeg, 0));
-        const centerX = toNumber(geometry.centerX, 0);
-        const centerY = toNumber(geometry.centerY, 0);
-        const radiusPx = Math.max(1, toNumber(geometry.radiusPx, 0));
-        const handleGuidePoint = getPointAtAngle(centerX, centerY, radiusPx, facingDeg);
-        const shapeMarkup = arcDeg >= 359.5
-            ? `
-                <circle cx="${centerX.toFixed(3)}" cy="${centerY.toFixed(3)}" r="${radiusPx.toFixed(3)}"
-                    fill="${fill}"
-                    stroke="${stroke}"
-                    stroke-width="8"
-                    vector-effect="non-scaling-stroke"></circle>
-            `
-            : (() => {
-                const startPoint = getPointAtAngle(centerX, centerY, radiusPx, facingDeg - arcDeg / 2);
-                const endPoint = getPointAtAngle(centerX, centerY, radiusPx, facingDeg + arcDeg / 2);
-                const largeArcFlag = arcDeg > 180 ? 1 : 0;
-                const path = [
-                    `M ${centerX.toFixed(3)} ${centerY.toFixed(3)}`,
-                    `L ${startPoint.x.toFixed(3)} ${startPoint.y.toFixed(3)}`,
-                    `A ${radiusPx.toFixed(3)} ${radiusPx.toFixed(3)} 0 ${largeArcFlag} 1 ${endPoint.x.toFixed(3)} ${endPoint.y.toFixed(3)}`,
-                    'Z'
-                ].join(' ');
-                return `
-                    <path d="${path}"
-                        fill="${fill}"
-                        stroke="${stroke}"
-                        stroke-width="8"
-                        vector-effect="non-scaling-stroke"></path>
-                `;
-            })();
-        if (visionConeRotateState && visionConeRotateState.tokenId === token.id) classes.push('is-rotating');
-        const guideMarkup = selectedTokenId === token.id && canRoleMoveToken(token)
-            ? `
-                <line class="vtt-vision-cone-guide"
-                    x1="${centerX.toFixed(3)}"
-                    y1="${centerY.toFixed(3)}"
-                    x2="${handleGuidePoint.x.toFixed(3)}"
-                    y2="${handleGuidePoint.y.toFixed(3)}"
-                    vector-effect="non-scaling-stroke"></line>
-            `
-            : '';
-        return `
-            <div class="${classes.join(' ')}"
-                data-token-id="${escapeHtml(String(token.id || ''))}"
-                data-world-left="${escapeHtml(String(geometry.left))}"
-                data-world-top="${escapeHtml(String(geometry.top))}"
-                data-world-width="${escapeHtml(String(geometry.width))}"
-                data-world-height="${escapeHtml(String(geometry.height))}">
-                <svg viewBox="0 0 ${escapeHtml(String(geometry.width))} ${escapeHtml(String(geometry.height))}" preserveAspectRatio="none" aria-hidden="true">
-                    ${shapeMarkup}
-                    ${guideMarkup}
-                </svg>
-            </div>
-        `;
-    };
-
-    const buildVisionConeHandleMarkup = (token, scene, sceneSize = worldSize, now = Date.now()) => {
-        if (!isDM() || selectedTokenId !== token.id) return '';
-        const renderedToken = getRenderableVisionToken(token, scene, now);
-        const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
-        if (!geometry) return '';
-        const handleOffsetPx = 18 / Math.max(0.25, localView.zoom);
-        const handlePoint = getPointAtAngle(
-            toNumber(geometry.centerX, 0),
-            toNumber(geometry.centerY, 0),
-            Math.max(1, toNumber(geometry.radiusPx, 0)) + handleOffsetPx,
-            normalizeAngleDeg(toNumber(geometry.facingDeg, 0))
-        );
-        const leftPercent = geometry.width ? (handlePoint.x / geometry.width) * 100 : 0;
-        const topPercent = geometry.height ? (handlePoint.y / geometry.height) * 100 : 0;
-        return `
-            <div class="vtt-overlay-item vtt-vision-handle-overlay"
-                data-world-left="${escapeHtml(String(geometry.left))}"
-                data-world-top="${escapeHtml(String(geometry.top))}"
-                data-world-width="${escapeHtml(String(geometry.width))}"
-                data-world-height="${escapeHtml(String(geometry.height))}">
-                <button class="vtt-template-rotate-handle vtt-vision-cone-rotate-handle" type="button"
-                    data-token-id="${escapeHtml(String(token.id || ''))}"
-                    style="left:${escapeHtml(String(leftPercent))}%;top:${escapeHtml(String(topPercent))}%;"
-                    aria-label="Rotate sight cone"></button>
-            </div>
-        `;
-    };
-
-    const buildAreaTemplateMarkup = (template, scene, { preview = false, transient = false } = {}) => {
-        const geometry = getAreaTemplateWorldGeometry(template, scene);
-        if (!geometry) return '';
-        const classes = [
-            'vtt-overlay-item',
-            'vtt-area-template',
-            template.kind === TEMPLATE_KIND_CONE ? 'is-cone' : 'is-circle'
-        ];
-        if (preview) classes.push('is-preview');
-        if (transient) classes.push('is-transient');
-        const shapeMarkup = template.kind === TEMPLATE_KIND_CONE
-            ? `
-                <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                    <polygon points="0,50 100,0 100,100"
-                        fill="rgba(255, 211, 102, 0.2)"
-                        stroke="rgba(255, 227, 163, 0.84)"
-                        stroke-width="1.8"></polygon>
-                </svg>
-            `
-            : `
-                <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                    <circle cx="50" cy="50" r="48"
-                        fill="rgba(255, 211, 102, 0.18)"
-                        stroke="rgba(255, 227, 163, 0.84)"
-                        stroke-width="2"></circle>
-                </svg>
-            `;
-        return `
-            <div class="${classes.join(' ')}"
-                data-template-id="${escapeHtml(String(template.id || ''))}"
-                data-world-left="${escapeHtml(String(geometry.left))}"
-                data-world-top="${escapeHtml(String(geometry.top))}"
-                data-world-width="${escapeHtml(String(geometry.width))}"
-                data-world-height="${escapeHtml(String(geometry.height))}"
-                data-world-rotation="${escapeHtml(String(geometry.rotationDeg))}">
-                ${shapeMarkup}
-            </div>
-        `;
-    };
-
-    const buildPingMarkup = (ping, scene) => {
-        if (!ping || !scene) return '';
-        const askRollRequest = getAskRollRequestFromPing(ping);
-        if (askRollRequest) return buildAskRollMarkup(ping, scene, askRollRequest);
-        const cellPx = getSceneCellPx(scene);
-        const markerSize = Math.max(72, cellPx * 2.25);
-        const color = normalizeHexColor(ping.color, '#4f8dff');
-        const rgb = getHexColorRgbString(color, '#4f8dff');
-        const label = String(ping.label || 'Ping').trim().slice(0, 80) || 'Ping';
-        const variant = String(ping.variant || 'attention').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || 'attention';
-        const icon = (PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || PING_VARIANT_OPTIONS.attention).icon;
-        const pingId = String(ping.id || '').trim();
-        return `
-            <div class="vtt-overlay-item vtt-ping is-${escapeHtml(variant)}"
-                data-ping-id="${escapeHtml(pingId)}"
-                data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - markerSize / 2))}"
-                data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - markerSize / 2))}"
-                data-world-width="${escapeHtml(String(markerSize))}"
-                data-world-height="${escapeHtml(String(markerSize))}"
-                style="--vtt-ping-color:${escapeHtml(color)};--vtt-ping-rgb:${escapeHtml(rgb)};">
-                <div class="vtt-ping-ring"></div>
-                <div class="vtt-ping-core">${escapeHtml(icon)}</div>
-                <div class="vtt-ping-label">${escapeHtml(label)}</div>
-            </div>
-        `;
-    };
-
-    const buildAskRollMarkup = (ping, scene, request = null) => {
-        if (!ping || !scene) return '';
-        const cellPx = getSceneCellPx(scene);
-        const markerSize = Math.max(54, cellPx * 1.45);
-        const panelWidth = Math.max(184, markerSize * 3.25);
-        const gap = Math.max(10, markerSize * 0.2);
-        const boxWidth = markerSize + gap + panelWidth;
-        const boxHeight = Math.max(markerSize, 82);
-        const pingId = String(ping.id || '').trim();
-        const cleanRequest = request || getAskRollRequestFromPing(ping);
-        const requestLabel = String(cleanRequest && cleanRequest.label || '').trim().slice(0, 48) || 'Roll?';
-        const canRoll = canLocalRollAskRollRequest(cleanRequest);
-        const canCancel = canLocalCancelAskRollRequest(cleanRequest);
-        const color = normalizeHexColor(ping.color, '#7ee787');
-        const rgb = getHexColorRgbString(color, '#7ee787');
-        return `
-            <div class="vtt-overlay-item vtt-ask-roll-marker"
-                data-ping-id="${escapeHtml(pingId)}"
-                data-world-left="${escapeHtml(String(toNumber(ping.x, 0) - markerSize / 2))}"
-                data-world-top="${escapeHtml(String(toNumber(ping.y, 0) - boxHeight / 2))}"
-                data-world-width="${escapeHtml(String(boxWidth))}"
-                data-world-height="${escapeHtml(String(boxHeight))}"
-                style="--vtt-ask-roll-color:${escapeHtml(color)};--vtt-ask-roll-rgb:${escapeHtml(rgb)};--vtt-ask-roll-pin-size:${escapeHtml(String(markerSize))}px;">
-                <button class="vtt-ask-roll-pin" type="button"${canRoll ? ` data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}" title="Roll ${escapeHtml(requestLabel)}"` : ' disabled aria-disabled="true" title="Waiting for the owner to roll"'} >
-                    <span class="vtt-ask-roll-pin-dot"></span>
-                </button>
-                <div class="vtt-ask-roll-card" aria-label="Ask to roll ${escapeHtml(requestLabel)}" style="left:${escapeHtml(String(markerSize + gap))}px;width:${escapeHtml(String(panelWidth))}px;">
-                    <span class="vtt-ask-roll-title">Ask To Roll</span>
-                    <strong>${escapeHtml(requestLabel)}</strong>
-                    ${canRoll || canCancel ? `
-                        <span class="vtt-ask-roll-actions">
-                            ${canRoll ? `<button class="vtt-chip-btn strong" type="button" data-action="roll-ask-roll-ping" data-id="${escapeHtml(pingId)}">Roll</button>` : ''}
-                            ${canCancel ? `<button class="vtt-chip-btn" type="button" data-action="cancel-ask-roll-ping" data-id="${escapeHtml(pingId)}">Cancel</button>` : ''}
-                        </span>
-                    ` : '<span class="vtt-ask-roll-note">Waiting for owner</span>'}
-                </div>
-            </div>
-        `;
-    };
-
-    const buildEvidenceNoteMarkup = (note, scene, { preview = false, selected = false } = {}) => {
-        if (!note || !scene) return '';
-        const classes = ['vtt-overlay-item', 'vtt-map-note'];
-        if (preview) classes.push('is-preview');
-        if (selected) classes.push('is-selected');
-        if (note.hidden) classes.push('is-hidden');
-        if (isEvidenceNotePin(note)) classes.push('is-pin', 'is-icon-only');
-        if (activeProximityPrompt && activeProximityPrompt.sourceKind === 'note' && String(activeProximityPrompt.sourceId || '').trim() === String(note.id || '').trim()) {
-            classes.push('is-proximity-source');
+    const vttMarkupFactory = window.RTF_VTT_MARKUP;
+    if (!vttMarkupFactory || typeof vttMarkupFactory.create !== 'function') {
+        throw new Error('VTT markup module failed to load.');
+    }
+    const vttMarkup = vttMarkupFactory.create({
+        escapeHtml,
+        toNumber,
+        clamp,
+        normalizeAngleDeg,
+        getPointAtAngle,
+        normalizeClockMax,
+        normalizeClockCurrent,
+        getVisionConeGeometry,
+        getStealthVisionTargetSummary,
+        getAreaTemplateWorldGeometry,
+        getAskRollRequestFromPing,
+        getSceneCellPx,
+        normalizeHexColor,
+        getHexColorRgbString,
+        normalizePingVariant,
+        isEvidenceNotePin,
+        normalizeEvidenceNoteCategory,
+        getEvidenceNoteCategoryLabel,
+        getEvidenceNoteDisplayTitle,
+        buildEvidenceNoteAreaLabel,
+        getEvidenceNoteHighlightColor,
+        getEvidenceNoteHighlightRgb,
+        normalizeEvidenceNoteShape,
+        getEvidenceNoteCategoryShortLabel,
+        getTemplateWorldPoint,
+        pingVariantOptions: C.PING_VARIANT_OPTIONS
+    });
+    const buildClockPieMarkup = (clock) => vttMarkup.buildClockPieMarkup(clock);
+    const vttStageViewFactory = window.RTF_VTT_STAGE_VIEW;
+    if (!vttStageViewFactory || typeof vttStageViewFactory.create !== 'function') {
+        throw new Error('VTT stage view module failed to load.');
+    }
+    resources.stageView = vttStageViewFactory.create({
+        applyEvidenceNoteChipPresentation,
+        buildId,
+        buildInitials,
+        canLocalCancelAskRollRequest,
+        canLocalRollAskRollRequest,
+        canRoleMoveToken,
+        clamp,
+        clampZoom,
+        escapeHtml,
+        evaluateProximityTriggers,
+        getActiveScene,
+        getAskRollRequestFromPing,
+        getEntryById,
+        getFitViewOnNextMapLoad: () => stageState.view.fitOnNextMapLoad,
+        getLocalRole: () => sessionState.role,
+        getRenderableScenePings,
+        getRenderableSceneTemplates,
+        getSceneCellPx,
+        getSceneMapScale,
+        getStageState: () => ({
+            initialVTTLoadPending: sessionState.initialLoadPending,
+            vttState: sessionState.snapshot,
+            localRole: sessionState.role,
+            isDM: isDM(),
+            selectedTokenId: stageState.selection.tokenId,
+            selectedEntryId: stageState.selection.entryId,
+            selectedEvidenceNoteId: stageState.selection.evidenceNoteId,
+            previewTokenId: stageState.preview.tokenId,
+            dragState: stageState.pointer.drag,
+            activeProximityPrompt: getActiveProximityPrompt(),
+            visionConeRotateState: stageState.placement.visionConeRotate,
+            templatePlacementState: stageState.placement.template,
+            rulerState: stageState.placement.ruler,
+            fogPlacementState: stageState.placement.fog,
+            evidenceNotePlacementState: stageState.placement.evidenceNote
+        }),
+        getTokenDamageFraction,
+        getTokenImageRenderUrl,
+        getTokenMoodText,
+        getTokenVisionFacingDeg,
+        getUsableMediaUrl,
+        getViewedSceneId,
+        getVisibleSceneTokenForEntry,
+        isTokenBloodied,
+        normalizeAngleDeg,
+        normalizeMoodEmoji,
+        normalizeTokenCoordinate,
+        positionProximityPrompt: (...args) => vttProximityController.positionProximityPrompt(...args),
+        positiveModulo,
+        renderProximityPrompt,
+        setFitViewOnNextMapLoad: (value) => {
+            stageState.view.fitOnNextMapLoad = !!value;
+        },
+        toNumber,
+        localView: stageState.view.local,
+        worldSize: stageState.view.world,
+        remoteTokenTweens: resources.remoteTokenTweens,
+        dom: {
+            stageEl: dom.stageEl,
+            mapWorldEl: dom.mapWorldEl,
+            worldEl: dom.worldEl,
+            stageGridEl: dom.stageGridEl,
+            mapImageEl: dom.mapImageEl,
+            gridLayerEl: dom.gridLayerEl,
+            fogLayerEl: dom.fogLayerEl,
+            noteLayerEl: dom.noteLayerEl,
+            templateLayerEl: dom.templateLayerEl,
+            tokenLayerEl: dom.tokenLayerEl,
+            visionLayerEl: dom.visionLayerEl,
+            proximityPromptStackEl: dom.proximityPromptStackEl,
+            zoomResetEls: dom.zoomResetEls
+        },
+        geometry: vttGeometry,
+        markup: vttMarkup,
+        config: {
+            defaultWorldSize: C.DEFAULT_WORLD_SIZE,
+            defaultCellPx: C.DEFAULT_VTT_CELL_PX,
+            tokenCoordPrecision: C.TOKEN_COORD_PRECISION,
+            remoteTokenTweenMs: C.REMOTE_TOKEN_TWEEN_MS,
+            localDragTweenSuppressMs: C.LOCAL_DRAG_TWEEN_SUPPRESS_MS,
+            tokenHpFlashMs: C.TOKEN_HP_FLASH_MS,
+            fogRevealShimmerMs: C.FOG_REVEAL_SHIMMER_MS,
+            stealthStatusDetected: C.STEALTH_STATUS_DETECTED,
+            stealthStatusUnseen: C.STEALTH_STATUS_UNSEEN
         }
-        const category = normalizeEvidenceNoteCategory(note.category);
-        const categoryLabel = getEvidenceNoteCategoryLabel(category);
-        const displayTitle = getEvidenceNoteDisplayTitle(note);
-        const description = String(note && note.body || '').trim();
-        const areaLabel = buildEvidenceNoteAreaLabel(note, scene);
-        const highlightColor = getEvidenceNoteHighlightColor(note);
-        const highlightRgb = getEvidenceNoteHighlightRgb(note);
-        const kicker = note.hidden ? `DM Only · ${categoryLabel}` : categoryLabel;
-        const isPin = isEvidenceNotePin(note);
-        const noteX = toNumber(note.x, 0);
-        const noteY = toNumber(note.y, 0);
-        const noteW = Math.max(1, toNumber(note.w, 1));
-        const noteH = Math.max(1, toNumber(note.h, 1));
-        const worldLeft = isPin ? noteX - noteW / 2 : noteX;
-        const worldTop = isPin ? noteY - noteH / 2 : noteY;
-        return `
-            <div class="${classes.join(' ')}"
-                data-note-id="${escapeHtml(String(note.id || ''))}"
-                data-note-shape="${escapeHtml(normalizeEvidenceNoteShape(note.shape, EVIDENCE_NOTE_SHAPE_ZONE))}"
-                data-note-category="${escapeHtml(category)}"
-                data-note-title="${escapeHtml(displayTitle)}"
-                data-world-left="${escapeHtml(String(worldLeft))}"
-                data-world-top="${escapeHtml(String(worldTop))}"
-                data-world-width="${escapeHtml(String(noteW))}"
-                data-world-height="${escapeHtml(String(noteH))}"
-                style="--vtt-note-color:${escapeHtml(highlightColor)};--vtt-note-rgb:${escapeHtml(highlightRgb)};">
-                <div class="vtt-map-note-chip">
-                    <span class="vtt-map-note-kicker">${escapeHtml(kicker)}</span>
-                    <strong class="vtt-map-note-title" data-note-category-short="${escapeHtml(getEvidenceNoteCategoryShortLabel(category))}">${escapeHtml(displayTitle)}</strong>
-                    <span class="vtt-map-note-body">${escapeHtml(description || 'No marker details shared yet.')}</span>
-                    <span class="vtt-map-note-meta">${escapeHtml(areaLabel)}</span>
-                </div>
-            </div>
-        `;
-    };
-
-    const buildRulerMarkup = (scene) => {
-        if (!scene || !rulerState || !rulerState.dragging || rulerState.sceneId !== scene.id || !rulerState.start || !rulerState.end) return '';
-        const start = getTemplateWorldPoint(scene, rulerState.start);
-        const end = getTemplateWorldPoint(scene, rulerState.end);
-        const dx = end.x - start.x;
-        const dy = end.y - start.y;
-        const distanceCells = Math.hypot(toNumber(rulerState.end.x, 0) - toNumber(rulerState.start.x, 0), toNumber(rulerState.end.y, 0) - toNumber(rulerState.start.y, 0));
-        const distanceFeet = Math.round(distanceCells * Math.max(1, toNumber(scene.grid && scene.grid.cellDistance, 5)));
-        const label = `${Number.isInteger(distanceCells) ? distanceCells : Math.round(distanceCells * 10) / 10} sq · ${distanceFeet} ft`;
-        return `
-            <div class="vtt-overlay-item vtt-ruler-line"
-                data-world-left="${escapeHtml(String(start.x))}"
-                data-world-top="${escapeHtml(String(start.y - 10))}"
-                data-world-width="${escapeHtml(String(Math.max(1, Math.hypot(dx, dy))))}"
-                data-world-height="20"
-                data-world-rotation="${escapeHtml(String(normalizeAngleDeg(Math.atan2(dy, dx) * 180 / Math.PI)))}">
-                <div class="vtt-ruler-label">${escapeHtml(label)}</div>
-            </div>
-        `;
-    };
-
-    const renderVisionLayer = (scene, visibleTokens, sceneSize = worldSize, now = Date.now()) => {
-        if (!visionLayerEl) return;
-        const showStealthCones = !!(scene && scene.stealthMode);
-        const handleMarkup = showStealthCones
-            ? visibleTokens
-                .filter((token) => {
-                    const side = String(token && token.side || '').trim().toLowerCase();
-                    return side === 'enemy' || side === 'neutral';
-                })
-                .map((token) => buildVisionConeHandleMarkup(token, scene, sceneSize, now))
-                .join('')
-            : '';
-        const pingMarkup = getRenderableScenePings(scene, now).map((ping) => buildPingMarkup(ping, scene)).join('');
-        visionLayerEl.innerHTML = `${handleMarkup}${pingMarkup}`;
-        schedulePingExpiryRender(scene);
-    };
-
-    const renderTemplateLayer = (scene, visibleTokens, sceneSize = worldSize, now = Date.now()) => {
-        if (!templateLayerEl) return;
-        const showStealthCones = !!(scene && scene.stealthMode);
-        const visibleTemplates = getRenderableSceneTemplates(scene);
-        const visionMarkup = showStealthCones
-            ? visibleTokens
-                .filter((token) => {
-                    const side = String(token && token.side || '').trim().toLowerCase();
-                    return side === 'enemy' || side === 'neutral';
-                })
-                .map((token) => buildVisionConeMarkup(token, scene, sceneSize, now))
-                .join('')
-            : '';
-        const templateMarkup = visibleTemplates.map((template) => buildAreaTemplateMarkup(template, scene, { transient: true })).join('');
-        const previewMarkup = templatePlacementState && templatePlacementState.sceneId === scene.id && templatePlacementState.template
-            ? buildAreaTemplateMarkup(templatePlacementState.template, scene, { preview: true })
-            : '';
-        const rulerMarkup = buildRulerMarkup(scene);
-        templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`;
-        scheduleTemplateExpiryRender(scene);
-    };
-
-    const buildTokenClassName = (options = {}) => {
-        const token = options.token;
-        const stealthStatus = String(options.stealthStatus || '').trim();
-        const classes = ['vtt-token'];
-        if (options.usableImageUrl) classes.push('has-image');
-        if (options.moodEmoji) classes.push('has-mood-corner');
-        if (token && token.id === selectedTokenId) classes.push('is-selected');
-        if (token && token.id === options.focusedEntryTokenId) classes.push('is-entry-linked');
-        if (token && token.id === options.activeTurnTokenId) classes.push('is-active-turn');
-        if (options.isHiddenToPlayers) classes.push('is-hidden');
-        if (token && token.id === previewTokenId) classes.push('is-preview-open');
-        if (token && dragState && String(dragState.tokenId || '').trim() === String(token.id || '').trim()) classes.push('is-dragging');
-        if (activeProximityPrompt && activeProximityPrompt.sourceKind === 'token' && token && String(activeProximityPrompt.sourceId || '').trim() === String(token.id || '').trim()) {
-            classes.push('is-proximity-source');
-        }
-        if (options.visualEffectKind) classes.push(`is-${options.visualEffectKind}`);
-        if (stealthStatus === STEALTH_STATUS_DETECTED) classes.push('is-stealth-detected');
-        if (stealthStatus === STEALTH_STATUS_UNSEEN) classes.push('is-stealth-unseen');
-        return classes.join(' ');
-    };
-
-    const renderTokenStableContent = (tokenEl, token, usableImageUrl, moodEmoji, moodText) => {
-        const label = String(token && token.label || 'Token');
-        const initials = buildInitials(label);
-        const signature = JSON.stringify({
-            image: usableImageUrl || '',
-            label,
-            initials,
-            moodEmoji: moodEmoji || '',
-            moodText: moodText || ''
-        });
-        if (tokenEl.dataset.renderSignature === signature) return;
-        tokenEl.innerHTML = `
-            <div class="vtt-token-corona"></div>
-            <div class="vtt-token-face">
-                ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(label)}" draggable="false" decoding="async">` : `<div class="vtt-token-initials">${escapeHtml(initials)}</div>`}
-            </div>
-            ${moodEmoji ? `<div class="vtt-token-mood-corner">${escapeHtml(moodEmoji)}</div>` : ''}
-            <div class="vtt-token-subtitle">${escapeHtml(label)}</div>
-        `;
-        tokenEl.dataset.renderSignature = signature;
-    };
-
-    const renderTokenLayer = (scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime) => {
-        if (!tokenLayerEl || !scene || !scene.grid) return;
-        const liveIds = new Set();
-        visibleTokens.forEach((token) => {
-            const tokenId = String(token && token.id || '').trim();
-            if (tokenId) liveIds.add(tokenId);
-        });
-        Array.from(tokenLayerEl.querySelectorAll('.vtt-token')).forEach((tokenEl) => {
-            const tokenId = String(tokenEl.getAttribute('data-token-id') || '').trim();
-            if (!liveIds.has(tokenId)) tokenEl.remove();
-        });
-
-        visibleTokens.forEach((token) => {
-            const tokenId = String(token && token.id || '').trim();
-            if (!tokenId) return;
-            const renderedCells = getRenderableTokenCells(token, scene, renderTime);
-            const usableImageUrl = getTokenImageRenderUrl(token);
-            const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
-            const isBloodied = isTokenBloodied(token);
-            const isHiddenToPlayers = !!token.hidden || isTokenUnderFog(scene, token);
-            const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
-            const moodText = getTokenMoodText(token);
-            const currentHp = Number(token && token.hpCurrent);
-            const previousHp = tokenHpSnapshot.get(tokenId);
-            if (Number.isFinite(currentHp)) {
-                if (Number.isFinite(previousHp) && currentHp !== previousHp) {
-                    markTokenVisualEffect(tokenId, currentHp < previousHp ? 'damage-flash' : 'heal-flash', TOKEN_HP_FLASH_MS);
-                }
-                tokenHpSnapshot.set(tokenId, currentHp);
-            } else {
-                tokenHpSnapshot.delete(tokenId);
-            }
-            const visualEffectKind = getTokenVisualEffectKind(tokenId, renderTime);
-            const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(tokenId) : tokenId.replace(/"/g, '\\"');
-            let tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
-            if (!tokenEl) {
-                tokenEl = document.createElement('div');
-            }
-            tokenLayerEl.appendChild(tokenEl);
-            tokenEl.className = buildTokenClassName({
-                token,
-                usableImageUrl,
-                moodEmoji,
-                focusedEntryTokenId,
-                activeTurnTokenId,
-                isHiddenToPlayers,
-                stealthStatus,
-                visualEffectKind
-            });
-            tokenEl.dataset.tokenId = tokenId;
-            tokenEl.dataset.id = tokenId;
-            tokenEl.dataset.action = 'select-token';
-            tokenEl.dataset.side = token.side || 'neutral';
-            tokenEl.dataset.stealthStatus = stealthStatus;
-            tokenEl.dataset.bloodied = isBloodied ? '1' : '0';
-            tokenEl.dataset.worldLeft = String(scene.grid.offsetX + renderedCells.x * scene.grid.cellPx);
-            tokenEl.dataset.worldTop = String(scene.grid.offsetY + renderedCells.y * scene.grid.cellPx);
-            tokenEl.dataset.worldWidth = String(token.w * scene.grid.cellPx);
-            tokenEl.dataset.worldHeight = String(token.h * scene.grid.cellPx);
-            tokenEl.style.setProperty('--vtt-token-damage', String(getTokenDamageFraction(token)));
-            renderTokenStableContent(tokenEl, token, usableImageUrl, moodEmoji, moodText);
-        });
-    };
-
-    const renderStage = () => {
-        if (initialVTTLoadPending) return;
-        const renderTime = Date.now();
-        pruneVisualEffects(renderTime);
-        const scene = getActiveScene();
-        if (!scene || !mapWorldEl || !worldEl || !gridLayerEl || !fogLayerEl || !noteLayerEl || !templateLayerEl || !tokenLayerEl || !visionLayerEl) return;
-
-        loadMapForScene(scene);
-        worldSize = getWorldSizeForScene(scene);
-        const mapDisplaySize = getLoadedMapSizeForScene(scene);
-        mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
-
-        const fogCellSet = Array.isArray(scene.fog)
-            ? collectFogCellSet(scene, scene.fog)
-            : new Set();
-
-        evaluateProximityTriggers();
-
-        const fogMarkup = '';
-        const fogEdgeMarkup = buildFogEdgeMarkup(scene, fogCellSet);
-
-        const fogPreviewMarkup = fogPlacementState && fogPlacementState.sceneId === scene.id && fogPlacementState.mask
-            ? buildFogMaskMarkup(scene, fogPlacementState.mask, fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
-            : '';
-        const fogRevealMarkup = buildFogRevealShimmerMarkup(renderTime);
-
-        fogLayerEl.innerHTML = `${fogMarkup}${fogEdgeMarkup}${fogPreviewMarkup}${fogRevealMarkup}`;
-
-        const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
-        const evidenceMarkup = visibleEvidenceNotes
-            .map((note) => buildEvidenceNoteMarkup(note, scene, { selected: note.id === selectedEvidenceNoteId }))
-            .join('');
-        const evidencePreviewMarkup = evidenceNotePlacementState && evidenceNotePlacementState.sceneId === scene.id && evidenceNotePlacementState.note
-            ? buildEvidenceNoteMarkup(evidenceNotePlacementState.note, scene, { preview: true, selected: true })
-            : '';
-        noteLayerEl.innerHTML = `${evidenceMarkup}${evidencePreviewMarkup}`;
-
-        const visibleTokens = getVisibleTokensForRole(scene);
-        const initiative = vttState && vttState.initiative ? vttState.initiative : { activeEntryId: '' };
-        const activeTurnToken = getVisibleSceneTokenForEntry(getEntryById(initiative.activeEntryId), vttState, localRole);
-        const focusedEntryToken = getVisibleSceneTokenForEntry(getEntryById(selectedEntryId), vttState, localRole);
-        const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
-        const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
-        const stealthStatusMap = buildStealthStatusMap(scene, vttState);
-
-        renderTemplateLayer(scene, visibleTokens, worldSize, renderTime);
-
-        renderTokenLayer(scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime);
-
-        renderVisionLayer(scene, visibleTokens, worldSize, renderTime);
-
-        applyRenderedWorldGeometry(scene);
-        if (hasActiveSceneRemoteTweens(scene.id, renderTime)) scheduleRemoteTokenTweenRender();
-        if (fitViewOnNextMapLoad && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
-            fitViewOnNextMapLoad = false;
-            fitViewToWorld();
-        } else {
-            applyWorldTransform(scene);
-        }
-        renderProximityPrompt();
-    };
-
+    });
     const renderTableDocks = () => {
-        const activePanel = getAllowedVTTPanel(uiState.activeVttPanel);
-        const isRulerActive = localToolState.mode === TOOL_MODE_RULER;
-        if (playerMeasureButtonEl) playerMeasureButtonEl.setAttribute('aria-pressed', isRulerActive ? 'true' : 'false');
-        if (playerPingButtonEl) {
-            playerPingButtonEl.disabled = isSpectator();
-            playerPingButtonEl.setAttribute('aria-pressed', localToolState.mode === TOOL_MODE_PING ? 'true' : 'false');
+        const activePanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
+        const isRulerActive = stageState.tool.current.mode === C.TOOL_MODE_RULER;
+        if (dom.playerMeasureButtonEl) dom.playerMeasureButtonEl.setAttribute('aria-pressed', isRulerActive ? 'true' : 'false');
+        if (dom.playerPingButtonEl) {
+            dom.playerPingButtonEl.disabled = isSpectator();
+            dom.playerPingButtonEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_PING ? 'true' : 'false');
         }
-        if (playerRollsButtonEl) playerRollsButtonEl.setAttribute('aria-expanded', activePanel === 'player-rolls' ? 'true' : 'false');
-        if (playerCombatButtonEl) playerCombatButtonEl.setAttribute('aria-expanded', activePanel === 'combat' ? 'true' : 'false');
-        if (isPlayer() && playerDockStatusEl) {
+        if (dom.playerRollsButtonEl) dom.playerRollsButtonEl.setAttribute('aria-expanded', activePanel === 'player-rolls' ? 'true' : 'false');
+        if (isPlayer() && dom.playerDockStatusEl) {
             const context = getLocalPlayerFocusContext();
             const name = context.linkedPlayer && context.linkedPlayer.name
                 ? context.linkedPlayer.name
                 : (context.identity && context.identity.characterName ? context.identity.characterName : 'Unlinked');
-            playerDockStatusEl.innerHTML = `<strong>${escapeHtml(context.isTurn ? 'Your Turn' : name)}</strong><span>${escapeHtml(context.token ? 'Ready at the table' : 'No visible token')}</span>`;
-            if (playerFindTokenEl) playerFindTokenEl.disabled = !context.token;
+            dom.playerDockStatusEl.innerHTML = `<strong>${escapeHtml(context.isTurn ? 'Your Turn' : name)}</strong><span>${escapeHtml(context.token ? 'Ready at the table' : 'No visible token')}</span>`;
+            if (dom.playerFindTokenEl) dom.playerFindTokenEl.disabled = !context.token;
         }
-        if (toolsMenuToggleEl) {
-            toolsMenuToggleEl.setAttribute('aria-expanded', toolsMenuOpen ? 'true' : 'false');
-            toolsMenuToggleEl.setAttribute('aria-pressed', activePanel === 'dm-tools' ? 'true' : 'false');
+        if (dom.toolsMenuToggleEl) {
+            dom.toolsMenuToggleEl.setAttribute('aria-expanded', uiRuntime.menus.toolsOpen ? 'true' : 'false');
+            dom.toolsMenuToggleEl.setAttribute('aria-pressed', activePanel === 'dm-tools' ? 'true' : 'false');
         }
     };
 
     const renderSceneControls = () => {
         const scene = getActiveScene();
         if (!scene) return;
-        const sharedScene = getSceneById(getSharedSceneId(vttState), vttState) || scene;
-        const toolMeta = localToolState.mode === TOOL_MODE_PING
-            ? (pendingAskRollRequest
-                ? `Ask-to-roll active: click the map where you want to place ${pendingAskRollRequest.label}.`
+        const sharedScene = getSceneById(getSharedSceneId(sessionState.snapshot), sessionState.snapshot) || scene;
+        const toolMeta = stageState.tool.current.mode === C.TOOL_MODE_PING
+            ? (stageState.tool.pendingAskRollRequest
+                ? `Ask-to-roll active: click the map where you want to place ${stageState.tool.pendingAskRollRequest.label}.`
                 : `${getPingVariantOptions().label} ping active: click the map to show every connected player a short-lived marker.`)
-            : (localToolState.mode === TOOL_MODE_RULER
+            : (stageState.tool.current.mode === C.TOOL_MODE_RULER
             ? 'Ruler active: click and hold on the stage to measure squares and feet.'
-            : (localToolState.mode === TOOL_MODE_CIRCLE
-                ? `Circle tool active: click and hold to preview a ${localToolState.sizeCells}-square radius circle. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
-                : (localToolState.mode === TOOL_MODE_CONE
-                    ? `Cone tool active: click and hold to preview a ${localToolState.sizeCells}-square cone. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
-                    : (localToolState.mode === TOOL_MODE_NOTE
+            : (stageState.tool.current.mode === C.TOOL_MODE_CIRCLE
+                ? `Circle tool active: click and hold to preview a ${stageState.tool.current.sizeCells}-square radius circle. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
+                : (stageState.tool.current.mode === C.TOOL_MODE_CONE
+                    ? `Cone tool active: click and hold to preview a ${stageState.tool.current.sizeCells}-square cone. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
+                    : (stageState.tool.current.mode === C.TOOL_MODE_NOTE
                         ? 'Pin / Zone tool active: click to place a point pin, or drag a rectangle to tag a zone. Both can be shared to players or kept DM-only.'
-                    : (localToolState.mode === TOOL_MODE_FOG
+                    : (stageState.tool.current.mode === C.TOOL_MODE_FOG
                         ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tokens under fog are hidden from players.'
-                        : (localToolState.mode === TOOL_MODE_FOG_REMOVE
+                        : (stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE
                             ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
                     : (isDM()
                         ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Double-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Arrow keys move the selected token by one cell.'
@@ -10274,44 +5462,44 @@
                             ? 'Spectator mode: drag empty space to pan, scroll or pinch to zoom, and click visible pins or zones to read them.'
                             : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click pins or zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
-        const dockToolStatus = localToolState.mode === TOOL_MODE_PING
-            ? (pendingAskRollRequest ? 'Ask roll' : 'Ping')
-            : (localToolState.mode === TOOL_MODE_RULER
+        const dockToolStatus = stageState.tool.current.mode === C.TOOL_MODE_PING
+            ? (stageState.tool.pendingAskRollRequest ? 'Ask roll' : 'Ping')
+            : (stageState.tool.current.mode === C.TOOL_MODE_RULER
                 ? 'Measure'
-                : (localToolState.mode === TOOL_MODE_CIRCLE
-                    ? `Circle ${localToolState.sizeCells}`
-                    : (localToolState.mode === TOOL_MODE_CONE
-                        ? `Cone ${localToolState.sizeCells}`
-                        : (localToolState.mode === TOOL_MODE_NOTE
+                : (stageState.tool.current.mode === C.TOOL_MODE_CIRCLE
+                    ? `Circle ${stageState.tool.current.sizeCells}`
+                    : (stageState.tool.current.mode === C.TOOL_MODE_CONE
+                        ? `Cone ${stageState.tool.current.sizeCells}`
+                        : (stageState.tool.current.mode === C.TOOL_MODE_NOTE
                             ? 'Pins'
-                            : (localToolState.mode === TOOL_MODE_FOG
+                            : (stageState.tool.current.mode === C.TOOL_MODE_FOG
                                 ? 'Fog'
-                                : (localToolState.mode === TOOL_MODE_FOG_REMOVE
+                                : (stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE
                                     ? 'Unfog'
                                     : (isSpectator() ? 'View' : 'Select')))))));
         applyUIPreferences();
         renderToolsMenu();
         renderModeChip();
         renderSceneList();
-        if (caseNameEl) caseNameEl.textContent = getActiveCaseName();
-        if (roleToggleEl) roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
-        if (spectatorToggleEl) {
-            spectatorToggleEl.textContent = isSpectator() ? 'Leave Spectator' : 'Spectator';
-            spectatorToggleEl.setAttribute('aria-pressed', isSpectator() ? 'true' : 'false');
+        if (dom.caseNameEl) dom.caseNameEl.textContent = getActiveCaseName();
+        if (dom.roleToggleEl) dom.roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
+        if (dom.spectatorToggleEl) {
+            dom.spectatorToggleEl.textContent = isSpectator() ? 'Leave Spectator' : 'Spectator';
+            dom.spectatorToggleEl.setAttribute('aria-pressed', isSpectator() ? 'true' : 'false');
         }
-        if (activeSceneLabelEl) activeSceneLabelEl.textContent = `Scene: ${sharedScene.name || 'Scene'}`;
-        if (scenePanelSceneLabelEl) scenePanelSceneLabelEl.textContent = scene.name || 'Scene';
-        if (stageTitleEl) stageTitleEl.textContent = scene.name || 'Scene';
-        if (stageMetaEl) {
-            const metaParts = [dockToolStatus, `${Math.round(localView.zoom * 100)}%`];
+        if (dom.activeSceneLabelEl) dom.activeSceneLabelEl.textContent = `Scene: ${sharedScene.name || 'Scene'}`;
+        if (dom.scenePanelSceneLabelEl) dom.scenePanelSceneLabelEl.textContent = scene.name || 'Scene';
+        if (dom.stageTitleEl) dom.stageTitleEl.textContent = scene.name || 'Scene';
+        if (dom.stageMetaEl) {
+            const metaParts = [dockToolStatus, `${Math.round(stageState.view.local.zoom * 100)}%`];
             if (scene.stealthMode) metaParts.push('Sight cones');
-            stageMetaEl.textContent = metaParts.join(' / ');
+            dom.stageMetaEl.textContent = metaParts.join(' / ');
         }
-        if (stageEl) {
-            if (localToolState.mode === TOOL_MODE_NAVIGATE) {
-                stageEl.removeAttribute('title');
+        if (dom.stageEl) {
+            if (stageState.tool.current.mode === C.TOOL_MODE_NAVIGATE) {
+                dom.stageEl.removeAttribute('title');
             } else {
-                stageEl.title = `${toolMeta} ${stealthMeta}`;
+                dom.stageEl.title = `${toolMeta} ${stealthMeta}`;
             }
         }
         renderTableDocks();
@@ -10346,7 +5534,7 @@
     };
 
     const render = () => {
-        if (initialVTTLoadPending) return;
+        if (sessionState.initialLoadPending) return;
         normalizeSelections();
         renderSceneControls();
         renderViewMenu();
@@ -10371,28 +5559,28 @@
     };
 
     const updateSelectedEvidenceNote = (mutator) => {
-        if (!selectedEvidenceNoteId) return;
+        if (!stageState.selection.evidenceNoteId) return;
         withDraft((draft) => {
             const scene = getActiveScene(draft);
             if (!scene || !Array.isArray(scene.evidenceNotes)) return;
-            const idx = scene.evidenceNotes.findIndex((note) => String(note && note.id || '').trim() === selectedEvidenceNoteId);
+            const idx = scene.evidenceNotes.findIndex((note) => String(note && note.id || '').trim() === stageState.selection.evidenceNoteId);
             if (idx < 0) return;
             mutator(scene.evidenceNotes[idx], draft, scene);
         });
     };
 
     const updateSelectedToken = (mutator) => {
-        if (!selectedTokenId) return;
+        if (!stageState.selection.tokenId) return;
         withDraft((draft) => {
             const scene = getActiveScene(draft);
             if (!scene || !Array.isArray(scene.tokens)) return;
-            const idx = scene.tokens.findIndex((token) => token.id === selectedTokenId);
+            const idx = scene.tokens.findIndex((token) => token.id === stageState.selection.tokenId);
             if (idx < 0) return;
             mutator(scene.tokens[idx], draft);
             const rosterPlayer = getRosterPlayerForRecord(scene.tokens[idx]);
             if (rosterPlayer) syncTokenRosterIdentity(scene.tokens[idx], rosterPlayer);
             draft.initiative.entries = draft.initiative.entries.map((entry) => {
-                const matchesLinkedToken = entry.linkedTokenId === selectedTokenId;
+                const matchesLinkedToken = entry.linkedTokenId === stageState.selection.tokenId;
                 const matchesSourceIdentity = !!(
                     scene.tokens[idx].sourceType
                     && scene.tokens[idx].sourceId
@@ -10530,10 +5718,10 @@
 
     const updateSelectedEntry = (mutator, options = {}) => {
         if (!canEditInitiative()) return;
-        if (!selectedEntryId) return;
+        if (!stageState.selection.entryId) return;
         withDraft((draft) => {
             const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
-            const idx = entries.findIndex((entry) => entry.id === selectedEntryId);
+            const idx = entries.findIndex((entry) => entry.id === stageState.selection.entryId);
             if (idx < 0) return;
             mutator(entries[idx], draft);
             const linkedToken = findTokenByIdAcrossScenes(draft, entries[idx].linkedTokenId)
@@ -10569,9 +5757,9 @@
             const scene = getActiveScene(draft);
             if (!scene || !Array.isArray(scene.evidenceNotes)) return;
             scene.evidenceNotes = scene.evidenceNotes.filter((note) => String(note && note.id || '').trim() !== targetId);
-            if (selectedEvidenceNoteId === targetId) selectedEvidenceNoteId = '';
-            if (tokenInspectorState && tokenInspectorState.kind === 'note' && tokenInspectorState.targetId === targetId) {
-                tokenInspectorState = null;
+            if (stageState.selection.evidenceNoteId === targetId) stageState.selection.evidenceNoteId = '';
+            if (uiRuntime.overlays.tokenInspector && uiRuntime.overlays.tokenInspector.kind === 'note' && uiRuntime.overlays.tokenInspector.targetId === targetId) {
+                uiRuntime.overlays.tokenInspector = null;
             }
         });
         return true;
@@ -10594,9 +5782,9 @@
             copy.y = toNumber(source.y, 0) + cellPx;
             scene.evidenceNotes.push(copy);
             duplicateId = copy.id;
-            selectedEvidenceNoteId = copy.id;
-            selectedTokenId = '';
-            selectedEntryId = '';
+            stageState.selection.evidenceNoteId = copy.id;
+            stageState.selection.tokenId = '';
+            stageState.selection.entryId = '';
         });
         return !!duplicateId;
     };
@@ -10604,18 +5792,18 @@
     const assignSelectedEntryToToken = (tokenId) => {
         if (!canEditInitiative()) return false;
         const targetTokenId = String(tokenId || '').trim();
-        if (!selectedEntryId || !targetTokenId) return false;
+        if (!stageState.selection.entryId || !targetTokenId) return false;
         let assigned = false;
         withDraft((draft) => {
             const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
-            const idx = entries.findIndex((entry) => String(entry && entry.id || '').trim() === String(selectedEntryId || '').trim());
+            const idx = entries.findIndex((entry) => String(entry && entry.id || '').trim() === String(stageState.selection.entryId || '').trim());
             if (idx < 0) return;
             const token = findTokenByIdAcrossScenes(draft, targetTokenId);
             if (!token) return;
             persistSheetIdentityForLinkedPlayer(entries[idx], token);
             entries[idx] = linkInitiativeEntryToToken(entries[idx], token);
-            selectedTokenId = token.id;
-            selectedEvidenceNoteId = '';
+            stageState.selection.tokenId = token.id;
+            stageState.selection.evidenceNoteId = '';
             assigned = true;
         });
         return assigned;
@@ -10659,8 +5847,8 @@
         if (removedEntryIds.has(String(draft.initiative.activeEntryId || '').trim())) {
             draft.initiative.activeEntryId = draft.initiative.entries[0] ? draft.initiative.entries[0].id : '';
         }
-        if (removedEntryIds.has(String(selectedEntryId || '').trim())) {
-            selectedEntryId = draft.initiative.activeEntryId || '';
+        if (removedEntryIds.has(String(stageState.selection.entryId || '').trim())) {
+            stageState.selection.entryId = draft.initiative.activeEntryId || '';
         }
     };
 
@@ -10678,11 +5866,11 @@
             );
             if (existingIdx >= 0) {
                 entries[existingIdx] = syncInitiativeEntryFromToken(entries[existingIdx], token);
-                selectedEntryId = entries[existingIdx].id;
+                stageState.selection.entryId = entries[existingIdx].id;
             } else {
                 const nextEntry = buildInitiativeEntryFromToken(token);
                 entries.push(nextEntry);
-                selectedEntryId = nextEntry.id;
+                stageState.selection.entryId = nextEntry.id;
             }
             sortInitiativeEntries(entries);
             if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
@@ -10709,8 +5897,8 @@
     };
 
     const moveSelectedTokenByCells = (deltaX, deltaY) => {
-        if (!selectedTokenId) return false;
-        const token = getTokenById(selectedTokenId);
+        if (!stageState.selection.tokenId) return false;
+        const token = getTokenById(stageState.selection.tokenId);
         if (!token) return false;
         const nextX = Math.max(0, snapTokenCoordinate(token.x, token.x) + deltaX);
         const nextY = Math.max(0, snapTokenCoordinate(token.y, token.y) + deltaY);
@@ -10719,7 +5907,7 @@
         return withDraft((draft) => {
             const scene = getActiveScene(draft);
             if (!scene || !Array.isArray(scene.tokens)) return;
-            const draftToken = scene.tokens.find((entry) => entry && entry.id === selectedTokenId);
+            const draftToken = scene.tokens.find((entry) => entry && entry.id === stageState.selection.tokenId);
             if (!draftToken) return;
             draftToken.x = nextX;
             draftToken.y = nextY;
@@ -10728,11 +5916,13 @@
 
     const syncDraggedState = (force = false) => {
         const store = getStore();
-        if (!store || !vttState) return;
+        if (!store || !sessionState.snapshot) return;
+        const collabTransport = getVTTCollabTransport();
         const canSyncLivePosition = isVTTCollabReady()
+            && collabTransport
             && (
-                typeof vttCollabSession.syncSnapshot === 'function'
-                || typeof vttCollabSession.updateTokenPositions === 'function'
+                typeof collabTransport.syncSnapshot === 'function'
+                || typeof collabTransport.updateTokenPositions === 'function'
             );
         if (!canSyncLivePosition && requiresLiveVTTRoom()) {
             canMutateLiveVTTState(force ? 'token-drop' : 'token-drag');
@@ -10740,29 +5930,29 @@
         }
         if (!force && !canSyncLivePosition) return;
         const now = Date.now();
-        if (!force && lastDragSyncAt && now - lastDragSyncAt < DRAG_SYNC_INTERVAL_MS) return;
-        const localToken = dragState ? getTokenById(dragState.tokenId, vttState) : null;
-        const scene = getActiveScene(vttState);
+        if (!force && stageState.pointer.lastDragSyncAt && now - stageState.pointer.lastDragSyncAt < C.DRAG_SYNC_INTERVAL_MS) return;
+        const localToken = stageState.pointer.drag ? getTokenById(stageState.pointer.drag.tokenId, sessionState.snapshot) : null;
+        const scene = getActiveScene(sessionState.snapshot);
 
         if (!localToken || !scene) {
-            vttState = readSharedVTTSnapshot() || deepClone(vttState);
-            lastDragSyncAt = now;
+            sessionState.snapshot = readSharedVTTSnapshot() || deepClone(sessionState.snapshot);
+            stageState.pointer.lastDragSyncAt = now;
             return;
         }
 
         if (canSyncLivePosition) {
-            const sessionSnapshot = typeof vttCollabSession.getSnapshot === 'function'
-                ? deepClone(vttCollabSession.getSnapshot())
+            const sessionSnapshot = typeof collabTransport.getSnapshot === 'function'
+                ? deepClone(collabTransport.getSnapshot())
                 : readSharedVTTSnapshot();
-            const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : deepClone(vttState);
+            const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : deepClone(sessionState.snapshot);
             const nextScene = nextSnapshot && Array.isArray(nextSnapshot.scenes)
                 ? nextSnapshot.scenes.find((entry) => entry && entry.id === scene.id)
                 : null;
             const nextToken = nextScene && Array.isArray(nextScene.tokens)
                 ? nextScene.tokens.find((entry) => entry && entry.id === localToken.id)
                 : null;
-            if (typeof vttCollabSession.updateTokenPositions === 'function') {
-                Promise.resolve(vttCollabSession.updateTokenPositions([{
+            if (typeof collabTransport.updateTokenPositions === 'function') {
+                Promise.resolve(collabTransport.updateTokenPositions([{
                     sceneId: scene.id,
                     tokenId: localToken.id,
                     x: localToken.x,
@@ -10770,10 +5960,10 @@
                 }], force ? { flushNow: true } : {})).catch((err) => {
                     console.warn('VTT collaboration drag sync failed', err);
                 });
-            } else if (nextToken && typeof vttCollabSession.syncSnapshot === 'function') {
+            } else if (nextToken && typeof collabTransport.syncSnapshot === 'function') {
                 nextToken.x = localToken.x;
                 nextToken.y = localToken.y;
-                Promise.resolve(vttCollabSession.syncSnapshot(nextSnapshot, {
+                Promise.resolve(collabTransport.syncSnapshot(nextSnapshot, {
                     baseSnapshot: sessionSnapshot,
                     flushNow: !!force,
                     reason: force ? 'token-drop' : 'token-drag'
@@ -10781,19 +5971,19 @@
                     console.warn('VTT collaboration drag sync failed', err);
                 });
             }
-            lastDragSyncAt = now;
+            stageState.pointer.lastDragSyncAt = now;
             return;
         }
 
         const draft = deepClone(store.getVTTState(getActiveCaseId()));
         const draftScene = getActiveScene(draft);
         const idx = draftScene && Array.isArray(draftScene.tokens)
-            ? draftScene.tokens.findIndex((token) => token.id === (dragState && dragState.tokenId))
+            ? draftScene.tokens.findIndex((token) => token.id === (stageState.pointer.drag && stageState.pointer.drag.tokenId))
             : -1;
         if (!draftScene || idx < 0) {
-            vttState = deepClone(draft);
-            syncRosterLinkedPlayerPresentation(vttState);
-            lastDragSyncAt = now;
+            sessionState.snapshot = deepClone(draft);
+            syncRosterLinkedPlayerPresentation(sessionState.snapshot);
+            stageState.pointer.lastDragSyncAt = now;
             return;
         }
 
@@ -10804,10 +5994,10 @@
         };
 
         const saved = store.updateVTTState(draft, getActiveCaseId());
-        vttState = deepClone(saved);
-        vttStateCaseId = getActiveCaseId();
-        syncRosterLinkedPlayerPresentation(vttState);
-        lastDragSyncAt = now;
+        sessionState.snapshot = deepClone(saved);
+        sessionState.stateCaseId = getActiveCaseId();
+        syncRosterLinkedPlayerPresentation(sessionState.snapshot);
+        stageState.pointer.lastDragSyncAt = now;
     };
 
     const advanceTurn = (direction) => {
@@ -10869,13 +6059,13 @@
             if (draft.initiative.activeEntryId === removed.id) {
                 draft.initiative.activeEntryId = entries[idx] ? entries[idx].id : (entries[idx - 1] ? entries[idx - 1].id : '');
             }
-            if (selectedEntryId === removed.id) selectedEntryId = draft.initiative.activeEntryId || '';
-            if (initiativeDetailState && initiativeDetailState.entryId === removed.id) initiativeDetailState = null;
+            if (stageState.selection.entryId === removed.id) stageState.selection.entryId = draft.initiative.activeEntryId || '';
+            if (uiRuntime.overlays.initiativeDetail && uiRuntime.overlays.initiativeDetail.entryId === removed.id) uiRuntime.overlays.initiativeDetail = null;
         });
     };
 
     const getPlayerRollAnchorPoint = () => {
-        const anchor = playerRollToggleEl || playerRollPanelEl;
+        const anchor = dom.playerRollPanelEl;
         if (anchor && typeof anchor.getBoundingClientRect === 'function') {
             const rect = anchor.getBoundingClientRect();
             return {
@@ -10886,1572 +6076,322 @@
         return { x: Math.round(window.innerWidth / 2), y: Math.round(window.innerHeight / 2) };
     };
 
+    const vttActionState = runtimeState.ports.actions;
+
+    const vttRollsActionFactory = window.RTF_VTT_ACTIONS_ROLLS;
+    if (!vttRollsActionFactory || typeof vttRollsActionFactory.create !== 'function') {
+        throw new Error('VTT roll and modal actions module failed to load.');
+    }
+    const vttRollsActions = vttRollsActionFactory.create({
+        state: vttActionState,
+        activateTokenSelection,
+        addProximityTrigger,
+        applyRollModeToD20Formula,
+        applyTokenInitiativeRollToTracker,
+        askRollFromSheetActionByKey,
+        buildMonsterAssignResultsMarkup,
+        buildMonsterRollPresets,
+        buildSheetActionCatalog,
+        canDeleteLiveVTTState,
+        canUseSharedPlayerTools,
+        cancelAskRollPickMode,
+        cancelAskRollPingById,
+        closeActiveVTTPanel,
+        closeDMUnlockModal,
+        closeInitiativeDetail,
+        closeNPCRollPopover,
+        closeRosterSelfModal,
+        closeSheetActionPopover,
+        closeViewMenu,
+        deleteProximityTrigger,
+        dismissActiveProximityPrompt,
+        findMonsterById,
+        focusViewOnToken,
+        getActiveProximityPrompt,
+        getActiveScene,
+        getAllowedVTTPanel,
+        getAskRollRequestLabelForItem,
+        getLocalPlayerFocusContext,
+        getPlayerRollAnchorPoint,
+        getSceneById,
+        getSceneMusicSummary,
+        getSharedSceneId,
+        getTokenById,
+        gmParseComplexFormula,
+        isDM,
+        isPlayer,
+        isRollActionGuarded,
+        isSpectator,
+        linkRosterSelfSelection,
+        normalizeRollMode,
+        openCustomRollPopover,
+        openSheetActionPopover,
+        postGMDiscordRoll,
+        promptForDMMode,
+        queueRollRequest,
+        render,
+        renderInitiativeDetail,
+        renderInitiativeList,
+        renderNPCRollPopover,
+        renderPlayerRollMenu,
+        renderProximityPrompt,
+        renderSheetActionPopover,
+        renderStage,
+        renderTokenInspector,
+        renderYouTubeAudioPlayer,
+        resolveActiveProximityRoll,
+        rollAskRollPingById,
+        runSheetActionByKey,
+        selectRosterSelfPlayer,
+        sendYouTubeMusicCommand,
+        setActiveVTTPanel,
+        setAskRollPickMode,
+        setRolePreference,
+        stopYouTubeMusicFrame,
+        toggleDrawerPreference,
+        updateMonsterRollOverrideForToken,
+        withDraft,
+        youtubeAudioPlayerEl: dom.youtubeAudioPlayerEl
+    });
+
+    const vttTableActionFactory = window.RTF_VTT_ACTIONS_TABLE;
+    if (!vttTableActionFactory || typeof vttTableActionFactory.create !== 'function') {
+        throw new Error('VTT table chrome and quick-edit actions module failed to load.');
+    }
+    const vttTableActions = vttTableActionFactory.create({
+        state: vttActionState,
+        EVIDENCE_NOTE_SHAPE_PIN: C.EVIDENCE_NOTE_SHAPE_PIN,
+        TOOL_MODE_FOG: C.TOOL_MODE_FOG,
+        TOOL_MODE_FOG_REMOVE: C.TOOL_MODE_FOG_REMOVE,
+        TOOL_MODE_NAVIGATE: C.TOOL_MODE_NAVIGATE,
+        TOOL_MODE_NOTE: C.TOOL_MODE_NOTE,
+        TOOL_MODE_PING: C.TOOL_MODE_PING,
+        TOOL_MODE_RULER: C.TOOL_MODE_RULER,
+        applyMonsterStatBlockToToken,
+        buildId,
+        bustAllVTTRosterAssociations,
+        bustVTTLiveCache,
+        canDeleteLiveVTTState,
+        canUseSharedPlayerTools,
+        clearTokenPortraitPreview,
+        closeNPCSearch,
+        closeQuickSpawnMenu,
+        closeStageContextMenu,
+        closeTokenInspectorPopover,
+        closeViewMenu,
+        createEvidenceNoteAtWorldPoint,
+        deleteEvidenceNoteById,
+        duplicateEvidenceNoteById,
+        findMonsterForAssignmentQuery,
+        fitViewToWorld,
+        forceDMVTTAuthoritative,
+        getActiveScene,
+        getCanonicalTokenImageUrl,
+        getLocalPlayerFocusContext,
+        getPingVariantOptions,
+        getRosterPlayerForRecord,
+        getStageContextWorldPoint,
+        getTokenById,
+        hasValue,
+        isDM,
+        isNPCRollTarget,
+        isPlayer,
+        isSpectator,
+        normalizeClockCurrent,
+        normalizeClockMax,
+        normalizePingVariant,
+        normalizeToolMode,
+        npcSearchToggleEl: dom.npcSearchToggleEl,
+        openCustomRollPopover,
+        openEvidenceNoteInspectorPopover,
+        openNPCRollPopover,
+        openNPCSearchAt,
+        openQuickSpawnMenu,
+        openSheetActionPopover,
+        openTokenInspectorPopover,
+        queueSharedPing,
+        render,
+        renderNPCSearchPopover,
+        renderStage,
+        renderTokenInspector,
+        renderTokenInspectorPopover,
+        renderToolsMenu,
+        renderViewMenu,
+        reportVTTAdminActionError,
+        setActiveVTTPanel,
+        setToolMode,
+        setZoomAroundStageCenter,
+        showTokenPortraitPreview,
+        spawnAllPlayersAtWorldPoint,
+        spawnTokenFromDescriptor,
+        stageEl: dom.stageEl,
+        toImageUrl,
+        toNumber,
+        toggleUIPreference,
+        tokenImageRetryKeys: resources.tokenImageRetryKeys,
+        updateSceneClock,
+        updateSelectedEvidenceNote,
+        updateSelectedToken,
+        withDraft
+    });
+
+    const vttScenesActionFactory = window.RTF_VTT_ACTIONS_SCENES;
+    if (!vttScenesActionFactory || typeof vttScenesActionFactory.create !== 'function') {
+        throw new Error('VTT scene actions module failed to load.');
+    }
+    const vttScenesActions = vttScenesActionFactory.create({
+        state: vttActionState,
+        SCENE_VIEW_LOCAL: C.SCENE_VIEW_LOCAL,
+        SCENE_VIEW_SHARED: C.SCENE_VIEW_SHARED,
+        buildSceneRecord,
+        canDeleteLiveVTTState,
+        clampMapScale,
+        getActiveScene,
+        getContextSpawnWorldPoint,
+        getSharedSceneId,
+        getViewedSceneId,
+        isDM,
+        normalizeSelections,
+        openQuickSpawnMenu,
+        render,
+        setSceneViewPreference,
+        spawnTokenFromDescriptor,
+        stageEl: dom.stageEl,
+        toNumber,
+        withDraft
+    });
+
+    const vttSelectionActionFactory = window.RTF_VTT_ACTIONS_SELECTION;
+    if (!vttSelectionActionFactory || typeof vttSelectionActionFactory.create !== 'function') {
+        throw new Error('VTT token and initiative actions module failed to load.');
+    }
+    const vttSelectionActions = vttSelectionActionFactory.create({
+        state: vttActionState,
+        activateTokenSelection,
+        addTokenToInitiative,
+        advanceTurn,
+        assignSelectedEntryToToken,
+        canDeleteLiveVTTState,
+        cloneTokenById,
+        getActiveScene,
+        isDM,
+        openInitiativeDetail,
+        removeEntry,
+        removeInitiativeEntriesForToken,
+        renderInitiativeDetail,
+        renderInitiativeList,
+        renderStage,
+        renderTokenInspector,
+        reorderEntry,
+        resetInitiativeToRoundOne,
+        setInitiativeEntryRosterOwner,
+        showTokenPortraitPreview,
+        toNumber,
+        updateSelectedEntry,
+        updateSelectedToken,
+        withDraft
+    });
+
     const handleAction = (actionEl) => {
         const action = String(actionEl.dataset.action || '').trim();
         if (!action) return;
         const id = String(actionEl.dataset.id || '').trim();
 
-        if (action === 'play-scene-music') {
-            const scene = getSceneById(getSharedSceneId(vttState), vttState) || getActiveScene();
-            const summary = getSceneMusicSummary(scene);
-            const playerKey = `${summary.tension}:${summary.videoId || 'empty'}`;
-            if (!summary.videoId || String(actionEl.dataset.musicKey || '').trim() !== playerKey) return;
-            const wasPaused = youtubeMusicState.key === playerKey && youtubeMusicState.status === 'paused';
-            youtubeMusicState = { key: playerKey, status: 'playing' };
-            if (wasPaused) sendYouTubeMusicCommand('playVideo');
-            if (youtubeAudioPlayerEl) youtubeAudioPlayerEl.dataset.musicKey = '';
-            renderYouTubeAudioPlayer(scene);
+        if (vttRollsActions.handles(action)) {
+            vttRollsActions.handle(actionEl, action, id);
             return;
         }
-        if (action === 'pause-scene-music') {
-            const scene = getSceneById(getSharedSceneId(vttState), vttState) || getActiveScene();
-            const summary = getSceneMusicSummary(scene);
-            const playerKey = `${summary.tension}:${summary.videoId || 'empty'}`;
-            if (youtubeMusicState.key !== playerKey || youtubeMusicState.status !== 'playing') return;
-            sendYouTubeMusicCommand('pauseVideo');
-            youtubeMusicState = { key: playerKey, status: 'paused' };
-            if (youtubeAudioPlayerEl) youtubeAudioPlayerEl.dataset.musicKey = '';
-            renderYouTubeAudioPlayer(scene);
-            return;
-        }
-        if (action === 'stop-scene-music') {
-            stopYouTubeMusicFrame();
-            youtubeMusicState = { key: '', status: 'stopped' };
-            if (youtubeAudioPlayerEl) youtubeAudioPlayerEl.dataset.musicKey = '';
-            const scene = getSceneById(getSharedSceneId(vttState), vttState) || getActiveScene();
-            renderYouTubeAudioPlayer(scene);
-            return;
-        }
-
-        if (action === 'open-vtt-panel') {
-            const panel = String(actionEl.dataset.panel || '').trim();
-            const activePanel = getAllowedVTTPanel(uiState.activeVttPanel);
-            setActiveVTTPanel(activePanel === panel ? '' : panel);
-            closeViewMenu();
-            return;
-        }
-        if (action === 'close-vtt-panel') {
-            closeActiveVTTPanel();
-            return;
-        }
-        if (action === 'open-accent-panel') {
-            closeViewMenu();
-            setActiveVTTPanel('');
-            if (typeof window.triggerAccentPicker === 'function') window.triggerAccentPicker();
-            return;
-        }
-
-        if (action === 'toggle-role') {
-            if (isDM()) {
-                setRolePreference('player');
-            } else {
-                promptForDMMode();
-            }
-            return;
-        }
-        if (action === 'toggle-spectator-role') {
-            setRolePreference(isSpectator() ? 'player' : 'spectator');
-            return;
-        }
-        if (action === 'toggle-topbar-pin') {
-            toggleDrawerPreference('topbarCollapsed', 'topbarHoverSuppressed');
-            return;
-        }
-        if (action === 'close-dm-unlock') {
-            closeDMUnlockModal();
-            return;
-        }
-        if (action === 'select-roster-self') {
-            if (!isPlayer()) return;
-            selectRosterSelfPlayer(id);
-            return;
-        }
-        if (action === 'confirm-roster-self-link') {
-            if (!isPlayer()) return;
-            linkRosterSelfSelection();
-            return;
-        }
-        if (action === 'roster-self-dm-mode') {
-            closeRosterSelfModal({ restoreFocus: false });
-            promptForDMMode();
-            return;
-        }
-        if (action === 'roster-self-spectator-mode') {
-            closeRosterSelfModal({ restoreFocus: false });
-            setRolePreference('spectator');
-            return;
-        }
-        if (action === 'close-initiative-detail') {
-            closeInitiativeDetail();
-            return;
-        }
-        if (action === 'close-sheet-actions') {
-            closeSheetActionPopover();
-            return;
-        }
-        if (action === 'close-npc-roll') {
-            closeNPCRollPopover();
-            return;
-        }
-        if (action === 'seed-proximity-trigger') {
-            if (!isDM()) return;
-            addProximityTrigger(
-                String(actionEl.dataset.ownerKind || '').trim(),
-                String(actionEl.dataset.ownerId || '').trim(),
-                String(actionEl.dataset.seed || 'perception').trim()
-            );
-            return;
-        }
-        if (action === 'delete-proximity-trigger') {
-            if (!isDM()) return;
-            if (!canDeleteLiveVTTState('delete-proximity-trigger')) return;
-            deleteProximityTrigger(
-                String(actionEl.dataset.ownerKind || '').trim(),
-                String(actionEl.dataset.ownerId || '').trim(),
-                String(actionEl.dataset.triggerId || '').trim()
-            );
-            return;
-        }
-        if (action === 'dismiss-proximity-prompt') {
-            if (!isPlayer()) return;
-            dismissActiveProximityPrompt();
-            return;
-        }
-        if (action === 'resolve-proximity-roll') {
-            if (!isPlayer()) return;
-            if (isRollActionGuarded(`proximity-roll:${activeProximityPrompt && activeProximityPrompt.id || ''}:${activeProximityPrompt && activeProximityPrompt.tokenId || ''}`, actionEl instanceof HTMLButtonElement ? actionEl : null)) return;
-            resolveActiveProximityRoll();
-            return;
-        }
-        if (action === 'toggle-player-roll-menu') {
-            if (!isPlayer()) return;
-            playerRollMenuOpen = true;
-            setActiveVTTPanel('player-rolls');
-            render();
-            return;
-        }
-        if (action === 'toggle-player-roll-rail') {
-            if (!isPlayer()) return;
-            setActiveVTTPanel(uiState.activeVttPanel === 'player-rolls' ? '' : 'player-rolls');
-            return;
-        }
-        if (action === 'set-roll-mode') {
-            localRollMode = normalizeRollMode(actionEl.dataset.rollMode);
-            renderPlayerRollMenu();
-            renderProximityPrompt();
-            return;
-        }
-        if (action === 'start-ask-roll-pick') {
-            if (!isPlayer()) return;
-            setAskRollPickMode(true);
-            return;
-        }
-        if (action === 'cancel-ask-roll-pick') {
-            if (!isPlayer()) return;
-            cancelAskRollPickMode();
-            render();
-            return;
-        }
-        if (action === 'player-roll-from-sheet') {
-            if (!isPlayer()) return;
-            const point = getPlayerRollAnchorPoint();
-            openSheetActionPopover(null, point.x, point.y, askRollPickMode ? { mode: 'request' } : {});
-            render();
-            return;
-        }
-        if (action === 'player-custom-roll') {
-            if (!isPlayer()) return;
-            if (askRollPickMode) {
-                queueRollRequest('other');
-                return;
-            }
-            const point = getPlayerRollAnchorPoint();
-            openCustomRollPopover(null, point.x, point.y);
-            render();
-            return;
-        }
-        if (action === 'focus-own-token') {
-            if (!isPlayer()) return;
-            const context = getLocalPlayerFocusContext();
-            if (!context.token) return;
-            activateTokenSelection(context.token.id);
-            focusViewOnToken(context.token);
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderStage();
-            return;
-        }
-        if (action === 'quick-sheet-action') {
-            if (!isPlayer()) return;
-            if (isRollActionGuarded(`quick-sheet-action:${id}:${askRollPickMode ? 'ask' : 'roll'}`, actionEl instanceof HTMLButtonElement ? actionEl : null)) return;
-            if (askRollPickMode) {
-                const item = buildSheetActionCatalog().find((entry) => entry && entry.key === id);
-                if (item) queueRollRequest(getAskRollRequestLabelForItem(item), { actionKey: item.key });
-                return;
-            }
-            const point = getPlayerRollAnchorPoint();
-            openSheetActionPopover(null, point.x, point.y);
-            runSheetActionByKey(id);
-            render();
-            return;
-        }
-        if (action === 'ask-roll-from-sheet-action') {
-            if (!isPlayer()) return;
-            if (isRollActionGuarded(`ask-roll-click:${id}`, actionEl instanceof HTMLButtonElement ? actionEl : null)) return;
-            askRollFromSheetActionByKey(id);
-            render();
-            return;
-        }
-        if (action === 'roll-ask-roll-ping') {
-            if (!canUseSharedPlayerTools()) return;
-            if (isRollActionGuarded(`ask-ping-click:${id}`, actionEl instanceof HTMLButtonElement ? actionEl : null)) return;
-            rollAskRollPingById(id);
-            return;
-        }
-        if (action === 'cancel-ask-roll-ping') {
-            if (!canUseSharedPlayerTools()) return;
-            cancelAskRollPingById(id);
-            return;
-        }
-        if (action === 'set-sheet-action-mode') {
-            if (!sheetActionState) return;
-            sheetActionState.mode = String(actionEl.dataset.mode || '').trim() === 'request' ? 'request' : 'roll';
-            renderSheetActionPopover();
-            return;
-        }
-        if (action === 'run-sheet-action') {
-            if (isRollActionGuarded(`run-sheet-click:${id}`, actionEl instanceof HTMLButtonElement ? actionEl : null)) return;
-            runSheetActionByKey(id);
-            return;
-        }
-        if (action === 'set-npc-roll-formula') {
-            if (!npcRollState) return;
-            npcRollState.formula = String(actionEl.dataset.formula || '').trim() || '1d20';
-            npcRollState.type = 'check';
-            npcRollState.detail = '';
-            npcRollState.presetKey = '';
-            npcRollState.editingPresetKey = '';
-            npcRollState.monsterRollQuery = '';
-            renderNPCRollPopover();
-            return;
-        }
-        if (action === 'set-npc-roll-preset') {
-            if (!npcRollState) return;
-            npcRollState.label = String(actionEl.dataset.label || npcRollState.label || 'NPC Roll').trim().slice(0, 120);
-            npcRollState.formula = String(actionEl.dataset.formula || npcRollState.formula || '1d20').trim().slice(0, 120);
-            npcRollState.type = String(actionEl.dataset.rollType || npcRollState.type || 'check').trim().slice(0, 20);
-            npcRollState.detail = String(actionEl.dataset.detail || '').trim().slice(0, 1000);
-            npcRollState.presetKey = String(actionEl.dataset.presetKey || '').trim();
-            npcRollState.editingPresetKey = '';
-            renderNPCRollPopover();
-            return;
-        }
-        if (action === 'edit-monster-roll-preset') {
-            if (!npcRollState) return;
-            npcRollState.editingPresetKey = String(actionEl.dataset.presetKey || '').trim();
-            renderNPCRollPopover();
-            return;
-        }
-        if (action === 'cancel-monster-roll-edit') {
-            if (!npcRollState) return;
-            npcRollState.editingPresetKey = '';
-            renderNPCRollPopover();
-            return;
-        }
-        if (action === 'save-monster-roll-override') {
-            if (!npcRollState || !isDM()) return;
-            const presetKey = String(actionEl.dataset.presetKey || '').trim();
-            const tokenId = String(npcRollState.tokenId || '').trim();
-            const sourceToken = getTokenById(tokenId);
-            const preset = buildMonsterRollPresets(sourceToken).find((entry) => entry && entry.key === presetKey);
-            if (!preset) return;
-            const scope = actionEl.closest('.vtt-monster-roll-edit');
-            const labelEl = scope ? scope.querySelector('[data-monster-roll-edit-field="label"]') : null;
-            const formulaEl = scope ? scope.querySelector('[data-monster-roll-edit-field="formula"]') : null;
-            const nextLabel = labelEl instanceof HTMLInputElement ? String(labelEl.value || '').trim().slice(0, 120) : '';
-            const nextFormula = formulaEl instanceof HTMLInputElement ? String(formulaEl.value || '').trim().slice(0, 120) : '';
-            const baseLabel = String(preset.baseLabel || preset.label || '').trim();
-            const baseFormula = String(preset.baseFormula || preset.formula || '').trim();
-            const resolvedLabel = nextLabel || baseLabel || preset.label;
-            const resolvedFormula = nextFormula || baseFormula || preset.formula;
-            const override = {
-                label: resolvedLabel,
-                formula: resolvedFormula,
-                type: preset.type || preset.baseType || npcRollState.type || 'check',
-                detail: preset.detail || preset.baseDetail || ''
-            };
-            npcRollState.editingPresetKey = '';
-            npcRollState.presetKey = presetKey;
-            npcRollState.label = override.label;
-            npcRollState.formula = override.formula;
-            npcRollState.type = override.type;
-            npcRollState.detail = override.detail;
-            withDraft((draft) => {
-                updateMonsterRollOverrideForToken(draft, tokenId, presetKey, override);
-            });
-            return;
-        }
-        if (action === 'reset-monster-roll-override') {
-            if (!npcRollState || !isDM()) return;
-            const presetKey = String(actionEl.dataset.presetKey || '').trim();
-            const tokenId = String(npcRollState.tokenId || '').trim();
-            const sourceToken = getTokenById(tokenId);
-            const preset = buildMonsterRollPresets(sourceToken).find((entry) => entry && entry.key === presetKey);
-            if (!preset) return;
-            npcRollState.editingPresetKey = '';
-            npcRollState.presetKey = presetKey;
-            npcRollState.label = preset.baseLabel || preset.label;
-            npcRollState.formula = preset.baseFormula || preset.formula;
-            npcRollState.type = preset.type || npcRollState.type || 'check';
-            npcRollState.detail = preset.detail || npcRollState.detail || '';
-            withDraft((draft) => {
-                updateMonsterRollOverrideForToken(draft, tokenId, presetKey, null);
-            });
-            return;
-        }
-        if (action === 'select-token-monster-assignment') {
-            if (!isDM()) return;
-            const monsterId = String(actionEl.dataset.monsterId || '').trim();
-            const monster = findMonsterById(monsterId);
-            const scope = actionEl.closest('.vtt-inspector-stack');
-            const inputEl = scope ? scope.querySelector('[data-token-monster-search]') : null;
-            const hiddenEl = scope ? scope.querySelector('[data-token-monster-id]') : null;
-            const resultsEl = scope ? scope.querySelector('[data-token-monster-results]') : null;
-            if (inputEl instanceof HTMLInputElement && monster) inputEl.value = monster.name || '';
-            if (hiddenEl instanceof HTMLInputElement) hiddenEl.value = monsterId;
-            if (resultsEl instanceof HTMLElement) resultsEl.innerHTML = buildMonsterAssignResultsMarkup(monster ? monster.name : '', monsterId);
-            return;
-        }
-        if (action === 'roll-npc-dice') {
-            if (!npcRollState) return;
-            if (isRollActionGuarded(`npc-roll:${npcRollState.tokenId || ''}:${npcRollState.label || ''}:${npcRollState.formula || ''}`, actionEl instanceof HTMLButtonElement ? actionEl : null)) return;
-            const rollFormula = applyRollModeToD20Formula(npcRollState.formula || '1d20');
-            const parsed = gmParseComplexFormula(rollFormula);
-            if (!parsed.text) {
-                renderNPCRollPopover({ total: 'Invalid', text: 'Use a formula like 1d20 + 3 or 2d6.' });
-                return;
-            }
-            const label = String(npcRollState.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
-            const token = getTokenById(npcRollState.tokenId);
-            const tokenName = String(token && token.label || npcRollState.tokenName || 'NPC').trim() || 'NPC';
-            const isCustomRoll = String(npcRollState.mode || '').trim().toLowerCase() === 'custom';
-            if (!isCustomRoll && String(npcRollState.presetKey || '').trim() === 'core:initiative' && token) {
-                applyTokenInitiativeRollToTracker(token, parsed);
-            }
-            renderNPCRollPopover(parsed);
-            postGMDiscordRoll(tokenName, label, parsed.total, parsed.text, {
-                type: npcRollState.type || 'check',
-                detail: npcRollState.detail || ''
-            }).then((sent) => {
-                if (!sent && !isCustomRoll) console.warn('VTT monster/NPC roll Discord post skipped: enable Discord integration in the GM dashboard and save a webhook URL.');
-            }).catch((err) => {
-                console.warn('VTT NPC roll Discord post failed', err);
-            });
-            return;
-        }
-        if (action === 'context-ping') {
-            if (!canUseSharedPlayerTools()) return;
-            const scene = getActiveScene();
-            const worldPoint = getStageContextWorldPoint();
-            const pingOptions = getPingVariantOptions(lastContextPointerState);
-            closeStageContextMenu();
-            if (scene && worldPoint) queueSharedPing(scene, worldPoint, pingOptions);
-            render();
-            return;
-        }
-        if (action === 'context-roll-from-sheet') {
-            if (!isDM() && !(isPlayer() && canUseSharedPlayerTools())) return;
-            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
-            const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
-            const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
-            const tokenPlayerId = String(getRosterPlayerForRecord(token) && getRosterPlayerForRecord(token).id || '').trim();
-            const isOwnToken = !!(localContext && localContext.playerId && tokenPlayerId && tokenPlayerId === localContext.playerId);
-            const rollToken = isDM()
-                ? (token && String(token.sourceType || '').trim().toLowerCase() === 'player' ? token : null)
-                : (isOwnToken ? token : null);
-            closeStageContextMenu();
-            openSheetActionPopover(rollToken, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
-            render();
-            return;
-        }
-        if (action === 'context-custom-roll') {
-            if (!isDM() && !(isPlayer() && canUseSharedPlayerTools())) return;
-            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
-            const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
-            const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
-            const tokenPlayerId = String(getRosterPlayerForRecord(token) && getRosterPlayerForRecord(token).id || '').trim();
-            const isOwnToken = !!(localContext && localContext.playerId && tokenPlayerId && tokenPlayerId === localContext.playerId);
-            const rollToken = isDM() ? token : (isOwnToken ? token : null);
-            closeStageContextMenu();
-            openCustomRollPopover(rollToken, menuState ? menuState.clientX : window.innerWidth / 2, menuState ? menuState.clientY : window.innerHeight / 2);
-            render();
-            return;
-        }
-        if (action === 'context-roll-stat-block' || action === 'context-make-roll') {
-            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
-            const token = menuState && menuState.tokenId ? getTokenById(menuState.tokenId) : null;
-            closeStageContextMenu();
-            if (token && isDM() && isNPCRollTarget(token)) openNPCRollPopover(token, menuState.clientX, menuState.clientY);
-            render();
-            return;
-        }
-        if (action === 'context-token-inspector') {
-            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
-            closeStageContextMenu();
-            if (menuState && menuState.tokenId) openTokenInspectorPopover(menuState.tokenId, menuState.clientX, menuState.clientY);
-            render();
-            return;
-        }
-        if (action === 'context-note-inspector') {
-            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
-            closeStageContextMenu();
-            if (menuState && menuState.noteId) openEvidenceNoteInspectorPopover(menuState.noteId, menuState.clientX, menuState.clientY);
-            render();
-            return;
-        }
-        if (action === 'context-note-toggle-hidden') {
-            const noteId = stageContextMenuState ? String(stageContextMenuState.noteId || '').trim() : '';
-            closeStageContextMenu();
-            if (!noteId || !isDM()) return;
-            selectedEvidenceNoteId = noteId;
-            updateSelectedEvidenceNote((note) => {
-                note.hidden = !note.hidden;
-            });
-            return;
-        }
-        if (action === 'context-note-duplicate') {
-            const noteId = stageContextMenuState ? String(stageContextMenuState.noteId || '').trim() : '';
-            closeStageContextMenu();
-            if (noteId) duplicateEvidenceNoteById(noteId);
-            return;
-        }
-        if (action === 'context-note-delete') {
-            const noteId = stageContextMenuState ? String(stageContextMenuState.noteId || '').trim() : '';
-            closeStageContextMenu();
-            if (noteId) deleteEvidenceNoteById(noteId);
-            return;
-        }
-        if (action === 'context-preview-token') {
-            const tokenId = stageContextMenuState ? String(stageContextMenuState.tokenId || '').trim() : '';
-            closeStageContextMenu();
-            if (previewTokenId === tokenId) {
-                clearTokenPortraitPreview();
-            } else {
-                showTokenPortraitPreview(tokenId);
-            }
-            render();
-            return;
-        }
-        if (action === 'context-set-tool') {
-            const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
-            if (isSpectator() && ![TOOL_MODE_NAVIGATE, TOOL_MODE_RULER].includes(nextMode)) return;
-            if (nextMode === TOOL_MODE_NOTE && !isDM()) return;
-            if ((nextMode === TOOL_MODE_FOG || nextMode === TOOL_MODE_FOG_REMOVE) && !isDM()) return;
-            closeStageContextMenu();
-            setToolMode(nextMode);
-            render();
-            return;
-        }
-        if (action === 'context-quick-spawn') {
-            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
-            closeStageContextMenu();
-            if (menuState) openQuickSpawnMenu(menuState.clientX, menuState.clientY);
-            render();
-            return;
-        }
-        if (action === 'context-npc-search') {
-            const menuState = stageContextMenuState ? { ...stageContextMenuState } : null;
-            closeStageContextMenu();
-            if (menuState) openNPCSearchAt(menuState.clientX, menuState.clientY, menuState.worldPoint);
-            render();
-            return;
-        }
-        if (action === 'toggle-view-menu') {
-            viewMenuOpen = !viewMenuOpen;
-            if (viewMenuOpen) {
-                toolsMenuOpen = false;
-            }
-            renderViewMenu();
-            renderToolsMenu();
-            return;
-        }
-        if (action === 'open-global-sync' || action === 'open-global-settings') {
-            const globalMenuButton = document.querySelector(
-                action === 'open-global-sync' ? '.hero-menu-sync' : '.hero-menu-gear'
-            );
-            closeViewMenu();
-            renderViewMenu();
-            if (globalMenuButton instanceof HTMLElement) globalMenuButton.click();
-            return;
-        }
-        if (action === 'toggle-tools-menu') {
-            setActiveVTTPanel(uiState.activeVttPanel === 'dm-tools' ? '' : 'dm-tools');
-            viewMenuOpen = false;
-            renderViewMenu();
-            renderToolsMenu();
-            return;
-        }
-        if (action === 'toggle-ruler-mode') {
-            setToolMode(localToolState.mode === TOOL_MODE_RULER ? TOOL_MODE_NAVIGATE : TOOL_MODE_RULER);
-            render();
-            return;
-        }
-        if (action === 'set-ping-mode') {
-            if (isSpectator()) return;
-            askRollPickMode = false;
-            pendingAskRollRequest = null;
-            localPingVariant = normalizePingVariant(actionEl.dataset.pingVariant);
-            setToolMode(TOOL_MODE_PING);
-            render();
-            return;
-        }
-        if (action === 'set-tool-mode') {
-            const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
-            if (isSpectator() && ![TOOL_MODE_NAVIGATE, TOOL_MODE_RULER].includes(nextMode)) return;
-            if (nextMode === TOOL_MODE_NOTE && !isDM()) return;
-            if ((nextMode === TOOL_MODE_FOG || nextMode === TOOL_MODE_FOG_REMOVE) && !isDM()) return;
-            closeViewMenu();
-            setToolMode(nextMode);
-            render();
-            return;
-        }
-        if (action === 'open-quick-spawn') {
-            if (!isDM() || !stageEl) return;
-            setActiveVTTPanel('');
-            const rect = stageEl.getBoundingClientRect();
-            openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2);
-            return;
-        }
-        if (action === 'toggle-settings') {
-            if (!isDM()) return;
-            setActiveVTTPanel(uiState.activeVttPanel === 'setup' ? '' : 'setup');
-            return;
-        }
-        if (action === 'toggle-initiative') {
-            setActiveVTTPanel(uiState.activeVttPanel === 'combat' ? '' : 'combat');
-            return;
-        }
-        if (action === 'toggle-scene-panel') {
-            toggleUIPreference('scenePanelCollapsed');
-            return;
-        }
-        if (action === 'toggle-spawn-panel') {
-            toggleUIPreference('spawnPanelCollapsed');
-            return;
-        }
-        if (action === 'toggle-inspector-panel') {
-            toggleUIPreference('inspectorPanelCollapsed');
-            return;
-        }
-        if (action === 'close-token-inspector') {
-            closeTokenInspectorPopover();
-            renderTokenInspectorPopover();
-            renderTokenInspector();
-            return;
-        }
-        if (action === 'toggle-token-names') {
-            toggleUIPreference('showTokenNames');
-            return;
-        }
-        if (action === 'toggle-grid') {
-            toggleUIPreference('showGrid');
-            return;
-        }
-        if (action === 'force-vtt-authoritative') {
-            forceDMVTTAuthoritative().catch((err) => reportVTTAdminActionError(err, 'Failed to force the DM VTT snapshot.'));
-            return;
-        }
-        if (action === 'bust-vtt-roster-associations') {
-            if (!isDM()) return;
-            bustAllVTTRosterAssociations();
-            return;
-        }
-        if (action === 'bust-vtt-cache') {
-            bustVTTLiveCache().catch((err) => reportVTTAdminActionError(err, 'Failed to bust the VTT cache.'));
-            return;
-        }
-        if (action === 'clear-scene-fog') {
-            if (!isDM()) return;
-            if (!canDeleteLiveVTTState('clear-scene-fog')) return;
-            closeStageContextMenu();
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.fog = [];
-            });
-            return;
-        }
-        if (action === 'add-scene-clock') {
-            if (!isDM()) return;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                if (!Array.isArray(scene.clocks)) scene.clocks = [];
-                const nextNumber = scene.clocks.length + 1;
-                const clock = {
-                    id: buildId('clock'),
-                    title: `Clock ${nextNumber}`,
-                    current: 0,
-                    max: 4,
-                    hidden: false,
-                    color: '#f0b357',
-                    note: ''
-                };
-                scene.clocks.push(clock);
-                selectedClockId = clock.id;
-            });
-            return;
-        }
-        if (action === 'clock-step') {
-            if (!isDM()) return;
-            const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
-            updateSceneClock(id, (clock) => {
-                const max = normalizeClockMax(clock.max, 4);
-                clock.max = max;
-                clock.current = normalizeClockCurrent(toNumber(clock.current, 0) + delta, max, 0);
-            });
-            return;
-        }
-        if (action === 'toggle-clock-hidden') {
-            if (!isDM()) return;
-            updateSceneClock(id, (clock) => {
-                clock.hidden = !clock.hidden;
-            });
-            return;
-        }
-        if (action === 'delete-clock') {
-            if (!isDM()) return;
-            if (!canDeleteLiveVTTState('delete-clock')) return;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.clocks)) return;
-                scene.clocks = scene.clocks.filter((clock) => String(clock && clock.id || '').trim() !== id);
-                if (selectedClockId === id) selectedClockId = '';
-            });
-            return;
-        }
-        if (action === 'toggle-evidence-hidden-quick') {
-            if (!isDM()) return;
-            selectedEvidenceNoteId = id || selectedEvidenceNoteId;
-            updateSelectedEvidenceNote((note) => {
-                note.hidden = !note.hidden;
-            });
-            return;
-        }
-        if (action === 'delete-evidence-note') {
-            if (!isDM()) return;
-            if (!canDeleteLiveVTTState('delete-evidence-note')) return;
-            deleteEvidenceNoteById(id || selectedEvidenceNoteId);
-            return;
-        }
-        if (action === 'token-adjust-hp') {
-            selectedTokenId = id || selectedTokenId;
-            const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
-            updateSelectedToken((token) => {
-                const currentHp = Number.isFinite(Number(token.hpCurrent)) ? Math.round(Number(token.hpCurrent)) : 0;
-                const maxHp = Number.isFinite(Number(token.hpMax)) ? Math.max(0, Math.round(Number(token.hpMax))) : null;
-                const nextHp = Math.max(0, currentHp + delta);
-                token.hpCurrent = maxHp !== null ? Math.min(nextHp, maxHp) : nextHp;
-                if (maxHp !== null && token.hpMax === null) token.hpMax = maxHp;
-            });
-            return;
-        }
-        if (action === 'token-set-bloodied') {
-            selectedTokenId = id || selectedTokenId;
-            updateSelectedToken((token) => {
-                const maxHp = Number.isFinite(Number(token.hpMax)) ? Math.max(0, Math.round(Number(token.hpMax))) : null;
-                if (maxHp === null || maxHp <= 0) return;
-                token.hpCurrent = maxHp <= 1 ? 1 : Math.max(1, Math.floor(maxHp / 2));
-            });
-            return;
-        }
-        if (action === 'token-set-full-hp') {
-            selectedTokenId = id || selectedTokenId;
-            updateSelectedToken((token) => {
-                const maxHp = Number.isFinite(Number(token.hpMax)) ? Math.max(0, Math.round(Number(token.hpMax))) : null;
-                if (maxHp === null) return;
-                token.hpCurrent = maxHp;
-            });
-            return;
-        }
-        if (action === 'toggle-token-hidden-quick') {
-            selectedTokenId = id || selectedTokenId;
-            updateSelectedToken((token) => {
-                token.hidden = !token.hidden;
-            });
-            return;
-        }
-        if (action === 'token-apply-condition') {
-            selectedTokenId = id || selectedTokenId;
-            const conditionName = String(actionEl.dataset.condition || '').trim();
-            if (!conditionName) return;
-            updateSelectedToken((token) => {
-                if (!Array.isArray(token.conditions)) token.conditions = [];
-                if (token.conditions.some((entry) => String(entry || '').trim().toLowerCase() === conditionName.toLowerCase())) return;
-                token.conditions.push(conditionName);
-                token.conditions = token.conditions.slice(0, 24);
-            });
-            return;
-        }
-        if (action === 'token-clear-conditions') {
-            selectedTokenId = id || selectedTokenId;
-            updateSelectedToken((token) => {
-                token.conditions = [];
-            });
-            return;
-        }
-        if (action === 'assign-token-monster') {
-            if (!isDM()) return;
-            selectedTokenId = id || selectedTokenId;
-            const scope = actionEl.closest('.vtt-inspector-stack');
-            const inputEl = scope ? scope.querySelector('[data-token-monster-search]') : null;
-            const hiddenEl = scope ? scope.querySelector('[data-token-monster-id]') : null;
-            const query = inputEl instanceof HTMLInputElement ? String(inputEl.value || '').trim() : '';
-            const monsterId = hiddenEl instanceof HTMLInputElement ? String(hiddenEl.value || '').trim() : '';
-            const monster = findMonsterForAssignmentQuery(query, monsterId);
-            if (!monster) return;
-            const isChecked = (name) => {
-                const input = scope ? scope.querySelector(`[data-token-monster-option="${name}"]`) : null;
-                return input instanceof HTMLInputElement ? input.checked : false;
-            };
-            updateSelectedToken((token) => {
-                applyMonsterStatBlockToToken(token, monster, {
-                    stats: isChecked('stats'),
-                    rename: isChecked('rename'),
-                    resize: isChecked('resize')
-                });
-            });
-            return;
-        }
-        if (action === 'clear-token-monster') {
-            if (!isDM()) return;
-            selectedTokenId = id || selectedTokenId;
-            updateSelectedToken((token) => {
-                if (String(token.sourceType || '').trim() === 'monster') {
-                    token.sourceType = '';
-                    token.sourceId = '';
-                }
-                delete token.monster;
-            });
-            return;
-        }
-        if (action === 'token-retry-image') {
-            selectedTokenId = id || selectedTokenId;
-            const token = getTokenById(selectedTokenId);
-            const imageUrl = toImageUrl(actionEl.dataset.imageUrl || getCanonicalTokenImageUrl(token));
-            if (imageUrl && window.RTF_MEDIA_CACHE && typeof window.RTF_MEDIA_CACHE.rememberSuccess === 'function') {
-                window.RTF_MEDIA_CACHE.rememberSuccess(imageUrl);
-            }
-            if (selectedTokenId) tokenImageRetryKeys.set(selectedTokenId, String(Date.now()));
-            renderStage();
-            renderTokenInspector();
-            return;
-        }
-        if (action === 'quick-spawn-custom') {
-            if (!quickSpawnMenuState) return;
-            spawnTokenFromDescriptor('custom', '', quickSpawnMenuState.worldPoint);
-            return;
-        }
-        if (action === 'quick-spawn-all-players') {
-            if (!quickSpawnMenuState) return;
-            spawnAllPlayersAtWorldPoint(quickSpawnMenuState.worldPoint);
-            return;
-        }
-        if (action === 'quick-spawn-guildless') {
-            if (!quickSpawnMenuState) return;
-            spawnTokenFromDescriptor('guildless', '', quickSpawnMenuState.worldPoint);
-            return;
-        }
-        if (action === 'quick-spawn-evidence-note') {
-            if (!quickSpawnMenuState) return;
-            createEvidenceNoteAtWorldPoint(quickSpawnMenuState.worldPoint, {
-                clientX: quickSpawnMenuState.clientX,
-                clientY: quickSpawnMenuState.clientY,
-                shape: actionEl.dataset.shape || EVIDENCE_NOTE_SHAPE_PIN
-            });
-            return;
-        }
-        if (action === 'quick-spawn-player') {
-            if (!quickSpawnMenuState) return;
-            spawnTokenFromDescriptor('player', id, quickSpawnMenuState.worldPoint);
-            return;
-        }
-        if (action === 'quick-spawn-npc') {
-            if (!quickSpawnMenuState) return;
-            spawnTokenFromDescriptor('npc', id, quickSpawnMenuState.worldPoint);
-            return;
-        }
-        if (action === 'quick-spawn-open-npc-search') {
-            if (!quickSpawnMenuState) return;
-            const anchorClientX = quickSpawnMenuState.clientX;
-            const anchorClientY = quickSpawnMenuState.clientY;
-            const worldPoint = quickSpawnMenuState.worldPoint || null;
-            closeQuickSpawnMenu();
-            openNPCSearchAt(anchorClientX, anchorClientY, worldPoint);
-            return;
-        }
-
-        if (action === 'zoom-in') {
-            setZoomAroundStageCenter(localView.zoom + 0.12);
-            return;
-        }
-        if (action === 'zoom-out') {
-            setZoomAroundStageCenter(localView.zoom - 0.12);
-            return;
-        }
-        if (action === 'zoom-reset') {
-            setZoomAroundStageCenter(1);
-            return;
-        }
-        if (action === 'fit-view') {
-            fitViewToWorld();
-            return;
-        }
-        if (action === 'toggle-stealth-mode') {
-            if (!isDM()) return;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.stealthMode = !scene.stealthMode;
-            });
-            return;
-        }
-
-        if (action === 'toggle-npc-search') {
-            if (!isDM()) return;
-            if (npcSearchOpen) {
-                closeNPCSearch();
-                renderNPCSearchPopover();
-                return;
-            }
-            const rect = npcSearchToggleEl ? npcSearchToggleEl.getBoundingClientRect() : null;
-            openNPCSearchAt(
-                rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
-                rect ? rect.bottom : window.innerHeight / 2,
-                null
-            );
+        if (vttTableActions.handles(action)) {
+            vttTableActions.handle(actionEl, action, id);
             return;
         }
 
         if (!isDM() && action !== 'select-token' && action !== 'select-entry') return;
 
-        if (action === 'clone-current-scene') {
-            const sourceScene = getActiveScene(vttState);
-            if (!sourceScene) return;
-            const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
-            withDraft((draft) => {
-                if (!Array.isArray(draft.scenes)) draft.scenes = [];
-                draft.scenes.push(nextScene);
-                if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
-                else draft.activeSceneId = nextScene.id;
-                previewTokenId = '';
-            }, { fitView: true });
+        if (vttScenesActions.handles(action)) {
+            vttScenesActions.handle(actionEl, action, id);
             return;
         }
-
-        if (action === 'delete-current-scene') {
-            if (!canDeleteLiveVTTState('delete-current-scene')) return;
-            const targetSceneId = getViewedSceneId(vttState, localRole);
-            if (!targetSceneId) return;
-            const viewedSceneId = getViewedSceneId(vttState, localRole);
-            const sharedSceneId = getSharedSceneId(vttState);
-            withDraft((draft) => {
-                if (!Array.isArray(draft.scenes) || draft.scenes.length <= 1) return;
-                const idx = draft.scenes.findIndex((entry) => entry.id === targetSceneId);
-                if (idx < 0) return;
-                const wasActive = draft.activeSceneId === targetSceneId;
-                const wasViewed = viewedSceneId === targetSceneId;
-                draft.scenes.splice(idx, 1);
-                if (!draft.scenes.length) {
-                    const nextScene = buildSceneRecord(draft.scenes);
-                    draft.scenes.push(nextScene);
-                }
-                if (wasActive) {
-                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
-                    draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
-                }
-                if (wasViewed || wasActive || targetSceneId === sharedSceneId) {
-                    setSceneViewPreference(SCENE_VIEW_SHARED);
-                }
-                previewTokenId = '';
-            }, { fitView: true });
-            return;
-        }
-
-        if (action === 'create-scene') {
-            const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : []);
-            withDraft((draft) => {
-                if (!Array.isArray(draft.scenes)) draft.scenes = [];
-                draft.scenes.push(nextScene);
-                if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
-                else draft.activeSceneId = nextScene.id;
-                previewTokenId = '';
-            }, { fitView: true });
-            return;
-        }
-
-        if (action === 'view-scene-local') {
-            const scene = Array.isArray(vttState && vttState.scenes)
-                ? vttState.scenes.find((entry) => entry.id === id)
-                : null;
-            if (!scene) return;
-            setSceneViewPreference(SCENE_VIEW_LOCAL, scene.id);
-            previewTokenId = '';
-            fitViewOnNextMapLoad = true;
-            normalizeSelections();
-            render();
-            return;
-        }
-
-        if (action === 'show-scene-everyone') {
-            setSceneViewPreference(SCENE_VIEW_SHARED);
-            withDraft((draft) => {
-                const scene = Array.isArray(draft.scenes)
-                    ? draft.scenes.find((entry) => entry.id === id)
-                    : null;
-                if (!scene) return;
-                draft.activeSceneId = scene.id;
-                previewTokenId = '';
-            }, { fitView: true });
-            return;
-        }
-
-        if (action === 'duplicate-scene') {
-            const sourceScene = Array.isArray(vttState && vttState.scenes)
-                ? vttState.scenes.find((entry) => entry.id === id) || getActiveScene(vttState)
-                : null;
-            const nextScene = buildSceneRecord(vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [], sourceScene);
-            withDraft((draft) => {
-                if (!Array.isArray(draft.scenes)) draft.scenes = [];
-                draft.scenes.push(nextScene);
-                if (isDM()) setSceneViewPreference(SCENE_VIEW_LOCAL, nextScene.id);
-                else draft.activeSceneId = nextScene.id;
-                previewTokenId = '';
-            }, { fitView: true });
-            return;
-        }
-
-        if (action === 'delete-scene') {
-            if (!canDeleteLiveVTTState('delete-scene')) return;
-            const viewedSceneId = getViewedSceneId(vttState, localRole);
-            const sharedSceneId = getSharedSceneId(vttState);
-            withDraft((draft) => {
-                if (!Array.isArray(draft.scenes) || draft.scenes.length <= 1) return;
-                const idx = draft.scenes.findIndex((entry) => entry.id === id);
-                if (idx < 0) return;
-                const wasActive = draft.activeSceneId === id;
-                const wasViewed = viewedSceneId === id;
-                draft.scenes.splice(idx, 1);
-                if (!draft.scenes.length) {
-                    const nextScene = buildSceneRecord(draft.scenes);
-                    draft.scenes.push(nextScene);
-                }
-                if (wasActive) {
-                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
-                    draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
-                }
-                if (wasViewed || wasActive || id === sharedSceneId) {
-                    setSceneViewPreference(SCENE_VIEW_SHARED);
-                }
-                previewTokenId = '';
-            }, { fitView: true });
-            return;
-        }
-
-        if (action === 'nudge-grid') {
-            const axis = actionEl.dataset.axis === 'y' ? 'offsetY' : 'offsetX';
-            const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.grid[axis] = Math.round(toNumber(scene.grid[axis], 0) + delta);
-            });
-            return;
-        }
-
-        if (action === 'step-map-scale') {
-            const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.mapScale = clampMapScale((toNumber(scene.mapScale, 1) * 100 + delta) / 100, 1);
-            });
-            return;
-        }
-
-        if (action === 'reset-grid-offset') {
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.grid.offsetX = 0;
-                scene.grid.offsetY = 0;
-            });
-            return;
-        }
-
-        if (action === 'add-custom-token') {
-            if (!stageEl) return;
-            const rect = stageEl.getBoundingClientRect();
-            openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2);
-            return;
-        }
-
-        if (action === 'spawn-player') {
-            spawnTokenFromDescriptor('player', id, getContextSpawnWorldPoint());
-            return;
-        }
-
-        if (action === 'spawn-npc') {
-            spawnTokenFromDescriptor('npc', id, getContextSpawnWorldPoint());
-            return;
-        }
-
-        if (action === 'spawn-monster') {
-            spawnTokenFromDescriptor('monster', id, getContextSpawnWorldPoint());
-            return;
-        }
-
-        if (action === 'select-token') {
-            const token = activateTokenSelection(id);
-            const suppressPreview = token
-                && String(token.id || '').trim() === suppressedTokenPreviewClickId
-                && Date.now() <= suppressedTokenPreviewClickUntil;
-            if (token && !suppressPreview) showTokenPortraitPreview(token.id);
-            if (suppressPreview) {
-                suppressedTokenPreviewClickId = '';
-                suppressedTokenPreviewClickUntil = 0;
-            }
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderStage();
-            return;
-        }
-
-        if (action === 'delete-token') {
-            if (!canDeleteLiveVTTState('delete-token')) return;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.tokens)) return;
-                const removedToken = scene.tokens.find((token) => token.id === id);
-                if (!removedToken) return;
-                scene.tokens = scene.tokens.filter((token) => token.id !== id);
-                removeInitiativeEntriesForToken(draft, removedToken);
-                if (selectedTokenId === id) selectedTokenId = '';
-                if (previewTokenId === id) previewTokenId = '';
-            });
-            return;
-        }
-
-        if (action === 'clone-token') {
-            cloneTokenById(id || selectedTokenId);
-            return;
-        }
-
-        if (action === 'set-token-size') {
-            const size = Math.max(1, Math.round(toNumber(actionEl.dataset.size, 1)));
-            selectedTokenId = id || selectedTokenId;
-            updateSelectedToken((token) => {
-                token.w = size;
-                token.h = size;
-            });
-            return;
-        }
-
-        if (action === 'add-token-to-initiative') {
-            addTokenToInitiative(id || selectedTokenId);
-            return;
-        }
-
-        if (action === 'prev-turn') {
-            advanceTurn(-1);
-            return;
-        }
-
-        if (action === 'next-turn') {
-            advanceTurn(1);
-            return;
-        }
-
-        if (action === 'reset-initiative-round') {
-            resetInitiativeToRoundOne();
-            return;
-        }
-
-        if (action === 'select-entry') {
-            selectedEntryId = id;
-            selectedEvidenceNoteId = '';
-            if (initiativeDetailState && initiativeDetailState.entryId !== id) {
-                initiativeDetailState = null;
-            }
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderStage();
-            return;
-        }
-
-        if (action === 'edit-entry') {
-            if (!isDM()) return;
-            selectedEntryId = id || selectedEntryId;
-            if (!selectedEntryId) return;
-            const rect = actionEl.getBoundingClientRect ? actionEl.getBoundingClientRect() : null;
-            openInitiativeDetail(
-                selectedEntryId,
-                rect ? Math.round(rect.right) : window.innerWidth / 2,
-                rect ? Math.round(rect.top) : window.innerHeight / 2
-            );
-            renderInitiativeList();
-            renderInitiativeDetail();
-            return;
-        }
-
-        if (action === 'remove-entry') {
-            removeEntry(id);
-            return;
-        }
-
-        if (action === 'move-entry-up') {
-            reorderEntry(id, -1);
-            return;
-        }
-
-        if (action === 'move-entry-down') {
-            reorderEntry(id, 1);
-            return;
-        }
-
-        if (action === 'toggle-reaction') {
-            selectedEntryId = id || selectedEntryId;
-            updateSelectedEntry((entry) => {
-                entry.reactionUsed = !entry.reactionUsed;
-            });
-            return;
-        }
-
-        if (action === 'toggle-concentration') {
-            selectedEntryId = id || selectedEntryId;
-            updateSelectedEntry((entry) => {
-                entry.concentrating = !entry.concentrating;
-            });
-            return;
-        }
-
-        if (action === 'assign-entry-selected-token') {
-            selectedEntryId = id || selectedEntryId;
-            if (!selectedEntryId || !selectedTokenId) return;
-            assignSelectedEntryToToken(selectedTokenId);
-            return;
-        }
-
-        if (action === 'clear-entry-roster-owner') {
-            selectedEntryId = id || selectedEntryId;
-            if (!selectedEntryId) return;
-            setInitiativeEntryRosterOwner(selectedEntryId, '');
+        if (vttSelectionActions.handles(action)) {
+            vttSelectionActions.handle(actionEl, action, id);
         }
     };
 
-    const handleNPCSearchInput = (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLInputElement) || target !== npcSearchInputEl) return;
-        npcSearchQuery = target.value || '';
-        renderNPCSearchPopover();
-    };
-
-    const commitSceneMusicField = (target) => {
-        if (!target || !(target instanceof HTMLElement)) return false;
-        if (!isDM()) return false;
-        if (!(target.dataset.sceneMusicField || target.dataset.sceneMusicTrack || target.dataset.sceneMusicTitle)) return false;
-        const field = String(target.dataset.sceneMusicField || '').trim();
-        const trackLevel = normalizeOptionalMusicTension(target.dataset.sceneMusicTrack);
-        const titleLevel = normalizeOptionalMusicTension(target.dataset.sceneMusicTitle);
-        return withDraft((draft) => {
-            const scene = getActiveScene(draft);
-            if (!scene) return;
-            scene.music = normalizeSceneMusic(scene.music);
-            if (field === 'tension' && target instanceof HTMLSelectElement) {
-                scene.music.tension = normalizeMusicTension(target.value, scene.music.tension);
-                return;
-            }
-            if (trackLevel && target instanceof HTMLInputElement) {
-                scene.music.tracks[trackLevel] = String(target.value || '').trim().slice(0, 4000);
-                return;
-            }
-            if (titleLevel && target instanceof HTMLInputElement) {
-                scene.music.titles[titleLevel] = String(target.value || '').trim().slice(0, 160);
-            }
-        }, { reason: 'scene-music-edit' });
-    };
-
-    const handleSceneMusicEditorInput = (event) => {
-        event.stopPropagation();
-    };
-
-    const handleSceneMusicEditorChange = (event) => {
-        event.stopPropagation();
-        commitSceneMusicField(event.target);
-    };
-
-    const handleSceneMusicEditorKeyDown = (event) => {
-        if (event.key !== 'Enter') return;
-        const target = event.target;
-        if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
-        if (!(target.dataset.sceneMusicField || target.dataset.sceneMusicTrack || target.dataset.sceneMusicTitle)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        commitSceneMusicField(target);
-    };
-
-    const handleFieldChange = (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) return;
-        if (target instanceof HTMLInputElement && target.dataset.youtubeVolume !== undefined) {
-            setYouTubeMusicVolume(target.value);
-            return;
-        }
-        if (target instanceof HTMLInputElement && target.dataset.toolSizeField) {
-            const nextSize = normalizeToolSizeCells(target.value, localToolState.sizeCells);
-            localToolState.sizeCells = nextSize;
-            return;
-        }
-        if (target instanceof HTMLInputElement && target.dataset.playerRollSearch !== undefined) {
-            playerRollSearchQuery = String(target.value || '');
-            renderPlayerRollMenu();
-            return;
-        }
-        if (target instanceof HTMLInputElement && target.dataset.tokenMonsterSearch !== undefined) {
-            const scope = target.closest('.vtt-inspector-stack');
-            const hiddenEl = scope ? scope.querySelector('[data-token-monster-id]') : null;
-            const resultsEl = scope ? scope.querySelector('[data-token-monster-results]') : null;
-            if (hiddenEl instanceof HTMLInputElement) hiddenEl.value = '';
-            if (resultsEl instanceof HTMLElement) {
-                resultsEl.innerHTML = buildMonsterAssignResultsMarkup(target.value || '', '');
-            }
-            return;
-        }
-        if (target.dataset.proximityTriggerField !== undefined) {
-            if (event.type === 'input' && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-            handleProximityTriggerFieldChange(target);
-            return;
-        }
-
-        if (event.type === 'input' && target instanceof HTMLInputElement) return;
-        if (event.type === 'input' && target instanceof HTMLTextAreaElement) return;
-
-        if (target instanceof HTMLSelectElement && target.dataset.casePicker) {
-            if (event.type !== 'change') return;
-            if (!isDM()) return;
-            const caseId = String(target.value || '').trim();
-            switchVTTCase(caseId).then((switched) => {
-                if (!switched) renderSceneList();
-            }).catch((err) => {
-                console.warn('VTT case switch failed', err);
-                renderSceneList();
-            });
-            return;
-        }
-
-        if (target instanceof HTMLSelectElement && target.dataset.scenePicker) {
-            if (event.type !== 'change') return;
-            const sceneId = String(target.value || '').trim();
-            const scenes = vttState && Array.isArray(vttState.scenes) ? vttState.scenes : [];
-            if (!sceneId || !scenes.some((scene) => scene.id === sceneId)) return;
-            if (target.dataset.scenePicker === 'local' && isDM()) {
-                setSceneViewPreference(SCENE_VIEW_LOCAL, sceneId);
-                previewTokenId = '';
-                fitViewOnNextMapLoad = true;
-                normalizeSelections();
-                render();
-                return;
-            }
-            setSceneViewPreference(SCENE_VIEW_SHARED);
-            withDraft((draft) => {
-                const scene = Array.isArray(draft.scenes)
-                    ? draft.scenes.find((entry) => entry.id === sceneId)
-                    : null;
-                if (!scene) return;
-                draft.activeSceneId = scene.id;
-                previewTokenId = '';
-            }, { fitView: true });
-            return;
-        }
-
-        if (target instanceof HTMLInputElement && target.dataset.sheetActionSearch !== undefined) {
-            sheetActionQuery = String(target.value || '');
-            renderSheetActionPopover();
-            return;
-        }
-
-        if (target instanceof HTMLInputElement && target.dataset.npcRollField) {
-            if (!npcRollState) return;
-            const field = target.dataset.npcRollField;
-            if (field === 'label') npcRollState.label = String(target.value || '').slice(0, 120);
-            if (field === 'formula') npcRollState.formula = String(target.value || '').slice(0, 120);
-            return;
-        }
-
-        if (target instanceof HTMLInputElement && target.dataset.monsterRollFilter !== undefined) {
-            if (!npcRollState) return;
-            npcRollState.monsterRollQuery = String(target.value || '').slice(0, 120);
-            renderNPCRollPopover();
-            return;
-        }
-
-        if (target instanceof HTMLInputElement && target.dataset.sceneField) {
-            const field = target.dataset.sceneField;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                if (field === 'mapImageUrl') {
-                    scene[field] = String(target.value || '').trim();
-                    return;
-                }
-                if (field === 'name') {
-                    scene[field] = String(target.value || '').trim() || 'Scene';
-                    return;
-                }
-                scene[field] = target.value;
-            }, { fitView: field === 'mapImageUrl' });
-            return;
-        }
-
-        if (target instanceof HTMLInputElement && target.dataset.sceneScaleField) {
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.mapScale = clampMapScale(toNumber(target.value, 100) / 100, 1);
-            });
-            return;
-        }
-
-        if (target instanceof HTMLInputElement && target.dataset.sceneGridField) {
-            const field = target.dataset.sceneGridField;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                scene.grid[field] = Math.round(toNumber(target.value, scene.grid[field] || 0));
-            });
-            return;
-        }
-
-        if (target instanceof HTMLInputElement && target.dataset.clockField) {
-            if (!isDM()) return;
-            const field = target.dataset.clockField;
-            const clockId = String(target.dataset.id || '').trim();
-            updateSceneClock(clockId, (clock) => {
-                if (field === 'title') {
-                    clock.title = normalizeClockTitle(target.value, 'Scene Clock');
-                    return;
-                }
-                if (field === 'note') {
-                    clock.note = normalizeClockNote(target.value);
-                    return;
-                }
-                if (field === 'color') {
-                    clock.color = normalizeHexColor(target.value, '#f0b357');
-                    return;
-                }
-                if (field === 'max') {
-                    const nextMax = normalizeClockMax(target.value, clock.max || 4);
-                    clock.max = nextMax;
-                    clock.current = normalizeClockCurrent(clock.current, nextMax, 0);
-                    return;
-                }
-                if (field === 'current') {
-                    clock.current = normalizeClockCurrent(target.value, clock.max || 4, clock.current || 0);
-                }
-            });
-            return;
-        }
-
-        if (selectedEntryId && target instanceof HTMLSelectElement && target.dataset.entryTokenLink) {
-            if (!canEditInitiative()) return;
-            if (event.type !== 'change') return;
-            const tokenId = String(target.value || '').trim();
-            if (!tokenId) return;
-            assignSelectedEntryToToken(tokenId);
-            return;
-        }
-
-        if (selectedEntryId && target instanceof HTMLSelectElement && target.dataset.entryPlayerLink) {
-            if (!canEditInitiative()) return;
-            if (event.type !== 'change') return;
-            setInitiativeEntryRosterOwner(selectedEntryId, String(target.value || '').trim());
-            return;
-        }
-
-        if (selectedTokenId && target.dataset.tokenField) {
-            const field = target.dataset.tokenField;
-            const token = getTokenById(selectedTokenId);
-            const rosterPlayer = getRosterPlayerForRecord(token);
-            if (rosterPlayer && field === 'label') return;
-            if (rosterPlayer && field === 'imageUrl') {
-                const updated = persistRosterPlayerImageUrl(token, target.value);
-                if (String(target.value || '').trim() && updated && !updated.imageUrl) {
-                    alert('Please provide a valid HTTP or HTTPS image URL or data:image URL.');
-                }
-                return;
-            }
-            if (field === 'imageUrl' && event.type !== 'change') return;
-            updateSelectedToken((token) => {
-                if (field === 'hidden' && target instanceof HTMLInputElement && target.type === 'checkbox') {
-                    token.hidden = target.checked;
-                    return;
-                }
-                if (field === 'conditions' && target instanceof HTMLTextAreaElement) {
-                    token.conditions = parseConditions(target.value);
-                    return;
-                }
-                if (field === 'side' && target instanceof HTMLSelectElement) {
-                    token.side = SIDE_OPTIONS.includes(target.value) ? target.value : 'neutral';
-                    return;
-                }
-                if (field === 'moveAccess' && target instanceof HTMLSelectElement) {
-                    token.moveAccess = MOVE_ACCESS_OPTIONS.includes(target.value) ? target.value : 'dm';
-                    return;
-                }
-                if (field === 'imageUrl') {
-                    token.imageUrl = String(target.value || '').trim();
-                    return;
-                }
-                if (field === 'label') {
-                    token.label = String(target.value || '').trim() || 'Token';
-                    return;
-                }
-                if (field === 'moodEmoji') {
-                    token.moodEmoji = normalizeMoodEmoji(target.value);
-                    return;
-                }
-                if (field === 'moodLabel') {
-                    token.moodLabel = normalizeMoodLabel(target.value);
-                    return;
-                }
-                const nextValue = String(target.value || '').trim();
-                if (field === 'w' || field === 'h') {
-                    token[field] = nextValue === '' ? 1 : Math.max(1, Math.round(toNumber(nextValue, 1)));
-                    return;
-                }
-                token[field] = nextValue === '' ? null : Math.round(toNumber(nextValue, 0));
-            });
-            return;
-        }
-
-        if (selectedTokenId && target.dataset.tokenVisionField) {
-            const field = target.dataset.tokenVisionField;
-            updateSelectedToken((token) => {
-                if (!token.vision || typeof token.vision !== 'object') {
-                    token.vision = { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6, passivePerception: 10 };
-                }
-                if (field === 'enabled' && target instanceof HTMLInputElement && target.type === 'checkbox') {
-                    token.vision.enabled = target.checked;
-                    return;
-                }
-                const nextValue = String(target.value || '').trim();
-                if (field === 'arcDeg') {
-                    token.vision.arcDeg = nextValue === '' ? 90 : clamp(Math.round(toNumber(nextValue, 90)), 1, 360);
-                    return;
-                }
-                if (field === 'baseRangeCells') {
-                    token.vision.baseRangeCells = nextValue === '' ? 0 : clamp(Math.round(toNumber(nextValue, 6)), 0, 99);
-                    return;
-                }
-                token.vision[field] = nextValue === '' ? 0 : Math.round(toNumber(nextValue, 0));
-            });
-            return;
-        }
-
-        if (selectedEvidenceNoteId && target.dataset.noteField) {
-            const field = target.dataset.noteField;
-            updateSelectedEvidenceNote((note, draft, scene) => {
-                if (field === 'hidden' && target instanceof HTMLInputElement && target.type === 'checkbox') {
-                    note.hidden = target.checked;
-                    return;
-                }
-                if (field === 'shape' && target instanceof HTMLSelectElement) {
-                    const nextShape = normalizeEvidenceNoteShape(target.value, note.shape || EVIDENCE_NOTE_SHAPE_ZONE);
-                    note.shape = nextShape;
-                    if (nextShape === EVIDENCE_NOTE_SHAPE_PIN) {
-                        const bounds = getEvidenceNoteCellBounds(scene, note);
-                        const nextNote = buildEvidenceNoteFromCellBounds(scene, {
-                            left: bounds ? bounds.left : 0,
-                            top: bounds ? bounds.top : 0,
-                            widthCells: 1,
-                            heightCells: 1
-                        }, note);
-                        if (nextNote) Object.assign(note, nextNote);
-                    }
-                    return;
-                }
-                if (field === 'category' && target instanceof HTMLSelectElement) {
-                    const previousCategory = normalizeEvidenceNoteCategory(note.category);
-                    const nextCategory = normalizeEvidenceNoteCategory(target.value, previousCategory);
-                    const previousDefaultTitle = getDefaultEvidenceNoteTitle(previousCategory);
-                    const currentTitle = getEvidenceNoteDisplayTitle(note);
-                    note.category = nextCategory;
-                    if (!String(note.title || '').trim() || currentTitle === previousDefaultTitle) {
-                        note.title = getDefaultEvidenceNoteTitle(nextCategory);
-                    }
-                    note.highlightColor = getDefaultEvidenceNoteHighlightColor(nextCategory);
-                    return;
-                }
-                if (field === 'title') {
-                    note.title = normalizeEvidenceNoteTitle(target.value, getDefaultEvidenceNoteTitle(note && note.category));
-                    return;
-                }
-                if (field === 'body' && target instanceof HTMLTextAreaElement) {
-                    note.body = normalizeEvidenceNoteBody(target.value);
-                    return;
-                }
-                note.shape = normalizeEvidenceNoteShape(note.shape, EVIDENCE_NOTE_SHAPE_ZONE);
-                const bounds = getEvidenceNoteCellBounds(scene, note) || {
-                    left: 0,
-                    top: 0,
-                    widthCells: 1,
-                    heightCells: 1
-                };
-                const rawNextValue = toNumber(target.value, 0);
-                const nextValue = note.shape === EVIDENCE_NOTE_SHAPE_PIN
-                    ? normalizeGridCoordinate(rawNextValue, 0)
-                    : Math.round(rawNextValue);
-                if (field === 'gridX') bounds.left = Math.max(0, nextValue);
-                else if (field === 'gridY') bounds.top = Math.max(0, nextValue);
-                else if (field === 'cellsWide') bounds.widthCells = note.shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, nextValue);
-                else if (field === 'cellsHigh') bounds.heightCells = note.shape === EVIDENCE_NOTE_SHAPE_PIN ? 1 : Math.max(1, nextValue);
-                const nextNote = buildEvidenceNoteFromCellBounds(scene, bounds, note);
-                if (nextNote) Object.assign(note, nextNote);
-            });
-            return;
-        }
-
-        if (selectedEntryId && target.dataset.entryField) {
-            if (!canEditInitiative()) return;
-            const field = target.dataset.entryField;
-            const entry = getEntryById(selectedEntryId);
-            const rosterPlayer = getRosterPlayerForRecord(entry) || getRosterPlayerForRecord(findTokenByIdAcrossScenes(vttState, entry && entry.linkedTokenId));
-            if (rosterPlayer && field === 'name') return;
-            updateSelectedEntry((entry) => {
-                if (field === 'name') {
-                    entry.name = String(target.value || '').trim() || 'Combatant';
-                    return;
-                }
-                const nextValue = String(target.value || '').trim();
-                entry[field] = nextValue === '' ? null : Math.round(toNumber(nextValue, 0));
-            }, { sort: field === 'total' || field === 'tie' });
-            return;
-        }
-
-        if (selectedEntryId && target.dataset.entryDefence) {
-            if (!canEditInitiative()) return;
-            const key = target.dataset.entryDefence;
-            if (!DEFENCE_KEYS.includes(key)) return;
-            updateSelectedEntry((entry) => {
-                if (!entry.defences || typeof entry.defences !== 'object') entry.defences = normalizeDefences(null);
-                const nextValue = String(target.value || '').trim();
-                entry.defences[key] = nextValue === '' ? null : clamp(Math.round(toNumber(nextValue, 0)), 0, 99);
-            });
-        }
-    };
+    const vttFieldRouterFactory = window.RTF_VTT_FIELD_ROUTER;
+    if (!vttFieldRouterFactory || typeof vttFieldRouterFactory.create !== 'function') {
+        throw new Error('VTT field router module failed to load.');
+    }
+    const vttFieldRouterState = runtimeState.ports.fields;
+    const vttFieldRouter = vttFieldRouterFactory.create({
+        state: vttFieldRouterState,
+        DEFENCE_KEYS: C.DEFENCE_KEYS,
+        EVIDENCE_NOTE_SHAPE_PIN: C.EVIDENCE_NOTE_SHAPE_PIN,
+        EVIDENCE_NOTE_SHAPE_ZONE: C.EVIDENCE_NOTE_SHAPE_ZONE,
+        MOVE_ACCESS_OPTIONS: C.MOVE_ACCESS_OPTIONS,
+        SCENE_VIEW_LOCAL: C.SCENE_VIEW_LOCAL,
+        SCENE_VIEW_SHARED: C.SCENE_VIEW_SHARED,
+        SIDE_OPTIONS: C.SIDE_OPTIONS,
+        alert: (...args) => window.alert(...args),
+        assignSelectedEntryToToken,
+        buildEvidenceNoteFromCellBounds,
+        buildMonsterAssignResultsMarkup,
+        canEditInitiative,
+        clamp,
+        clampMapScale,
+        findTokenByIdAcrossScenes,
+        getActiveScene,
+        getDefaultEvidenceNoteHighlightColor,
+        getDefaultEvidenceNoteTitle,
+        getEntryById,
+        getEvidenceNoteCellBounds,
+        getEvidenceNoteDisplayTitle,
+        getRosterPlayerForRecord,
+        getTokenById,
+        handleProximityTriggerFieldChange,
+        isDM,
+        normalizeClockCurrent,
+        normalizeClockMax,
+        normalizeClockNote,
+        normalizeClockTitle,
+        normalizeDefences,
+        normalizeEvidenceNoteBody,
+        normalizeEvidenceNoteCategory,
+        normalizeEvidenceNoteShape,
+        normalizeEvidenceNoteTitle,
+        normalizeGridCoordinate,
+        normalizeHexColor,
+        normalizeMoodEmoji,
+        normalizeMoodLabel,
+        normalizeMusicTension,
+        normalizeOptionalMusicTension,
+        normalizeSceneMusic,
+        normalizeSelections,
+        normalizeToolSizeCells,
+        npcSearchInputEl: dom.npcSearchInputEl,
+        parseConditions,
+        persistRosterPlayerImageUrl,
+        render,
+        renderNPCRollPopover,
+        renderNPCSearchPopover,
+        renderPlayerRollMenu,
+        renderSceneList,
+        renderSheetActionPopover,
+        setInitiativeEntryRosterOwner,
+        setSceneViewPreference,
+        setYouTubeMusicVolume,
+        switchVTTCase,
+        toNumber,
+        updateSceneClock,
+        updateSelectedEntry,
+        updateSelectedEvidenceNote,
+        updateSelectedToken,
+        withDraft
+    });
+    const handleFieldChange = vttFieldRouter.handleFieldChange;
+    const handleNPCSearchInput = vttFieldRouter.handleNPCSearchInput;
+    const handleSceneMusicEditorChange = vttFieldRouter.handleSceneMusicEditorChange;
+    const handleSceneMusicEditorInput = vttFieldRouter.handleSceneMusicEditorInput;
+    const handleSceneMusicEditorKeyDown = vttFieldRouter.handleSceneMusicEditorKeyDown;
 
     const sanitizeQueueEntry = (raw) => {
         const source = raw && typeof raw === 'object' ? raw : null;
@@ -12482,7 +6422,7 @@
         if (!canEditInitiative()) return;
         let parsed = [];
         try {
-            const raw = localStorage.getItem(TRACKER_INITIATIVE_QUEUE_KEY);
+            const raw = localStorage.getItem(C.TRACKER_INITIATIVE_QUEUE_KEY);
             const queue = raw ? JSON.parse(raw) : [];
             if (Array.isArray(queue)) parsed = queue;
         } catch (err) {
@@ -12531,7 +6471,7 @@
                     submittedAt: packet.submittedAt
                 };
                 if (linkedToken && packet.stealthRoll !== null) linkedToken.stealthRoll = packet.stealthRoll;
-                selectedEntryId = entries[idx].id;
+                stageState.selection.entryId = entries[idx].id;
             } else {
                 const deterministicEntryId = packet.sourceType && packet.sourceId
                     ? String(`init_${packet.sourceType}_${packet.sourceId}`).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 120)
@@ -12575,7 +6515,7 @@
                 };
                 if (linkedToken && packet.stealthRoll !== null) linkedToken.stealthRoll = packet.stealthRoll;
                 entries.push(nextEntry);
-                selectedEntryId = nextEntry.id;
+                stageState.selection.entryId = nextEntry.id;
             }
             mutated = true;
             newlyProcessed.push(packet.rollId);
@@ -12591,21 +6531,22 @@
             baseSnapshot
         });
         if (!saved) return;
-        vttState = deepClone(saved);
-        syncRosterLinkedPlayerPresentation(vttState);
+        sessionState.snapshot = deepClone(saved);
+        syncRosterLinkedPlayerPresentation(sessionState.snapshot);
         markProcessedRollIds(newlyProcessed);
         normalizeSelections();
         render();
     };
 
     const ingestSharedInitiativeSubmissions = async (store) => {
-        if (!isDM() || !store || !isVTTCollabReady() || !vttCollabSession) return false;
+        const collabTransport = getVTTCollabTransport();
+        if (!isDM() || !store || !isVTTCollabReady() || !collabTransport) return false;
         const activeCaseId = getActiveCaseId();
-        if (pendingVTTCaseId || vttCollabSession.caseId !== activeCaseId || vttStateCaseId !== activeCaseId) return false;
-        if (typeof vttCollabSession.getSnapshot !== 'function' || typeof vttCollabSession.syncSnapshot !== 'function') return false;
+        if (sessionState.pendingCaseId || collabTransport.caseId !== activeCaseId || sessionState.stateCaseId !== activeCaseId) return false;
+        if (typeof collabTransport.getSnapshot !== 'function' || typeof collabTransport.syncSnapshot !== 'function') return false;
 
         const storeSnapshot = typeof store.getVTTState === 'function' ? deepClone(store.getVTTState(activeCaseId)) : null;
-        const baseSnapshot = deepClone(vttCollabSession.getSnapshot());
+        const baseSnapshot = deepClone(collabTransport.getSnapshot());
         const incomingEntries = storeSnapshot && storeSnapshot.initiative && Array.isArray(storeSnapshot.initiative.entries)
             ? storeSnapshot.initiative.entries
             : [];
@@ -12675,14 +6616,15 @@
         if (!mutated) return false;
         sortInitiativeEntries(nextEntries);
         if (!baseSnapshot.initiative.activeEntryId && nextEntries[0]) baseSnapshot.initiative.activeEntryId = nextEntries[0].id;
-        await vttCollabSession.syncSnapshot(baseSnapshot, {
-            baseSnapshot: vttCollabSession.getSnapshot(),
+        await collabTransport.syncSnapshot(baseSnapshot, {
+            baseSnapshot: collabTransport.getSnapshot(),
             flushNow: true,
             reason: 'shared-initiative-submission'
         });
-        if (activeCaseId !== getActiveCaseId() || vttCollabSession.caseId !== activeCaseId) return false;
-        vttState = deepClone(vttCollabSession.getSnapshot());
-        vttStateCaseId = activeCaseId;
+        const currentTransport = getVTTCollabTransport();
+        if (activeCaseId !== getActiveCaseId() || !currentTransport || currentTransport.caseId !== activeCaseId) return false;
+        sessionState.snapshot = deepClone(currentTransport.getSnapshot());
+        sessionState.stateCaseId = activeCaseId;
         normalizeSelections();
         render();
         return true;
@@ -12693,30 +6635,31 @@
         if (!store) return;
         const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
         const activeCaseId = getActiveCaseId();
-        if (pendingVTTCaseId) return;
+        if (sessionState.pendingCaseId) return;
         loadRolePreference();
         refreshPlayerImageCache();
-        if (vttCollabSession && (vttCollabSession.caseId !== activeCaseId || vttCollabSession.roomId !== getVTTCollabRoomId(activeCaseId))) {
+        const collabTransport = getVTTCollabTransport();
+        if (collabTransport && (collabTransport.caseId !== activeCaseId || collabTransport.roomId !== getVTTCollabRoomId(activeCaseId))) {
             refreshVTTCollabRoomIfNeeded().catch((err) => {
                 console.warn('VTT collaboration room refresh failed', err);
             });
             return;
         }
-        if (initialVTTLoadPending) return;
+        if (sessionState.initialLoadPending) return;
         if (isVTTCollabReady()) {
             if (isDM()) {
                 ingestSharedInitiativeSubmissions(store).catch((err) => {
                     console.warn('Failed ingesting shared initiative submission into live VTT', err);
                 });
             }
-            if (vttState && syncRosterLinkedPlayerPresentation(vttState)) {
+            if (sessionState.snapshot && syncRosterLinkedPlayerPresentation(sessionState.snapshot)) {
                 normalizeSelections();
                 render();
             }
             return;
         }
-        if (dragState) {
-            if (syncRosterLinkedPlayerPresentation(vttState)) {
+        if (stageState.pointer.drag) {
+            if (syncRosterLinkedPlayerPresentation(sessionState.snapshot)) {
                 normalizeSelections();
                 render();
             }
@@ -12726,16 +6669,16 @@
             readSharedVTTSnapshot({ syncRosterPresentation: false }) || deepClone(store.getVTTState(activeCaseId)),
             { reason: 'roster-player-presentation-sync' }
         ).snapshot;
-        queueRemoteTweensFromSnapshots(vttState, nextSnapshot);
-        vttState = nextSnapshot;
-        vttStateCaseId = activeCaseId;
+        queueRemoteTweensFromSnapshots(sessionState.snapshot, nextSnapshot);
+        sessionState.snapshot = nextSnapshot;
+        sessionState.stateCaseId = activeCaseId;
         normalizeSelections();
         render();
     };
 
     const handleStorageEvent = (event) => {
         if (!event) return;
-        if (event.key === TRACKER_INITIATIVE_QUEUE_KEY) {
+        if (event.key === C.TRACKER_INITIATIVE_QUEUE_KEY) {
             processInitiativeQueue();
             return;
         }
@@ -12748,1006 +6691,137 @@
             render();
             return;
         }
-        if (event.key === SHEET_STORAGE_KEY) {
+        if (event.key === C.SHEET_STORAGE_KEY) {
             render();
         }
     };
 
-    const beginTokenPointerInteraction = (event, scene, worldPoint, tokenEl) => {
-        if (!tokenEl) return false;
-        const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
-        if (!token) return false;
-        const canMoveToken = canRoleMoveToken(token, localRole);
-        const now = Date.now();
-        const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
-        lastTokenPointerDownId = token.id;
-        lastTokenPointerDownAt = now;
-        activateTokenSelection(token.id);
-        renderInitiativeList();
-        renderInitiativeDetail();
-        renderTokenInspector();
-        renderToolsMenu();
-        if (isDoublePress && isDM()) {
-            lastTokenPointerDownId = '';
-            lastTokenPointerDownAt = 0;
-            previewTokenId = '';
-            openTokenInspectorPopover(token.id, event.clientX, event.clientY);
-            renderTokenInspectorPopover();
-            renderStage();
-            return true;
+    const vttStageInputFactory = window.RTF_VTT_STAGE_INPUT;
+    if (!vttStageInputFactory || typeof vttStageInputFactory.create !== 'function') {
+        throw new Error('VTT stage input module failed to load.');
+    }
+    const vttStageInputRuntime = runtimeState.ports.stageInput;
+    resources.stageInput = vttStageInputFactory.create({
+        runtime: vttStageInputRuntime,
+        api: {
+            PING_VARIANT_OPTIONS: C.PING_VARIANT_OPTIONS,
+            activateEvidenceNoteSelection,
+            activateTokenSelection,
+            addFogRevealBurst,
+            applyFogMaskMutation,
+            applyPendingRemoteVTTSnapshot,
+            applyWorldTransform,
+            beginSpawnDrag,
+            buildAreaTemplate,
+            buildEvidenceNoteFromWorldPoints,
+            buildFogMaskFromWorldPoints,
+            buildRemoteTokenTweenKey,
+            canMutateLiveVTTState,
+            canRoleMoveToken,
+            canUseSharedPlayerTools,
+            cancelAskRollPickMode,
+            clampZoom,
+            clearSpawnDrag,
+            clearTemplatePlacementState,
+            clearTokenPortraitPreview,
+            clearTransientDrawerState,
+            closeActiveVTTPanel,
+            closeDMUnlockModal,
+            closeInitiativeDetail,
+            closeNPCRollPopover,
+            closeNPCSearch,
+            closeNavMenu,
+            closeQuickSpawnMenu,
+            closeSheetActionPopover,
+            closeStageContextMenu,
+            closeTokenInspectorPopover,
+            closeToolsMenu,
+            closeViewMenu,
+            getActiveScene,
+            getEvidenceNoteById,
+            getLocalPlayerFocusContext,
+            getPingVariantOptions,
+            getSceneCellPx,
+            getTemplateAngleFromWorldPoint,
+            getTemplateById,
+            getTokenById,
+            getTokenCenterInCells,
+            isClientPointInsideStage,
+            isDM,
+            isDMUnlockModalOpen,
+            isEvidenceNotePin,
+            isRosterSelfModalOpen,
+            markTokenVisualEffect,
+            moveSelectedTokenByCells,
+            normalizeAngleDeg,
+            normalizeTokenCoordinate,
+            openEvidenceNoteInspectorPopover,
+            openInitiativeDetail,
+            openStageContextMenu,
+            openTokenInspectorPopover,
+            queueSharedPing,
+            queueSharedTransientTemplate,
+            rememberRecentLocalDragDrop,
+            remoteTokenTweens: resources.remoteTokenTweens,
+            render,
+            renderInitiativeDetail,
+            renderInitiativeList,
+            renderNPCRollPopover,
+            renderSheetActionPopover,
+            renderSpawnGhost,
+            renderStage,
+            renderStageContextMenu,
+            renderTokenInspector,
+            renderTokenInspectorPopover,
+            renderToolsMenu,
+            scaleForZoom,
+            screenToWorld,
+            setToolMode,
+            setZoomAtPoint,
+            showTokenPortraitPreview,
+            snapTokenToGrid,
+            snapWorldPointToTemplateAnchor,
+            spawnTokenFromDescriptor,
+            suppressLocalDragTween,
+            syncDraggedState,
+            toNumber,
+            withDraft
+        },
+        dom: {
+            body: dom.body,
+            initiativeListEl: dom.initiativeListEl,
+            noteLayerEl: dom.noteLayerEl,
+            stageEl: dom.stageEl
+        },
+        config: {
+            STAGE_TOOL_DOUBLE_PRESS_PX: C.STAGE_TOOL_DOUBLE_PRESS_PX,
+            TEMPLATE_HOLD_PERSIST_MS: C.TEMPLATE_HOLD_PERSIST_MS,
+            TEMPLATE_KIND_CIRCLE: C.TEMPLATE_KIND_CIRCLE,
+            TEMPLATE_KIND_CONE: C.TEMPLATE_KIND_CONE,
+            TOKEN_CLICK_MOVE_PX: C.TOKEN_CLICK_MOVE_PX,
+            TOKEN_DOUBLE_CLICK_MS: C.TOKEN_DOUBLE_CLICK_MS,
+            TOKEN_DROP_PULSE_MS: C.TOKEN_DROP_PULSE_MS,
+            TOOL_MODE_CIRCLE: C.TOOL_MODE_CIRCLE,
+            TOOL_MODE_CONE: C.TOOL_MODE_CONE,
+            TOOL_MODE_FOG: C.TOOL_MODE_FOG,
+            TOOL_MODE_FOG_REMOVE: C.TOOL_MODE_FOG_REMOVE,
+            TOOL_MODE_NAVIGATE: C.TOOL_MODE_NAVIGATE,
+            TOOL_MODE_NOTE: C.TOOL_MODE_NOTE,
+            TOOL_MODE_PING: C.TOOL_MODE_PING,
+            TOOL_MODE_RULER: C.TOOL_MODE_RULER,
+            TOUCH_CONTEXT_HOLD_MS: C.TOUCH_CONTEXT_HOLD_MS,
+            TOUCH_CONTEXT_MOVE_PX: C.TOUCH_CONTEXT_MOVE_PX
         }
-        if (isDoublePress && canMoveToken) {
-            lastTokenPointerDownId = '';
-            lastTokenPointerDownAt = 0;
-            snapTokenToGrid(token.id);
-            return true;
-        }
-        if (!canMoveToken) {
-            showTokenPortraitPreview(token.id);
-            renderStage();
-            return true;
-        }
-        if (!canMutateLiveVTTState('token-drag-start')) {
-            renderStage();
-            return true;
-        }
-        const anchorX = (worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - token.x;
-        const anchorY = (worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - token.y;
-        remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, token.id));
-        dragState = {
-            tokenId: token.id,
-            anchorX,
-            anchorY,
-            startClientX: event.clientX,
-            startClientY: event.clientY,
-            moved: false
-        };
-        lastDragSyncAt = 0;
-        renderStage();
-        return true;
-    };
-
-    const beginEvidenceNotePointerInteraction = (event, scene, worldPoint, noteEl) => {
-        if (!isDM() || !scene || !noteEl || localToolState.mode !== TOOL_MODE_NAVIGATE) return false;
-        if (window.matchMedia('(max-width: 860px)').matches) return false;
-        const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
-        const note = getEvidenceNoteById(noteId);
-        if (!note) return false;
-        const now = Date.now();
-        const previousPress = lastEvidenceNotePointerDownState;
-        const isDoublePress = !!(
-            previousPress
-            && previousPress.noteId === note.id
-            && now - previousPress.at <= TOKEN_DOUBLE_CLICK_MS
-            && Math.hypot(event.clientX - previousPress.clientX, event.clientY - previousPress.clientY) <= STAGE_TOOL_DOUBLE_PRESS_PX
-        );
-        lastEvidenceNotePointerDownState = {
-            noteId: note.id,
-            at: now,
-            clientX: event.clientX,
-            clientY: event.clientY
-        };
-        if (isDoublePress) {
-            lastEvidenceNotePointerDownState = null;
-            evidenceNoteDragState = null;
-            openEvidenceNoteInspectorPopover(note.id, event.clientX, event.clientY);
-            renderTokenInspectorPopover();
-            renderStage();
-            return true;
-        }
-        if (!canMutateLiveVTTState('evidence-note-drag-start')) return false;
-        evidenceNoteDragState = {
-            sceneId: scene.id,
-            noteId,
-            startClientX: event.clientX,
-            startClientY: event.clientY,
-            startWorldPoint: { x: worldPoint.x, y: worldPoint.y },
-            originX: toNumber(note.x, 0),
-            originY: toNumber(note.y, 0),
-            previewX: toNumber(note.x, 0),
-            previewY: toNumber(note.y, 0),
-            width: Math.max(1, toNumber(note.w, 1)),
-            height: Math.max(1, toNumber(note.h, 1)),
-            isPin: isEvidenceNotePin(note),
-            moved: false
-        };
-        return true;
-    };
-
-    const previewEvidenceNoteDrag = (event) => {
-        const state = evidenceNoteDragState;
-        const scene = getActiveScene();
-        if (!state || !scene || state.sceneId !== scene.id) return false;
-        const moveDistance = Math.hypot(event.clientX - state.startClientX, event.clientY - state.startClientY);
-        if (!state.moved && moveDistance <= TOKEN_CLICK_MOVE_PX) return true;
-        state.moved = true;
-        lastEvidenceNotePointerDownState = null;
-        const worldPoint = screenToWorld(event.clientX, event.clientY);
-        const cellPx = getSceneCellPx(scene);
-        const offsetX = toNumber(scene.grid && scene.grid.offsetX, 0);
-        const offsetY = toNumber(scene.grid && scene.grid.offsetY, 0);
-        const rawX = state.originX + worldPoint.x - state.startWorldPoint.x;
-        const rawY = state.originY + worldPoint.y - state.startWorldPoint.y;
-        state.previewX = offsetX + Math.round((rawX - offsetX) / cellPx) * cellPx;
-        state.previewY = offsetY + Math.round((rawY - offsetY) / cellPx) * cellPx;
-        const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(state.noteId) : state.noteId.replace(/"/g, '\\"');
-        const currentEl = noteLayerEl ? noteLayerEl.querySelector(`.vtt-map-note[data-note-id="${escapedId}"]`) : null;
-        if (currentEl instanceof HTMLElement) {
-            const worldLeft = state.isPin ? state.previewX - state.width / 2 : state.previewX;
-            const worldTop = state.isPin ? state.previewY - state.height / 2 : state.previewY;
-            currentEl.style.left = `${scaleForZoom(worldLeft)}px`;
-            currentEl.style.top = `${scaleForZoom(worldTop)}px`;
-            currentEl.classList.add('is-dragging');
-        }
-        return true;
-    };
-
-    const handleStagePointerDown = (event) => {
-        const targetEl = getEventTargetElement(event);
-        if (!targetEl) return;
-        if (event.button !== 0) return;
-        if (targetEl.closest('#vtt-quick-spawn-menu')) return;
-        if (targetEl.closest('#vtt-stage-context-menu')) return;
-        if (targetEl.closest('.vtt-ask-roll-marker')) return;
-        if (targetEl.closest('.vtt-ping')) return;
-        closeQuickSpawnMenu();
-        closeStageContextMenu();
-        closeTokenInspectorPopover();
-
-        const scene = getActiveScene();
-        if (!scene) return;
-        const worldPoint = screenToWorld(event.clientX, event.clientY);
-        if (localToolState.mode !== TOOL_MODE_NAVIGATE) {
-            const now = Date.now();
-            const previousPress = lastStageToolPointerDownState;
-            const pressDistance = previousPress
-                ? Math.hypot(event.clientX - previousPress.clientX, event.clientY - previousPress.clientY)
-                : Infinity;
-            const isDoublePress = previousPress
-                && previousPress.mode === localToolState.mode
-                && now - previousPress.at <= TOKEN_DOUBLE_CLICK_MS
-                && pressDistance <= STAGE_TOOL_DOUBLE_PRESS_PX;
-            lastStageToolPointerDownState = {
-                at: now,
-                mode: localToolState.mode,
-                clientX: event.clientX,
-                clientY: event.clientY
-            };
-            if (isDoublePress) {
-                setToolMode(TOOL_MODE_NAVIGATE);
-                render();
-                event.preventDefault();
-                return;
-            }
-        } else {
-            lastStageToolPointerDownState = null;
-        }
-        if (localToolState.mode === TOOL_MODE_PING) {
-            if (!canUseSharedPlayerTools()) return;
-            if (pendingAskRollRequest) {
-                const context = getLocalPlayerFocusContext();
-                const name = context.linkedPlayer && context.linkedPlayer.name
-                    ? String(context.linkedPlayer.name).trim()
-                    : 'Player';
-                queueSharedPing(scene, worldPoint, {
-                    ...PING_VARIANT_OPTIONS.askRoll,
-                    label: `${name} asks: ${pendingAskRollRequest.label}`.slice(0, 80),
-                    askRoll: pendingAskRollRequest
-                });
-                pendingAskRollRequest = null;
-                setToolMode(TOOL_MODE_NAVIGATE);
-                render();
-            } else {
-                queueSharedPing(scene, worldPoint, getPingVariantOptions(event));
-                setToolMode(TOOL_MODE_NAVIGATE);
-                render();
-            }
-            event.preventDefault();
-            return;
-        }
-        const tokenElAtPoint = localToolState.mode === TOOL_MODE_NAVIGATE
-            ? getTokenElementAtClientPoint(event.clientX, event.clientY, targetEl)
-            : null;
-        if (tokenElAtPoint && beginTokenPointerInteraction(event, scene, worldPoint, tokenElAtPoint)) {
-            event.preventDefault();
-            return;
-        }
-        const noteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
-        if (noteEl && localToolState.mode === TOOL_MODE_NAVIGATE) {
-            const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
-            if (!activateEvidenceNoteSelection(noteId)) return;
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderToolsMenu();
-            renderStage();
-            const renderedNoteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
-            beginEvidenceNotePointerInteraction(event, scene, worldPoint, renderedNoteEl || noteEl);
-            event.preventDefault();
-            return;
-        }
-        if (beginTouchContextInteraction(event, scene, worldPoint)) {
-            event.preventDefault();
-            return;
-        }
-        const visionRotateHandleEl = getVisionConeRotateHandleElementAtClientPoint(event.clientX, event.clientY, targetEl);
-        if (visionRotateHandleEl) {
-            const tokenId = String(visionRotateHandleEl.getAttribute('data-token-id') || '').trim();
-            const token = getTokenById(tokenId);
-            if (!isDM() || !token) return;
-            selectedTokenId = token.id;
-            selectedTemplateId = '';
-            selectedEvidenceNoteId = '';
-            selectedEntryId = '';
-            previewTokenId = '';
-            templatePlacementState = null;
-            templateRotateState = null;
-            rulerState = null;
-            visionConeRotateState = {
-                sceneId: scene.id,
-                tokenId: token.id,
-                angleDeg: getTemplateAngleFromWorldPoint(scene, getTokenCenterInCells(token), worldPoint)
-            };
-            renderTokenInspector();
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-        const rotateHandleEl = targetEl.closest('.vtt-template-rotate-handle');
-        if (rotateHandleEl) {
-            const templateId = String(rotateHandleEl.getAttribute('data-template-id') || '').trim();
-            const template = getTemplateById(templateId);
-            if (!template || template.kind !== TEMPLATE_KIND_CONE) return;
-            selectedTemplateId = template.id;
-            selectedTokenId = '';
-            selectedEvidenceNoteId = '';
-            selectedEntryId = '';
-            previewTokenId = '';
-            templatePlacementState = null;
-            visionConeRotateState = null;
-            rulerState = null;
-            templateRotateState = {
-                sceneId: scene.id,
-                templateId: template.id,
-                angleDeg: getTemplateAngleFromWorldPoint(scene, template, worldPoint)
-            };
-            renderTokenInspector();
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        const templateEl = targetEl.closest('.vtt-area-template');
-        if (templateEl) {
-            selectedTemplateId = String(templateEl.getAttribute('data-template-id') || '').trim();
-            selectedTokenId = '';
-            selectedEvidenceNoteId = '';
-            selectedEntryId = '';
-            previewTokenId = '';
-            visionConeRotateState = null;
-            renderTokenInspector();
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        if ((localToolState.mode === TOOL_MODE_FOG || localToolState.mode === TOOL_MODE_FOG_REMOVE) && isDM()) {
-            const initialMask = buildFogMaskFromWorldPoints(scene, worldPoint, worldPoint);
-            if (!initialMask) return;
-
-            fogPlacementState = {
-                sceneId: scene.id,
-                mode: localToolState.mode === TOOL_MODE_FOG_REMOVE ? 'remove' : 'add',
-                startWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
-                currentWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
-                mask: initialMask
-            };
-
-            evidenceNotePlacementState = null;
-            templatePlacementState = null;
-            templateRotateState = null;
-            visionConeRotateState = null;
-            rulerState = null;
-
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        if (localToolState.mode === TOOL_MODE_NOTE && isDM()) {
-            const initialNote = buildEvidenceNoteFromWorldPoints(scene, worldPoint, worldPoint);
-            if (!initialNote) return;
-            evidenceNotePlacementState = {
-                sceneId: scene.id,
-                startWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
-                currentWorldPoint: { x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) },
-                note: initialNote
-            };
-            selectedEvidenceNoteId = '';
-            templatePlacementState = null;
-            templateRotateState = null;
-            visionConeRotateState = null;
-            rulerState = null;
-            fogPlacementState = null;
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        if (localToolState.mode === TOOL_MODE_CIRCLE) {
-            if (!canUseSharedPlayerTools()) return;
-            const template = buildAreaTemplate(TEMPLATE_KIND_CIRCLE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
-            if (!template) return;
-            templatePlacementState = {
-                sceneId: scene.id,
-                template,
-                startedAt: Date.now()
-            };
-            templateRotateState = null;
-            visionConeRotateState = null;
-            rulerState = null;
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        if (localToolState.mode === TOOL_MODE_CONE) {
-            if (!canUseSharedPlayerTools()) return;
-            const template = buildAreaTemplate(TEMPLATE_KIND_CONE, scene, worldPoint, { sizeCells: localToolState.sizeCells });
-            if (!template) return;
-            templatePlacementState = {
-                sceneId: scene.id,
-                template,
-                startedAt: Date.now()
-            };
-            templateRotateState = null;
-            visionConeRotateState = null;
-            rulerState = null;
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        if (localToolState.mode === TOOL_MODE_RULER) {
-            const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
-            rulerState = { sceneId: scene.id, start: anchor, end: anchor, dragging: true };
-            templatePlacementState = null;
-            templateRotateState = null;
-            visionConeRotateState = null;
-            renderToolsMenu();
-            renderStage();
-            event.preventDefault();
-            return;
-        }
-
-        lastTokenPointerDownId = '';
-        lastTokenPointerDownAt = 0;
-        lastEvidenceNotePointerDownState = null;
-        if (localToolState.mode === TOOL_MODE_NAVIGATE && selectedEvidenceNoteId) {
-            selectedEvidenceNoteId = '';
-            renderTokenInspector();
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderToolsMenu();
-            renderStage();
-        }
-        if (selectedTemplateId) {
-            selectedTemplateId = '';
-            renderToolsMenu();
-            renderStage();
-        }
-
-        panState = {
-            startClientX: event.clientX,
-            startClientY: event.clientY,
-            originX: localView.x,
-            originY: localView.y
-        };
-        if (stageEl) stageEl.classList.add('is-panning');
-    };
-
-    const handlePointerMove = (event) => {
-        if (spawnDragState) {
-            spawnDragState.clientX = event.clientX;
-            spawnDragState.clientY = event.clientY;
-            spawnDragState.overStage = isClientPointInsideStage(event.clientX, event.clientY);
-            renderSpawnGhost();
-            return;
-        }
-        if (evidenceNoteDragState) {
-            previewEvidenceNoteDrag(event);
-            return;
-        }
-        if (pendingTouchContextState && event.pointerId === pendingTouchContextState.pointerId) {
-            if (pendingTouchContextState.triggered) return;
-            const moveDistance = Math.hypot(event.clientX - pendingTouchContextState.clientX, event.clientY - pendingTouchContextState.clientY);
-            if (moveDistance < TOUCH_CONTEXT_MOVE_PX) return;
-            const pending = clearPendingTouchContext();
-            if (!pending) return;
-            if (pending.targetKind === 'token') {
-                if (!pending.canMoveToken) {
-                    renderStage();
-                    return;
-                }
-                if (!canMutateLiveVTTState('token-touch-drag-start')) {
-                    renderStage();
-                    return;
-                }
-                dragState = {
-                    tokenId: pending.tokenId,
-                    anchorX: pending.anchorX,
-                    anchorY: pending.anchorY,
-                    startClientX: pending.clientX,
-                    startClientY: pending.clientY,
-                    moved: true
-                };
-                const scene = getActiveScene();
-                if (scene) remoteTokenTweens.delete(buildRemoteTokenTweenKey(scene.id, pending.tokenId));
-                lastDragSyncAt = 0;
-                renderStage();
-                return;
-            }
-            panState = {
-                startClientX: pending.clientX,
-                startClientY: pending.clientY,
-                originX: pending.originX,
-                originY: pending.originY
-            };
-            if (stageEl) stageEl.classList.add('is-panning');
-            return;
-        }
-        if (fogPlacementState) {
-            const scene = getActiveScene();
-            if (!scene || fogPlacementState.sceneId !== scene.id) {
-                fogPlacementState = null;
-                renderStage();
-                return;
-            }
-            fogPlacementState.currentWorldPoint = screenToWorld(event.clientX, event.clientY);
-            fogPlacementState.mask = buildFogMaskFromWorldPoints(
-                scene,
-                fogPlacementState.startWorldPoint,
-                fogPlacementState.currentWorldPoint,
-                fogPlacementState.mask && fogPlacementState.mask.id
-            );
-            renderStage();
-            return;
-        }
-        if (evidenceNotePlacementState) {
-            const scene = getActiveScene();
-            if (!scene || evidenceNotePlacementState.sceneId !== scene.id) {
-                evidenceNotePlacementState = null;
-                renderStage();
-                return;
-            }
-            evidenceNotePlacementState.currentWorldPoint = screenToWorld(event.clientX, event.clientY);
-            evidenceNotePlacementState.note = buildEvidenceNoteFromWorldPoints(
-                scene,
-                evidenceNotePlacementState.startWorldPoint,
-                evidenceNotePlacementState.currentWorldPoint,
-                evidenceNotePlacementState.note && evidenceNotePlacementState.note.id,
-                evidenceNotePlacementState.note || {}
-            );
-            renderStage();
-            return;
-        }
-        if (templatePlacementState) {
-            const scene = getActiveScene();
-            if (!scene || !templatePlacementState.template) return;
-            const worldPoint = screenToWorld(event.clientX, event.clientY);
-            if (templatePlacementState.template.kind === TEMPLATE_KIND_CIRCLE) {
-                const anchor = snapWorldPointToTemplateAnchor(scene, worldPoint);
-                templatePlacementState.template.x = anchor.x;
-                templatePlacementState.template.y = anchor.y;
-            } else {
-                templatePlacementState.template.angleDeg = getTemplateAngleFromWorldPoint(scene, templatePlacementState.template, worldPoint);
-            }
-            renderStage();
-            return;
-        }
-        if (templateRotateState) {
-            const scene = getActiveScene();
-            const template = getTemplateById(templateRotateState.templateId);
-            if (!scene || !template || template.kind !== TEMPLATE_KIND_CONE) {
-                templateRotateState = null;
-                renderStage();
-                return;
-            }
-            templateRotateState.angleDeg = getTemplateAngleFromWorldPoint(scene, template, screenToWorld(event.clientX, event.clientY));
-            renderStage();
-            return;
-        }
-        if (visionConeRotateState) {
-            const scene = getActiveScene();
-            const token = getTokenById(visionConeRotateState.tokenId);
-            if (!isDM() || !scene || !token) {
-                visionConeRotateState = null;
-                renderStage();
-                return;
-            }
-            visionConeRotateState.angleDeg = getTemplateAngleFromWorldPoint(scene, getTokenCenterInCells(token), screenToWorld(event.clientX, event.clientY));
-            renderStage();
-            return;
-        }
-        if (rulerState && rulerState.dragging) {
-            const scene = getActiveScene();
-            if (!scene) return;
-            rulerState.end = snapWorldPointToTemplateAnchor(scene, screenToWorld(event.clientX, event.clientY));
-            renderStage();
-            return;
-        }
-        if (dragState) {
-            const scene = getActiveScene();
-            if (!scene) return;
-            const token = getTokenById(dragState.tokenId);
-            if (!token || !canRoleMoveToken(token, localRole)) return;
-            lastTokenPointerDownId = '';
-            lastTokenPointerDownAt = 0;
-            const worldPoint = screenToWorld(event.clientX, event.clientY);
-            if (!dragState.moved) {
-                const moveDistance = Math.hypot(
-                    event.clientX - toNumber(dragState.startClientX, event.clientX),
-                    event.clientY - toNumber(dragState.startClientY, event.clientY)
-                );
-                if (moveDistance > TOKEN_CLICK_MOVE_PX) dragState.moved = true;
-            }
-            token.x = normalizeTokenCoordinate((worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - dragState.anchorX, token.x);
-            token.y = normalizeTokenCoordinate((worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - dragState.anchorY, token.y);
-            renderStage();
-            syncDraggedState(false);
-            return;
-        }
-
-        if (panState) {
-            localView.x = Math.round(panState.originX + (event.clientX - panState.startClientX));
-            localView.y = Math.round(panState.originY + (event.clientY - panState.startClientY));
-            applyWorldTransform();
-        }
-    };
-
-    const handlePointerUp = (event) => {
-        if (spawnDragState) {
-            const shouldSpawn = isDM() && event && isClientPointInsideStage(event.clientX, event.clientY);
-            const nextWorldPoint = shouldSpawn ? screenToWorld(event.clientX, event.clientY) : null;
-            const descriptor = { kind: spawnDragState.kind, id: spawnDragState.id };
-            clearSpawnDrag();
-            if (shouldSpawn) {
-                spawnTokenFromDescriptor(descriptor.kind, descriptor.id, nextWorldPoint);
-            }
-            return;
-        }
-        if (evidenceNoteDragState) {
-            const completed = { ...evidenceNoteDragState };
-            evidenceNoteDragState = null;
-            if (!event || event.type === 'pointercancel' || !completed.moved) {
-                renderStage();
-                return;
-            }
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || scene.id !== completed.sceneId || !Array.isArray(scene.evidenceNotes)) return;
-                const note = scene.evidenceNotes.find((entry) => String(entry && entry.id || '').trim() === completed.noteId);
-                if (!note) return;
-                note.x = completed.previewX;
-                note.y = completed.previewY;
-                selectedEvidenceNoteId = note.id;
-            });
-            return;
-        }
-        if (pendingTouchContextState && event && event.pointerId === pendingTouchContextState.pointerId) {
-            const pending = clearPendingTouchContext();
-            if (!pending) return;
-            if (!pending.triggered && pending.targetKind === 'token') {
-                renderTokenInspector();
-                renderInitiativeList();
-                renderInitiativeDetail();
-                renderStage();
-            }
-            return;
-        }
-        if (fogPlacementState) {
-            const pendingFog = { ...fogPlacementState };
-            fogPlacementState = null;
-            if (event && event.type === 'pointercancel') {
-                renderStage();
-                return;
-            }
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                if (!Array.isArray(scene.fog)) scene.fog = [];
-                const mask = buildFogMaskFromWorldPoints(
-                    scene,
-                    pendingFog.startWorldPoint,
-                    pendingFog.currentWorldPoint || pendingFog.startWorldPoint,
-                    pendingFog.mask && pendingFog.mask.id
-                );
-                if (!mask) return;
-                if (pendingFog.mode === 'remove') addFogRevealBurst(scene, mask);
-                scene.fog = applyFogMaskMutation(scene, mask, pendingFog.mode === 'remove' ? 'remove' : 'add');
-            });
-            return;
-        }
-        if (evidenceNotePlacementState) {
-            const pendingNote = { ...evidenceNotePlacementState };
-            evidenceNotePlacementState = null;
-            if (event && event.type === 'pointercancel') {
-                renderStage();
-                return;
-            }
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene) return;
-                if (!Array.isArray(scene.evidenceNotes)) scene.evidenceNotes = [];
-                const note = buildEvidenceNoteFromWorldPoints(
-                    scene,
-                    pendingNote.startWorldPoint,
-                    pendingNote.currentWorldPoint || pendingNote.startWorldPoint,
-                    pendingNote.note && pendingNote.note.id,
-                    pendingNote.note || {}
-                );
-                if (!note) return;
-                scene.evidenceNotes.push(note);
-                selectedEvidenceNoteId = note.id;
-                selectedTokenId = '';
-                selectedEntryId = '';
-            });
-            return;
-        }
-        if (templatePlacementState) {
-            const pendingTemplateState = templatePlacementState;
-            templatePlacementState = null;
-            if (event && event.type === 'pointercancel') {
-                renderStage();
-                return;
-            }
-            if (pendingTemplateState && pendingTemplateState.template && Date.now() - toNumber(pendingTemplateState.startedAt, 0) >= TEMPLATE_HOLD_PERSIST_MS) {
-                queueSharedTransientTemplate({ ...pendingTemplateState.template });
-                return;
-            }
-            renderStage();
-            return;
-        }
-        if (templateRotateState) {
-            if (event && event.type === 'pointercancel') {
-                templateRotateState = null;
-                renderStage();
-                return;
-            }
-            const pendingRotation = { ...templateRotateState };
-            templateRotateState = null;
-            withDraft((draft) => {
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.templates)) return;
-                const template = scene.templates.find((entry) => entry && entry.id === pendingRotation.templateId);
-                if (!template) return;
-                template.angleDeg = normalizeAngleDeg(pendingRotation.angleDeg);
-                selectedTemplateId = template.id;
-                selectedEvidenceNoteId = '';
-            });
-            return;
-        }
-        if (visionConeRotateState) {
-            if (event && event.type === 'pointercancel') {
-                visionConeRotateState = null;
-                renderStage();
-                return;
-            }
-            const pendingRotation = { ...visionConeRotateState };
-            visionConeRotateState = null;
-            withDraft((draft) => {
-                if (!isDM()) return;
-                const scene = getActiveScene(draft);
-                if (!scene || !Array.isArray(scene.tokens)) return;
-                const token = scene.tokens.find((entry) => entry && entry.id === pendingRotation.tokenId);
-                if (!token) return;
-                if (!token.vision || typeof token.vision !== 'object') {
-                    token.vision = { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6, passivePerception: 10 };
-                }
-                token.vision.facingDeg = normalizeAngleDeg(pendingRotation.angleDeg);
-                selectedTokenId = token.id;
-                selectedEvidenceNoteId = '';
-            });
-            return;
-        }
-        let appliedRemoteSnapshot = false;
-        if (dragState) {
-            const completedDragState = { ...dragState };
-            const completedDragSceneId = getActiveScene(vttState) ? getActiveScene(vttState).id : '';
-            if (event && !completedDragState.moved) {
-                const moveDistance = Math.hypot(
-                    event.clientX - toNumber(completedDragState.startClientX, event.clientX),
-                    event.clientY - toNumber(completedDragState.startClientY, event.clientY)
-                );
-                completedDragState.moved = moveDistance > TOKEN_CLICK_MOVE_PX;
-            }
-            suppressLocalDragTween(completedDragSceneId, completedDragState.tokenId);
-            const completedToken = getTokenById(completedDragState.tokenId, vttState);
-            if (completedToken) {
-                rememberRecentLocalDragDrop(completedDragSceneId, completedDragState.tokenId, completedToken.x, completedToken.y);
-            }
-            markTokenVisualEffect(completedDragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
-            syncDraggedState(true);
-            lastDragSyncAt = 0;
-            dragState = null;
-            if (!completedDragState.moved) {
-                showTokenPortraitPreview(completedDragState.tokenId);
-            } else {
-                suppressedTokenPreviewClickId = String(completedDragState.tokenId || '').trim();
-                suppressedTokenPreviewClickUntil = Date.now() + 500;
-                clearTokenPortraitPreview();
-            }
-            appliedRemoteSnapshot = applyPendingRemoteVTTSnapshot();
-            if (!appliedRemoteSnapshot) render();
-        }
-        if (rulerState && rulerState.dragging) {
-            rulerState = null;
-            renderStage();
-        }
-
-        if (panState) {
-            panState = null;
-            if (stageEl) stageEl.classList.remove('is-panning');
-        }
-    };
-
-    const handleDocumentPointerDown = (event) => {
-        const targetEl = getEventTargetElement(event);
-        if (!targetEl) return;
-        if (event.button === 2) {
-            const tokenEl = targetEl.closest('.vtt-token');
-            lastContextPointerState = {
-                altKey: !!(event.altKey || (typeof event.getModifierState === 'function' && event.getModifierState('Alt'))),
-                shiftKey: !!(event.shiftKey || (typeof event.getModifierState === 'function' && event.getModifierState('Shift'))),
-                clientX: Math.round(toNumber(event.clientX, 0)),
-                clientY: Math.round(toNumber(event.clientY, 0)),
-                tokenId: tokenEl ? String(tokenEl.getAttribute('data-token-id') || '').trim() : '',
-                at: Date.now()
-            };
-        }
-        const spawnEl = event.button === 0 ? targetEl.closest('[data-spawn-kind]') : null;
-        if (spawnEl instanceof HTMLElement) {
-            const kind = String(spawnEl.dataset.spawnKind || '').trim();
-            const id = String(spawnEl.dataset.id || '').trim();
-            if (beginSpawnDrag(event, kind, id)) {
-                event.preventDefault();
-                return;
-            }
-        }
-        let needsRender = false;
-
-        if (npcSearchOpen && !targetEl.closest('.vtt-popover-anchor') && !targetEl.closest('#vtt-npc-search-popover')) {
-            closeNPCSearch();
-            needsRender = true;
-        }
-
-        if (stageContextMenuState && !targetEl.closest('#vtt-stage-context-menu')) {
-            stageContextMenuState = null;
-            needsRender = true;
-        }
-        if (quickSpawnMenuState && !targetEl.closest('#vtt-quick-spawn-menu')) {
-            quickSpawnMenuState = null;
-            needsRender = true;
-        }
-        if (viewMenuOpen && !targetEl.closest('#vtt-view-menu') && !targetEl.closest('[data-vtt-master-menu-toggle]')) {
-            viewMenuOpen = false;
-            needsRender = true;
-        }
-        if (toolsMenuOpen && !targetEl.closest('.vtt-topbar-tools')) {
-            toolsMenuOpen = false;
-            needsRender = true;
-        }
-        if (playerRollMenuOpen
-            && !targetEl.closest('#vtt-player-roll-panel')
-            && !targetEl.closest('#vtt-sheet-action-popover')
-            && !targetEl.closest('#vtt-npc-roll-popover')) {
-            playerRollMenuOpen = false;
-            needsRender = true;
-        }
-        if (initiativeDetailState && !targetEl.closest('#vtt-initiative-detail-panel') && !targetEl.closest('.vtt-entry')) {
-            initiativeDetailState = null;
-            needsRender = true;
-        }
-        if (tokenInspectorState
-            && !targetEl.closest('#vtt-token-inspector-popover')
-            && !targetEl.closest('.vtt-token')
-            && !targetEl.closest('.vtt-map-note')) {
-            tokenInspectorState = null;
-            needsRender = true;
-        }
-        if (sheetActionState
-            && !targetEl.closest('#vtt-sheet-action-popover')
-            && !targetEl.closest('.vtt-token')) {
-            sheetActionState = null;
-            sheetActionQuery = '';
-            needsRender = true;
-        }
-        if (npcRollState
-            && !targetEl.closest('#vtt-npc-roll-popover')
-            && !targetEl.closest('.vtt-token')) {
-            npcRollState = null;
-            needsRender = true;
-        }
-
-        if (previewTokenId && !targetEl.closest('.vtt-token')) {
-            previewTokenId = '';
-            needsRender = true;
-        }
-
-        if (needsRender) render();
-    };
-
-    const handleStageWheel = (event) => {
-        if (!stageEl) return;
-        if (event.target instanceof Element && event.target.closest('#vtt-quick-spawn-menu')) return;
-        const absX = Math.abs(event.deltaX);
-        const absY = Math.abs(event.deltaY);
-        if (absX > absY * 1.2 && !event.ctrlKey) return;
-        const dominantDelta = absY >= absX ? event.deltaY : event.deltaX;
-        if (!Number.isFinite(dominantDelta) || dominantDelta === 0) return;
-        event.preventDefault();
-        const sensitivity = event.ctrlKey ? 0.0016 : 0.00085;
-        const factor = Math.exp(-dominantDelta * sensitivity);
-        const nextZoom = clampZoom(localView.zoom * factor);
-        if (nextZoom === localView.zoom) return;
-        setZoomAtPoint(nextZoom, event.clientX, event.clientY);
-    };
-
-    const handleStageDragStart = (event) => {
-        const targetEl = getEventTargetElement(event);
-        if (!targetEl || !stageEl || !targetEl.closest('#vtt-stage')) return;
-        event.preventDefault();
-    };
-
-    const handleStageContextMenu = (event) => {
-        const targetEl = getEventTargetElement(event);
-        if (!targetEl) return;
-        if (targetEl.closest('#vtt-quick-spawn-menu')) return;
-        const tokenEl = targetEl.closest('.vtt-token');
-        const token = tokenEl ? getTokenById(String(tokenEl.getAttribute('data-token-id') || '')) : null;
-        const noteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
-        if (noteEl) {
-            const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
-            if (!noteId) return;
-            event.preventDefault();
-            activateEvidenceNoteSelection(noteId);
-            previewTokenId = '';
-            openStageContextMenu(event.clientX, event.clientY, {
-                noteId,
-                worldPoint: screenToWorld(event.clientX, event.clientY)
-            });
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderTokenInspectorPopover();
-            renderStageContextMenu();
-            renderToolsMenu();
-            renderStage();
-            return;
-        }
-        if (tokenEl) {
-            if (!token) return;
-
-            event.preventDefault();
-            activateTokenSelection(token.id);
-            previewTokenId = '';
-            openStageContextMenu(event.clientX, event.clientY, {
-                tokenId: token.id,
-                worldPoint: screenToWorld(event.clientX, event.clientY)
-            });
-            renderInitiativeList();
-            renderInitiativeDetail();
-            renderTokenInspector();
-            renderTokenInspectorPopover();
-            renderSheetActionPopover();
-            renderNPCRollPopover();
-            renderStageContextMenu();
-            renderToolsMenu();
-            renderStage();
-            return;
-        }
-        if (previewTokenId) previewTokenId = '';
-        event.preventDefault();
-        openStageContextMenu(event.clientX, event.clientY, {
-            worldPoint: screenToWorld(event.clientX, event.clientY)
-        });
-        renderStage();
-    };
-
-    const handleInitiativeContextMenu = (event) => {
-        const targetEl = getEventTargetElement(event);
-        if (!targetEl) return;
-        if (targetEl.closest('#vtt-initiative-detail-panel')) return;
-        const entryEl = targetEl.closest('.vtt-entry');
-        if (!entryEl) return;
-        if (!isDM()) return;
-        const entryId = String(entryEl.getAttribute('data-id') || entryEl.getAttribute('data-entry-id') || '').trim();
-        if (!entryId) return;
-        event.preventDefault();
-        openInitiativeDetail(entryId, event.clientX, event.clientY);
-        renderInitiativeList();
-        renderInitiativeDetail();
-    };
-
-    const handleDocumentKeyDown = (event) => {
-        if (isDMUnlockModalOpen()) {
-            if (event.key === 'Escape') {
-                closeDMUnlockModal();
-                event.preventDefault();
-            }
-            return;
-        }
-        if (isRosterSelfModalOpen()) {
-            if (event.key === 'Escape') event.preventDefault();
-            return;
-        }
-        const target = event.target;
-        const isEditableTarget = (
-            target instanceof HTMLInputElement
-            || target instanceof HTMLTextAreaElement
-            || target instanceof HTMLSelectElement
-            || (target instanceof HTMLElement && target.isContentEditable)
-        );
-        if (event.key === 'Escape') {
-            const clearedTransientDrawerState = clearTransientDrawerState();
-            const cancelledAskRollPick = cancelAskRollPickMode();
-            const closedMenu = closeQuickSpawnMenu();
-            const closedNavMenu = closeNavMenu();
-            const closedViewMenu = closeViewMenu();
-            const closedToolsMenu = closeToolsMenu();
-            const closedStageContext = closeStageContextMenu();
-            const clearedSpawn = clearSpawnDrag();
-            const clearedTemplatePlacement = clearTemplatePlacementState();
-            const closedVTTPanel = closeActiveVTTPanel();
-            const closedInitiativeDetail = closeInitiativeDetail();
-            const closedTokenInspector = closeTokenInspectorPopover();
-            const closedSheetActions = closeSheetActionPopover();
-            const closedNPCRoll = closeNPCRollPopover();
-            const closedPlayerRollMenu = playerRollMenuOpen;
-            playerRollMenuOpen = false;
-            if (previewTokenId) {
-                previewTokenId = '';
-                renderStage();
-                event.preventDefault();
-            } else if (clearedTransientDrawerState || cancelledAskRollPick || closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedVTTPanel || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll || closedPlayerRollMenu) {
-                render();
-                event.preventDefault();
-            }
-            return;
-        }
-        if (
-            isEditableTarget
-        ) {
-            return;
-        }
-        if (!selectedTokenId || event.defaultPrevented) return;
-        if (event.altKey || event.ctrlKey || event.metaKey) return;
-        const selectedToken = getTokenById(selectedTokenId);
-        if (!selectedToken || !canRoleMoveToken(selectedToken, localRole)) return;
-
-        let deltaX = 0;
-        let deltaY = 0;
-        if (event.key === 'ArrowLeft') deltaX = -1;
-        else if (event.key === 'ArrowRight') deltaX = 1;
-        else if (event.key === 'ArrowUp') deltaY = -1;
-        else if (event.key === 'ArrowDown') deltaY = 1;
-        else return;
-
-        if (!moveSelectedTokenByCells(deltaX, deltaY)) return;
-        event.preventDefault();
-    };
+    });
+    const handleDocumentKeyDown = (...args) => requireStageInput().handleDocumentKeyDown(...args);
+    const handleDocumentPointerDown = (...args) => requireStageInput().handleDocumentPointerDown(...args);
+    const handleInitiativeContextMenu = (...args) => requireStageInput().handleInitiativeContextMenu(...args);
+    const handlePointerMove = (...args) => requireStageInput().handlePointerMove(...args);
+    const handlePointerUp = (...args) => requireStageInput().handlePointerUp(...args);
+    const handleStageContextMenu = (...args) => requireStageInput().handleStageContextMenu(...args);
+    const handleStageDragStart = (...args) => requireStageInput().handleStageDragStart(...args);
+    const handleStagePointerDown = (...args) => requireStageInput().handleStagePointerDown(...args);
+    const handleStageWheel = (...args) => requireStageInput().handleStageWheel(...args);
 
     const bindEvents = () => {
         bindSyncChipActions();
@@ -13761,48 +6835,45 @@
         document.addEventListener('keydown', handleDocumentKeyDown);
         document.addEventListener('input', handleFieldChange);
         document.addEventListener('change', handleFieldChange);
-        if (sceneMusicEditorEl) {
-            sceneMusicEditorEl.addEventListener('input', handleSceneMusicEditorInput, true);
-            sceneMusicEditorEl.addEventListener('change', handleSceneMusicEditorChange, true);
-            sceneMusicEditorEl.addEventListener('keydown', handleSceneMusicEditorKeyDown, true);
+        if (dom.sceneMusicEditorEl) {
+            dom.sceneMusicEditorEl.addEventListener('input', handleSceneMusicEditorInput, true);
+            dom.sceneMusicEditorEl.addEventListener('change', handleSceneMusicEditorChange, true);
+            dom.sceneMusicEditorEl.addEventListener('keydown', handleSceneMusicEditorKeyDown, true);
         }
-        if (dmUnlockFormEl) {
-            dmUnlockFormEl.addEventListener('submit', (event) => {
+        if (dom.dmUnlockFormEl) {
+            dom.dmUnlockFormEl.addEventListener('submit', (event) => {
                 event.preventDefault();
                 submitDMUnlockModal();
             });
         }
-        if (npcSearchInputEl) npcSearchInputEl.addEventListener('input', handleNPCSearchInput);
-        if (mapImageEl) mapImageEl.draggable = false;
-        if (stageEl) stageEl.addEventListener('pointerdown', handleStagePointerDown);
-        if (stageEl) stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
-        if (stageEl) stageEl.addEventListener('dragstart', handleStageDragStart);
-        if (stageEl) stageEl.addEventListener('contextmenu', handleStageContextMenu);
-        if (stageContextMenuEl) {
-            stageContextMenuEl.addEventListener('toggle', () => {
+        if (dom.npcSearchInputEl) dom.npcSearchInputEl.addEventListener('input', handleNPCSearchInput);
+        if (dom.mapImageEl) dom.mapImageEl.draggable = false;
+        if (dom.stageEl) dom.stageEl.addEventListener('pointerdown', handleStagePointerDown);
+        if (dom.stageEl) dom.stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
+        if (dom.stageEl) dom.stageEl.addEventListener('dragstart', handleStageDragStart);
+        if (dom.stageEl) dom.stageEl.addEventListener('contextmenu', handleStageContextMenu);
+        if (dom.stageContextMenuEl) {
+            dom.stageContextMenuEl.addEventListener('toggle', () => {
                 window.requestAnimationFrame(positionStageContextMenu);
             }, true);
         }
-        if (initiativeListEl) initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
-        if (topbarTabEl) topbarTabEl.addEventListener('pointerleave', () => clearHoverSuppression('topbarHoverSuppressed'));
-        if (settingsRailTabEl) settingsRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));
-        if (playerRollRailTabEl) playerRollRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('playerRollHoverSuppressed'));
-        if (initiativeRailTabEl) initiativeRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('initiativeHoverSuppressed'));
-        if (topbarTabEl) topbarTabEl.addEventListener('pointerenter', () => setDrawerPreview('topbarPreview', 'topbarHoverSuppressed', uiState.topbarCollapsed));
-        if (settingsRailTabEl) settingsRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('settingsPreview', 'settingsHoverSuppressed', uiState.settingsCollapsed));
-        if (playerRollRailTabEl) playerRollRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('playerRollPreview', 'playerRollHoverSuppressed', uiState.playerRollRailCollapsed));
-        if (initiativeRailTabEl) initiativeRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('initiativePreview', 'initiativeHoverSuppressed', uiState.initiativeCollapsed));
-        if (topbarEl) topbarEl.addEventListener('pointerleave', () => setDrawerPreview('topbarPreview', '', false));
-        if (sidebarEl) sidebarEl.addEventListener('pointerleave', () => setDrawerPreview('settingsPreview', '', false));
-        if (playerRollRailEl) playerRollRailEl.addEventListener('pointerleave', () => setDrawerPreview('playerRollPreview', '', false));
-        if (initiativePanelEl) initiativePanelEl.addEventListener('pointerleave', () => setDrawerPreview('initiativePreview', '', false));
+        if (dom.initiativeListEl) dom.initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
+        if (dom.settingsRailTabEl) dom.settingsRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));
+        if (dom.playerRollRailTabEl) dom.playerRollRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('playerRollHoverSuppressed'));
+        if (dom.initiativeRailTabEl) dom.initiativeRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('initiativeHoverSuppressed'));
+        if (dom.settingsRailTabEl) dom.settingsRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('settingsPreview', 'settingsHoverSuppressed', uiRuntime.preferences.settingsCollapsed));
+        if (dom.playerRollRailTabEl) dom.playerRollRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('playerRollPreview', 'playerRollHoverSuppressed', uiRuntime.preferences.playerRollRailCollapsed));
+        if (dom.initiativeRailTabEl) dom.initiativeRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('initiativePreview', 'initiativeHoverSuppressed', uiRuntime.preferences.initiativeCollapsed));
+        if (dom.sidebarEl) dom.sidebarEl.addEventListener('pointerleave', () => setDrawerPreview('settingsPreview', '', false));
+        if (dom.playerRollRailEl) dom.playerRollRailEl.addEventListener('pointerleave', () => setDrawerPreview('playerRollPreview', '', false));
+        if (dom.initiativePanelEl) dom.initiativePanelEl.addEventListener('pointerleave', () => setDrawerPreview('initiativePreview', '', false));
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerUp);
-        window.addEventListener(STORE_UPDATED_EVENT, handleStoreUpdate);
+        window.addEventListener(C.STORE_UPDATED_EVENT, handleStoreUpdate);
         window.addEventListener('storage', handleStorageEvent);
         window.addEventListener('resize', () => {
-            if (fitViewOnNextMapLoad) {
+            if (stageState.view.fitOnNextMapLoad) {
                 fitViewToWorld();
                 renderQuickSpawnMenu();
                 positionStageContextMenu();
@@ -13828,14 +6899,23 @@
         window.addEventListener('scroll', positionSheetActionPopover, { passive: true });
         window.addEventListener('scroll', positionNPCRollPopover, { passive: true });
         window.addEventListener('scroll', positionStageContextMenu, { passive: true });
-        if (sidebarEl) sidebarEl.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
+        if (dom.sidebarEl) dom.sidebarEl.addEventListener('scroll', positionNPCSearchPopover, { passive: true });
     };
 
     const init = async () => {
         const store = getStore();
         if (!store) {
-            initialVTTLoadPending = false;
-            if (syncChipEl) syncChipEl.textContent = 'Unavailable';
+            sessionState.initialLoadPending = false;
+            if (dom.syncChipEl) dom.syncChipEl.textContent = 'Unavailable';
+            return;
+        }
+
+        try {
+            await ensureVTTSessionController();
+        } catch (err) {
+            sessionState.initialLoadPending = false;
+            if (dom.syncChipEl) dom.syncChipEl.textContent = 'Unavailable';
+            reportVTTError('vtt-session-init', 'module', err);
             return;
         }
 
@@ -13844,16 +6924,16 @@
         loadUIPreferences();
         capturePlayerImagesAtLoad();
         const initialCaseId = getActiveCaseId();
-        const initialTransitionId = vttCaseTransitionId;
+        const initialTransitionId = sessionState.caseTransitionId;
         const initialSnapshot = await loadInitialVTTSnapshot(store, initialCaseId);
-        if (initialCaseId !== getActiveCaseId() || initialTransitionId !== vttCaseTransitionId) return;
+        if (initialCaseId !== getActiveCaseId() || initialTransitionId !== sessionState.caseTransitionId) return;
         if (!initialSnapshot) {
-            vttState = null;
-            vttStateCaseId = initialCaseId;
-            initialVTTLoadPending = true;
+            sessionState.snapshot = null;
+            sessionState.stateCaseId = initialCaseId;
+            sessionState.initialLoadPending = true;
             normalizeSelections();
             if (typeof store.onSyncStatus === 'function') {
-                unsubscribeSyncStatus = store.onSyncStatus(handleVTTStoreSyncStatus);
+                resources.unsubscribeSyncStatus = store.onSyncStatus(handleVTTStoreSyncStatus);
             } else {
                 updateStoreSyncChip({ connected: false });
             }
@@ -13880,10 +6960,10 @@
             initialSynced = deepClone(saved || initialSynced);
         }
 
-        vttState = initialSynced;
-        vttStateCaseId = initialCaseId;
+        sessionState.snapshot = initialSynced;
+        sessionState.stateCaseId = initialCaseId;
         normalizeSelections();
-        initialVTTLoadPending = false;
+        sessionState.initialLoadPending = false;
         render();
         initVTTCollabWithRetry().catch((err) => {
             console.warn('VTT collaboration init failed', err);
@@ -13892,7 +6972,7 @@
         });
 
         if (typeof store.onSyncStatus === 'function') {
-            unsubscribeSyncStatus = store.onSyncStatus(handleVTTStoreSyncStatus);
+            resources.unsubscribeSyncStatus = store.onSyncStatus(handleVTTStoreSyncStatus);
         } else {
             updateStoreSyncChip({ connected: false });
         }

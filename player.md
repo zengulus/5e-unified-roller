@@ -1,6 +1,6 @@
 # Player Guide: Ravnica Task Force Tools
 
-Welcome to the **Ravnica Task Force** suite. These offline-first tools are designed to help you manage your character, track investigations, and visualize the campaign state.
+Welcome to the **Ravnica Task Force** suite. These browser-based tools help you manage your character, track investigations, and visualize the campaign state.
 
 ## Getting Started
 

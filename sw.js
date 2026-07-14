@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ravnica-tools-v14';
+const CACHE_NAME = 'ravnica-tools-v18';
 const SHELL_ASSETS = [
     './',
     './manifest.json',
@@ -87,8 +87,25 @@ const SHELL_ASSETS = [
     './js/tools.js',
     './js/ui.js',
     './js/vector-field.js',
+    './js/vtt-config.js',
+    './js/vtt-dom.js',
+    './js/vtt-inspector-markup.js',
+    './js/vtt-runtime-state.js',
     './js/vtt-collab.js',
     './js/vtt-fog-unified.js',
+    './js/vtt-field-router.js',
+    './js/vtt-actions-rolls.js',
+    './js/vtt-actions-scenes.js',
+    './js/vtt-actions-selection.js',
+    './js/vtt-actions-table.js',
+    './js/vtt-geometry.js',
+    './js/vtt-markup.js',
+    './js/vtt-proximity.js',
+    './js/vtt-rolls.js',
+    './js/vtt-rules.js',
+    './js/vtt-session.js',
+    './js/vtt-stage-input.js',
+    './js/vtt-stage-view.js',
     './js/vtt.js',
     './js/collab-relay-client.js',
     './js/vendor/lib0/array.js',
@@ -185,7 +202,7 @@ self.addEventListener('fetch', (event) => {
             }
             return networkResponse;
         } catch (err) {
-            const cached = await cache.match(event.request);
+            const cached = await cache.match(event.request, { ignoreSearch: true });
             if (cached) return cached;
 
             if (event.request.mode === 'navigate') {

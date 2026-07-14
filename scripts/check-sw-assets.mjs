@@ -6,11 +6,17 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const swSource = await readFile(path.join(root, 'sw.js'), 'utf8');
+const listeners = new Map();
 const sandbox = {
     URL,
     fetch: async () => {},
     caches: {},
-    self: { addEventListener() {}, skipWaiting() {}, clients: { claim() {} }, location: { origin: 'http://local' } }
+    self: {
+        addEventListener(type, listener) { listeners.set(type, listener); },
+        skipWaiting() {},
+        clients: { claim() {} },
+        location: { origin: 'http://local' }
+    }
 };
 vm.runInNewContext(`${swSource}\nglobalThis.__shellAssets = SHELL_ASSETS;`, sandbox, { filename: 'sw.js' });
 const assets = Array.from(sandbox.__shellAssets || []);
@@ -37,6 +43,31 @@ for (const htmlFile of htmlFiles) {
 
 const missing = [...required].filter((asset) => !assets.includes(asset)).sort();
 assert.deepEqual(missing, [], `SHELL_ASSETS is missing:\n${missing.join('\n')}`);
+
+const fetchListener = listeners.get('fetch');
+assert.equal(typeof fetchListener, 'function', 'service worker must register a fetch handler');
+const cachedScript = { source: 'precache' };
+let matchOptions = null;
+sandbox.fetch = async () => { throw new Error('offline'); };
+sandbox.caches.open = async () => ({
+    async match(request, options) {
+        matchOptions = options || null;
+        return String(request && request.url || '').includes('/js/vtt-geometry.js') ? cachedScript : null;
+    },
+    async put() {}
+});
+let offlineResponse = null;
+fetchListener({
+    request: {
+        method: 'GET',
+        mode: 'same-origin',
+        destination: 'script',
+        url: 'http://local/js/vtt-geometry.js?v=20260714a'
+    },
+    respondWith(response) { offlineResponse = response; }
+});
+assert.equal(await offlineResponse, cachedScript, 'versioned shell assets must fall back to the unversioned precache');
+assert.equal(matchOptions && matchOptions.ignoreSearch, true, 'offline shell lookup must ignore cache-busting query strings');
 
 const moduleQueue = assets.filter((asset) => /\.(?:js|mjs)$/.test(asset));
 const checkedModules = new Set();

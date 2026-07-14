@@ -11,6 +11,10 @@ body[data-player-nav="vtt"] canvas#vector-cloud {
     display: none;
 }
 
+.vtt-mobile-unsupported {
+    display: none;
+}
+
 .vtt-topbar {
     position: sticky;
     top: 0;
@@ -166,10 +170,6 @@ body[data-player-nav="vtt"] .vtt-topbar .hero-btn {
 
 .vtt-topbar-tab {
     display: none;
-}
-
-body[data-player-nav="vtt"] .vtt-topbar-tab {
-    display: none !important;
 }
 
 .vtt-secondary-topbar-control {
@@ -715,9 +715,10 @@ body:not([data-active-vtt-panel]) .vtt-admin-panel {
 .vtt-player-roll-rail,
 .vtt-admin-panel {
     opacity: 0;
+    visibility: hidden;
     pointer-events: none;
     transform: translateY(0.5rem);
-    transition: opacity 160ms ease, transform 160ms ease;
+    transition: opacity 160ms ease, transform 160ms ease, visibility 0s linear 160ms;
 }
 
 .vtt-admin-panel {
@@ -731,8 +732,10 @@ body[data-active-vtt-panel="player-rolls"] .vtt-player-roll-rail,
 body[data-active-vtt-panel="admin"] .vtt-admin-panel {
     z-index: 50;
     opacity: 1;
+    visibility: visible;
     pointer-events: auto;
     transform: translateY(0);
+    transition-delay: 0s;
 }
 
 body[data-active-vtt-panel="admin"] .vtt-admin-panel {
@@ -1237,6 +1240,7 @@ body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
     position: absolute;
     top: calc(100% + 0.55rem);
     right: 0;
+    box-sizing: border-box;
     width: min(320px, calc(100vw - 3rem));
     padding: 0.85rem;
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -4067,6 +4071,7 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag 
 }
 
 .vtt-modal-card {
+    box-sizing: border-box;
     width: min(28rem, calc(100vw - 2rem));
     padding: 1rem;
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -4460,7 +4465,7 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         box-shadow: 0 18px 38px rgba(0, 0, 0, 0.32);
         backdrop-filter: blur(14px);
         transform: none;
-        transition: box-shadow 160ms ease;
+        transition: transform 160ms ease, box-shadow 160ms ease;
     }
 
     .vtt-topbar-tab {
@@ -4498,7 +4503,14 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         opacity: 1;
     }
 
-    body[data-topbar-preview="1"] .vtt-topbar,
+    body[data-topbar-collapsed="1"] .vtt-topbar {
+        transform: translateY(calc(-100% - 0.5rem));
+    }
+
+    body[data-topbar-collapsed="1"] .vtt-topbar-tab {
+        transform: translate(-50%, 1.05rem);
+    }
+
     body[data-topbar-collapsed="0"] .vtt-topbar {
         transform: none;
         box-shadow: 0 22px 46px rgba(0, 0, 0, 0.46);
@@ -4510,7 +4522,10 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         padding-top: 0;
     }
 
-    body[data-topbar-preview="1"] .vtt-shell,
+    body[data-topbar-collapsed="1"] .vtt-shell {
+        --vtt-overlay-top: 0.75rem;
+    }
+
     body[data-topbar-collapsed="0"] .vtt-shell {
         --vtt-overlay-top: 4.75rem;
     }
@@ -4628,6 +4643,14 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         right: 0.5rem;
     }
 
+    body[data-active-vtt-panel="setup"] .vtt-sidebar,
+    body[data-active-vtt-panel="spawn"] .vtt-sidebar,
+    body[data-active-vtt-panel="inspector"] .vtt-sidebar,
+    body[data-active-vtt-panel="player-rolls"] .vtt-player-roll-rail,
+    body[data-active-vtt-panel="admin"] .vtt-admin-panel {
+        pointer-events: auto;
+    }
+
     .vtt-initiative-panel {
         --vtt-rail-width: min(300px, calc(100vw - 1rem));
         opacity: 1;
@@ -4637,17 +4660,6 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
 
     body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
         --vtt-rail-width: clamp(398px, calc(32vw + 1rem), 446px);
-    }
-
-    .vtt-sidebar > .vtt-side-rail-tab,
-    .vtt-player-roll-rail > .vtt-side-rail-tab,
-    .vtt-initiative-panel > .vtt-side-rail-tab,
-    .vtt-admin-panel > .vtt-side-rail-tab,
-    .vtt-sidebar > .vtt-sidebar-scroll,
-    .vtt-player-roll-rail > .vtt-panel,
-    .vtt-initiative-panel > .vtt-initiative-scroll,
-    .vtt-admin-panel > .vtt-panel {
-        pointer-events: auto;
     }
 
     .vtt-sidebar > .vtt-sidebar-scroll,
@@ -4751,200 +4763,52 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     }
 }
 
-@media (max-width: 860px) {
-    .vtt-topbar {
-        left: 0.5rem;
-        right: 0.5rem;
-        top: 0.5rem;
-        gap: 0.45rem;
-        padding: 0.55rem 0.65rem;
-        flex-wrap: wrap;
+@media (max-width: 860px), (hover: none) and (pointer: coarse) and (any-hover: none) {
+    body[data-player-nav="vtt"] {
+        overflow: hidden;
     }
 
-    .vtt-topbar-brand {
-        flex: 1 1 100%;
+    body[data-player-nav="vtt"] > :not(.vtt-mobile-unsupported):not(script) {
+        display: none !important;
     }
 
-    .vtt-topbar-brand .hero-eyebrow {
-        display: none;
-    }
-
-    .vtt-topbar-case-stack {
-        min-height: 0;
-    }
-
-    .vtt-topbar-toolbar {
-        width: 100%;
-        justify-content: flex-start;
-    }
-
-    .vtt-topbar .hero-btn {
-        min-height: 34px;
-        padding: 0.45rem 0.68rem;
-    }
-
-    .vtt-topbar-actions,
-    .vtt-topbar-local-controls,
-    .vtt-topbar-quick-controls {
-        justify-content: flex-start;
-    }
-
-    .vtt-audio-player,
-    .vtt-audio-empty,
-    .vtt-audio-shell {
-        width: 100%;
-        max-width: none;
-    }
-
-    .vtt-audio-shell {
-        grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .vtt-shell {
-        --vtt-shell-height: 100vh;
-        --vtt-overlay-top: 4rem;
-        padding: 0;
-    }
-
-    .vtt-sidebar,
-    .vtt-player-roll-rail,
-    .vtt-initiative-panel,
-    .vtt-admin-panel {
+    .vtt-mobile-unsupported {
         position: fixed;
-        left: 0;
-        right: 0;
-        top: auto;
-        bottom: 0;
-        width: 100vw;
-        max-height: min(78vh, 42rem);
-        padding: 0.75rem;
+        inset: 0;
+        z-index: 10000;
         box-sizing: border-box;
-        transform: translateY(105%);
-        z-index: 45;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        padding: 1.25rem;
+        background:
+            radial-gradient(circle at 50% 20%, rgba(var(--accent-rgb, 78, 205, 196), 0.12), transparent 34rem),
+            #05070b;
+        color: #eef6ff;
+        text-align: center;
     }
 
-    .vtt-scene-select-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .vtt-clock-edit-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .vtt-scene-music-editor {
-        grid-template-columns: 1fr;
-    }
-
-    .vtt-clock-layout {
-        grid-template-columns: auto minmax(0, 1fr);
-    }
-
-    .vtt-scene-summary-top {
-        flex-direction: column;
-    }
-
-    .vtt-tool-mode-row {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .vtt-stage-toolbar-controls,
-    .vtt-stage-tool-extras {
-        justify-content: flex-start;
-    }
-
-    .vtt-stage-tool-row {
-        flex-basis: 100%;
-    }
-
-    .vtt-stage-tool-size {
-        width: 100%;
-        max-width: 10rem;
-    }
-
-    body[data-active-vtt-panel="setup"] .vtt-sidebar,
-    body[data-active-vtt-panel="spawn"] .vtt-sidebar,
-    body[data-active-vtt-panel="inspector"] .vtt-sidebar,
-    body[data-active-vtt-panel="player-rolls"] .vtt-player-roll-rail,
-    body[data-active-vtt-panel="combat"] .vtt-initiative-panel,
-    body[data-active-vtt-panel="admin"] .vtt-admin-panel {
-        opacity: 1;
-        pointer-events: auto;
-        transform: translateY(0);
-    }
-
-    .vtt-sidebar-scroll,
-    .vtt-initiative-scroll,
-    .vtt-player-roll-panel,
-    .vtt-admin-panel > .vtt-panel {
-        max-height: calc(min(78vh, 42rem) - 1.5rem);
-        overflow-y: auto;
-        border-radius: 12px 12px 0 0;
-    }
-
-    .vtt-side-rail-tab {
-        display: none;
-    }
-
-    .vtt-table-hud {
-        inset: auto 0.55rem 0.55rem 0.55rem;
-    }
-
-    .vtt-command-dock,
-    .vtt-dm-dock,
-    .vtt-player-dock {
-        grid-template-columns: 1fr;
-        width: 100%;
-        max-width: none;
+    .vtt-mobile-unsupported-card {
         box-sizing: border-box;
+        width: min(32rem, 100%);
+        padding: 1.5rem;
+        border: 1px solid rgba(var(--accent-rgb, 78, 205, 196), 0.34);
+        border-radius: 1rem;
+        background: rgba(7, 11, 19, 0.94);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.48);
     }
 
-    .vtt-dock-actions {
-        justify-content: flex-start;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        padding-bottom: 0.1rem;
+    .vtt-mobile-unsupported h1 {
+        margin: 0.35rem 0 0.75rem;
+        color: #f7fbff;
+        font-size: clamp(1.45rem, 7vw, 2.1rem);
+        line-height: 1.12;
     }
 
-    .vtt-dock-group {
-        flex: 0 0 auto;
-    }
-
-    .vtt-dock-btn {
-        flex: 0 0 auto;
-        min-height: 2.6rem;
-    }
-
-    .vtt-zoom-dock {
-        top: auto;
-        right: 0.55rem;
-        bottom: 5.8rem;
-        max-width: calc(100vw - 1.1rem);
-        overflow-x: auto;
-    }
-
-    body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel {
-        left: auto;
-        right: 0.45rem;
-        top: calc(var(--vtt-overlay-top) + 3rem);
-        bottom: auto;
-        width: min(240px, calc(100vw - 0.9rem));
-        max-height: min(38vh, calc(100vh - var(--vtt-overlay-top) - 8.6rem));
-        padding: 0;
-        opacity: 1;
-        pointer-events: auto;
-        transform: none;
-        z-index: 46;
-    }
-
-    body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
-        left: 0;
-        right: 0;
-        top: auto;
-        bottom: 0;
-        width: 100vw;
-        max-height: min(78vh, 42rem);
-        padding: 0.75rem;
-        transform: translateY(0);
+    .vtt-mobile-unsupported p:last-child {
+        margin: 0;
+        color: rgba(226, 235, 246, 0.78);
+        line-height: 1.5;
     }
 }
 

@@ -217,7 +217,7 @@ Treat `connect.json` as a credential-bearing connection profile even though the 
 
 ## Notes
 
-- Sync is offline-first: local state always saves immediately.
+- Local state saves immediately before background synchronization.
 - First cloud connect in a browser session force-pulls remote state; remote is treated as source-of-truth at initial load.
 - Remote sync now uses optimistic conflict checks with per-state `meta.syncRevision`.
 - In normalized mode, routine row edits for players, NPCs, locations, requisitions, encounters, and timeline events auto-resolve against newer remote rows.

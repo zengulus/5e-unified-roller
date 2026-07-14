@@ -2,13 +2,14 @@
 
 ## Summary
 - Build a dedicated `vtt.html` that reuses board collaboration/storage internals but does not add tactical UI to `board.html`.
+- Treat the VTT as desktop-only. Mobile-width browsers show an unsupported notice instead of the table interface.
 - Keep the VTT case-scoped in v1.
 - Add a separate case-scoped VTT payload in shared store rather than storing tactical state inside board nodes/connections.
 - Keep a local-only `DM / Player` toggle. Both roles share the same synced active scene; Player mode hides DM tooling but still allows enemy-cone preview, local ruler use, and read-only initiative visibility.
 - Use separate scenes with a shared `Load Scene` action that switches the active scene for everyone, while zoom/pan stay local-only.
 - Keep initiative case-scoped so order, round, active turn, per-entry toggles, and DM-only inspection details persist between dialogue scenes, chaos scenes, and map changes.
 - Make VTT initiative the canonical combat state for the case, with Character Sheet submissions feeding it rather than living only inside the sheet.
-- Keep enemy vision token-attached: enemy tokens own facing/arc/range settings, and previews render from the token on hover or press-and-hold.
+- Keep enemy vision token-attached: enemy tokens own facing/arc/range settings, and previews render from the token on hover.
 - Add adjustable per-scene grid sizing and offset so the grid can align cleanly to the background map image.
 - Add a local-only distance ruler against the grid.
 
@@ -53,7 +54,7 @@
   - order, round, active turn, and per-entry toggles persist across scene loads
   - the initiative rail is visible in both DM and Player mode
   - only DM mode can edit initiative order and admin controls
-  - DM mode can click or tap an initiative entry to reveal passive perception, AC, and defences when present
+  - DM mode can click an initiative entry to reveal passive perception, AC, and defences when present
   - Player mode never exposes DM-only initiative inspection details
   - initiative entries may remain on the rail even when their linked token is not on the currently loaded scene
 - Sheet initiative rules:
@@ -111,7 +112,7 @@
   - only DM mode can edit enemy vision settings
 - Vision preview rules:
   - preview is local-only rendering
-  - preview triggers on hover or press-and-hold
+  - preview triggers on hover
   - no wall or LOS blocking in v1
   - effective range in cells = `baseRangeCells + max(0, floor((passivePerception - 10) / 2))`
   - tokens inside the cone compare enemy `passivePerception` against target `stealthDc`
@@ -181,7 +182,7 @@
 - Add local-only distance ruler against grid:
   - snap-to-grid measurement by default
   - optional free-measure mode
-  - desktop and tablet-safe trigger
+  - desktop pointer trigger
 - Useful-version acceptance:
   - scene loads/switches sync across browsers
   - initiative and turn state persist across scene loads and sync across browsers
@@ -201,13 +202,8 @@
   - facing/cone controls stay attached to the token and move with it
 - Add enemy-cone preview behavior:
   - desktop hover shows the stored cone for enemy tokens
-  - touch press-and-hold shows the stored cone for enemy tokens
   - preview highlights targets in range and marks stealth pass/fail against `stealthDc`
-  - preview clears on hover exit or touch release
-- Add tablet-safe interaction:
-  - larger tap targets
-  - long-press token actions
-  - no desktop-only requirement for core play
+  - preview clears on hover exit
 - Add docs:
   - VTT user doc
   - README/docs index entry
@@ -215,7 +211,7 @@
 - Polished acceptance:
   - fog persists and syncs
   - Player mode cleanly hides DM tooling
-  - enemy-cone preview works on desktop and touch
+  - enemy-cone preview works on desktop hover
   - token-attached cone settings persist and follow token movement
   - passive perception correctly affects range and stealth detection
   - VTT recovery path works without affecting board recovery
@@ -253,14 +249,15 @@
   - works against the configured grid
   - stays local-only
 - Verify DM-only initiative inspection:
-  - DM mode can click or tap an initiative entry to reveal passive perception, AC, and defences when present
+  - DM mode can click an initiative entry to reveal passive perception, AC, and defences when present
   - Player mode cannot see DM-only initiative inspection details
 - Verify enemy-cone preview:
   - only activates on `enemy` tokens
   - uses the fixed passive-perception range formula
   - marks `stealthDc` success/failure correctly
   - follows token facing and movement
-  - works on hover and press-and-hold
+  - works on hover
+- Verify mobile-width browsers show the unsupported notice and do not expose the VTT interface.
 - Verify `board.html` remains unchanged before and after VTT work.
 
 ## Assumptions And Defaults

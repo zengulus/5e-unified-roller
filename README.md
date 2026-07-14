@@ -1,6 +1,6 @@
 # Ravnica Task Force Tools
 
-This repository is the private, campaign-specific **Ravnica Task Force** platform. It is an offline-first suite of HTML tools for one trusted 5th Edition campaign group, not a generic multi-tenant 5e product. For the reusable toolkit, use [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).
+This repository is the private, campaign-specific **Ravnica Task Force** platform. It is a browser-based suite of HTML tools for one trusted 5th Edition campaign group, not a generic multi-tenant 5e product. For the reusable toolkit, use [5e-unified-roller-base](https://github.com/zengulus-d-and-d-tools/5e-unified-roller-base).
 
 > **Trust boundary:** Supabase policies supplied here grant every authenticated user access to every campaign row. Deploy cloud sync only for a single trusted group.
 
@@ -11,7 +11,7 @@ The ownership and authority rules for each subsystem are documented in **[Archit
 
 ## Components
 
-Each tool runs offline. The campaign stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Mission Timeline, Ledger, Encounters, HQ) shares the `RTF_STORE` object. On load, the shared campaign save is normalized into IndexedDB row stores, and Supabase sync uses the forced row-normalized v2 backend from `docs/SupabaseSyncRowsV2.sql`. Lead Queue, Prep/Procedure, and Clocks keep page-owned state keys; Lead Queue and Prep/Procedure cross-link into the campaign stack while Clocks remains standalone.
+The campaign stack (Hub, Campaign Board, Case Board, Dashboard, Roster, Locations, Requisitions, Campaign Timeline, Mission Timeline, Ledger, Encounters, HQ) shares the `RTF_STORE` object. On load, the shared campaign save is normalized into IndexedDB row stores, and Supabase sync uses the forced row-normalized v2 backend from `docs/SupabaseSyncRowsV2.sql`. Lead Queue, Prep/Procedure, and Clocks keep page-owned state keys; Lead Queue and Prep/Procedure cross-link into the campaign stack while Clocks remains standalone.
 
 | Tool | File | Description |
 |------|------|-------------|
@@ -31,6 +31,7 @@ Each tool runs offline. The campaign stack (Hub, Campaign Board, Case Board, Das
 | **[Session Tracker](docs/SessionTracker.md)** | `gm.html` | Multi-tab GM console (initiative, roller, reference, loot). |
 | **[Encounter Recipes](docs/EncounterRecipes.md)** | `encounters.html` | Reusable encounter cards with tier tags and searchable notes. |
 | **[Narrative Engine](docs/NarrativeEngine.md)** | `dm-screen.html` | Procedural prompts, NPC hooks, and hazard/debrief generators. |
+| **[Light VTT](docs/LightVTTRoadmap.md)** | `vtt.html` | Desktop virtual tabletop for scenes, tokens, fog, initiative, and player rolls. Mobile-width browsers show an unsupported notice. |
 | **[Campaign Board](docs/CampaignBoard.md)** | `campaign-board.html` | Campaign-level board for cross-case references, strategic links, and scope artifacts. |
 | **[Case Board](docs/CaseBoard.md)** | `board.html` | Physics-based investigation board with pop-up data sources. |
 | **[Clue Generator](docs/ClueGenerator.md)** | `clue.html` | Signal vs Noise intersection generator for mysteries. |

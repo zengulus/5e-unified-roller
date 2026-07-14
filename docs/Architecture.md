@@ -1,6 +1,6 @@
 # Architecture and State Authority
 
-This repository is the private Ravnica Task Force campaign platform. It remains dependency-light and offline-first, but it is not a single application: several page families own different state.
+This repository is the private Ravnica Task Force campaign platform. It remains dependency-light, but it is not a single application: several page families own different state.
 
 ## Authoritative State Map
 
@@ -15,11 +15,29 @@ This repository is the private Ravnica Task Force campaign platform. It remains 
 
 ## Runtime Layers
 
-1. Page controllers (`js/index.js`, `js/gm.js`, `js/roster.js`, `js/vtt.js`, and peers) bind DOM interactions.
-2. Shared domain modules own deterministic rules. Dice parsing/rolling lives in `js/dice.js`; character calculations live in `js/character-model.js`; legacy sheet conversion lives in `js/data-migrations.js`.
+1. Page controllers (`js/index.js`, `js/gm.js`, `js/roster.js`, `js/vtt.js`, and peers) bind DOM interactions and compose feature modules.
+2. Shared domain modules own deterministic rules. Dice parsing/rolling lives in `js/dice.js`; character calculations live in `js/character-model.js`; legacy sheet conversion lives in `js/data-migrations.js`. The VTT composition root is `js/vtt.js`: geometry/fog, sheet and monster rules, roll requests, proximity prompts, collaboration lifecycle, stage rendering, and domain action routing live in the focused `js/vtt-*.js` modules beside it.
 3. `js/store.js` owns campaign entities, local row persistence, scope tracking, conflict handling, and cloud orchestration. `js/supabase-transport.js` separately owns Supabase library loading and shared client lifecycle.
 4. `js/board-collab.js` and `js/vtt-collab.js` own Yjs documents and collaboration sessions. `js/collab-relay-client.js` is the WebSocket relay transport.
-5. `sw.js` provides the offline application shell. `scripts/check-sw-assets.mjs` verifies that every directly referenced entry asset exists in its cache list.
+5. `sw.js` provides the application shell cache. `scripts/check-sw-assets.mjs` verifies that every directly referenced entry asset exists in its cache list.
+
+### VTT Feature Boundaries
+
+| Module | Responsibility |
+|---|---|
+| `js/vtt.js` | Composition, shared snapshot transactions, selection reconciliation, and feature wiring |
+| `js/vtt-config.js` | Immutable VTT constants and fresh default snapshot construction |
+| `js/vtt-runtime-state.js` | Categorized session, stage, UI, and resource state plus live consumer ports |
+| `js/vtt-dom.js` | Validated VTT DOM reference registry |
+| `js/vtt-inspector-markup.js` | Token, evidence, and proximity inspector presentation and read-only rendering |
+| `js/vtt-session.js` | Collaboration lifecycle, authority changes, status, retry, and room recovery |
+| `js/vtt-stage-view.js` | Map viewport, rendering layers, transient effects, and remote token tweening |
+| `js/vtt-stage-input.js` | Pointer, touch, wheel, context-menu, and keyboard interaction state |
+| `js/vtt-field-router.js` | DOM field decoding and delegation to scene, token, evidence, clock, and initiative mutations |
+| `js/vtt-proximity.js` | Trigger schema, candidate selection, persistence, prompt rendering, and resolution |
+| `js/vtt-rolls.js` / `js/vtt-rules.js` | Roll/search/request rules and sheet/monster domain rules |
+| `js/vtt-geometry.js` / `js/vtt-markup.js` | Deterministic geometry/fog calculations and stateless overlay markup |
+| `js/vtt-actions-*.js` | Domain-grouped click command routing for rolls, table tools, scenes, tokens, and initiative |
 
 ## Persistence Failure Contract
 
