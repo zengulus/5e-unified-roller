@@ -38,6 +38,7 @@
             "context-token-inspector",
             "delete-clock",
             "delete-evidence-note",
+            "edit-clock",
             "fit-view",
             "force-vtt-authoritative",
             "open-global-settings",
@@ -51,6 +52,7 @@
             "quick-spawn-open-npc-search",
             "quick-spawn-player",
             "set-ping-mode",
+            "set-combat-view",
             "set-tool-mode",
             "toggle-clock-hidden",
             "toggle-evidence-hidden-quick",
@@ -72,6 +74,44 @@
             "zoom-out",
             "zoom-reset"
     ]);
+
+    const forEachClockTrigger = (scene, callback) => {
+        if (!scene || typeof callback !== 'function') return;
+        const owners = [
+            ...(Array.isArray(scene.tokens) ? scene.tokens : []),
+            ...(Array.isArray(scene.evidenceNotes) ? scene.evidenceNotes : [])
+        ];
+        owners.forEach((owner) => {
+            if (!owner || !Array.isArray(owner.triggers)) return;
+            owner.triggers.forEach((trigger) => {
+                if (trigger && typeof trigger === 'object') callback(trigger, owner);
+            });
+        });
+    };
+
+    const countClockTriggerReferences = (scene, clockId) => {
+        const targetId = String(clockId || '').trim();
+        if (!targetId) return 0;
+        let count = 0;
+        forEachClockTrigger(scene, (trigger) => {
+            if (String(trigger.clockId || '').trim() === targetId) count += 1;
+        });
+        return count;
+    };
+
+    const clearClockTriggerReferences = (scene, clockId) => {
+        const targetId = String(clockId || '').trim();
+        if (!targetId) return 0;
+        let repaired = 0;
+        forEachClockTrigger(scene, (trigger) => {
+            if (String(trigger.clockId || '').trim() !== targetId) return;
+            trigger.clockId = '';
+            trigger.clockSuccessDelta = 0;
+            trigger.clockFailDelta = 0;
+            repaired += 1;
+        });
+        return repaired;
+    };
 
     const create = (deps = {}) => {
         const state = deps.state;
@@ -100,8 +140,10 @@
             duplicateEvidenceNoteById,
             findMonsterForAssignmentQuery,
             fitViewToWorld,
+            focusClockEditor,
             forceDMVTTAuthoritative,
             getActiveScene,
+            getCombatScene,
             getCanonicalTokenImageUrl,
             getLocalPlayerFocusContext,
             getPingVariantOptions,
@@ -135,6 +177,7 @@
             renderViewMenu,
             reportVTTAdminActionError,
             setActiveVTTPanel,
+            setCombatView,
             setToolMode,
             setZoomAroundStageCenter,
             showTokenPortraitPreview,
@@ -372,8 +415,9 @@
             }
             if (action === 'add-scene-clock') {
                 if (!isDM()) return;
+                let createdClockId = '';
                 withDraft((draft) => {
-                    const scene = getActiveScene(draft);
+                    const scene = getCombatScene(draft);
                     if (!scene) return;
                     if (!Array.isArray(scene.clocks)) scene.clocks = [];
                     const nextNumber = scene.clocks.length + 1;
@@ -382,19 +426,39 @@
                         title: `Clock ${nextNumber}`,
                         current: 0,
                         max: 4,
-                        hidden: false,
+                        hidden: true,
                         color: '#f0b357',
-                        note: ''
+                        note: '',
+                        cadence: 'manual'
                     };
                     scene.clocks.push(clock);
                     state.selectedClockId = clock.id;
+                    state.combatClockEditorId = clock.id;
+                    createdClockId = clock.id;
                 });
+                if (createdClockId) {
+                    setCombatView('clocks');
+                    focusClockEditor(createdClockId);
+                }
+                return;
+            }
+            if (action === 'edit-clock') {
+                if (!isDM()) return;
+                state.selectedClockId = id;
+                state.combatClockEditorId = state.combatClockEditorId === id ? '' : id;
+                setCombatView('clocks');
+                if (state.combatClockEditorId) focusClockEditor(state.combatClockEditorId);
+                return;
+            }
+            if (action === 'set-combat-view') {
+                setCombatView(actionEl.dataset.combatView);
                 return;
             }
             if (action === 'clock-step') {
                 if (!isDM()) return;
                 const delta = Math.round(toNumber(actionEl.dataset.delta, 0));
                 updateSceneClock(id, (clock) => {
+                    state.selectedClockId = id;
                     const max = normalizeClockMax(clock.max, 4);
                     clock.max = max;
                     clock.current = normalizeClockCurrent(toNumber(clock.current, 0) + delta, max, 0);
@@ -404,6 +468,7 @@
             if (action === 'toggle-clock-hidden') {
                 if (!isDM()) return;
                 updateSceneClock(id, (clock) => {
+                    state.selectedClockId = id;
                     clock.hidden = !clock.hidden;
                 });
                 return;
@@ -412,10 +477,17 @@
                 if (!isDM()) return;
                 if (!canDeleteLiveVTTState('delete-clock')) return;
                 withDraft((draft) => {
-                    const scene = getActiveScene(draft);
+                    const scene = getCombatScene(draft);
                     if (!scene || !Array.isArray(scene.clocks)) return;
-                    scene.clocks = scene.clocks.filter((clock) => String(clock && clock.id || '').trim() !== id);
-                    if (state.selectedClockId === id) state.selectedClockId = '';
+                    const clockIdx = scene.clocks.findIndex((clock) => String(clock && clock.id || '').trim() === id);
+                    if (clockIdx < 0) return;
+                    clearClockTriggerReferences(scene, id);
+                    scene.clocks.splice(clockIdx, 1);
+                    if (state.selectedClockId === id) {
+                        const nextClock = scene.clocks[clockIdx] || scene.clocks[clockIdx - 1] || null;
+                        state.selectedClockId = nextClock ? String(nextClock.id || '').trim() : '';
+                    }
+                    if (state.combatClockEditorId === id) state.combatClockEditorId = '';
                 });
                 return;
             }
@@ -636,5 +708,9 @@
         });
     };
 
-    return Object.freeze({ create });
+    return Object.freeze({
+        clearClockTriggerReferences,
+        countClockTriggerReferences,
+        create
+    });
 }));

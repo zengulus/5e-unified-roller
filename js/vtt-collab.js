@@ -195,7 +195,10 @@ const fallbackSnapshot = () => ({
     initiative: {
         entries: [],
         round: 1,
-        activeEntryId: ''
+        activeEntryId: '',
+        encounterActive: false,
+        sceneId: '',
+        startedAt: 0
     }
 });
 
@@ -244,6 +247,8 @@ const getVTTContentScore = (snapshot, coerceSnapshot = (value) => value) => {
     const initiative = clean && clean.initiative && typeof clean.initiative === 'object' ? clean.initiative : {};
     score += (Array.isArray(initiative.entries) ? initiative.entries.length : 0) * 500;
     score += toTrimmedString(initiative.activeEntryId, '', 120).trim() ? 80 : 0;
+    score += initiative.encounterActive ? 100 : 0;
+    score += toTrimmedString(initiative.sceneId, '', 120).trim() ? 40 : 0;
     score += Math.max(1, Math.round(toFiniteNumber(initiative.round, 1))) > 1 ? 40 : 0;
     return score;
 };
@@ -265,6 +270,22 @@ const sanitizePositionChange = (entry) => {
         x: normalizeTokenCoordinate(source.x, 0),
         y: normalizeTokenCoordinate(source.y, 0)
     };
+};
+
+const sanitizePositionChanges = (changes) => (
+    (Array.isArray(changes) ? changes : []).map(sanitizePositionChange).filter(Boolean)
+);
+
+const canApplyTokenPositionsToSnapshot = (snapshot, changes) => {
+    if (!snapshot || !Array.isArray(snapshot.scenes)) return false;
+    const cleanChanges = sanitizePositionChanges(changes);
+    if (!cleanChanges.length) return false;
+    return cleanChanges.every((change) => {
+        const scene = snapshot.scenes.find((candidate) => String(candidate && candidate.id || '').trim() === change.sceneId);
+        return !!(scene && Array.isArray(scene.tokens) && scene.tokens.some((token) => (
+            String(token && token.id || '').trim() === change.tokenId
+        )));
+    });
 };
 
 const applyTokenPositionsToSnapshot = (snapshot, changes, stamp = Date.now()) => {
@@ -640,7 +661,8 @@ const syncYClockRecord = (record, clock) => {
     setYScalar(record, 'hidden', !!source.hidden);
     setYScalar(record, 'color', source.color || '');
     setYScalar(record, 'note', source.note || '');
-    removeExtraneousMapKeys(record, new Set(['id', 'title', 'current', 'max', 'hidden', 'color', 'note']));
+    setYScalar(record, 'cadence', source.cadence || 'manual');
+    removeExtraneousMapKeys(record, new Set(['id', 'title', 'current', 'max', 'hidden', 'color', 'note', 'cadence']));
 };
 
 const serializeYClockRecord = (record, clockId) => ({
@@ -650,7 +672,8 @@ const serializeYClockRecord = (record, clockId) => ({
     max: record.get('max'),
     hidden: !!record.get('hidden'),
     color: toTrimmedString(record.get('color'), '', 20),
-    note: toTrimmedString(record.get('note'), '', 240)
+    note: toTrimmedString(record.get('note'), '', 240),
+    cadence: toTrimmedString(record.get('cadence'), 'manual', 20)
 });
 
 const syncYPingRecord = (record, ping) => {
@@ -970,6 +993,7 @@ const patchYClockRecord = (record, baseClock = {}, nextClock = {}) => {
     mutated = patchYScalar(record, 'hidden', !!baseClock.hidden, !!nextClock.hidden) || mutated;
     mutated = patchYScalar(record, 'color', baseClock.color, nextClock.color) || mutated;
     mutated = patchYScalar(record, 'note', baseClock.note, nextClock.note) || mutated;
+    mutated = patchYScalar(record, 'cadence', baseClock.cadence || 'manual', nextClock.cadence || 'manual') || mutated;
     return mutated;
 };
 
@@ -1199,7 +1223,10 @@ const applySnapshotToDoc = (doc, payload, coerceSnapshot, origin, stamp = Date.n
         syncOrderedEntityCollection(initiativeEntries, initiativeOrder, clean.initiative.entries, syncYInitiativeEntryRecord);
         setYScalar(initiativeMeta, 'round', Math.max(1, toNonNegativeInt(clean.initiative.round, 1) || 1));
         setYScalar(initiativeMeta, 'activeEntryId', toTrimmedString(clean.initiative.activeEntryId, '', 120).trim());
-        removeExtraneousMapKeys(initiativeMeta, new Set(['round', 'activeEntryId']));
+        setYScalar(initiativeMeta, 'encounterActive', !!clean.initiative.encounterActive);
+        setYScalar(initiativeMeta, 'sceneId', toTrimmedString(clean.initiative.sceneId, '', 120).trim());
+        setYScalar(initiativeMeta, 'startedAt', Math.max(0, toNonNegativeInt(clean.initiative.startedAt, 0)));
+        removeExtraneousMapKeys(initiativeMeta, new Set(['round', 'activeEntryId', 'encounterActive', 'sceneId', 'startedAt']));
         removeExtraneousMapKeys(metaMap, new Set(['activeSceneId', 'updatedAt']));
     }, origin);
 };
@@ -1290,6 +1317,24 @@ const applySnapshotDeltaToDoc = (doc, baseSnapshot, nextSnapshot, coerceSnapshot
             toTrimmedString(base.initiative && base.initiative.activeEntryId, '', 120).trim(),
             toTrimmedString(next.initiative && next.initiative.activeEntryId, '', 120).trim()
         ) || mutated;
+        mutated = patchYScalar(
+            initiativeMeta,
+            'encounterActive',
+            !!(base.initiative && base.initiative.encounterActive),
+            !!(next.initiative && next.initiative.encounterActive)
+        ) || mutated;
+        mutated = patchYScalar(
+            initiativeMeta,
+            'sceneId',
+            toTrimmedString(base.initiative && base.initiative.sceneId, '', 120).trim(),
+            toTrimmedString(next.initiative && next.initiative.sceneId, '', 120).trim()
+        ) || mutated;
+        mutated = patchYScalar(
+            initiativeMeta,
+            'startedAt',
+            Math.max(0, toNonNegativeInt(base.initiative && base.initiative.startedAt, 0)),
+            Math.max(0, toNonNegativeInt(next.initiative && next.initiative.startedAt, 0))
+        ) || mutated;
 
         if (mutated) {
             setYScalar(metaMap, 'updatedAt', Math.max(0, toNonNegativeInt(stamp, Date.now()) || Date.now()));
@@ -1312,6 +1357,11 @@ const serializeDocSnapshot = (doc, coerceSnapshot) => {
         scenes[0] && scenes[0].id ? scenes[0].id : 'scene_1',
         120
     ).trim() || (scenes[0] && scenes[0].id ? scenes[0].id : 'scene_1');
+    const activeEntryId = toTrimmedString(initiativeMeta.get('activeEntryId'), '', 120).trim();
+    const hasExplicitEncounterState = typeof initiativeMeta.has === 'function' && initiativeMeta.has('encounterActive');
+    const encounterActive = hasExplicitEncounterState ? !!initiativeMeta.get('encounterActive') : !!activeEntryId;
+    const encounterSceneId = toTrimmedString(initiativeMeta.get('sceneId'), '', 120).trim()
+        || (encounterActive ? activeSceneId : '');
     return coerceSnapshot({
         updatedAt: Math.max(0, toNonNegativeInt(metaMap.get('updatedAt'), 0)),
         activeSceneId,
@@ -1319,7 +1369,10 @@ const serializeDocSnapshot = (doc, coerceSnapshot) => {
         initiative: {
             entries: serializeOrderedEntityCollection(initiativeEntries, initiativeOrder, serializeYInitiativeEntryRecord),
             round: initiativeMeta.get('round'),
-            activeEntryId: toTrimmedString(initiativeMeta.get('activeEntryId'), '', 120).trim()
+            activeEntryId,
+            encounterActive,
+            sceneId: encounterSceneId,
+            startedAt: initiativeMeta.get('startedAt') || 0
         }
     });
 };
@@ -1488,6 +1541,9 @@ const diffVTTSnapshots = (previousSnapshot, nextSnapshot, coerceSnapshot) => {
     const nextEntries = Array.isArray(next.initiative && next.initiative.entries) ? next.initiative.entries : [];
     if ((previous.initiative && previous.initiative.round) !== (next.initiative && next.initiative.round)
         || String(previous.initiative && previous.initiative.activeEntryId || '') !== String(next.initiative && next.initiative.activeEntryId || '')
+        || !!(previous.initiative && previous.initiative.encounterActive) !== !!(next.initiative && next.initiative.encounterActive)
+        || String(previous.initiative && previous.initiative.sceneId || '') !== String(next.initiative && next.initiative.sceneId || '')
+        || Number(previous.initiative && previous.initiative.startedAt || 0) !== Number(next.initiative && next.initiative.startedAt || 0)
         || !compareOrderedEntityCollections(previousEntries, nextEntries)) {
         return { structural: true, positions: [] };
     }
@@ -2271,10 +2327,16 @@ class VTTCollabSession {
         const encoded = payload.update;
         const room = payload.room && typeof payload.room === 'object' ? payload.room : {};
         const serverSeeded = !!room.seeded;
-        const beforeSig = buildSnapshotSignature(
-            this.lastSnapshot || serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this)),
-            this.coerceSnapshot.bind(this)
-        );
+        const hintedPositionChanges = sanitizePositionChanges(payload.positionChanges);
+        const fastPositionChanges = canApplyTokenPositionsToSnapshot(this.lastSnapshot, hintedPositionChanges)
+            ? hintedPositionChanges
+            : [];
+        const beforeSig = fastPositionChanges.length
+            ? ''
+            : buildSnapshotSignature(
+                this.lastSnapshot || serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this)),
+                this.coerceSnapshot.bind(this)
+            );
         let update;
         try {
             update = decodeBase64(encoded);
@@ -2286,6 +2348,7 @@ class VTTCollabSession {
         const decoder = decoding.createDecoder(update);
         const encoder = encoding.createEncoder();
         let applyFailed = false;
+        if (fastPositionChanges.length) this.positionChangesInFlight = fastPositionChanges;
         try {
             const messageType = syncProtocol.readSyncMessage(decoder, encoder, this.doc, this.originRemoteSync, (error) => {
                 applyFailed = true;
@@ -2293,8 +2356,12 @@ class VTTCollabSession {
             });
             if (applyFailed) return;
             this.lastYSyncAt = Date.now();
-            const nextSnapshot = serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
-            const afterSig = buildSnapshotSignature(nextSnapshot, this.coerceSnapshot.bind(this));
+            const nextSnapshot = fastPositionChanges.length
+                ? this.lastSnapshot
+                : serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
+            const afterSig = fastPositionChanges.length
+                ? ''
+                : buildSnapshotSignature(nextSnapshot, this.coerceSnapshot.bind(this));
             const documentBearingMessage = messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2;
             const inferredSeed = messageType === syncProtocol.messageYjsUpdate
                 || (messageType === syncProtocol.messageYjsSyncStep2
@@ -2307,6 +2374,8 @@ class VTTCollabSession {
         } catch (err) {
             console.warn('RTF_VTT_COLLAB: Sync decode failed', err);
             return;
+        } finally {
+            if (fastPositionChanges.length) this.positionChangesInFlight = null;
         }
 
         if (encoding.hasContent(encoder)) {
@@ -2481,17 +2550,26 @@ class VTTCollabSession {
         if (origin === this.originRemoteSync) return;
         const encoder = encoding.createEncoder();
         syncProtocol.writeUpdate(encoder, update);
-        this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
+        const positionChanges = origin === this.originPosition
+            ? sanitizePositionChanges(this.positionChangesInFlight)
+            : [];
+        this.sendBroadcast('y-sync', {
+            update: encodeBase64(encoding.toUint8Array(encoder)),
+            ...(positionChanges.length ? { positionChanges } : {})
+        });
         this.updateLiveSyncStatus();
     }
 
     handleAfterTransaction(transaction) {
         const origin = transaction ? transaction.origin : null;
         const isBootstrap = origin === this.originBootstrap;
-        const isLocalPosition = origin === this.originPosition && Array.isArray(this.positionChangesInFlight);
+        const positionChanges = sanitizePositionChanges(this.positionChangesInFlight);
+        const isPositionTransaction = (
+            origin === this.originPosition || origin === this.originRemoteSync
+        ) && !!positionChanges.length;
         const previous = this.lastSnapshot;
-        const next = isLocalPosition
-            ? applyTokenPositionsToSnapshot(previous, this.positionChangesInFlight, getDocUpdatedAt(this.doc))
+        const next = isPositionTransaction
+            ? applyTokenPositionsToSnapshot(previous, positionChanges, getDocUpdatedAt(this.doc))
             : serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
         this.lastSnapshot = next;
         this.pendingSnapshot = next;
@@ -2501,8 +2579,11 @@ class VTTCollabSession {
         }
 
         if (this.ready) {
-            this.scheduleMirror();
-            if (!isBootstrap) {
+            // Position drops are already authoritative in the live Y.Doc. Their deferred
+            // cloud checkpoint also refreshes the compatibility store, so mirroring the
+            // entire snapshot again immediately only adds a second heavyweight write.
+            if (!isPositionTransaction) this.scheduleMirror();
+            if (!isBootstrap && !isPositionTransaction) {
                 this.scheduleCloudFlush();
             }
             this.refreshPresenceTracking().catch(() => { });
@@ -2514,11 +2595,15 @@ class VTTCollabSession {
             && origin !== this.originManualFlush;
 
         if (shouldDispatchSnapshot) {
-            const diff = diffVTTSnapshots(previous, next, this.coerceSnapshot.bind(this));
-            if (!diff.structural && diff.positions.length && typeof this.options.applyPositionChanges === 'function') {
-                this.options.applyPositionChanges(diff.positions, { origin, snapshot: next });
-            } else if ((diff.structural || diff.positions.length) && typeof this.options.applySnapshot === 'function') {
-                this.options.applySnapshot(next, { origin });
+            if (isPositionTransaction && typeof this.options.applyPositionChanges === 'function') {
+                this.options.applyPositionChanges(positionChanges, { origin, snapshot: next });
+            } else {
+                const diff = diffVTTSnapshots(previous, next, this.coerceSnapshot.bind(this));
+                if (!diff.structural && diff.positions.length && typeof this.options.applyPositionChanges === 'function') {
+                    this.options.applyPositionChanges(diff.positions, { origin, snapshot: next });
+                } else if ((diff.structural || diff.positions.length) && typeof this.options.applySnapshot === 'function') {
+                    this.options.applySnapshot(next, { origin });
+                }
             }
         }
     }
@@ -2965,14 +3050,12 @@ class VTTCollabSession {
         if (!applied.length) {
             if (opts.flushNow) {
                 this.scheduleCloudFlush({ forceCompatibilityMirror: true });
-                this.requestPeerReconcile('token-drop');
                 return Promise.resolve({ ok: true, reason: 'scheduled' });
             }
             return Promise.resolve({ ok: true, reason: 'unchanged' });
         }
         if (opts.flushNow) {
             this.scheduleCloudFlush({ forceCompatibilityMirror: true });
-            this.requestPeerReconcile('token-drop');
         } else {
             this.scheduleCloudFlush();
         }

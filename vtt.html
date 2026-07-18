@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260718c">
+    <link rel="stylesheet" href="css/vtt.css?v=20260719a">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
@@ -384,39 +384,71 @@
                     id="vtt-initiative-rail-tab" aria-controls="vtt-initiative-panel"
                     aria-label="Collapse combat panel">Collapse</button>
             </header>
+
+            <div class="vtt-combat-turn-strip" aria-label="Initiative turn controls">
+                <span class="vtt-panel-pill" id="vtt-round-pill">Round 1</span>
+                <div class="vtt-combat-turn-copy" aria-live="polite">
+                    <span>Current</span>
+                    <strong id="vtt-current-turn-label">No active turn</strong>
+                    <small id="vtt-next-turn-label">Add combatants to begin</small>
+                </div>
+                <div class="vtt-combat-turn-actions" data-dm-only="1">
+                    <button class="vtt-inline-btn" type="button" data-action="prev-turn" aria-label="Previous turn">Prev</button>
+                    <button class="vtt-inline-btn strong" type="button" data-action="next-turn" aria-label="Next turn">Next</button>
+                </div>
+                <button class="vtt-inline-btn vtt-initiative-expand" type="button" data-action="open-vtt-panel"
+                    data-panel="combat" aria-controls="vtt-initiative-panel" aria-expanded="false">Open</button>
+            </div>
+
+            <div class="vtt-combat-view-tabs" role="tablist" aria-label="Combat views">
+                <button type="button" role="tab" id="vtt-combat-turns-tab" data-action="set-combat-view"
+                    data-combat-view="turns" aria-controls="vtt-initiative-workspace" aria-selected="true">Turns</button>
+                <button type="button" role="tab" id="vtt-combat-clocks-tab" data-action="set-combat-view"
+                    data-combat-view="clocks" aria-controls="vtt-clock-panel" aria-selected="false">Clocks</button>
+            </div>
+
             <div class="vtt-initiative-scroll">
-                <section class="vtt-panel" id="vtt-clock-panel">
+                <section class="vtt-panel vtt-combat-workspace-panel" id="vtt-initiative-workspace"
+                    role="tabpanel" aria-labelledby="vtt-combat-turns-tab">
                     <div class="vtt-panel-head">
-                        <h2>Clocks</h2>
+                        <div>
+                            <h2>Initiative</h2>
+                            <div class="vtt-combat-scope">Table-wide turn order</div>
+                        </div>
+                    </div>
+                    <div class="vtt-encounter-toolbar" data-dm-only="1">
+                        <div class="vtt-encounter-status">
+                            <span>Encounter</span>
+                            <strong id="vtt-encounter-status">Not started</strong>
+                        </div>
+                        <div class="vtt-encounter-actions">
+                            <button class="vtt-chip-btn strong" type="button" data-action="start-encounter">Start Encounter</button>
+                            <button class="vtt-chip-btn" type="button" data-action="add-visible-tokens-to-initiative">Add Visible Tokens</button>
+                            <button class="vtt-chip-btn danger" type="button" data-action="end-encounter">End Encounter</button>
+                        </div>
+                    </div>
+                    <div class="vtt-initiative-toolbar" data-dm-only="1">
+                        <button class="vtt-chip-btn" data-action="reset-initiative-round">Reset to Round 1</button>
+                    </div>
+                    <div class="vtt-initiative-list" id="vtt-initiative-list"></div>
+                    <div class="vtt-popover vtt-initiative-popover" id="vtt-initiative-detail-panel"
+                        role="region" aria-label="Initiative entry details" hidden></div>
+                </section>
+
+                <section class="vtt-panel vtt-combat-workspace-panel" id="vtt-clock-panel"
+                    role="tabpanel" aria-labelledby="vtt-combat-clocks-tab">
+                    <div class="vtt-panel-head">
+                        <div>
+                            <h2>Scene Clocks</h2>
+                            <div class="vtt-combat-scope" id="vtt-clock-scope">Current scene</div>
+                        </div>
                         <div class="vtt-panel-head-actions">
                             <button class="vtt-chip-btn" data-action="add-scene-clock" data-dm-only="1">New Clock</button>
                         </div>
                     </div>
                     <div class="vtt-clock-list" id="vtt-clock-list"></div>
                 </section>
-
-                <section class="vtt-panel">
-                    <div class="vtt-panel-head">
-                        <h2>Initiative</h2>
-                        <div class="vtt-initiative-head-actions">
-                            <span class="vtt-panel-pill" id="vtt-round-pill">Round 1</span>
-                            <div class="vtt-initiative-compact-actions">
-                                <button class="vtt-inline-btn" type="button" data-action="next-turn" data-dm-only="1">Next</button>
-                                <button class="vtt-inline-btn vtt-initiative-expand" type="button" data-action="open-vtt-panel"
-                                    data-panel="combat" aria-controls="vtt-initiative-panel" aria-expanded="false">Open</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="vtt-initiative-toolbar" data-dm-only="1">
-                        <button class="vtt-chip-btn" data-action="prev-turn">Prev</button>
-                        <button class="vtt-chip-btn" data-action="reset-initiative-round">Reset to Round 1</button>
-                        <button class="vtt-chip-btn strong" data-action="next-turn">Next</button>
-                    </div>
-                    <div class="vtt-initiative-list" id="vtt-initiative-list"></div>
-                </section>
             </div>
-
-            <div class="vtt-popover vtt-initiative-popover" id="vtt-initiative-detail-panel" hidden></div>
         </aside>
 
         <aside class="vtt-admin-panel vtt-drawer" id="vtt-admin-panel" data-dm-only="1" aria-label="VTT diagnostics">
@@ -468,12 +500,12 @@
     <script src="js/media-cache.js"></script>
     <script src="js/data-loader.js"></script>
     <script src="js/supabase-transport.js"></script>
-    <script src="js/store.js?v=20260610a"></script>
+    <script src="js/store.js?v=20260718d"></script>
     <script src="js/player-nav.js?v=20260428a"></script>
     <script src="js/vector-field.js?v=20260224g"></script>
     <script src="js/dice.js?v=20260710a"></script>
     <script>
-        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260718c')
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260718d')
             .then(() => window.RTF_VTT_COLLAB || null)
             .catch((err) => {
                 console.warn('VTT collaboration module failed to load', err);
@@ -520,23 +552,23 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt-config.js?v=20260718a"></script>
-    <script src="js/vtt-runtime-state.js?v=20260718c"></script>
+    <script src="js/vtt-config.js?v=20260718d"></script>
+    <script src="js/vtt-runtime-state.js?v=20260718d"></script>
     <script src="js/vtt-dom.js?v=20260718a"></script>
-    <script src="js/vtt-inspector-markup.js?v=20260718a"></script>
+    <script src="js/vtt-inspector-markup.js?v=20260718d"></script>
     <script src="js/vtt-geometry.js?v=20260718a"></script>
     <script src="js/vtt-rules.js?v=20260714b"></script>
     <script src="js/vtt-rolls.js?v=20260714b"></script>
-    <script src="js/vtt-proximity.js?v=20260714b"></script>
+    <script src="js/vtt-proximity.js?v=20260718d"></script>
     <script src="js/vtt-markup.js?v=20260718a"></script>
     <script src="js/vtt-stage-view.js?v=20260718c"></script>
-    <script src="js/vtt-stage-input.js?v=20260718c"></script>
-    <script src="js/vtt-field-router.js?v=20260714b"></script>
-    <script src="js/vtt-actions-rolls.js?v=20260718c"></script>
-    <script src="js/vtt-actions-table.js?v=20260718c"></script>
-    <script src="js/vtt-actions-scenes.js?v=20260718c"></script>
-    <script src="js/vtt-actions-selection.js?v=20260718a"></script>
-    <script src="js/vtt.js?v=20260718c"></script>
+    <script src="js/vtt-stage-input.js?v=20260718d"></script>
+    <script src="js/vtt-field-router.js?v=20260718d"></script>
+    <script src="js/vtt-actions-rolls.js?v=20260718d"></script>
+    <script src="js/vtt-actions-table.js?v=20260718d"></script>
+    <script src="js/vtt-actions-scenes.js?v=20260718d"></script>
+    <script src="js/vtt-actions-selection.js?v=20260718d"></script>
+    <script src="js/vtt.js?v=20260719a"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

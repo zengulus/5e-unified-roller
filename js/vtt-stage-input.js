@@ -49,6 +49,7 @@
             closeTokenInspectorPopover,
             closeToolsMenu,
             closeViewMenu,
+            evaluateProximityTriggers,
             getActiveScene,
             getEvidenceNoteById,
             getLocalPlayerFocusContext,
@@ -79,6 +80,7 @@
             renderInitiativeDetail,
             renderInitiativeList,
             renderNPCRollPopover,
+            renderProximityPrompt,
             renderSheetActionPopover,
             renderSpawnGhost,
             renderStage,
@@ -465,6 +467,21 @@
             tokenEl.style.top = '0px';
             tokenEl.style.transform = `translate3d(${scaleForZoom(worldLeft)}px, ${scaleForZoom(worldTop)}px, 0)`;
             tokenEl.classList.add('is-dragging');
+            return true;
+        };
+
+        const settleTokenDropVisual = (tokenId) => {
+            if (!stageEl) return false;
+            const cleanTokenId = String(tokenId || '').trim();
+            if (!cleanTokenId) return false;
+            const escapedId = typeof CSS !== 'undefined' && CSS.escape
+                ? CSS.escape(cleanTokenId)
+                : cleanTokenId.replace(/"/g, '\\"');
+            const tokenEl = stageEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
+            if (!(tokenEl instanceof HTMLElement)) return false;
+            tokenEl.classList.remove('is-dragging');
+            tokenEl.classList.add('is-drop-pulse');
+            delete tokenEl.dataset.stateSignature;
             return true;
         };
     
@@ -1061,12 +1078,23 @@
                 if (!completedDragState.moved) {
                     showTokenPortraitPreview(completedDragState.tokenId);
                 } else {
+                    settleTokenDropVisual(completedDragState.tokenId);
                     runtime.suppressedTokenPreviewClickId = String(completedDragState.tokenId || '').trim();
                     runtime.suppressedTokenPreviewClickUntil = Date.now() + 500;
                     clearTokenPortraitPreview();
                 }
                 appliedRemoteSnapshot = applyPendingRemoteVTTSnapshot();
-                if (!appliedRemoteSnapshot) render();
+                if (!appliedRemoteSnapshot) {
+                    if (completedDragState.moved) {
+                        // Position is already current in the model and token DOM. Only proximity
+                        // depends on the final drop; the rest of the application does not need a
+                        // synchronous full render here.
+                        evaluateProximityTriggers();
+                        renderProximityPrompt();
+                    } else {
+                        render();
+                    }
+                }
             }
             if (runtime.rulerState && runtime.rulerState.dragging) {
                 runtime.rulerState = null;

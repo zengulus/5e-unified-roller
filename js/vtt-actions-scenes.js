@@ -38,6 +38,7 @@
             buildSceneRecord,
             canDeleteLiveVTTState,
             clampMapScale,
+            confirmSceneDeletion,
             getActiveScene,
             getContextSpawnWorldPoint,
             getSharedSceneId,
@@ -45,6 +46,7 @@
             isDM,
             normalizeSelections,
             openQuickSpawnMenu,
+            removeInitiativeEntriesForToken,
             render,
             setSceneViewPreference,
             spawnTokenFromDescriptor,
@@ -52,6 +54,124 @@
             toNumber,
             withDraft
         } = deps;
+
+        const getSceneDeletionImpact = (snapshot, scene) => {
+            const initiative = snapshot && snapshot.initiative && typeof snapshot.initiative === 'object'
+                ? snapshot.initiative
+                : {};
+            const sceneId = String(scene && scene.id || '').trim();
+            const tokens = Array.isArray(scene && scene.tokens) ? scene.tokens : [];
+            const tokenIds = new Set(tokens.map((token) => String(token && token.id || '').trim()).filter(Boolean));
+            const sourceKeys = new Set(tokens.map((token) => {
+                const sourceType = String(token && token.sourceType || '').trim();
+                const sourceId = String(token && token.sourceId || '').trim();
+                return sourceType && sourceId ? `${sourceType}\u0000${sourceId}` : '';
+            }).filter(Boolean));
+            const entries = Array.isArray(initiative.entries) ? initiative.entries : [];
+            const initiativeEntryCount = entries.filter((entry) => {
+                const linkedTokenId = String(entry && entry.linkedTokenId || '').trim();
+                if (linkedTokenId && tokenIds.has(linkedTokenId)) return true;
+                const sourceType = String(entry && entry.sourceType || '').trim();
+                const sourceId = String(entry && entry.sourceId || '').trim();
+                return !!(sourceType && sourceId && sourceKeys.has(`${sourceType}\u0000${sourceId}`));
+            }).length;
+            return {
+                endsEncounter: !!(
+                    initiative.encounterActive
+                    && sceneId
+                    && String(initiative.sceneId || '').trim() === sceneId
+                ),
+                initiativeEntryCount,
+                tokenCount: tokens.length
+            };
+        };
+
+        const endEncounterScopedToDeletedScene = (draft, sceneId) => {
+            const initiative = draft && draft.initiative && typeof draft.initiative === 'object'
+                ? draft.initiative
+                : null;
+            const targetSceneId = String(sceneId || '').trim();
+            if (!initiative || !targetSceneId || String(initiative.sceneId || '').trim() !== targetSceneId) return false;
+            const endedActiveEncounter = !!initiative.encounterActive;
+            initiative.encounterActive = false;
+            initiative.sceneId = '';
+            initiative.startedAt = 0;
+            if (endedActiveEncounter) {
+                initiative.activeEntryId = '';
+                initiative.round = 1;
+            }
+            return endedActiveEncounter;
+        };
+
+        const cleanDeletedSceneSelections = (draft, removedScene, endedActiveEncounter) => {
+            const removedTokenIds = new Set((Array.isArray(removedScene && removedScene.tokens) ? removedScene.tokens : [])
+                .map((token) => String(token && token.id || '').trim()).filter(Boolean));
+            const removedNoteIds = new Set((Array.isArray(removedScene && removedScene.evidenceNotes) ? removedScene.evidenceNotes : [])
+                .map((note) => String(note && note.id || '').trim()).filter(Boolean));
+            const removedClockIds = new Set((Array.isArray(removedScene && removedScene.clocks) ? removedScene.clocks : [])
+                .map((clock) => String(clock && clock.id || '').trim()).filter(Boolean));
+            if (removedTokenIds.has(String(state.selectedTokenId || '').trim())) state.selectedTokenId = '';
+            if (removedNoteIds.has(String(state.selectedEvidenceNoteId || '').trim())) state.selectedEvidenceNoteId = '';
+            if (removedClockIds.has(String(state.selectedClockId || '').trim())) state.selectedClockId = '';
+            if (removedClockIds.has(String(state.combatClockEditorId || '').trim())) state.combatClockEditorId = '';
+
+            const initiative = draft && draft.initiative && typeof draft.initiative === 'object' ? draft.initiative : {};
+            const entryIds = new Set((Array.isArray(initiative.entries) ? initiative.entries : [])
+                .map((entry) => String(entry && entry.id || '').trim()).filter(Boolean));
+            if (endedActiveEncounter) {
+                state.selectedEntryId = '';
+                state.initiativeDetailState = null;
+                return;
+            }
+            if (!entryIds.has(String(state.selectedEntryId || '').trim())) {
+                const activeEntryId = String(initiative.activeEntryId || '').trim();
+                state.selectedEntryId = entryIds.has(activeEntryId) ? activeEntryId : '';
+            }
+            const detailEntryId = String(state.initiativeDetailState && state.initiativeDetailState.entryId || '').trim();
+            if (detailEntryId && !entryIds.has(detailEntryId)) state.initiativeDetailState = null;
+        };
+
+        const deleteSceneById = (targetSceneId, reason) => {
+            if (!canDeleteLiveVTTState(reason)) return;
+            const cleanSceneId = String(targetSceneId || '').trim();
+            const currentScenes = Array.isArray(state.vttState && state.vttState.scenes) ? state.vttState.scenes : [];
+            if (!cleanSceneId || currentScenes.length <= 1) return;
+            const currentScene = currentScenes.find((scene) => String(scene && scene.id || '').trim() === cleanSceneId);
+            if (!currentScene) return;
+            const deletionImpact = getSceneDeletionImpact(state.vttState, currentScene);
+            if (typeof confirmSceneDeletion === 'function' && !confirmSceneDeletion(currentScene, deletionImpact)) return;
+
+            const viewedSceneId = getViewedSceneId(state.vttState, state.localRole);
+            const sharedSceneId = getSharedSceneId(state.vttState);
+            withDraft((draft) => {
+                if (!Array.isArray(draft.scenes) || draft.scenes.length <= 1) return;
+                const idx = draft.scenes.findIndex((entry) => String(entry && entry.id || '').trim() === cleanSceneId);
+                if (idx < 0) return;
+                const removedScene = draft.scenes[idx];
+                const wasActive = draft.activeSceneId === cleanSceneId;
+                const wasViewed = viewedSceneId === cleanSceneId;
+                draft.scenes.splice(idx, 1);
+                if (typeof removeInitiativeEntriesForToken === 'function') {
+                    (Array.isArray(removedScene && removedScene.tokens) ? removedScene.tokens : []).forEach((token) => {
+                        removeInitiativeEntriesForToken(draft, token);
+                    });
+                }
+                const endedActiveEncounter = endEncounterScopedToDeletedScene(draft, cleanSceneId);
+                cleanDeletedSceneSelections(draft, removedScene, endedActiveEncounter);
+                if (!draft.scenes.length) {
+                    const nextScene = buildSceneRecord(draft.scenes);
+                    draft.scenes.push(nextScene);
+                }
+                if (wasActive) {
+                    const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
+                    draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
+                }
+                if (wasViewed || wasActive || cleanSceneId === sharedSceneId) {
+                    setSceneViewPreference(SCENE_VIEW_SHARED);
+                }
+                state.previewTokenId = '';
+            }, { fitView: true });
+        };
 
         const handle = (actionEl, action, id) => {
             if (action === 'clone-current-scene') {
@@ -69,31 +189,8 @@
             }
 
             if (action === 'delete-current-scene') {
-                if (!canDeleteLiveVTTState('delete-current-scene')) return;
                 const targetSceneId = getViewedSceneId(state.vttState, state.localRole);
-                if (!targetSceneId) return;
-                const viewedSceneId = getViewedSceneId(state.vttState, state.localRole);
-                const sharedSceneId = getSharedSceneId(state.vttState);
-                withDraft((draft) => {
-                    if (!Array.isArray(draft.scenes) || draft.scenes.length <= 1) return;
-                    const idx = draft.scenes.findIndex((entry) => entry.id === targetSceneId);
-                    if (idx < 0) return;
-                    const wasActive = draft.activeSceneId === targetSceneId;
-                    const wasViewed = viewedSceneId === targetSceneId;
-                    draft.scenes.splice(idx, 1);
-                    if (!draft.scenes.length) {
-                        const nextScene = buildSceneRecord(draft.scenes);
-                        draft.scenes.push(nextScene);
-                    }
-                    if (wasActive) {
-                        const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
-                        draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
-                    }
-                    if (wasViewed || wasActive || targetSceneId === sharedSceneId) {
-                        setSceneViewPreference(SCENE_VIEW_SHARED);
-                    }
-                    state.previewTokenId = '';
-                }, { fitView: true });
+                deleteSceneById(targetSceneId, 'delete-current-scene');
                 return;
             }
 
@@ -151,29 +248,7 @@
             }
 
             if (action === 'delete-scene') {
-                if (!canDeleteLiveVTTState('delete-scene')) return;
-                const viewedSceneId = getViewedSceneId(state.vttState, state.localRole);
-                const sharedSceneId = getSharedSceneId(state.vttState);
-                withDraft((draft) => {
-                    if (!Array.isArray(draft.scenes) || draft.scenes.length <= 1) return;
-                    const idx = draft.scenes.findIndex((entry) => entry.id === id);
-                    if (idx < 0) return;
-                    const wasActive = draft.activeSceneId === id;
-                    const wasViewed = viewedSceneId === id;
-                    draft.scenes.splice(idx, 1);
-                    if (!draft.scenes.length) {
-                        const nextScene = buildSceneRecord(draft.scenes);
-                        draft.scenes.push(nextScene);
-                    }
-                    if (wasActive) {
-                        const fallbackScene = draft.scenes[Math.max(0, idx - 1)] || draft.scenes[0];
-                        draft.activeSceneId = fallbackScene ? fallbackScene.id : '';
-                    }
-                    if (wasViewed || wasActive || id === sharedSceneId) {
-                        setSceneViewPreference(SCENE_VIEW_SHARED);
-                    }
-                    state.previewTokenId = '';
-                }, { fitView: true });
+                deleteSceneById(id, 'delete-scene');
                 return;
             }
 

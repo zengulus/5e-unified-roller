@@ -155,7 +155,10 @@
         initiative: {
             entries: [],
             round: 1,
-            activeEntryId: ''
+            activeEntryId: '',
+            encounterActive: false,
+            sceneId: '',
+            startedAt: 0
         }
     });
 

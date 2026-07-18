@@ -16,6 +16,12 @@
     const PROXIMITY_PROMPT_STATE_LIMIT = 80;
     const PROXIMITY_TRIGGER_KIND_OPTIONS = ['fiction', 'skillRoll'];
     const PROXIMITY_TRIGGER_TYPE_OPTIONS = ['enter', 'startTurnNear', 'click', 'reveal'];
+    const PROXIMITY_TRIGGER_TYPE_LABELS = Object.freeze({
+        enter: 'Enter Area',
+        startTurnNear: 'Start Turn Nearby',
+        click: 'Click',
+        reveal: 'Reveal'
+    });
     const PROXIMITY_TRIGGER_TARGET_OPTIONS = ['playerTokens', 'anyVisibleToken'];
     const PROXIMITY_TRIGGER_REPEAT_OPTIONS = ['oncePerToken', 'oncePerScene', 'always'];
     const PROXIMITY_TRIGGER_SKILL_OPTIONS = [
@@ -72,6 +78,11 @@
             if (PROXIMITY_TRIGGER_SKILL_OPTIONS.includes(clean)) return clean;
             return 'perception';
         };
+        const normalizeProximityTriggerType = (value, fallback = 'enter') => {
+            const clean = String(value || '').trim();
+            if (PROXIMITY_TRIGGER_TYPE_OPTIONS.includes(clean)) return clean;
+            return PROXIMITY_TRIGGER_TYPE_OPTIONS.includes(fallback) ? fallback : 'enter';
+        };
         const getProximitySkillLabel = (value) => PROXIMITY_TRIGGER_SKILL_LABELS[normalizeProximityTriggerSkill(value)] || toTitleCaseWords(value || 'Perception');
         const normalizeProximityTrigger = (trigger, idx = 0) => {
             const source = trigger && typeof trigger === 'object' ? trigger : {};
@@ -85,7 +96,7 @@
             return {
                 id: String(source.id || fallbackId).trim().slice(0, 120) || fallbackId,
                 enabled: source.enabled !== undefined ? !!source.enabled : true,
-                trigger: PROXIMITY_TRIGGER_TYPE_OPTIONS.includes(triggerType) ? triggerType : 'enter',
+                trigger: normalizeProximityTriggerType(triggerType),
                 radiusCells: clamp(Math.round(toNumber(source.radiusCells, 0)), 0, 24),
                 target: PROXIMITY_TRIGGER_TARGET_OPTIONS.includes(target) ? target : 'playerTokens',
                 repeat: PROXIMITY_TRIGGER_REPEAT_OPTIONS.includes(repeat) ? repeat : 'oncePerToken',
@@ -177,10 +188,12 @@
             PROXIMITY_PROMPT_STATE_LIMIT,
             PROXIMITY_TRIGGER_KIND_OPTIONS,
             PROXIMITY_TRIGGER_TYPE_OPTIONS,
+            PROXIMITY_TRIGGER_TYPE_LABELS,
             PROXIMITY_TRIGGER_TARGET_OPTIONS,
             PROXIMITY_TRIGGER_REPEAT_OPTIONS,
             PROXIMITY_TRIGGER_SKILL_OPTIONS,
             PROXIMITY_TRIGGER_SKILL_LABELS,
+            normalizeProximityTriggerType,
             normalizeProximityTriggerSkill,
             getProximitySkillLabel,
             normalizeProximityTrigger,
@@ -325,17 +338,21 @@
                 return isPlayerFacingToken(token);
             });
         };
-        const getProximityPromptSeenKey = (scene, sourceKind, sourceId, trigger, token) => {
+        const getProximityPromptSeenKey = (scene, sourceKind, sourceId, trigger, token, occurrenceKey = '') => {
             const normalized = normalizeProximityTrigger(trigger);
             const tokenPart = normalized.repeat === 'oncePerScene'
                 ? 'scene'
                 : String(token && token.id || 'token').trim();
+            const occurrencePart = normalized.trigger === 'startTurnNear' && normalized.repeat === 'always'
+                ? String(occurrenceKey || 'turn').trim()
+                : '';
             return [
                 String(scene && scene.id || '').trim(),
                 String(sourceKind || '').trim(),
                 String(sourceId || '').trim(),
                 normalized.id,
-                tokenPart
+                tokenPart,
+                occurrencePart
             ].join('|');
         };
         const getProximitySeenEntry = (seenMap, key) => {
@@ -473,10 +490,10 @@
                 y: toNumber(rect.top, 0)
             };
         };
-        const buildProximityCandidate = ({ scene, sourceKind, source, sourceRect = null, trigger, token, distance, result = null }) => {
+        const buildProximityCandidate = ({ scene, sourceKind, source, sourceRect = null, trigger, token, distance, result = null, occurrenceKey = '' }) => {
             const normalized = normalizeProximityTrigger(trigger);
             const sourceId = String(source && source.id || '').trim();
-            const key = getProximityPromptSeenKey(scene, sourceKind, sourceId, normalized, token);
+            const key = getProximityPromptSeenKey(scene, sourceKind, sourceId, normalized, token, occurrenceKey);
             const sourceAnchor = getProximitySourceAnchorCells(scene, sourceKind, source, sourceRect);
             return {
                 key,
@@ -493,6 +510,7 @@
                 sourceAnchorCellX: sourceAnchor ? sourceAnchor.x : null,
                 sourceAnchorCellY: sourceAnchor ? sourceAnchor.y : null,
                 distance: Number.isFinite(distance) ? distance : 0,
+                occurrenceKey: String(occurrenceKey || '').trim(),
                 trigger: normalized,
                 result
             };
@@ -561,25 +579,30 @@
             }
             return true;
         };
-        const collectProximityPromptCandidates = (scene) => {
+        const collectProximityPromptCandidatesForEvent = (scene, triggerEvent = 'enter', options = {}) => {
             if (!scene) return [];
+            const cleanTriggerEvent = String(triggerEvent || 'enter').trim();
+            const targetTokenId = String(options && options.targetTokenId || '').trim();
+            const occurrenceKey = String(options && options.occurrenceKey || '').trim();
             const seenMap = readProximitySeenMap();
             const candidates = [];
             const visibleTokens = getVisibleTokensForRole(scene, 'player');
             const playerFogCellSet = collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
             const sourceNotes = getSceneEvidenceNotes(scene);
+            const getEventTargetTokens = (trigger, sourceToken = null) => getProximityTargetTokens(scene, trigger, sourceToken)
+                .filter((token) => !targetTokenId || String(token && token.id || '').trim() === targetTokenId);
             sourceNotes.forEach((note) => {
                 const sourceRect = getEvidenceNoteTriggerRect(scene, note);
                 if (!sourceRect) return;
                 const noteVisible = isEvidenceNoteVisibleToRole(note, scene, 'player', playerFogCellSet);
                 normalizeProximityTriggers(note.triggers)
-                    .filter((trigger) => trigger.enabled && trigger.trigger === 'enter')
+                    .filter((trigger) => trigger.enabled && trigger.trigger === cleanTriggerEvent)
                     .forEach((trigger) => {
                         if (!noteVisible && !(trigger.kind === 'skillRoll' && trigger.revealOnSuccess)) return;
-                        getProximityTargetTokens(scene, trigger).forEach((token) => {
+                        getEventTargetTokens(trigger).forEach((token) => {
                             const tokenRect = getTokenCellRect(token);
                             if (!isWithinProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
-                            const key = getProximityPromptSeenKey(scene, 'note', note.id, trigger, token);
+                            const key = getProximityPromptSeenKey(scene, 'note', note.id, trigger, token, occurrenceKey);
                             if (suppressedPromptKeys.has(key)) return;
                             const persistedResult = getPersistedProximityResult(note, seenMap, key, trigger);
                             if (persistedResult) {
@@ -591,7 +614,8 @@
                                     trigger,
                                     token,
                                     distance: getCellRectDistance(sourceRect, tokenRect),
-                                    result: persistedResult
+                                    result: persistedResult,
+                                    occurrenceKey
                                 }));
                                 return;
                             }
@@ -603,7 +627,8 @@
                                 sourceRect,
                                 trigger,
                                 token,
-                                distance: getCellRectDistance(sourceRect, tokenRect)
+                                distance: getCellRectDistance(sourceRect, tokenRect),
+                                occurrenceKey
                             }));
                         });
                     });
@@ -612,12 +637,12 @@
                 const sourceRect = getTokenCellRect(sourceToken);
                 if (!sourceRect) return;
                 normalizeProximityTriggers(sourceToken.triggers)
-                    .filter((trigger) => trigger.enabled && trigger.trigger === 'enter')
+                    .filter((trigger) => trigger.enabled && trigger.trigger === cleanTriggerEvent)
                     .forEach((trigger) => {
-                        getProximityTargetTokens(scene, trigger, sourceToken).forEach((token) => {
+                        getEventTargetTokens(trigger, sourceToken).forEach((token) => {
                             const tokenRect = getTokenCellRect(token);
                             if (!isWithinTokenProximityRadius(sourceRect, tokenRect, trigger.radiusCells)) return;
-                            const key = getProximityPromptSeenKey(scene, 'token', sourceToken.id, trigger, token);
+                            const key = getProximityPromptSeenKey(scene, 'token', sourceToken.id, trigger, token, occurrenceKey);
                             if (suppressedPromptKeys.has(key)) return;
                             const persistedResult = getPersistedProximityResult(sourceToken, seenMap, key, trigger);
                             if (persistedResult) {
@@ -629,7 +654,8 @@
                                     trigger,
                                     token,
                                     distance: getCellRectCenterDistance(sourceRect, tokenRect),
-                                    result: persistedResult
+                                    result: persistedResult,
+                                    occurrenceKey
                                 }));
                                 return;
                             }
@@ -641,12 +667,49 @@
                                 sourceRect,
                                 trigger,
                                 token,
-                                distance: getCellRectCenterDistance(sourceRect, tokenRect)
+                                distance: getCellRectCenterDistance(sourceRect, tokenRect),
+                                occurrenceKey
                             }));
                         });
                     });
             });
             return candidates.sort((left, right) => left.distance - right.distance);
+        };
+        const collectProximityPromptCandidates = (scene) => collectProximityPromptCandidatesForEvent(scene, 'enter');
+        const collectStartTurnNearCandidates = (scene, tokenId, occurrenceKey = '') => (
+            collectProximityPromptCandidatesForEvent(scene, 'startTurnNear', {
+                targetTokenId: tokenId,
+                occurrenceKey
+            })
+        );
+        const isStartTurnPrompt = (prompt) => !!(
+            prompt && normalizeProximityTrigger(prompt.trigger).trigger === 'startTurnNear'
+        );
+        const evaluateStartTurnNear = (options = {}) => {
+            if (isInitialLoadPending()) return null;
+            const cleanOptions = options && typeof options === 'object' ? options : {};
+            const sceneId = String(cleanOptions.sceneId || '').trim();
+            const tokenId = String(cleanOptions.tokenId || '').trim();
+            if (!tokenId) {
+                if (isStartTurnPrompt(activePrompt)) activePrompt = null;
+                return null;
+            }
+            const scene = (sceneId ? getSceneById(sceneId) : null) || getActiveScene();
+            if (!scene) return null;
+            const occurrenceKey = String(
+                cleanOptions.turnKey
+                || cleanOptions.occurrenceKey
+                || [cleanOptions.round, cleanOptions.entryId || tokenId].filter((value) => value !== undefined && value !== null && value !== '').join(':')
+                || tokenId
+            ).trim();
+            const candidates = collectStartTurnNearCandidates(scene, tokenId, occurrenceKey);
+            const nextPrompt = candidates.find((candidate) => canInteractWithProximityPrompt(candidate)) || candidates[0] || null;
+            if (nextPrompt) {
+                activePrompt = nextPrompt;
+                return nextPrompt;
+            }
+            if (isStartTurnPrompt(activePrompt)) activePrompt = null;
+            return null;
         };
         const evaluateProximityTriggers = () => {
             if (isDragging()) return;
@@ -658,6 +721,12 @@
             if (!scene) {
                 activePrompt = null;
                 return;
+            }
+            if (isStartTurnPrompt(activePrompt) && activePrompt.sceneId === scene.id) {
+                const source = findProximityPromptSource(scene, activePrompt);
+                const token = getProximityPromptToken(scene, activePrompt);
+                if (source && token) return;
+                activePrompt = null;
             }
             const candidates = collectProximityPromptCandidates(scene);
             if (activePrompt && activePrompt.sceneId === scene.id) {
@@ -687,7 +756,7 @@
                 promptStackEl.hidden = true;
                 return;
             }
-            const scene = getActiveScene();
+            const scene = getSceneById(activePrompt.sceneId) || getActiveScene();
             const prompt = activePrompt;
             const trigger = normalizeProximityTrigger(prompt.trigger);
             const isSkillRoll = trigger.kind === 'skillRoll';
@@ -853,6 +922,7 @@
         return Object.freeze({
             dismissActiveProximityPrompt,
             evaluateProximityTriggers,
+            evaluateStartTurnNear,
             getActivePrompt: () => activePrompt,
             positionProximityPrompt,
             renderProximityPrompt,

@@ -155,6 +155,7 @@ const createStageHarness = () => {
         closeTokenInspectorPopover: recordClose('close-inspector'),
         closeToolsMenu: recordClose('close-tools'),
         closeViewMenu: recordClose('close-view'),
+        evaluateProximityTriggers: () => calls.push('evaluate-proximity'),
         getActiveScene: (state = vttState) => {
             const scenes = state && Array.isArray(state.scenes) ? state.scenes : [];
             return scenes.find((entry) => entry.id === state.activeSceneId) || scenes[0] || null;
@@ -178,6 +179,7 @@ const createStageHarness = () => {
         renderInitiativeDetail: () => calls.push('render-detail'),
         renderInitiativeList: () => calls.push('render-list'),
         renderNPCRollPopover: () => calls.push('render-npc-roll'),
+        renderProximityPrompt: () => calls.push('render-proximity'),
         renderSheetActionPopover: () => calls.push('render-sheet'),
         renderStage: () => calls.push('render-stage'),
         renderStageContextMenu: () => calls.push('render-context'),
@@ -194,7 +196,8 @@ const createStageHarness = () => {
         toNumber: (value, fallback = 0) => {
             const parsed = Number(value);
             return Number.isFinite(parsed) ? parsed : fallback;
-        }
+        },
+        withDraft: () => calls.push('with-draft')
     };
     const input = stageInputFactory.create({
         runtime,
@@ -251,7 +254,7 @@ test('VTT stage input wiring supplies every API, DOM, config, and runtime field'
     };
     assert.deepEqual(
         { api: required.api.size, dom: required.dom.size, config: required.config.size },
-        { api: 81, dom: 4, config: 17 }
+        { api: 83, dom: 4, config: 17 }
     );
 
     const createMatch = controllerSource.match(
@@ -517,6 +520,18 @@ test('VTT token drag previews only the dragged DOM node and force-syncs on drop'
     assert.ok(harness.calls.includes('sync:true'), 'drop must force the final shared position sync');
     assert.ok(harness.calls.includes('remember:scene_one:token_one:3:4'));
     assert.ok(harness.calls.includes('effect:token_one:drop-pulse:720'));
+    assert.equal(tokenEl.classList.contains('is-dragging'), false);
+    assert.equal(tokenEl.classList.contains('is-drop-pulse'), true);
+    assert.deepEqual(harness.calls, [
+        'suppress:scene_one:token_one',
+        'remember:scene_one:token_one:3:4',
+        'effect:token_one:drop-pulse:720',
+        'sync:true',
+        'clear-preview',
+        'apply-remote',
+        'evaluate-proximity',
+        'render-proximity'
+    ], 'drop must commit once, reconcile pending state once, and evaluate proximity once without a draft or global render');
 });
 
 test('VTT native token double click opens the DM inspector and is wired on the stage', () => {

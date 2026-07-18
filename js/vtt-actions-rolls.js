@@ -229,7 +229,7 @@
                 return;
             }
             if (action === 'close-initiative-detail') {
-                closeInitiativeDetail();
+                closeInitiativeDetail({ restoreFocus: true });
                 return;
             }
             if (action === 'close-sheet-actions') {

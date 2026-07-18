@@ -14,7 +14,7 @@ const actionGroups = [
     {
         name: 'table',
         controllerName: 'Table',
-        expectedActionCount: 57,
+        expectedActionCount: 59,
         factory: require('../js/vtt-actions-table.js')
     },
     {
@@ -26,7 +26,7 @@ const actionGroups = [
     {
         name: 'selection',
         controllerName: 'Selection',
-        expectedActionCount: 18,
+        expectedActionCount: 21,
         factory: require('../js/vtt-actions-selection.js')
     }
 ];
@@ -74,7 +74,7 @@ test('VTT action ownership is complete, exclusive, and rejects unknown actions',
     }));
     const allActions = instances.flatMap((group) => group.actions);
 
-    assert.equal(allActions.length, 132);
+    assert.equal(allActions.length, 137);
     instances.forEach((group) => {
         assert.equal(group.actions.length, group.expectedActionCount, `${group.name} action count`);
         assert.equal(new Set(group.actions).size, group.actions.length, `${group.name} has no duplicate entries`);
@@ -183,6 +183,112 @@ test('table actions clear request state before changing the active ping tool', (
     ]);
 });
 
+test('new scene clocks begin as private manual drafts and open the single clock editor', () => {
+    const calls = [];
+    const scene = { id: 'scene_one', clocks: [] };
+    const state = { selectedClockId: '', combatClockEditorId: '' };
+    const tableGroup = actionGroups.find((group) => group.name === 'table');
+    const actions = tableGroup.factory.create({
+        state,
+        buildId: () => 'clock_new',
+        getActiveScene: () => scene,
+        getCombatScene: () => scene,
+        isDM: () => true,
+        setCombatView: (view) => calls.push(`view:${view}`),
+        focusClockEditor: (id) => calls.push(`focus:${id}`),
+        withDraft: (mutate) => mutate({ activeSceneId: scene.id, scenes: [scene] })
+    });
+
+    actions.handle({ dataset: {} }, 'add-scene-clock', '');
+
+    assert.deepEqual(scene.clocks, [{
+        id: 'clock_new',
+        title: 'Clock 1',
+        current: 0,
+        max: 4,
+        hidden: true,
+        color: '#f0b357',
+        note: '',
+        cadence: 'manual'
+    }]);
+    assert.equal(state.selectedClockId, 'clock_new');
+    assert.equal(state.combatClockEditorId, 'clock_new');
+    assert.deepEqual(calls, ['view:clocks', 'focus:clock_new']);
+});
+
+test('clock Edit toggles one editor without changing the selected combat view', () => {
+    const calls = [];
+    const state = { selectedClockId: '', combatClockEditorId: 'clock_old' };
+    const tableGroup = actionGroups.find((group) => group.name === 'table');
+    const actions = tableGroup.factory.create({
+        state,
+        isDM: () => true,
+        setCombatView: (view) => calls.push(`view:${view}`),
+        focusClockEditor: (id) => calls.push(`focus:${id}`)
+    });
+
+    actions.handle({ dataset: {} }, 'edit-clock', 'clock_new');
+    assert.equal(state.selectedClockId, 'clock_new');
+    assert.equal(state.combatClockEditorId, 'clock_new');
+    assert.deepEqual(calls, ['view:clocks', 'focus:clock_new']);
+
+    calls.length = 0;
+    actions.handle({ dataset: {} }, 'edit-clock', 'clock_new');
+    assert.equal(state.combatClockEditorId, '');
+    assert.deepEqual(calls, ['view:clocks']);
+});
+
+test('deleting a scene clock repairs proximity references and keeps clock selection valid', () => {
+    const scene = {
+        id: 'scene_one',
+        clocks: [
+            { id: 'clock_alarm', title: 'Alarm' },
+            { id: 'clock_escape', title: 'Escape' }
+        ],
+        tokens: [{
+            id: 'token_guard',
+            triggers: [{ clockId: 'clock_alarm', clockSuccessDelta: 1, clockFailDelta: -1 }]
+        }],
+        evidenceNotes: [{
+            id: 'note_rune',
+            triggers: [
+                { clockId: 'clock_alarm', clockSuccessDelta: 2, clockFailDelta: 0 },
+                { clockId: 'clock_escape', clockSuccessDelta: 1, clockFailDelta: 0 }
+            ]
+        }]
+    };
+    const state = {
+        selectedClockId: 'clock_alarm',
+        vttState: { activeSceneId: scene.id, scenes: [scene] }
+    };
+    const tableGroup = actionGroups.find((group) => group.name === 'table');
+    const actions = tableGroup.factory.create({
+        state,
+        canDeleteLiveVTTState: () => true,
+        getActiveScene: (draft) => draft.scenes[0],
+        getCombatScene: (draft) => draft.scenes[0],
+        isDM: () => true,
+        withDraft: (mutator) => mutator(state.vttState)
+    });
+
+    assert.equal(tableGroup.factory.countClockTriggerReferences(scene, 'clock_alarm'), 2);
+    actions.handle({ dataset: {} }, 'delete-clock', 'clock_alarm');
+
+    assert.deepEqual(scene.clocks.map((clock) => clock.id), ['clock_escape']);
+    assert.equal(state.selectedClockId, 'clock_escape');
+    assert.deepEqual(scene.tokens[0].triggers[0], {
+        clockId: '',
+        clockSuccessDelta: 0,
+        clockFailDelta: 0
+    });
+    assert.deepEqual(scene.evidenceNotes[0].triggers[0], {
+        clockId: '',
+        clockSuccessDelta: 0,
+        clockFailDelta: 0
+    });
+    assert.equal(scene.evidenceNotes[0].triggers[1].clockId, 'clock_escape');
+});
+
 test('scene actions create, select, and fit a scene inside one draft mutation', () => {
     const calls = [];
     const originalScene = { id: 'scene_one' };
@@ -266,4 +372,21 @@ test('selection actions commit entry selection before rendering all dependent vi
         'inspector:entry_new::null',
         'stage:entry_new::null'
     ]);
+});
+
+test('selection actions route encounter lifecycle controls through one controller', () => {
+    const calls = [];
+    const selectionGroup = actionGroups.find((group) => group.name === 'selection');
+    const actions = selectionGroup.factory.create({
+        state: {},
+        addVisibleTokensToInitiative: () => calls.push('add-visible'),
+        startEncounter: () => calls.push('start'),
+        endEncounter: () => calls.push('end')
+    });
+
+    actions.handle({ dataset: {} }, 'add-visible-tokens-to-initiative', '');
+    actions.handle({ dataset: {} }, 'start-encounter', '');
+    actions.handle({ dataset: {} }, 'end-encounter', '');
+
+    assert.deepEqual(calls, ['add-visible', 'start', 'end']);
 });

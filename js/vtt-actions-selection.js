@@ -14,6 +14,7 @@
     'use strict';
 
     const ACTIONS = new Set([
+            "add-visible-tokens-to-initiative",
             "add-token-to-initiative",
             "assign-entry-selected-token",
             "clear-entry-roster-owner",
@@ -31,7 +32,9 @@
             "select-token",
             "set-token-size",
             "toggle-concentration",
-            "toggle-reaction"
+            "toggle-reaction",
+            "start-encounter",
+            "end-encounter"
     ]);
 
     const create = (deps = {}) => {
@@ -39,11 +42,13 @@
         const {
             activateEvidenceNoteSelection,
             activateTokenSelection,
+            addVisibleTokensToInitiative,
             addTokenToInitiative,
             advanceTurn,
             assignSelectedEntryToToken,
             canDeleteLiveVTTState,
             cloneTokenById,
+            endEncounter,
             focusViewOnToken,
             getActiveScene,
             isDM,
@@ -58,6 +63,7 @@
             resetInitiativeToRoundOne,
             setInitiativeEntryRosterOwner,
             showTokenPortraitPreview,
+            startEncounter,
             syncTokenSelectionFromEntry,
             toNumber,
             updateSelectedEntry,
@@ -115,6 +121,21 @@
 
             if (action === 'add-token-to-initiative') {
                 addTokenToInitiative(id || state.selectedTokenId);
+                return;
+            }
+
+            if (action === 'add-visible-tokens-to-initiative') {
+                addVisibleTokensToInitiative();
+                return;
+            }
+
+            if (action === 'start-encounter') {
+                startEncounter();
+                return;
+            }
+
+            if (action === 'end-encounter') {
+                endEncounter();
                 return;
             }
 

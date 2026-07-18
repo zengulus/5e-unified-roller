@@ -189,6 +189,7 @@ try {
             }));
         });
         await page.reload();
+        await page.waitForFunction(() => document.body?.dataset.vttRole === 'dm');
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
         assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'open panels must not persist across reloads');
 
@@ -403,25 +404,100 @@ try {
             await page.locator('.vtt-scene-summary-title').textContent(),
             (await page.locator('#vtt-stage-title').textContent()).replace(/^Preview:\s*/, '')
         );
+        await page.locator('[data-action="show-scene-everyone"]').first().evaluate((button) => button.click());
+        assert.equal(await page.locator('.vtt-scene-summary-eyebrow').textContent(), 'Shared Scene');
 
         await page.locator('[data-action="open-vtt-panel"][data-panel="combat"]').first().evaluate((button) => button.click());
+        await page.getByRole('tab', { name: 'Clocks' }).click();
         await page.getByRole('button', { name: 'New Clock' }).click();
         assert.match(await page.locator('#vtt-clock-list').innerText(), /Clock 1/);
+        assert.match(await page.locator('#vtt-clock-list').innerText(), /Private draft/);
+        assert.equal(await page.locator('#vtt-clock-list [data-clock-field="title"]').evaluate((input) => input === document.activeElement), true);
+        const clockDescription = 'The ward breaks when this clock fills.';
+        await page.locator('#vtt-clock-list [data-clock-field="note"]').fill(clockDescription);
+        await page.locator('#vtt-clock-list [data-clock-field="note"]').press('Tab');
+        const describedClock = page.locator('#vtt-clock-list .vtt-clock').first();
+        assert.equal(await describedClock.getAttribute('title'), clockDescription);
+        assert.equal(await describedClock.getAttribute('aria-describedby'), 'vtt-clock-description-0');
+        await page.locator('#vtt-initiative-panel .vtt-drawer-close').click();
+        assert.equal(await describedClock.locator('.vtt-clock-note').isHidden(), true);
+        await describedClock.hover();
+        assert.equal(await describedClock.locator('.vtt-clock-note').isVisible(), true);
+        await page.locator('#vtt-initiative-panel [data-action="open-vtt-panel"]').click();
+        await page.getByRole('tab', { name: 'Turns' }).click();
 
         await page.evaluate(() => {
             const store = window.RTF_STORE;
             const caseId = store.getActiveCaseId();
             const state = structuredClone(store.getVTTState(caseId));
+            const encounterScene = state.scenes.find((scene) => scene.id === state.activeSceneId);
+            encounterScene.tokens = [
+                {
+                    id: 'token_turn_trigger', label: 'Warning sigil', side: 'enemy', sourceType: 'custom',
+                    x: 2, y: 2, w: 1, h: 1, hidden: false,
+                    triggers: [{
+                        id: 'trigger_start_turn', enabled: true, trigger: 'startTurnNear', radiusCells: 4,
+                        target: 'anyVisibleToken', repeat: 'always', kind: 'fiction',
+                        title: 'The warning sigil flares', body: 'A start-of-turn prompt is active.'
+                    }]
+                },
+                {
+                    id: 'token_turn_target', label: 'Fast token', side: 'player', sourceType: 'player',
+                    x: 3, y: 2, w: 1, h: 1, hidden: false, moveAccess: 'player'
+                }
+            ];
+            encounterScene.clocks = [
+                { id: 'clock_manual', title: 'Manual', current: 0, max: 4, hidden: false, cadence: 'manual' },
+                { id: 'clock_turn', title: 'Turn cadence', current: 0, max: 4, hidden: false, cadence: 'turn' },
+                { id: 'clock_round', title: 'Round cadence', current: 0, max: 4, hidden: false, cadence: 'round' }
+            ];
             state.initiative = {
                 round: 1,
-                activeEntryId: 'init_fast',
+                activeEntryId: '',
+                encounterActive: false,
+                sceneId: '',
+                startedAt: 0,
                 entries: [
-                    { id: 'init_fast', name: 'Fast', total: 18, tie: 12 },
-                    { id: 'init_slow', name: 'Slow', total: 10, tie: 10 }
+                    { id: 'init_fast', name: 'Fast', total: 18, tie: 12, reactionUsed: true, linkedTokenId: 'token_turn_target' },
+                    { id: 'init_slow', name: 'Slow', total: 10, tie: 10, reactionUsed: true }
                 ]
             };
             store.updateVTTState(state, caseId);
         });
+        assert.equal(await page.locator('#vtt-current-turn-label').textContent(), 'Encounter ready');
+        await page.getByRole('button', { name: 'Start Encounter' }).click();
+        assert.deepEqual(await page.evaluate(() => {
+            const initiative = window.RTF_STORE.getVTTState().initiative;
+            return [initiative.encounterActive, initiative.round, initiative.activeEntryId, !!initiative.sceneId];
+        }), [true, 1, 'init_fast', true]);
+        assert.match(await page.locator('#vtt-proximity-prompt-stack').innerText(), /The warning sigil flares/);
+        await page.getByRole('button', { name: 'Next turn' }).click();
+        assert.equal(await page.locator('#vtt-proximity-prompt-stack').isHidden(), true, 'an unlinked next turn should clear the previous turn prompt');
+        assert.deepEqual(await page.evaluate(() => {
+            const state = window.RTF_STORE.getVTTState();
+            const clocks = state.scenes.find((scene) => scene.id === state.initiative.sceneId).clocks;
+            return [
+                state.initiative.round,
+                state.initiative.activeEntryId,
+                state.initiative.entries.find((entry) => entry.id === 'init_slow').reactionUsed,
+                clocks.find((clock) => clock.id === 'clock_manual').current,
+                clocks.find((clock) => clock.id === 'clock_turn').current,
+                clocks.find((clock) => clock.id === 'clock_round').current
+            ];
+        }), [1, 'init_slow', false, 0, 1, 0]);
+        await page.getByRole('button', { name: 'Next turn' }).click();
+        assert.deepEqual(await page.evaluate(() => {
+            const state = window.RTF_STORE.getVTTState();
+            const clocks = state.scenes.find((scene) => scene.id === state.initiative.sceneId).clocks;
+            return [
+                state.initiative.round,
+                state.initiative.activeEntryId,
+                state.initiative.entries.find((entry) => entry.id === 'init_fast').reactionUsed,
+                clocks.find((clock) => clock.id === 'clock_manual').current,
+                clocks.find((clock) => clock.id === 'clock_turn').current,
+                clocks.find((clock) => clock.id === 'clock_round').current
+            ];
+        }), [2, 'init_fast', false, 0, 2, 1]);
         await page.locator('#vtt-initiative-list .vtt-entry').first().focus();
         await page.keyboard.press('Enter');
         await page.waitForTimeout(25);
@@ -434,6 +510,7 @@ try {
         assert.deepEqual(await page.locator('#vtt-initiative-list .vtt-entry-name').allTextContents(), ['Slow', 'Fast']);
 
         await page.reload();
+        await page.waitForFunction(() => document.body?.dataset.vttRole === 'dm');
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
         assert.deepEqual(await page.locator('#vtt-initiative-list .vtt-entry-name').allTextContents(), ['Slow', 'Fast']);
         assert.deepEqual(await page.evaluate(() => {
@@ -445,8 +522,15 @@ try {
         }), ['roll_packet', 1234]);
 
         await page.locator('#vtt-dm-dock [data-panel="combat"]').click();
+        page.once('dialog', (dialog) => dialog.accept());
         await page.getByRole('button', { name: 'Reset to Round 1' }).click();
-        assert.equal(await page.locator('#vtt-round-pill').textContent(), 'Round 1');
+        assert.equal(await page.locator('#vtt-round-pill').getAttribute('aria-label'), 'Round 1');
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.getByRole('button', { name: 'End Encounter' }).click();
+        assert.deepEqual(await page.evaluate(() => {
+            const initiative = window.RTF_STORE.getVTTState().initiative;
+            return [initiative.encounterActive, initiative.activeEntryId, initiative.sceneId, initiative.entries.length];
+        }), [false, '', '', 2]);
 
         const primaryCaseId = await page.evaluate(() => window.RTF_STORE.getActiveCaseId());
         const secondCaseId = await page.evaluate(() => window.RTF_STORE.createCase('Second Case'));
@@ -484,11 +568,36 @@ try {
         if (await page.locator('.vtt-combat-drawer-bar').isVisible()) {
             await page.locator('#vtt-initiative-rail-tab').click();
         }
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            const caseId = store.getActiveCaseId();
+            const state = structuredClone(store.getVTTState(caseId));
+            state.initiative = {
+                ...state.initiative,
+                encounterActive: true,
+                sceneId: state.activeSceneId,
+                startedAt: Date.now(),
+                activeEntryId: 'init_hidden_current',
+                entries: [
+                    { id: 'init_public_before', name: 'Public Before', total: 14, tie: 14 },
+                    { id: 'init_hidden_current', name: 'Veiled Current', total: 13, tie: 13, hidden: true },
+                    { id: 'init_hidden_between', name: 'Veiled Interruption', total: 12, tie: 12, hidden: true },
+                    { id: 'init_public_next', name: 'Public Next', total: 11, tie: 11 }
+                ]
+            };
+            store.updateVTTState(state, caseId);
+        });
+        await page.waitForTimeout(50);
         await page.locator('#vtt-dm-dock [data-panel="combat"]').click();
         await page.locator('#vtt-dm-dock [data-vtt-master-menu-toggle]').click();
         await page.locator('#vtt-role-toggle').click();
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'player');
         assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'combat');
+        assert.equal(await page.locator('#vtt-current-turn-label').textContent(), 'Hidden combatant');
+        assert.equal(await page.locator('#vtt-next-turn-label').textContent(), 'Next visible · Public Next');
+        assert.equal(await page.locator('#vtt-initiative-list .vtt-entry-redacted').count(), 1);
+        assert.equal(await page.locator('#vtt-initiative-list').innerText().then((text) => text.includes('Veiled Current') || text.includes('Veiled Interruption')), false);
+        assert.match(await page.locator('#vtt-initiative-list .vtt-entry', { hasText: 'Public Next' }).innerText(), /Next visible/);
         await page.locator('#vtt-initiative-rail-tab').click();
         await page.waitForTimeout(25);
         assert.equal(await page.evaluate(() => document.activeElement?.id), 'vtt-player-combat-btn', 'role changes should remap Combat focus to the visible launcher');

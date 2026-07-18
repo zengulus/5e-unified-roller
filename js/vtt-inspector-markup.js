@@ -77,6 +77,14 @@
     const INSPECTOR_FOCUS_SELECTOR = INSPECTOR_FOCUS_ATTRIBUTES
         .map((attribute) => `[${attribute}]`)
         .join(',');
+    const PROXIMITY_TRIGGER_EVENT_OPTIONS = Object.freeze([
+        Object.freeze({ value: 'enter', label: 'Enter Area' }),
+        Object.freeze({ value: 'startTurnNear', label: 'Start Turn Nearby' })
+    ]);
+    const PROXIMITY_TRIGGER_LEGACY_EVENT_LABELS = Object.freeze({
+        click: 'Click (legacy)',
+        reveal: 'Reveal (legacy)'
+    });
 
     const validateDependencies = (deps) => {
         if (!deps || typeof deps !== 'object' || Array.isArray(deps)) {
@@ -189,6 +197,15 @@
             const isSkillRoll = normalized.kind === 'skillRoll';
             const sceneClocks = getSceneClocks(getActiveScene());
             const hasClock = !!normalized.clockId;
+            const triggerEventOptions = PROXIMITY_TRIGGER_EVENT_OPTIONS.some((option) => option.value === normalized.trigger)
+                ? PROXIMITY_TRIGGER_EVENT_OPTIONS
+                : [
+                    ...PROXIMITY_TRIGGER_EVENT_OPTIONS,
+                    {
+                        value: normalized.trigger,
+                        label: PROXIMITY_TRIGGER_LEGACY_EVENT_LABELS[normalized.trigger] || 'Legacy Event'
+                    }
+                ];
             return `
             <div class="vtt-proximity-trigger-row" data-trigger-id="${escapeHtml(normalized.id)}">
                 <div class="vtt-proximity-trigger-head">
@@ -207,6 +224,14 @@
                     <input class="vtt-inspector-input" type="text" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'title')} value="${escapeHtml(normalized.title)}">
                 </label>
                 <div class="vtt-inspector-grid">
+                    <label class="vtt-field">
+                        <span>When</span>
+                        <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'trigger')}>
+                            ${triggerEventOptions.map((option) => `
+                                <option value="${escapeHtml(option.value)}"${normalized.trigger === option.value ? ' selected' : ''}>${escapeHtml(option.label)}</option>
+                            `).join('')}
+                        </select>
+                    </label>
                     <label class="vtt-field">
                         <span>Kind</span>
                         <select class="vtt-inspector-select" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'kind')}>
@@ -279,6 +304,7 @@
                         ` : ''}
                     ` : ''}
                 </div>
+                ${normalized.trigger === 'startTurnNear' ? '<div class="vtt-detail-note">Runs when an eligible initiative-linked token starts its turn within this radius.</div>' : ''}
                 <label class="vtt-field">
                     <span>Fiction</span>
                     <textarea class="vtt-inspector-textarea vtt-proximity-textarea" ${buildProximityTriggerFieldAttrs(ownerKind, ownerId, normalized, 'body')}>${escapeHtml(normalized.body)}</textarea>

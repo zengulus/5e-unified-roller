@@ -294,6 +294,103 @@ test('VTT proximity controller evaluates and renders an in-range player prompt',
     assert.match(promptStackEl.innerHTML, /A sigil catches your eye/);
 });
 
+test('VTT proximity controller evaluates start-turn-near once per turn occurrence', () => {
+    const promptStackEl = { hidden: true, innerHTML: '', dataset: {}, style: {} };
+    const targetScene = {
+        id: 'scene_turn_prompt',
+        grid: { cellPx: 10, offsetX: 0, offsetY: 0 },
+        fog: [],
+        evidenceNotes: [{
+            id: 'note_hazard',
+            title: 'Arcane pressure plate',
+            triggers: [{
+                id: 'turn_hazard',
+                kind: 'skillRoll',
+                trigger: 'startTurnNear',
+                repeat: 'always',
+                target: 'playerTokens',
+                radiusCells: 1,
+                title: 'The plate flares'
+            }]
+        }],
+        tokens: [
+            { id: 'hero', side: 'player', x: 2, y: 0, w: 1, h: 1 },
+            { id: 'bystander', side: 'player', x: 2, y: 0, w: 1, h: 1 }
+        ]
+    };
+    const controller = proximityFactory.createController({
+        ...proximityModel,
+        canRoleMoveToken: () => true,
+        collectFogCellSet: () => new Set(),
+        escapeHtml,
+        getActiveCaseId: () => 'case_test',
+        getActiveScene: () => targetScene,
+        getActiveSheetBundle: () => null,
+        getEvidenceNoteCellBounds: () => ({ left: 0, top: 0, right: 1, bottom: 1, widthCells: 1, heightCells: 1 }),
+        getEvidenceNoteDisplayTitle: (note) => note.title,
+        getLocalRollMode: () => 'norm',
+        getLocalView: () => ({ x: 0, y: 0, zoom: 1 }),
+        getRenderableTokenCells: (token) => token,
+        getRollModeLabel: () => 'Normal',
+        getRosterPlayerForRecord: () => null,
+        getSceneById: (id) => id === targetScene.id ? targetScene : null,
+        getSceneCellPx,
+        getSceneEvidenceNotes: (currentScene) => currentScene.evidenceNotes,
+        getSheetMod: () => 0,
+        getSheetPB: () => 2,
+        getSheetSkillMiscBonus: () => 0,
+        getTokenById: (id) => targetScene.tokens.find((token) => token.id === id),
+        getVisibleTokensForRole: (currentScene) => currentScene.tokens,
+        isDragging: () => false,
+        isEvidenceNoteVisibleToRole: () => true,
+        isInitialLoadPending: () => false,
+        isPlayer: () => true,
+        normalizeClockCurrent: (value) => value,
+        normalizeClockMax: (value) => value,
+        normalizeRollMode: (value) => ['adv', 'dis'].includes(String(value || '').toLowerCase()) ? String(value).toLowerCase() : 'norm',
+        postSheetDiscordRoll: async () => true,
+        promptStackEl,
+        readJSONStorage: () => ({}),
+        rollRawD20WithMode: () => ({ total: 10, formula: '1d20' }),
+        rollSheetD20: () => ({ ok: true, total: 10, formula: '1d20' }),
+        scaleForZoom: (value) => value,
+        sheetSkillsMap: {},
+        stageEl: { getBoundingClientRect: () => ({ height: 600 }) },
+        toNumber,
+        withDraft: () => false
+    });
+
+    controller.evaluateProximityTriggers();
+    assert.equal(controller.getActivePrompt(), null, 'movement evaluation ignores turn-only triggers');
+
+    const firstPrompt = controller.evaluateStartTurnNear({
+        sceneId: targetScene.id,
+        tokenId: 'hero',
+        entryId: 'entry_hero',
+        round: 1
+    });
+    assert.equal(firstPrompt.tokenId, 'hero');
+    assert.equal(firstPrompt.trigger.trigger, 'startTurnNear');
+    assert.match(firstPrompt.key, /\|1:entry_hero$/);
+
+    controller.evaluateProximityTriggers();
+    assert.equal(controller.getActivePrompt().key, firstPrompt.key, 'ordinary renders preserve the turn prompt');
+    assert.equal(controller.dismissActiveProximityPrompt(), true);
+    assert.equal(controller.evaluateStartTurnNear({ sceneId: targetScene.id, tokenId: 'hero', entryId: 'entry_hero', round: 1 }), null);
+
+    const nextRoundPrompt = controller.evaluateStartTurnNear({
+        sceneId: targetScene.id,
+        tokenId: 'hero',
+        entryId: 'entry_hero',
+        round: 2
+    });
+    assert.ok(nextRoundPrompt);
+    assert.notEqual(nextRoundPrompt.key, firstPrompt.key);
+
+    assert.equal(controller.evaluateStartTurnNear({ sceneId: targetScene.id, tokenId: '' }), null);
+    assert.equal(controller.getActivePrompt(), null, 'an unlinked next combatant clears the previous turn prompt');
+});
+
 test('VTT geometry keeps evidence and stealth calculations independent of the controller', () => {
     const targetScene = {
         ...scene,

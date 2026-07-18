@@ -82,7 +82,14 @@
         const defaultSnapshot = clone(options.defaultSnapshot || {
             activeSceneId: '',
             scenes: [],
-            initiative: { round: 1, activeEntryId: '', entries: [] }
+            initiative: {
+                round: 1,
+                activeEntryId: '',
+                entries: [],
+                encounterActive: false,
+                sceneId: '',
+                startedAt: 0
+            }
         });
         const liveStatusDropoutGraceMs = Math.max(0, Math.round(toNumber(options.liveStatusDropoutGraceMs, 5000)));
         const schedule = typeof options.setTimeout === 'function'

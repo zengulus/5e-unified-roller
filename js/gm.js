@@ -305,7 +305,10 @@ function getVTTInitiativeSnapshot() {
             entries: [],
             round: 1,
             activeEntryId: '',
-            activeName: ''
+            activeName: '',
+            encounterActive: false,
+            sceneId: '',
+            sceneName: ''
         };
     }
     const state = store.getVTTState(caseInfo.id);
@@ -313,6 +316,9 @@ function getVTTInitiativeSnapshot() {
     const entries = Array.isArray(initiative.entries) ? initiative.entries.slice() : [];
     const activeEntryId = sanitizeString(initiative.activeEntryId || '', '', 120).trim();
     const activeEntry = entries.find((entry) => String(entry && entry.id ? entry.id : '') === activeEntryId) || null;
+    const sceneId = sanitizeString(initiative.sceneId || '', '', 120).trim();
+    const scenes = Array.isArray(state && state.scenes) ? state.scenes : [];
+    const encounterScene = scenes.find((scene) => String(scene && scene.id || '').trim() === sceneId) || null;
     return {
         available: true,
         caseId: caseInfo.id,
@@ -320,7 +326,10 @@ function getVTTInitiativeSnapshot() {
         entries,
         round: Math.max(1, Math.round(sanitizeNumber(initiative.round, 1, 1, 100000))),
         activeEntryId,
-        activeName: activeEntry ? sanitizeString(activeEntry.name || 'Combatant', 'Combatant', 160) : ''
+        activeName: activeEntry ? sanitizeString(activeEntry.name || 'Combatant', 'Combatant', 160) : '',
+        encounterActive: !!initiative.encounterActive,
+        sceneId,
+        sceneName: encounterScene ? sanitizeString(encounterScene.name || 'Scene', 'Scene', 160) : ''
     };
 }
 
@@ -387,7 +396,9 @@ function renderVTTSyncStatus() {
     }
 
     const activeText = snapshot.activeName ? ` Active turn: ${snapshot.activeName}.` : '';
-    summaryEl.textContent = `VTT currently has ${vttCount} combatant${vttCount === 1 ? '' : 's'} in round ${snapshot.round}.${activeText} Pulling replaces this Tracker mirror (${trackerCount} local).`;
+    const sceneText = snapshot.sceneName ? ` Scene: ${snapshot.sceneName}.` : '';
+    const encounterText = snapshot.encounterActive ? ' Live encounter.' : ' Prepared order (encounter inactive).';
+    summaryEl.textContent = `VTT currently has ${vttCount} combatant${vttCount === 1 ? '' : 's'} in round ${snapshot.round}.${activeText}${sceneText}${encounterText} Pulling replaces this Tracker mirror (${trackerCount} local).`;
     pullButtonEl.disabled = false;
     pullButtonEl.textContent = `Pull VTT Initiative (${vttCount})`;
 }

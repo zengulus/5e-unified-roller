@@ -457,6 +457,7 @@ body[data-vtt-role="dm"][data-topbar-collapsed="0"] .vtt-audio-player {
 .vtt-initiative-panel {
     right: 1rem;
     --vtt-rail-width: min(300px, calc(100vw - 2rem));
+    grid-template-rows: auto auto auto minmax(0, 1fr);
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
@@ -582,7 +583,7 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel {
 
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-initiative-scroll {
     gap: 0.5rem;
-    max-height: inherit;
+    max-height: calc(52vh - 4.25rem);
     overflow: hidden auto;
     scrollbar-width: thin;
 }
@@ -605,9 +606,160 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-panel-head
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-panel-head-actions,
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-initiative-toolbar,
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-controls,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-editor,
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-edit-grid,
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-top-actions .vtt-inline-btn {
     display: none;
+}
+
+.vtt-combat-turn-strip {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    padding: 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.9rem;
+    background:
+        linear-gradient(135deg, rgba(var(--accent-rgb, 78, 205, 196), 0.12), transparent 54%),
+        rgba(7, 11, 19, 0.95);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(14px);
+}
+
+.vtt-combat-turn-copy {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.vtt-combat-turn-copy > span,
+.vtt-encounter-status > span,
+.vtt-combat-scope {
+    color: rgba(221, 230, 241, 0.58);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1.15;
+    text-transform: uppercase;
+}
+
+.vtt-combat-turn-copy strong,
+.vtt-combat-turn-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-combat-turn-copy strong {
+    color: rgba(248, 252, 255, 0.98);
+    font-size: 0.96rem;
+}
+
+.vtt-combat-turn-copy small {
+    color: rgba(221, 230, 241, 0.7);
+    font-size: 0.74rem;
+}
+
+.vtt-combat-turn-actions,
+.vtt-encounter-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.vtt-combat-turn-actions .vtt-inline-btn {
+    min-height: 2.15rem;
+    padding: 0.42rem 0.62rem;
+}
+
+.vtt-combat-view-tabs {
+    display: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.3rem;
+    padding: 0.3rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.8rem;
+    background: rgba(7, 11, 19, 0.9);
+}
+
+body[data-active-vtt-panel="combat"] .vtt-combat-view-tabs {
+    display: grid;
+}
+
+.vtt-combat-view-tabs button {
+    min-height: 2.35rem;
+    border: 1px solid transparent;
+    border-radius: 0.6rem;
+    background: transparent;
+    color: rgba(222, 232, 244, 0.72);
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.vtt-combat-view-tabs button:hover,
+.vtt-combat-view-tabs button:focus-visible,
+.vtt-combat-view-tabs button[aria-selected="true"] {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.42);
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.16);
+    color: rgba(248, 252, 255, 0.98);
+    outline: none;
+}
+
+.vtt-combat-workspace-panel[hidden] {
+    display: none !important;
+}
+
+.vtt-encounter-toolbar {
+    display: grid;
+    gap: 0.65rem;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid rgba(var(--accent-rgb, 78, 205, 196), 0.2);
+    border-radius: 0.8rem;
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.06);
+}
+
+.vtt-encounter-status {
+    display: grid;
+    gap: 0.16rem;
+}
+
+.vtt-encounter-actions {
+    flex-wrap: wrap;
+}
+
+.vtt-combat-scope {
+    margin-top: 0.2rem;
+    letter-spacing: 0.04em;
+    text-transform: none;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-view-tabs,
+body:not([data-active-vtt-panel="combat"]) .vtt-encounter-toolbar,
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-scope {
+    display: none;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-turn-actions .vtt-inline-btn:first-child {
+    display: none;
+}
+
+body[data-active-vtt-panel="combat"] .vtt-initiative-expand {
+    display: none;
+}
+
+body[data-active-vtt-panel="setup"] .vtt-initiative-panel,
+body[data-active-vtt-panel="spawn"] .vtt-initiative-panel,
+body[data-active-vtt-panel="inspector"] .vtt-initiative-panel,
+body[data-active-vtt-panel="player-rolls"] .vtt-initiative-panel,
+body[data-active-vtt-panel="admin"] .vtt-initiative-panel {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(0.5rem);
 }
 
 body[data-vtt-role="player"] .vtt-sidebar,
@@ -851,6 +1003,10 @@ body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
     --vtt-rail-width: min(360px, calc(100vw - 2rem));
     z-index: 50;
     max-height: calc(100vh - var(--vtt-overlay-top) - 0.75rem);
+}
+
+body[data-active-vtt-panel="combat"] .vtt-initiative-panel .vtt-initiative-scroll {
+    max-height: none;
 }
 
 body[data-active-vtt-panel="combat"] .vtt-combat-drawer-bar {
@@ -3330,6 +3486,11 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     box-shadow: inset 0 0 0 1px rgba(var(--vtt-clock-rgb), 0.34);
 }
 
+.vtt-clock.is-editing {
+    border-color: rgba(var(--vtt-clock-rgb), 0.58);
+    box-shadow: inset 0 0 0 1px rgba(var(--vtt-clock-rgb), 0.18);
+}
+
 .vtt-clock-layout {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -3411,6 +3572,37 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
     white-space: nowrap;
 }
 
+.vtt-clock-badges {
+    display: inline-flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.3rem;
+}
+
+.vtt-clock-cadence,
+.vtt-clock-visibility {
+    flex: 0 0 auto;
+    padding: 0.16rem 0.42rem;
+    border-radius: 999px;
+    background: rgba(88, 214, 141, 0.12);
+    color: rgba(218, 252, 229, 0.9);
+    font-size: 0.66rem;
+    font-weight: 800;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.vtt-clock-cadence {
+    background: rgba(var(--vtt-clock-rgb), 0.12);
+    color: rgba(231, 240, 252, 0.88);
+}
+
+.vtt-clock-visibility.is-draft {
+    background: rgba(255, 191, 92, 0.12);
+    color: rgba(255, 224, 177, 0.92);
+}
+
 .vtt-clock-note {
     color: rgba(226, 236, 248, 0.76);
     font-size: 0.78rem;
@@ -3429,9 +3621,16 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
 
 .vtt-clock-edit-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.6fr) minmax(4.2rem, 0.6fr) minmax(4.2rem, 0.6fr) minmax(4.4rem, 0.55fr);
+    grid-template-columns: minmax(0, 1.5fr) minmax(4.2rem, 0.6fr) minmax(4.2rem, 0.6fr);
     gap: 0.5rem;
     align-items: end;
+}
+
+.vtt-clock-editor {
+    display: grid;
+    gap: 0.55rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid rgba(var(--vtt-clock-rgb), 0.22);
 }
 
 .vtt-clock-note-field {
@@ -3485,6 +3684,24 @@ body[data-token-names-hidden="1"] .vtt-token-subtitle {
 .vtt-entry.is-hidden {
     opacity: 0.76;
     border-style: dashed;
+}
+
+.vtt-entry.vtt-entry-redacted {
+    border-style: dashed;
+    border-color: rgba(255, 222, 126, 0.34);
+    background:
+        linear-gradient(135deg, rgba(255, 222, 126, 0.08), transparent 62%),
+        rgba(255, 255, 255, 0.025);
+    cursor: default;
+}
+
+.vtt-entry-redacted .vtt-entry-name {
+    color: rgba(238, 242, 248, 0.78);
+}
+
+.vtt-entry-redacted-note {
+    color: rgba(220, 229, 241, 0.66);
+    font-style: italic;
 }
 
 .vtt-entry-line {
@@ -3594,6 +3811,15 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock-note
     display: none;
 }
 
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock:hover .vtt-clock-note,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock:focus-visible .vtt-clock-note,
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-clock:focus-within .vtt-clock-note {
+    display: block;
+    margin-top: 0.25rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(var(--vtt-clock-rgb), 0.18);
+}
+
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry {
     padding: 0.42rem 0.48rem;
     border-radius: 8px;
@@ -3641,6 +3867,22 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-tag 
     max-height: min(80vh, 38rem);
     overflow: auto;
     z-index: 64;
+}
+
+body[data-active-vtt-panel="combat"] .vtt-initiative-popover {
+    position: static;
+    inset: auto;
+    box-sizing: border-box;
+    width: 100%;
+    max-height: none;
+    margin-top: 0.8rem;
+    overflow: visible;
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.28);
+    box-shadow: none;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-popover {
+    display: none !important;
 }
 
 .vtt-token-inspector-popover {

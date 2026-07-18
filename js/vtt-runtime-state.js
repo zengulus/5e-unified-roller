@@ -15,6 +15,7 @@
 
     const ACTION_PORT = Object.freeze({
         askRollPickMode: ['stage', 'tool', 'askRollPickMode'],
+        combatClockEditorId: ['ui', 'combat', 'clockEditorId'],
         fitViewOnNextMapLoad: ['stage', 'view', 'fitOnNextMapLoad'],
         initiativeDetailState: ['ui', 'overlays', 'initiativeDetail'],
         localPingVariant: ['stage', 'tool', 'pingVariant'],
@@ -190,6 +191,7 @@
                 }
             },
             ui: {
+                combat: { view: 'turns', clockEditorId: '' },
                 preferences: {
                     topbarCollapsed: true,
                     showGrid: true,

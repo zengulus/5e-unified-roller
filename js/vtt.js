@@ -6,7 +6,7 @@
         throw new Error('VTT configuration module failed to load.');
     }
     const C = vttConfig.constants;
-    const vttSessionModuleReady = import('./vtt-session.js?v=20260714b')
+    const vttSessionModuleReady = import('./vtt-session.js?v=20260718d')
         .then(() => window.RTF_VTT_SESSION || null)
         .catch((err) => {
             console.warn('VTT session module failed to load', err);
@@ -387,10 +387,37 @@
             ...note,
             id: buildId('evidence')
         }));
-        const clonedClocks = deepClone(Array.isArray(source && source.clocks) ? source.clocks : []).map((clock) => ({
-            ...clock,
-            id: buildId('clock')
-        }));
+        const sourceClocks = deepClone(Array.isArray(source && source.clocks) ? source.clocks : []);
+        const clonedClockIdMap = new Map();
+        const clonedClocks = sourceClocks.map((clock) => {
+            const sourceClockId = String(clock && clock.id || '').trim();
+            const clonedClock = {
+                ...clock,
+                id: buildId('clock')
+            };
+            if (sourceClockId) clonedClockIdMap.set(sourceClockId, clonedClock.id);
+            return clonedClock;
+        });
+        const remapClonedTriggerClockReferences = (owners) => {
+            owners.forEach((owner) => {
+                if (!owner || !Array.isArray(owner.triggers)) return;
+                owner.triggers = owner.triggers.map((trigger) => {
+                    if (!trigger || typeof trigger !== 'object') return trigger;
+                    const sourceClockId = String(trigger.clockId || '').trim();
+                    if (!sourceClockId) return trigger;
+                    const clonedClockId = clonedClockIdMap.get(sourceClockId) || '';
+                    if (clonedClockId) return { ...trigger, clockId: clonedClockId };
+                    return {
+                        ...trigger,
+                        clockId: '',
+                        clockSuccessDelta: 0,
+                        clockFailDelta: 0
+                    };
+                });
+            });
+        };
+        remapClonedTriggerClockReferences(clonedTokens);
+        remapClonedTriggerClockReferences(clonedEvidenceNotes);
         return {
             id: buildId('scene'),
             name: nextName,
@@ -688,7 +715,7 @@
         const targetId = String(clockId || '').trim();
         if (!targetId || typeof mutator !== 'function' || !isDM()) return false;
         withDraft((draft) => {
-            const scene = getActiveScene(draft);
+            const scene = getCombatScene(draft);
             if (!scene || !Array.isArray(scene.clocks)) return;
             const idx = scene.clocks.findIndex((clock) => String(clock && clock.id || '').trim() === targetId);
             if (idx < 0) return;
@@ -863,6 +890,19 @@
         });
         console.warn(`VTT delete blocked before live room was ready: ${reason}`);
         return false;
+    };
+    const confirmSceneDeletion = (scene, impact = {}) => {
+        const sceneName = String(scene && scene.name || 'this scene').trim() || 'this scene';
+        const tokenCount = Math.max(0, Math.round(toNumber(impact && impact.tokenCount, 0)));
+        const initiativeEntryCount = Math.max(0, Math.round(toNumber(impact && impact.initiativeEntryCount, 0)));
+        const consequences = [
+            `Its map, ${tokenCount} token${tokenCount === 1 ? '' : 's'}, notes, clocks, and fog will be removed.`
+        ];
+        if (initiativeEntryCount) {
+            consequences.push(`${initiativeEntryCount} linked combatant${initiativeEntryCount === 1 ? '' : 's'} will be removed or relinked to matching tokens in another scene.`);
+        }
+        if (impact && impact.endsEncounter) consequences.push('The active encounter scoped to this scene will end.');
+        return window.confirm(`Delete "${sceneName}"?\n\n${consequences.join('\n')}\n\nThis cannot be undone.`);
     };
     const normalizeLocalRole = (role) => {
         const clean = String(role || '').trim().toLowerCase();
@@ -1365,27 +1405,51 @@
         return true;
     };
 
-    const closeInitiativeDetail = () => {
+    const closeInitiativeDetail = (options = {}) => {
         if (!uiRuntime.overlays.initiativeDetail && (!dom.initiativeDetailPanelEl || dom.initiativeDetailPanelEl.hidden)) return false;
+        const closingEntryId = String(uiRuntime.overlays.initiativeDetail && uiRuntime.overlays.initiativeDetail.entryId || '').trim();
         uiRuntime.overlays.initiativeDetail = null;
         if (dom.initiativeDetailPanelEl) dom.initiativeDetailPanelEl.hidden = true;
+        if (options.restoreFocus && closingEntryId) {
+            window.requestAnimationFrame(() => {
+                const selectorId = window.CSS && typeof window.CSS.escape === 'function'
+                    ? window.CSS.escape(closingEntryId)
+                    : closingEntryId.replace(/"/g, '\\"');
+                const returnTarget = dom.initiativeListEl
+                    ? dom.initiativeListEl.querySelector(`[data-action="edit-entry"][data-id="${selectorId}"]`)
+                    : null;
+                if (returnTarget && typeof returnTarget.focus === 'function') returnTarget.focus({ preventScroll: true });
+            });
+        }
         return true;
     };
 
     const openInitiativeDetail = (entryId, clientX, clientY) => {
         const targetId = String(entryId || '').trim();
         if (!targetId || !isDM()) return false;
+        if (getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel) !== 'combat') {
+            setActiveVTTPanel('combat', { focus: false });
+        }
+        setCombatView('turns');
         stageState.selection.entryId = targetId;
         uiRuntime.overlays.initiativeDetail = {
             entryId: targetId,
             clientX: Math.round(toNumber(clientX, window.innerWidth / 2)),
-            clientY: Math.round(toNumber(clientY, window.innerHeight / 2))
+            clientY: Math.round(toNumber(clientY, window.innerHeight / 2)),
+            focusRequested: true
         };
         return true;
     };
 
     const positionInitiativeDetail = () => {
         if (!dom.initiativeDetailPanelEl || dom.initiativeDetailPanelEl.hidden || !uiRuntime.overlays.initiativeDetail) return;
+        if (getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel) === 'combat'
+            && dom.initiativePanelEl
+            && dom.initiativePanelEl.contains(dom.initiativeDetailPanelEl)) {
+            dom.initiativeDetailPanelEl.style.removeProperty('left');
+            dom.initiativeDetailPanelEl.style.removeProperty('top');
+            return;
+        }
         const width = dom.initiativeDetailPanelEl.offsetWidth || 360;
         const height = dom.initiativeDetailPanelEl.offsetHeight || 420;
         const margin = 12;
@@ -1401,6 +1465,56 @@
         dom.initiativeDetailPanelEl.style.top = `${Math.round(top)}px`;
     };
 
+    const normalizeCombatView = (view) => String(view || '').trim() === 'clocks' ? 'clocks' : 'turns';
+
+    const applyCombatWorkspaceView = () => {
+        const view = normalizeCombatView(uiRuntime.combat && uiRuntime.combat.view);
+        if (uiRuntime.combat) uiRuntime.combat.view = view;
+        const expanded = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel) === 'combat';
+        if (dom.body) dom.body.dataset.combatView = view;
+        const turnsPanel = document.getElementById('vtt-initiative-workspace');
+        const clocksPanel = document.getElementById('vtt-clock-panel');
+        document.querySelectorAll('[data-action="set-combat-view"][data-combat-view]').forEach((buttonEl) => {
+            const selected = normalizeCombatView(buttonEl.dataset.combatView) === view;
+            buttonEl.setAttribute('aria-selected', selected ? 'true' : 'false');
+            buttonEl.tabIndex = selected ? 0 : -1;
+        });
+        if (turnsPanel) {
+            turnsPanel.hidden = expanded && view !== 'turns';
+            turnsPanel.setAttribute('aria-hidden', expanded && view !== 'turns' ? 'true' : 'false');
+        }
+        if (clocksPanel) {
+            clocksPanel.hidden = expanded && view !== 'clocks';
+            clocksPanel.setAttribute('aria-hidden', expanded && view !== 'clocks' ? 'true' : 'false');
+        }
+    };
+
+    const setCombatView = (view) => {
+        if (!uiRuntime.combat) uiRuntime.combat = { view: 'turns' };
+        uiRuntime.combat.view = normalizeCombatView(view);
+        applyCombatWorkspaceView();
+    };
+
+    const focusClockEditor = (clockId) => {
+        const targetId = String(clockId || '').trim();
+        if (!targetId) return;
+        window.requestAnimationFrame(() => {
+            const selectorId = window.CSS && typeof window.CSS.escape === 'function'
+                ? window.CSS.escape(targetId)
+                : targetId.replace(/"/g, '\\"');
+            const editor = dom.clockListEl
+                ? dom.clockListEl.querySelector(`[data-clock-editor="${selectorId}"]`)
+                : null;
+            if (!editor) return;
+            if (typeof editor.scrollIntoView === 'function') editor.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            const titleInput = editor.querySelector('[data-clock-field="title"]');
+            if (titleInput && typeof titleInput.focus === 'function') {
+                titleInput.focus({ preventScroll: true });
+                if (typeof titleInput.select === 'function') titleInput.select();
+            }
+        });
+    };
+
     const applyUIPreferences = () => {
         if (dom.body) {
             dom.body.dataset.topbarCollapsed = uiRuntime.preferences.topbarCollapsed ? '1' : '0';
@@ -1408,6 +1522,7 @@
             dom.body.dataset.tokenNamesHidden = uiRuntime.preferences.showTokenNames ? '0' : '1';
             dom.body.dataset.activeVttPanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
         }
+        applyCombatWorkspaceView();
         if (dom.topbarTabEl) {
             dom.topbarTabEl.textContent = uiRuntime.preferences.topbarCollapsed ? 'Table info' : 'Hide header';
             dom.topbarTabEl.title = uiRuntime.preferences.topbarCollapsed ? 'Show table information and view controls' : 'Hide the table header';
@@ -1466,7 +1581,9 @@
         }
         if (dom.initiativePanelEl) {
             dom.initiativePanelEl.tabIndex = -1;
-            dom.initiativePanelEl.setAttribute('aria-hidden', 'false');
+            const combatSuppressed = !!(activePanel && activePanel !== 'combat');
+            dom.initiativePanelEl.inert = combatSuppressed;
+            dom.initiativePanelEl.setAttribute('aria-hidden', combatSuppressed ? 'true' : 'false');
             dom.initiativePanelEl.querySelectorAll('.vtt-initiative-expand').forEach((buttonEl) => {
                 buttonEl.setAttribute('aria-expanded', activePanel === 'combat' ? 'true' : 'false');
             });
@@ -1541,6 +1658,17 @@
         if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return null;
         const viewedSceneId = getViewedSceneId(state);
         return state.scenes.find((scene) => scene.id === viewedSceneId) || state.scenes[0] || null;
+    };
+
+    const getCombatScene = (state = sessionState.snapshot) => {
+        if (!state || !Array.isArray(state.scenes) || !state.scenes.length) return null;
+        const initiative = state.initiative && typeof state.initiative === 'object' ? state.initiative : {};
+        const encounterSceneId = initiative.encounterActive ? String(initiative.sceneId || '').trim() : '';
+        if (encounterSceneId) {
+            const encounterScene = state.scenes.find((scene) => String(scene && scene.id || '').trim() === encounterSceneId);
+            if (encounterScene) return encounterScene;
+        }
+        return getActiveScene(state);
     };
 
     const getSceneById = (sceneId, state = sessionState.snapshot) => {
@@ -2590,7 +2718,7 @@
         if (!entry) return true;
         if (role === 'dm') return false;
         if (entry.hidden) return true;
-        const scene = getActiveScene(state);
+        const scene = getCombatScene(state);
         const linkedToken = getSceneTokenForEntry(scene, entry);
         return !!(linkedToken && isTokenHiddenForRole(linkedToken, scene, role));
     };
@@ -2602,9 +2730,27 @@
         return entries.filter((entry) => !isEntryHiddenForRole(entry, state, role));
     };
 
+    const getNextVisibleInitiativeProjection = (entries, activeEntryId, state = sessionState.snapshot, role = sessionState.role) => {
+        const canonicalEntries = Array.isArray(entries) ? entries : [];
+        const activeId = String(activeEntryId || '').trim();
+        const activeIndex = canonicalEntries.findIndex((entry) => String(entry && entry.id || '').trim() === activeId);
+        if (!activeId || activeIndex < 0 || canonicalEntries.length < 2) return null;
+        let skippedHidden = false;
+        for (let offset = 1; offset < canonicalEntries.length; offset += 1) {
+            const entry = canonicalEntries[(activeIndex + offset) % canonicalEntries.length];
+            if (!entry || String(entry.id || '').trim() === activeId) continue;
+            if (isEntryHiddenForRole(entry, state, role)) {
+                skippedHidden = true;
+                continue;
+            }
+            return { entry, skippedHidden };
+        }
+        return null;
+    };
+
     const getVisibleSceneTokenForEntry = (entry, state = sessionState.snapshot, role = sessionState.role) => {
         if (!entry) return null;
-        const scene = getActiveScene(state);
+        const scene = getCombatScene(state);
         const linkedToken = getSceneTokenForEntry(scene, entry);
         if (!linkedToken) return null;
         if (role !== 'dm' && isTokenHiddenForRole(linkedToken, scene, role)) return null;
@@ -2641,6 +2787,8 @@
             || String(left.name || '').localeCompare(String(right.name || ''))
         );
     }
+
+    let handleInitiativeTurnOccurrence = () => false;
 
     const readSharedVTTSnapshot = (options = {}) => {
         const opts = options && typeof options === 'object' ? options : {};
@@ -2730,6 +2878,7 @@
 
         sessionState.snapshot = deepClone(saved || draft);
         syncRosterLinkedPlayerPresentation(sessionState.snapshot);
+        handleInitiativeTurnOccurrence(baseSnapshot, sessionState.snapshot);
         normalizeSelections();
         if (options.fitView) stageState.view.fitOnNextMapLoad = true;
         render();
@@ -3197,6 +3346,7 @@
         const targetCaseId = String(caseId || '').trim();
         if (!targetCaseId || targetCaseId !== getActiveCaseId() || (sessionState.pendingCaseId && sessionState.pendingCaseId !== targetCaseId)) return;
         const store = getStore();
+        const previousSnapshot = sessionState.snapshot;
         const clean = store && typeof store.normalizeVTTStateSnapshot === 'function'
             ? store.normalizeVTTStateSnapshot(payload)
             : deepClone(payload);
@@ -3215,6 +3365,7 @@
         sessionState.pendingRemoteSnapshot = null;
         sessionState.snapshot = deepClone(synced.snapshot);
         sessionState.stateCaseId = targetCaseId;
+        handleInitiativeTurnOccurrence(previousSnapshot, sessionState.snapshot);
         maybeFollowRemoteActivityForDM(changedSceneIds, sessionState.snapshot);
         normalizeSelections();
         render();
@@ -3227,6 +3378,7 @@
         const sessionSnapshot = isVTTCollabReady() && typeof collabTransport.getSnapshot === 'function'
             ? collabTransport.getSnapshot()
             : null;
+        const previousSnapshot = sessionState.snapshot;
         const nextSnapshot = sessionSnapshot ? deepClone(sessionSnapshot) : sessionState.pendingRemoteSnapshot;
         reconcileSnapshotWithRecentLocalDragDrops(nextSnapshot);
         const changedSceneIds = getSnapshotChangedSceneIds(sessionState.snapshot, nextSnapshot);
@@ -3235,6 +3387,7 @@
         sessionState.snapshot = deepClone(synced.snapshot);
         sessionState.stateCaseId = getActiveCaseId();
         sessionState.pendingRemoteSnapshot = null;
+        handleInitiativeTurnOccurrence(previousSnapshot, sessionState.snapshot);
         maybeFollowRemoteActivityForDM(changedSceneIds, sessionState.snapshot);
         normalizeSelections();
         render();
@@ -3260,6 +3413,7 @@
         }
         if (meta && meta.snapshot) {
             const store = getStore();
+            const previousSnapshot = sessionState.snapshot;
             const nextSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
                 ? store.normalizeVTTStateSnapshot(meta.snapshot)
                 : meta.snapshot;
@@ -3270,6 +3424,7 @@
             const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
             sessionState.snapshot = deepClone(synced.snapshot);
             sessionState.stateCaseId = targetCaseId;
+            handleInitiativeTurnOccurrence(previousSnapshot, sessionState.snapshot);
             const remoteSceneIds = new Set(
                 (Array.isArray(changes) ? changes : [])
                     .map((change) => String(change && change.sceneId || '').trim())
@@ -4332,7 +4487,14 @@
 
         const saved = withDraft((draft) => {
             if (!draft.initiative || !Array.isArray(draft.initiative.entries)) {
-                draft.initiative = { entries: [], round: 1, activeEntryId: '' };
+                draft.initiative = {
+                    entries: [],
+                    round: 1,
+                    activeEntryId: '',
+                    encounterActive: false,
+                    sceneId: '',
+                    startedAt: 0
+                };
             }
             const entries = draft.initiative.entries;
             let linkedToken = linkedTokenId ? findTokenByIdAcrossScenes(draft, linkedTokenId) : null;
@@ -4558,9 +4720,49 @@
     });
     const dismissActiveProximityPrompt = vttProximityController.dismissActiveProximityPrompt;
     const evaluateProximityTriggers = vttProximityController.evaluateProximityTriggers;
+    const evaluateStartTurnNear = vttProximityController.evaluateStartTurnNear;
     const getActiveProximityPrompt = vttProximityController.getActivePrompt;
     const renderProximityPrompt = vttProximityController.renderProximityPrompt;
     const resolveActiveProximityRoll = vttProximityController.resolveActiveProximityRoll;
+
+    handleInitiativeTurnOccurrence = (previousSnapshot, nextSnapshot) => {
+        const previousInitiative = previousSnapshot && previousSnapshot.initiative ? previousSnapshot.initiative : {};
+        const nextInitiative = nextSnapshot && nextSnapshot.initiative ? nextSnapshot.initiative : {};
+        const previousEntryId = String(previousInitiative.activeEntryId || '').trim();
+        const nextEntryId = String(nextInitiative.activeEntryId || '').trim();
+        const previousRound = Math.max(1, Math.round(toNumber(previousInitiative.round, 1)));
+        const nextRound = Math.max(1, Math.round(toNumber(nextInitiative.round, 1)));
+        const encounterStarted = !previousInitiative.encounterActive && !!nextInitiative.encounterActive;
+        const encounterSceneChanged = String(previousInitiative.sceneId || '').trim() !== String(nextInitiative.sceneId || '').trim();
+        if (!encounterStarted && !encounterSceneChanged && previousEntryId === nextEntryId && previousRound === nextRound) return false;
+        if (typeof evaluateStartTurnNear !== 'function') return false;
+        if (!nextInitiative.encounterActive || !nextEntryId) {
+            evaluateStartTurnNear({ tokenId: '' });
+            renderProximityPrompt();
+            return false;
+        }
+
+        const entries = Array.isArray(nextInitiative.entries) ? nextInitiative.entries : [];
+        const entry = entries.find((candidate) => String(candidate && candidate.id || '').trim() === nextEntryId) || null;
+        const sceneId = String(nextInitiative.sceneId || nextSnapshot && nextSnapshot.activeSceneId || '').trim();
+        const scene = getSceneById(sceneId, nextSnapshot) || getCombatScene(nextSnapshot);
+        const token = getSceneTokenForEntry(scene, entry);
+        if (!scene || !token) {
+            evaluateStartTurnNear({ sceneId: scene && scene.id || sceneId, tokenId: '' });
+            renderProximityPrompt();
+            return false;
+        }
+
+        evaluateStartTurnNear({
+            sceneId: scene.id,
+            tokenId: token.id,
+            entryId: nextEntryId,
+            round: nextRound,
+            turnKey: `${nextRound}:${nextEntryId}`
+        });
+        renderProximityPrompt();
+        return true;
+    };
 
     const gmParseComplexFormula = (value = '') => {
         return Dice.parseComplexBonus(value);
@@ -5065,66 +5267,93 @@
 
     const renderClockList = () => {
         if (!dom.clockListEl) return;
-        const scene = getActiveScene();
+        const scene = getCombatScene();
         const clocks = getVisibleSceneClocksForRole(scene, sessionState.role);
+        const clockScopeEl = document.getElementById('vtt-clock-scope');
+        if (clockScopeEl) clockScopeEl.textContent = scene && scene.name ? `Only in ${scene.name}` : 'Current scene only';
         if (!scene || !clocks.length) {
             dom.clockListEl.innerHTML = isDM()
-                ? '<div class="vtt-empty">No scene clocks yet. Add one for objectives, alarms, rituals, hazards, or escape pressure.</div>'
+                ? '<div class="vtt-empty">No clocks in this scene. Create one privately, finish its details, then publish it to players.</div>'
                 : '<div class="vtt-empty">No scene clocks are visible.</div>';
             return;
         }
 
-        dom.clockListEl.innerHTML = clocks.map((clock) => {
+        dom.clockListEl.innerHTML = clocks.map((clock, clockIndex) => {
+            const clockId = String(clock && clock.id || '');
             const max = normalizeClockMax(clock && clock.max, 4);
             const current = normalizeClockCurrent(clock && clock.current, max, 0);
             const title = normalizeClockTitle(clock && clock.title, 'Scene Clock');
             const color = normalizeHexColor(clock && clock.color, '#f0b357');
             const rgb = getHexColorRgbString(color, '#f0b357');
             const note = normalizeClockNote(clock && clock.note);
+            const cadence = ['turn', 'round'].includes(String(clock && clock.cadence || '').trim().toLowerCase())
+                ? String(clock.cadence).trim().toLowerCase()
+                : 'manual';
             const hidden = !!(clock && clock.hidden);
+            const selected = isDM() && String(uiRuntime.combat && uiRuntime.combat.clockEditorId || '').trim() === clockId;
+            const descriptionId = note ? `vtt-clock-description-${clockIndex}` : '';
             return `
-                <div class="vtt-clock${hidden ? ' is-hidden' : ''}${current >= max ? ' is-complete' : ''}"
+                <article class="vtt-clock${hidden ? ' is-hidden' : ''}${current >= max ? ' is-complete' : ''}${selected ? ' is-editing' : ''}"
+                    data-clock-id="${escapeHtml(clockId)}"
+                    ${note ? `tabindex="0" title="${escapeHtml(note)}" aria-describedby="${descriptionId}"` : ''}
                     style="--vtt-clock-color:${escapeHtml(color)};--vtt-clock-rgb:${escapeHtml(rgb)};">
                     <div class="vtt-clock-layout">
                         ${buildClockPieMarkup(clock)}
                         <div class="vtt-clock-main">
                             <div class="vtt-clock-title-row">
                                 <strong class="vtt-clock-title">${escapeHtml(title)}</strong>
+                                <div class="vtt-clock-badges">
+                                    <span class="vtt-clock-cadence">${cadence === 'turn' ? 'Each turn' : (cadence === 'round' ? 'Each round' : 'Manual')}</span>
+                                    ${isDM() ? `<span class="vtt-clock-visibility${hidden ? ' is-draft' : ''}">${hidden ? 'Private draft' : 'Published'}</span>` : ''}
+                                </div>
                             </div>
-                            ${note ? `<div class="vtt-clock-note">${escapeHtml(note)}</div>` : ''}
+                            ${note ? `<div class="vtt-clock-note" id="${descriptionId}">${escapeHtml(note)}</div>` : ''}
                         </div>
                     </div>
                     ${isDM() ? `
                         <div class="vtt-clock-controls" data-dm-only="1">
-                            <button class="vtt-inline-btn vtt-inline-btn-icon" data-action="clock-step" data-id="${escapeHtml(String(clock.id || ''))}" data-delta="-1" aria-label="Reduce clock">-</button>
-                            <button class="vtt-inline-btn vtt-inline-btn-icon" data-action="clock-step" data-id="${escapeHtml(String(clock.id || ''))}" data-delta="1" aria-label="Advance clock">+</button>
-                            <button class="vtt-inline-btn" data-action="toggle-clock-hidden" data-id="${escapeHtml(String(clock.id || ''))}">${hidden ? 'Show' : 'Hide'}</button>
-                            <button class="vtt-inline-btn danger" data-action="delete-clock" data-id="${escapeHtml(String(clock.id || ''))}">Delete</button>
+                            <button class="vtt-inline-btn vtt-inline-btn-icon" data-action="clock-step" data-id="${escapeHtml(clockId)}" data-delta="-1" aria-label="Reduce ${escapeHtml(title)}">-</button>
+                            <button class="vtt-inline-btn vtt-inline-btn-icon" data-action="clock-step" data-id="${escapeHtml(clockId)}" data-delta="1" aria-label="Advance ${escapeHtml(title)}">+</button>
+                            <button class="vtt-inline-btn" data-action="edit-clock" data-id="${escapeHtml(clockId)}" aria-expanded="${selected ? 'true' : 'false'}">${selected ? 'Done' : 'Edit'}</button>
+                            <button class="vtt-inline-btn${hidden ? ' strong' : ''}" data-action="toggle-clock-hidden" data-id="${escapeHtml(clockId)}">${hidden ? 'Publish' : 'Unpublish'}</button>
+                            <button class="vtt-inline-btn danger" data-action="delete-clock" data-id="${escapeHtml(clockId)}">Delete</button>
                         </div>
-                        <div class="vtt-clock-edit-grid" data-dm-only="1">
+                        ${selected ? `<div class="vtt-clock-editor" data-clock-editor="${escapeHtml(clockId)}" data-dm-only="1">
+                            <div class="vtt-subhead">Clock details</div>
+                            <div class="vtt-clock-edit-grid">
                             <label class="vtt-field vtt-field-tight">
                                 <span>Title</span>
-                                <input class="vtt-inspector-input" type="text" data-clock-field="title" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(title)}">
+                                <input class="vtt-inspector-input" type="text" data-clock-field="title" data-id="${escapeHtml(clockId)}" value="${escapeHtml(title)}">
                             </label>
                             <label class="vtt-field vtt-field-tight">
                                 <span>Done</span>
-                                <input class="vtt-inspector-input" type="number" min="0" max="${escapeHtml(String(max))}" data-clock-field="current" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(String(current))}">
+                                <input class="vtt-inspector-input" type="number" min="0" max="${escapeHtml(String(max))}" data-clock-field="current" data-id="${escapeHtml(clockId)}" value="${escapeHtml(String(current))}">
                             </label>
                             <label class="vtt-field vtt-field-tight">
                                 <span>Max</span>
-                                <input class="vtt-inspector-input" type="number" min="1" max="20" data-clock-field="max" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(String(max))}">
+                                <input class="vtt-inspector-input" type="number" min="1" max="20" data-clock-field="max" data-id="${escapeHtml(clockId)}" value="${escapeHtml(String(max))}">
                             </label>
                             <label class="vtt-field vtt-field-tight">
                                 <span>Color</span>
-                                <input class="vtt-inspector-input" type="color" data-clock-field="color" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(color)}">
+                                <input class="vtt-inspector-input" type="color" data-clock-field="color" data-id="${escapeHtml(clockId)}" value="${escapeHtml(color)}">
+                            </label>
+                            <label class="vtt-field vtt-field-tight">
+                                <span>Advance</span>
+                                <select class="vtt-inspector-select" data-clock-field="cadence" data-id="${escapeHtml(clockId)}">
+                                    <option value="manual"${cadence === 'manual' ? ' selected' : ''}>Manually</option>
+                                    <option value="turn"${cadence === 'turn' ? ' selected' : ''}>Each turn</option>
+                                    <option value="round"${cadence === 'round' ? ' selected' : ''}>Each round</option>
+                                </select>
                             </label>
                             <label class="vtt-field vtt-field-tight vtt-clock-note-field">
-                                <span>Note</span>
-                                <input class="vtt-inspector-input" type="text" data-clock-field="note" data-id="${escapeHtml(String(clock.id || ''))}" value="${escapeHtml(note)}">
+                                <span>Description</span>
+                                <input class="vtt-inspector-input" type="text" data-clock-field="note" data-id="${escapeHtml(clockId)}" value="${escapeHtml(note)}">
                             </label>
-                        </div>
+                            </div>
+                            ${hidden ? '<div class="vtt-detail-note">Private draft — players cannot see this clock until you publish it.</div>' : '<div class="vtt-detail-note">Published — changes are visible to players in this scene.</div>'}
+                        </div>` : ''}
                     ` : ''}
-                </div>
+                </article>
             `;
         }).join('');
     };
@@ -5137,25 +5366,106 @@
         const isCombatDrawerOpen = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel) === 'combat';
         dom.roundPillEl.textContent = isCombatDrawerOpen ? `Round ${roundNumber}` : `R${roundNumber}`;
         dom.roundPillEl.setAttribute('aria-label', `Round ${roundNumber}`);
+        const initiativeEntries = Array.isArray(initiative.entries) ? initiative.entries : [];
+        const displayedActiveEntryId = initiative.encounterActive ? String(initiative.activeEntryId || '').trim() : '';
+        const activeEntry = initiativeEntries.find((entry) => entry && entry.id === displayedActiveEntryId) || null;
+        const visibleActiveEntry = visibleEntries.find((entry) => entry && entry.id === displayedActiveEntryId) || null;
+        const activeEntryIsRedacted = !!(activeEntry && !visibleActiveEntry && !isDM());
+        const nextVisibleProjection = getNextVisibleInitiativeProjection(
+            initiativeEntries,
+            displayedActiveEntryId,
+            sessionState.snapshot,
+            sessionState.role
+        );
+        const nextVisibleEntry = nextVisibleProjection ? nextVisibleProjection.entry : null;
+        const nextLabelPrefix = nextVisibleProjection && nextVisibleProjection.skippedHidden ? 'Next visible' : 'Next';
+        const currentTurnLabelEl = document.getElementById('vtt-current-turn-label');
+        const nextTurnLabelEl = document.getElementById('vtt-next-turn-label');
+        if (currentTurnLabelEl) {
+            currentTurnLabelEl.textContent = !initiative.encounterActive
+                ? (initiativeEntries.length ? 'Encounter ready' : 'No active turn')
+                : visibleActiveEntry
+                ? (visibleActiveEntry.name || 'Combatant')
+                : (activeEntry ? 'Hidden combatant' : 'No active turn');
+        }
+        if (nextTurnLabelEl) {
+            nextTurnLabelEl.textContent = !initiative.encounterActive
+                ? (initiativeEntries.length ? 'Start when the table is ready' : 'Add combatants to begin')
+                : nextVisibleEntry && nextVisibleEntry.id !== displayedActiveEntryId
+                ? `${nextLabelPrefix} · ${nextVisibleEntry.name || 'Combatant'}`
+                : (initiativeEntries.length ? 'No visible combatant next' : 'Add combatants to begin');
+        }
+        const encounterStatusEl = document.getElementById('vtt-encounter-status');
+        if (encounterStatusEl) {
+            const scenes = sessionState.snapshot && Array.isArray(sessionState.snapshot.scenes) ? sessionState.snapshot.scenes : [];
+            const encounterScene = scenes.find((scene) => scene && scene.id === initiative.sceneId) || null;
+            const viewedScene = getActiveScene();
+            encounterStatusEl.textContent = initiative.encounterActive
+                ? `Active · ${encounterScene && encounterScene.name ? encounterScene.name : 'Unknown scene'}`
+                : `Not started${viewedScene && viewedScene.name ? ` · viewing ${viewedScene.name}` : ''}`;
+        }
+        document.querySelectorAll('[data-action="start-encounter"]').forEach((button) => {
+            if (button instanceof HTMLButtonElement) button.disabled = !!initiative.encounterActive;
+        });
+        document.querySelectorAll('[data-action="end-encounter"]').forEach((button) => {
+            if (button instanceof HTMLButtonElement) button.disabled = !initiative.encounterActive;
+        });
+        const activeCanonicalIndex = initiativeEntries.findIndex((entry) => entry && entry.id === displayedActiveEntryId);
+        document.querySelectorAll('[data-action="prev-turn"]').forEach((button) => {
+            if (button instanceof HTMLButtonElement) {
+                button.disabled = !initiative.encounterActive || (roundNumber <= 1 && activeCanonicalIndex <= 0);
+            }
+        });
+        document.querySelectorAll('[data-action="reset-initiative-round"]').forEach((button) => {
+            if (button instanceof HTMLButtonElement) {
+                button.disabled = !initiative.encounterActive || (roundNumber <= 1 && activeCanonicalIndex === 0);
+            }
+        });
         if (!Array.isArray(initiative.entries) || !initiative.entries.length) {
             dom.initiativeListEl.innerHTML = isDM()
                 ? '<div class="vtt-empty">No combatants yet. Add a token from its inspector or roll initiative from a sheet.</div>'
                 : '<div class="vtt-empty">Combat has not started.</div>';
             return;
         }
-        if (!visibleEntries.length) {
+        if (!visibleEntries.length && !activeEntryIsRedacted) {
             dom.initiativeListEl.innerHTML = '<div class="vtt-empty">No visible combatants right now.</div>';
             return;
         }
 
-        dom.initiativeListEl.innerHTML = visibleEntries.map((entry) => {
+        const visibleEntryIds = new Set(visibleEntries.map((entry) => String(entry && entry.id || '').trim()).filter(Boolean));
+        const projectedEntries = isDM()
+            ? initiativeEntries.map((entry) => ({ kind: 'entry', entry }))
+            : initiativeEntries.reduce((projection, entry) => {
+                const entryId = String(entry && entry.id || '').trim();
+                if (entryId && entryId === displayedActiveEntryId && !visibleEntryIds.has(entryId)) {
+                    projection.push({ kind: 'redacted-active' });
+                } else if (visibleEntryIds.has(entryId)) {
+                    projection.push({ kind: 'entry', entry });
+                }
+                return projection;
+            }, []);
+        const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
+        dom.initiativeListEl.innerHTML = projectedEntries.map((projectedEntry) => {
+            if (projectedEntry.kind === 'redacted-active') {
+                return `
+                    <div class="vtt-entry vtt-entry-redacted is-active-turn" role="status" aria-label="Hidden combatant. Current turn.">
+                        <div class="vtt-entry-line">
+                            <div class="vtt-entry-primary">
+                                <div class="vtt-entry-name">Hidden combatant</div>
+                                <div class="vtt-entry-meta vtt-entry-meta-inline">
+                                    <span class="vtt-entry-tag strong">Now</span>
+                                    <span class="vtt-entry-redacted-note">The DM is resolving this turn</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            const entry = projectedEntry.entry;
             const isHiddenToPlayers = isEntryHiddenForRole(entry, sessionState.snapshot, 'player');
-            const entryIdx = visibleEntries.findIndex((candidate) => candidate && candidate.id === entry.id);
-            const activeVisibleIdx = visibleEntries.findIndex((candidate) => candidate && candidate.id === initiative.activeEntryId);
-            const isActive = entry.id === initiative.activeEntryId;
-            const isNext = !isActive && activeVisibleIdx >= 0 && entryIdx === ((activeVisibleIdx + 1) % visibleEntries.length);
+            const isActive = entry.id === displayedActiveEntryId;
+            const isNext = !isActive && !!(nextVisibleEntry && nextVisibleEntry.id === entry.id);
             const rosterPlayer = getRosterPlayerForRecord(entry);
-            const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
             const isMine = !!(isPlayer() && localContext && localContext.playerId && rosterPlayer && String(rosterPlayer.id || '').trim() === localContext.playerId);
             const turnStatus = isActive ? ' Current turn.' : (isNext ? ' Next turn.' : '');
             const ownershipStatus = isMine ? ' Your combatant.' : '';
@@ -5166,8 +5476,8 @@
                     <div class="vtt-entry-primary">
                         <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
                         <div class="vtt-entry-meta vtt-entry-meta-inline">
-                            ${isPlayer() && isActive ? '<span class="vtt-entry-tag strong">Now</span>' : ''}
-                            ${isPlayer() && isNext ? '<span class="vtt-entry-tag">Next</span>' : ''}
+                            ${isActive ? '<span class="vtt-entry-tag strong">Now</span>' : ''}
+                            ${isNext ? `<span class="vtt-entry-tag">${nextVisibleProjection && nextVisibleProjection.skippedHidden ? 'Next visible' : 'Next'}</span>` : ''}
                             ${isPlayer() && isMine ? '<span class="vtt-entry-tag">You</span>' : ''}
                             ${isDM() ? `<span class="vtt-entry-tag">Tie ${escapeHtml(String(entry.tie ?? 10))}</span>` : ''}
                             ${isHiddenToPlayers ? '<span class="vtt-entry-tag">Hidden</span>' : ''}
@@ -5321,6 +5631,7 @@
     const renderInitiativeDetail = () => {
         if (!dom.initiativeDetailPanelEl) return;
         const activePopoverId = uiRuntime.overlays.initiativeDetail && uiRuntime.overlays.initiativeDetail.entryId ? uiRuntime.overlays.initiativeDetail.entryId : '';
+        const shouldFocusEditor = !!(uiRuntime.overlays.initiativeDetail && uiRuntime.overlays.initiativeDetail.focusRequested);
         const entry = getEntryById(activePopoverId);
         const assignedToken = getAssignedTokenForEntry(entry, sessionState.snapshot);
         const assignedTokenScene = assignedToken ? findSceneForTokenId(sessionState.snapshot, assignedToken.id) : null;
@@ -5426,6 +5737,19 @@
         `;
         dom.initiativeDetailPanelEl.hidden = false;
         positionInitiativeDetail();
+        if (shouldFocusEditor && uiRuntime.overlays.initiativeDetail) {
+            uiRuntime.overlays.initiativeDetail.focusRequested = false;
+            window.requestAnimationFrame(() => {
+                if (!dom.initiativeDetailPanelEl || dom.initiativeDetailPanelEl.hidden) return;
+                if (typeof dom.initiativeDetailPanelEl.scrollIntoView === 'function') {
+                    dom.initiativeDetailPanelEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+                const focusTarget = dom.initiativeDetailPanelEl.querySelector('[data-entry-field="name"]')
+                    || dom.initiativeDetailPanelEl.querySelector('[data-entry-field="total"]')
+                    || dom.initiativeDetailPanelEl.querySelector('[data-action="close-initiative-detail"]');
+                if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({ preventScroll: true });
+            });
+        }
     };
 
     const vttMarkupFactory = window.RTF_VTT_MARKUP;
@@ -5814,6 +6138,10 @@
                 trigger.kind = PROXIMITY_TRIGGER_KIND_OPTIONS.includes(target.value) ? target.value : 'skillRoll';
                 return;
             }
+            if (field === 'trigger' && target instanceof HTMLSelectElement) {
+                trigger.trigger = PROXIMITY_TRIGGER_TYPE_OPTIONS.includes(target.value) ? target.value : 'enter';
+                return;
+            }
             if (field === 'skill' && target instanceof HTMLSelectElement) {
                 trigger.skill = normalizeProximityTriggerSkill(target.value);
                 return;
@@ -5996,10 +6324,150 @@
 
         if (removedEntryIds.has(String(draft.initiative.activeEntryId || '').trim())) {
             draft.initiative.activeEntryId = draft.initiative.entries[0] ? draft.initiative.entries[0].id : '';
+            const replacementEntry = draft.initiative.entries[0] || null;
+            if (draft.initiative.encounterActive && replacementEntry) replacementEntry.reactionUsed = false;
+        }
+        if (!draft.initiative.entries.length && draft.initiative.encounterActive) {
+            draft.initiative.encounterActive = false;
+            draft.initiative.sceneId = '';
+            draft.initiative.startedAt = 0;
+            draft.initiative.round = 1;
         }
         if (removedEntryIds.has(String(stageState.selection.entryId || '').trim())) {
             stageState.selection.entryId = draft.initiative.activeEntryId || '';
         }
+    };
+
+    const ensureInitiativeState = (draft) => {
+        if (!draft.initiative || typeof draft.initiative !== 'object') draft.initiative = {};
+        if (!Array.isArray(draft.initiative.entries)) draft.initiative.entries = [];
+        draft.initiative.round = Math.max(1, Math.round(toNumber(draft.initiative.round, 1)));
+        draft.initiative.activeEntryId = String(draft.initiative.activeEntryId || '').trim();
+        draft.initiative.encounterActive = !!draft.initiative.encounterActive;
+        draft.initiative.sceneId = String(draft.initiative.sceneId || '').trim();
+        draft.initiative.startedAt = Math.max(0, Math.round(toNumber(draft.initiative.startedAt, 0)));
+        return draft.initiative;
+    };
+
+    const upsertInitiativeEntryForToken = (draft, token) => {
+        if (!draft || !token) return null;
+        const initiative = ensureInitiativeState(draft);
+        const entries = initiative.entries;
+        const existingIdx = entries.findIndex((entry) =>
+            entry.linkedTokenId === token.id
+            || (token.sourceType && token.sourceId && entry.sourceType === token.sourceType && entry.sourceId === token.sourceId)
+        );
+        if (existingIdx >= 0) {
+            entries[existingIdx] = syncInitiativeEntryFromToken(entries[existingIdx], token);
+            return entries[existingIdx];
+        }
+        const nextEntry = buildInitiativeEntryFromToken(token);
+        entries.push(nextEntry);
+        return nextEntry;
+    };
+
+    const getEncounterSetupScene = (state) => {
+        const initiative = state && state.initiative ? state.initiative : {};
+        const encounterSceneId = String(initiative.sceneId || '').trim();
+        if (initiative.encounterActive && encounterSceneId) {
+            const encounterScene = getSceneById(encounterSceneId, state);
+            if (encounterScene) return encounterScene;
+        }
+        return getSceneById(getSharedSceneId(state), state) || getActiveScene(state);
+    };
+
+    const addVisibleTokensToInitiativeDraft = (draft, scene = getEncounterSetupScene(draft)) => {
+        if (!scene || !Array.isArray(scene.tokens)) return [];
+        const addedEntries = [];
+        scene.tokens
+            .filter((token) => !isTokenHiddenForRole(token, scene, 'player'))
+            .forEach((token) => {
+                const entry = upsertInitiativeEntryForToken(draft, token);
+                if (entry) addedEntries.push(entry);
+            });
+        const initiative = ensureInitiativeState(draft);
+        sortInitiativeEntries(initiative.entries);
+        if (initiative.encounterActive && !initiative.activeEntryId && initiative.entries[0]) {
+            initiative.activeEntryId = initiative.entries[0].id;
+        }
+        return addedEntries;
+    };
+
+    const focusInitiativeTurn = (entryId, state = sessionState.snapshot) => {
+        const targetId = String(entryId || '').trim();
+        if (!targetId) return false;
+        const entry = getEntryById(targetId, state);
+        const scene = getCombatScene(state);
+        const token = getSceneTokenForEntry(scene, entry);
+        stageState.selection.entryId = targetId;
+        stageState.selection.evidenceNoteId = '';
+        stageState.selection.tokenId = token ? token.id : '';
+        if (token && scene && getActiveScene(state) && getActiveScene(state).id === scene.id) {
+            focusViewOnToken(token, scene);
+            renderStage();
+        }
+        window.requestAnimationFrame(() => {
+            if (!dom.initiativeListEl) return;
+            const selectorId = window.CSS && typeof window.CSS.escape === 'function'
+                ? window.CSS.escape(targetId)
+                : targetId.replace(/"/g, '\\"');
+            const row = dom.initiativeListEl.querySelector(`.vtt-entry[data-id="${selectorId}"]`);
+            if (row && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+        return true;
+    };
+
+    const addVisibleTokensToInitiative = () => {
+        if (!canEditInitiative()) return false;
+        let focusEntryId = '';
+        const changed = withDraft((draft) => {
+            const entries = addVisibleTokensToInitiativeDraft(draft);
+            const initiative = ensureInitiativeState(draft);
+            focusEntryId = String(entries[0] && entries[0].id || initiative.activeEntryId || '').trim();
+        }, { reason: 'add-visible-tokens-to-initiative' });
+        if (changed && focusEntryId) focusInitiativeTurn(focusEntryId);
+        return changed;
+    };
+
+    const startEncounter = () => {
+        if (!canEditInitiative()) return false;
+        let activeEntryId = '';
+        const changed = withDraft((draft) => {
+            const initiative = ensureInitiativeState(draft);
+            const scene = getEncounterSetupScene(draft);
+            if (!scene) return;
+            if (!initiative.entries.length) addVisibleTokensToInitiativeDraft(draft, scene);
+            if (!initiative.entries.length) return;
+            initiative.sceneId = scene.id;
+            initiative.encounterActive = true;
+            initiative.startedAt = Date.now();
+            initiative.round = 1;
+            if (!initiative.entries.some((entry) => entry.id === initiative.activeEntryId)) {
+                initiative.activeEntryId = initiative.entries[0] ? initiative.entries[0].id : '';
+            }
+            const activeEntry = initiative.entries.find((entry) => entry.id === initiative.activeEntryId) || null;
+            if (activeEntry) activeEntry.reactionUsed = false;
+            activeEntryId = initiative.activeEntryId;
+            stageState.selection.entryId = activeEntryId;
+        }, { reason: 'start-encounter' });
+        if (changed && activeEntryId) focusInitiativeTurn(activeEntryId);
+        return changed;
+    };
+
+    const endEncounter = () => {
+        if (!canEditInitiative()) return false;
+        const initiative = sessionState.snapshot && sessionState.snapshot.initiative ? sessionState.snapshot.initiative : {};
+        if (!initiative.encounterActive) return false;
+        if (!window.confirm('End this encounter? The initiative order will be kept so it can be restarted or edited.')) return false;
+        return withDraft((draft) => {
+            const nextInitiative = ensureInitiativeState(draft);
+            nextInitiative.encounterActive = false;
+            nextInitiative.activeEntryId = '';
+            nextInitiative.sceneId = '';
+            nextInitiative.startedAt = 0;
+            nextInitiative.round = 1;
+            stageState.selection.entryId = '';
+        }, { reason: 'end-encounter' });
     };
 
     const addTokenToInitiative = (tokenId) => {
@@ -6009,21 +6477,13 @@
             if (!scene || !Array.isArray(scene.tokens)) return;
             const token = scene.tokens.find((entry) => entry.id === tokenId);
             if (!token) return;
-            const entries = draft.initiative.entries;
-            const existingIdx = entries.findIndex((entry) =>
-                entry.linkedTokenId === token.id
-                || (token.sourceType && token.sourceId && entry.sourceType === token.sourceType && entry.sourceId === token.sourceId)
-            );
-            if (existingIdx >= 0) {
-                entries[existingIdx] = syncInitiativeEntryFromToken(entries[existingIdx], token);
-                stageState.selection.entryId = entries[existingIdx].id;
-            } else {
-                const nextEntry = buildInitiativeEntryFromToken(token);
-                entries.push(nextEntry);
-                stageState.selection.entryId = nextEntry.id;
-            }
+            const nextEntry = upsertInitiativeEntryForToken(draft, token);
+            const entries = ensureInitiativeState(draft).entries;
+            stageState.selection.entryId = nextEntry ? nextEntry.id : stageState.selection.entryId;
             sortInitiativeEntries(entries);
-            if (!draft.initiative.activeEntryId && entries[0]) draft.initiative.activeEntryId = entries[0].id;
+            if (draft.initiative.encounterActive && !draft.initiative.activeEntryId && entries[0]) {
+                draft.initiative.activeEntryId = entries[0].id;
+            }
         });
     };
 
@@ -6175,38 +6635,100 @@
         stageState.pointer.lastDragSyncAt = now;
     };
 
-    const advanceTurn = (direction) => {
-        if (!canEditInitiative()) return;
-        withDraft((draft) => {
-            const entries = draft && draft.initiative && Array.isArray(draft.initiative.entries) ? draft.initiative.entries : [];
-            if (!entries.length) {
-                draft.initiative.activeEntryId = '';
-                draft.initiative.round = 1;
-                return;
-            }
-            const currentIdx = entries.findIndex((entry) => entry.id === draft.initiative.activeEntryId);
-            const safeIdx = currentIdx >= 0 ? currentIdx : 0;
-            if (direction > 0) {
-                const nextIdx = (safeIdx + 1) % entries.length;
-                if (safeIdx === entries.length - 1) draft.initiative.round += 1;
-                draft.initiative.activeEntryId = entries[nextIdx].id;
-                return;
-            }
-            const prevIdx = (safeIdx - 1 + entries.length) % entries.length;
-            if (safeIdx === 0) draft.initiative.round = Math.max(1, (draft.initiative.round || 1) - 1);
-            draft.initiative.activeEntryId = entries[prevIdx].id;
+    const advanceSceneClocksForCadence = (draft, cadence) => {
+        const targetCadence = String(cadence || '').trim().toLowerCase();
+        if (!['turn', 'round'].includes(targetCadence)) return 0;
+        const scene = getCombatScene(draft);
+        if (!scene || !Array.isArray(scene.clocks)) return 0;
+        let advanced = 0;
+        scene.clocks.forEach((clock) => {
+            const clockCadence = ['turn', 'round'].includes(String(clock && clock.cadence || '').trim().toLowerCase())
+                ? String(clock.cadence).trim().toLowerCase()
+                : 'manual';
+            if (clockCadence !== targetCadence) return;
+            const max = normalizeClockMax(clock && clock.max, 4);
+            const current = normalizeClockCurrent(clock && clock.current, max, 0);
+            if (current >= max) return;
+            clock.current = current + 1;
+            advanced += 1;
         });
+        return advanced;
+    };
+
+    const advanceTurn = (direction) => {
+        if (!canEditInitiative()) return false;
+        const step = Math.sign(toNumber(direction, 0));
+        if (!step) return false;
+        const currentInitiative = sessionState.snapshot && sessionState.snapshot.initiative
+            ? sessionState.snapshot.initiative
+            : {};
+        if (!currentInitiative.encounterActive) {
+            return step > 0 ? startEncounter() : false;
+        }
+        const currentEntries = Array.isArray(currentInitiative.entries) ? currentInitiative.entries : [];
+        const currentEntryIndex = currentEntries.findIndex((entry) => entry && entry.id === currentInitiative.activeEntryId);
+        if (step < 0 && Math.max(1, Math.round(toNumber(currentInitiative.round, 1))) === 1 && currentEntryIndex <= 0) {
+            return false;
+        }
+
+        let focusedEntryId = '';
+        const changed = withDraft((draft) => {
+            const initiative = ensureInitiativeState(draft);
+            const entries = initiative.entries;
+            if (!entries.length) {
+                initiative.activeEntryId = '';
+                initiative.round = 1;
+                initiative.encounterActive = false;
+                initiative.sceneId = '';
+                initiative.startedAt = 0;
+                return;
+            }
+
+            const currentIdx = entries.findIndex((entry) => entry.id === initiative.activeEntryId);
+            const safeIdx = currentIdx >= 0 ? currentIdx : 0;
+            if (step > 0) {
+                const nextIdx = (safeIdx + 1) % entries.length;
+                const wrappedRound = safeIdx === entries.length - 1;
+                if (wrappedRound) initiative.round += 1;
+                initiative.activeEntryId = entries[nextIdx].id;
+                entries[nextIdx].reactionUsed = false;
+                advanceSceneClocksForCadence(draft, 'turn');
+                if (wrappedRound) advanceSceneClocksForCadence(draft, 'round');
+            } else {
+                if (initiative.round === 1 && safeIdx === 0) return;
+                const prevIdx = (safeIdx - 1 + entries.length) % entries.length;
+                if (safeIdx === 0) initiative.round = Math.max(1, initiative.round - 1);
+                initiative.activeEntryId = entries[prevIdx].id;
+            }
+            focusedEntryId = initiative.activeEntryId;
+            stageState.selection.entryId = focusedEntryId;
+        }, { reason: step > 0 ? 'initiative-next-turn' : 'initiative-previous-turn' });
+        if (changed && focusedEntryId) focusInitiativeTurn(focusedEntryId);
+        return changed;
     };
 
     const resetInitiativeToRoundOne = () => {
-        if (!canEditInitiative()) return;
-        withDraft((draft) => {
-            const initiative = draft && draft.initiative ? draft.initiative : null;
-            if (!initiative) return;
-            const entries = Array.isArray(initiative.entries) ? initiative.entries : [];
-            initiative.round = 1;
-            initiative.activeEntryId = entries.length ? entries[0].id : '';
-        });
+        if (!canEditInitiative()) return false;
+        const initiative = sessionState.snapshot && sessionState.snapshot.initiative ? sessionState.snapshot.initiative : {};
+        if (!initiative.encounterActive) return false;
+        const entries = Array.isArray(initiative.entries) ? initiative.entries : [];
+        const firstEntryId = String(entries[0] && entries[0].id || '').trim();
+        if (Math.max(1, Math.round(toNumber(initiative.round, 1))) === 1 && String(initiative.activeEntryId || '').trim() === firstEntryId) {
+            return false;
+        }
+        if (!window.confirm('Reset initiative to round 1 and make the first combatant active? Clocks will not be rewound.')) return false;
+        let focusedEntryId = '';
+        const changed = withDraft((draft) => {
+            const nextInitiative = ensureInitiativeState(draft);
+            nextInitiative.round = 1;
+            nextInitiative.activeEntryId = nextInitiative.entries.length ? nextInitiative.entries[0].id : '';
+            const activeEntry = nextInitiative.entries[0] || null;
+            if (activeEntry) activeEntry.reactionUsed = false;
+            focusedEntryId = nextInitiative.activeEntryId;
+            stageState.selection.entryId = focusedEntryId;
+        }, { reason: 'initiative-reset-round' });
+        if (changed && focusedEntryId) focusInitiativeTurn(focusedEntryId);
+        return changed;
     };
 
     const reorderEntry = (entryId, delta) => {
@@ -6233,6 +6755,14 @@
             entries.splice(idx, 1);
             if (draft.initiative.activeEntryId === removed.id) {
                 draft.initiative.activeEntryId = entries[idx] ? entries[idx].id : (entries[idx - 1] ? entries[idx - 1].id : '');
+                const replacement = entries.find((entry) => entry.id === draft.initiative.activeEntryId) || null;
+                if (draft.initiative.encounterActive && replacement) replacement.reactionUsed = false;
+            }
+            if (!entries.length && draft.initiative.encounterActive) {
+                draft.initiative.encounterActive = false;
+                draft.initiative.sceneId = '';
+                draft.initiative.startedAt = 0;
+                draft.initiative.round = 1;
             }
             if (stageState.selection.entryId === removed.id) stageState.selection.entryId = draft.initiative.activeEntryId || '';
             if (uiRuntime.overlays.initiativeDetail && uiRuntime.overlays.initiativeDetail.entryId === removed.id) uiRuntime.overlays.initiativeDetail = null;
@@ -6359,8 +6889,10 @@
         duplicateEvidenceNoteById,
         findMonsterForAssignmentQuery,
         fitViewToWorld,
+        focusClockEditor,
         forceDMVTTAuthoritative,
         getActiveScene,
+        getCombatScene,
         getCanonicalTokenImageUrl,
         getLocalPlayerFocusContext,
         getPingVariantOptions,
@@ -6394,6 +6926,7 @@
         renderViewMenu,
         reportVTTAdminActionError,
         setActiveVTTPanel,
+        setCombatView,
         setToolMode,
         setZoomAroundStageCenter,
         showTokenPortraitPreview,
@@ -6421,6 +6954,7 @@
         buildSceneRecord,
         canDeleteLiveVTTState,
         clampMapScale,
+        confirmSceneDeletion,
         getActiveScene,
         getContextSpawnWorldPoint,
         getSharedSceneId,
@@ -6428,6 +6962,7 @@
         isDM,
         normalizeSelections,
         openQuickSpawnMenu,
+        removeInitiativeEntriesForToken,
         render,
         setSceneViewPreference,
         spawnTokenFromDescriptor,
@@ -6444,11 +6979,13 @@
         state: vttActionState,
         activateEvidenceNoteSelection,
         activateTokenSelection,
+        addVisibleTokensToInitiative,
         addTokenToInitiative,
         advanceTurn,
         assignSelectedEntryToToken,
         canDeleteLiveVTTState,
         cloneTokenById,
+        endEncounter,
         focusViewOnToken,
         getActiveScene,
         isDM,
@@ -6463,6 +7000,7 @@
         resetInitiativeToRoundOne,
         setInitiativeEntryRosterOwner,
         showTokenPortraitPreview,
+        startEncounter,
         syncTokenSelectionFromEntry,
         toNumber,
         updateSelectedEntry,
@@ -6926,6 +7464,7 @@
             closeTokenInspectorPopover,
             closeToolsMenu,
             closeViewMenu,
+            evaluateProximityTriggers,
             getActiveScene,
             getEvidenceNoteById,
             getLocalPlayerFocusContext,
@@ -6956,6 +7495,7 @@
             renderInitiativeDetail,
             renderInitiativeList,
             renderNPCRollPopover,
+            renderProximityPrompt,
             renderSheetActionPopover,
             renderSpawnGhost,
             renderStage,

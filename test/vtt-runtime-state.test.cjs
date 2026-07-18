@@ -33,6 +33,7 @@ test('VTT runtime state factory creates the isolated default groups and resource
         'view'
     ]);
     assert.deepEqual(sortedKeys(state.ui), [
+        'combat',
         'menus',
         'modals',
         'music',
@@ -88,6 +89,7 @@ test('VTT runtime state factory creates the isolated default groups and resource
         commandState: { key: '', status: 'stopped' },
         volume: 70
     });
+    assert.deepEqual(state.ui.combat, { view: 'turns', clockEditorId: '' });
 
     assert.ok(state.resources.remoteTokenTweens instanceof Map);
     assert.ok(state.resources.tokenImageRetryKeys instanceof Map);

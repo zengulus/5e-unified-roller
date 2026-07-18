@@ -16,6 +16,7 @@ const normalizeTrigger = (trigger = {}) => ({
     enabled: true,
     title: 'Notice something',
     kind: 'fiction',
+    trigger: 'enter',
     skill: 'perception',
     radiusCells: 2,
     target: 'playerTokens',
@@ -236,6 +237,7 @@ test('proximity markup preserves owner attributes, skill fields, clocks, and not
     const editorMarkup = api.buildProximityTriggerEditor('note', 'note_1', [{
         id: 'trigger_1',
         kind: 'skillRoll',
+        trigger: 'startTurnNear',
         skill: 'investigation',
         dc: 14,
         dcVisible: true,
@@ -248,6 +250,9 @@ test('proximity markup preserves owner attributes, skill fields, clocks, and not
         failText: 'Missed it'
     }]);
     assert.match(editorMarkup, /option value="investigation" selected>Investigation/);
+    assert.match(editorMarkup, /data-proximity-trigger-field="trigger"/);
+    assert.match(editorMarkup, /option value="startTurnNear" selected>Start Turn Nearby/);
+    assert.match(editorMarkup, /initiative-linked token starts its turn/);
     assert.match(editorMarkup, /value="clock_1" selected>Alarm &amp; Doom/);
     assert.match(editorMarkup, /data-proximity-trigger-field="revealOnSuccess"[\s\S]* checked/);
     assert.match(editorMarkup, /data-proximity-trigger-field="clockSuccessDelta"[\s\S]*value="2"/);

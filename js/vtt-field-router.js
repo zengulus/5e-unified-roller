@@ -269,7 +269,7 @@
                 return;
             }
 
-            if (target instanceof HTMLInputElement && target.dataset.clockField) {
+            if ((target instanceof HTMLInputElement || target instanceof HTMLSelectElement) && target.dataset.clockField) {
                 if (!isDM()) return;
                 const field = target.dataset.clockField;
                 const clockId = String(target.dataset.id || '').trim();
@@ -284,6 +284,11 @@
                     }
                     if (field === 'color') {
                         clock.color = normalizeHexColor(target.value, '#f0b357');
+                        return;
+                    }
+                    if (field === 'cadence') {
+                        const cadence = String(target.value || '').trim().toLowerCase();
+                        clock.cadence = cadence === 'turn' || cadence === 'round' ? cadence : 'manual';
                         return;
                     }
                     if (field === 'max') {
@@ -498,4 +503,3 @@
 
     return Object.freeze({ create });
 }));
-

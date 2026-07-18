@@ -239,13 +239,17 @@
             initiative: {
                 entries: [],
                 round: 1,
-                activeEntryId: ''
+                activeEntryId: '',
+                encounterActive: false,
+                sceneId: '',
+                startedAt: 0
             }
         };
     }
     const VTT_TOKEN_SIDES = new Set(['player', 'ally', 'enemy', 'neutral']);
     const VTT_TOKEN_MOVE_ACCESS = new Set(['dm', 'player']);
     const VTT_DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+    const VTT_CLOCK_CADENCES = new Set(['manual', 'turn', 'round']);
     const DEFAULT_CAMPAIGN_META_BOARD_STATE = {
         name: 'CAMPAIGN META BOARD',
         nodes: [],
@@ -1008,7 +1012,10 @@
             max,
             hidden: !!source.hidden,
             color: sanitizeVTTColor(source.color, '#f0b357'),
-            note: toTrimmedString(source.note, '', 240).trim()
+            note: toTrimmedString(source.note, '', 240).trim(),
+            cadence: VTT_CLOCK_CADENCES.has(toTrimmedString(source.cadence, 'manual', 20).trim().toLowerCase())
+                ? toTrimmedString(source.cadence, 'manual', 20).trim().toLowerCase()
+                : 'manual'
         };
     };
 
@@ -1128,14 +1135,28 @@
             ? source.initiative.entries.map((entry, idx) => sanitizeVTTInitiativeEntry(entry, idx))
             : [];
         const activeEntryIdRaw = toTrimmedString(source.initiative && source.initiative.activeEntryId, '', 120).trim();
+        const encounterSceneIdRaw = toTrimmedString(source.initiative && source.initiative.sceneId, '', 120).trim();
+        const hasExplicitEncounterState = !!(
+            source.initiative
+            && Object.prototype.hasOwnProperty.call(source.initiative, 'encounterActive')
+        );
+        const activeSceneId = scenes.some((scene) => scene.id === activeSceneIdRaw) ? activeSceneIdRaw : scenes[0].id;
+        const encounterActive = hasExplicitEncounterState
+            ? !!source.initiative.encounterActive
+            : !!(activeEntryIdRaw && entries.some((entry) => entry.id === activeEntryIdRaw));
         return {
             updatedAt: Math.max(0, toNonNegativeInt(source.updatedAt, base.updatedAt)),
-            activeSceneId: scenes.some((scene) => scene.id === activeSceneIdRaw) ? activeSceneIdRaw : scenes[0].id,
+            activeSceneId,
             scenes,
             initiative: {
                 entries,
                 round: Math.max(1, Math.min(100000, Math.round(toNumber(source.initiative && source.initiative.round, 1)))),
-                activeEntryId: entries.some((entry) => entry.id === activeEntryIdRaw) ? activeEntryIdRaw : ''
+                activeEntryId: entries.some((entry) => entry.id === activeEntryIdRaw) ? activeEntryIdRaw : '',
+                encounterActive,
+                sceneId: scenes.some((scene) => scene.id === encounterSceneIdRaw)
+                    ? encounterSceneIdRaw
+                    : (encounterActive ? activeSceneId : ''),
+                startedAt: Math.max(0, Math.round(toNumber(source.initiative && source.initiative.startedAt, 0)))
             }
         };
     };
@@ -1872,6 +1893,8 @@
             || (Array.isArray(initiative.entries) && initiative.entries.length)
             || toNonNegativeInt(vtt.updatedAt, 0) > 0
             || toTrimmedString(initiative.activeEntryId, '', 120).trim()
+            || !!initiative.encounterActive
+            || toTrimmedString(initiative.sceneId, '', 120).trim()
             || Math.max(1, Math.round(toNumber(initiative.round, 1))) > 1
         );
     };
@@ -1898,6 +1921,8 @@
         const initiative = vtt && vtt.initiative && typeof vtt.initiative === 'object' ? vtt.initiative : {};
         score += (Array.isArray(initiative.entries) ? initiative.entries.length : 0) * 500;
         score += toTrimmedString(initiative.activeEntryId, '', 120).trim() ? 80 : 0;
+        score += initiative.encounterActive ? 100 : 0;
+        score += toTrimmedString(initiative.sceneId, '', 120).trim() ? 40 : 0;
         score += Math.max(1, Math.round(toNumber(initiative.round, 1))) > 1 ? 40 : 0;
         return score;
     };
@@ -2195,6 +2220,13 @@
         targetCase.vtt.initiative.activeEntryId = sourceActiveId && targetEntries.some((entry) => entry && entry.id === sourceActiveId)
             ? sourceActiveId
             : '';
+        targetCase.vtt.initiative.encounterActive = !!(sourceVTT && sourceVTT.initiative && sourceVTT.initiative.encounterActive);
+        targetCase.vtt.initiative.sceneId = sourceVTT && sourceVTT.initiative
+            ? toTrimmedString(sourceVTT.initiative.sceneId, '', 120).trim()
+            : '';
+        targetCase.vtt.initiative.startedAt = sourceVTT && sourceVTT.initiative
+            ? Math.max(0, Math.round(toNumber(sourceVTT.initiative.startedAt, 0)))
+            : 0;
     };
     const getCampaignMetaEventsList = (state) => {
         if (!state.campaignMeta || typeof state.campaignMeta !== 'object') {
@@ -2823,7 +2855,10 @@
                 activeSceneId: vtt.activeSceneId,
                 initiative: {
                     round: vtt.initiative.round,
-                    activeEntryId: vtt.initiative.activeEntryId
+                    activeEntryId: vtt.initiative.activeEntryId,
+                    encounterActive: !!vtt.initiative.encounterActive,
+                    sceneId: vtt.initiative.sceneId || '',
+                    startedAt: vtt.initiative.startedAt || 0
                 }
             }, {
                 parentId: caseId,
@@ -3136,6 +3171,9 @@
                 initiative: {
                     round: meta.initiative && meta.initiative.round,
                     activeEntryId: meta.initiative && meta.initiative.activeEntryId,
+                    encounterActive: !!(meta.initiative && meta.initiative.encounterActive),
+                    sceneId: meta.initiative && meta.initiative.sceneId,
+                    startedAt: meta.initiative && meta.initiative.startedAt,
                     entries: vttInitiativeByCase.get(caseId) || []
                 }
             });
