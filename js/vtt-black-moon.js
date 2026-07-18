@@ -19,7 +19,14 @@
         'THERE IS NO SPINE',
         'THERE IS NO EYE',
         'THERE IS NO HEART',
-        'THERE IS NO FLESH'
+        'THERE IS NO FLESH',
+        'YOU CANNOT REMEMBER',
+        'YOU DID THIS',
+        'VICTIMLESS',
+        'NOBODY',
+        'NOTHING',
+        'SEALED',
+        'FORGOTTEN'
     ]);
     const QUESTION = 'DOES THE BLACK MOON HOWL?';
     const ANSWER = 'YES';
