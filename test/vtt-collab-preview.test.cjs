@@ -182,6 +182,102 @@ test('non-final token previews send only the compact event without Y.Doc or pers
     assert.equal(session.pendingFlushTimer, null);
 });
 
+test('Black Moon Howl uses one ephemeral GM broadcast and never touches the Y.Doc', async (t) => {
+    const { VTTCollabSession } = await collabModulePromise;
+    const session = new VTTCollabSession({
+        roomId: 'room_one',
+        getSeedPayload: buildSeedSnapshot
+    });
+    const outbound = [];
+    const fixedNow = 1784342400123;
+
+    t.after(() => {
+        session.awareness.destroy();
+        session.doc.destroy();
+    });
+    t.mock.method(Date, 'now', () => fixedNow);
+    session.instanceId = 'gm_sender';
+    session.connected = true;
+    session.ready = true;
+    session.canSeedRelayRoom = true;
+    session.channel = {
+        send: async (packet) => {
+            outbound.push(packet);
+            return 'ok';
+        }
+    };
+    const before = session.doc.toJSON();
+    const result = await session.broadcastBlackMoonHowl({
+        effectId: 'black_moon_one',
+        command: 'start',
+        startsAt: fixedNow + 350
+    });
+
+    assert.deepEqual(result, { ok: true, reason: 'sent', effectId: 'black_moon_one' });
+    assert.deepEqual(outbound, [{
+        type: 'broadcast',
+        event: 'vtt-black-moon-howl',
+        payload: {
+            effectId: 'black_moon_one',
+            command: 'start',
+            startsAt: fixedNow + 350,
+            sentBy: 'gm_sender',
+            sentAt: fixedNow
+        }
+    }]);
+    assert.deepEqual(session.doc.toJSON(), before);
+    assert.equal(session.isDirty, false);
+});
+
+test('received Black Moon Howl events are sanitized, callback-only, and ignore sender echoes', async (t) => {
+    const { VTTCollabSession } = await collabModulePromise;
+    const received = [];
+    const session = new VTTCollabSession({
+        roomId: 'room_one',
+        getSeedPayload: buildSeedSnapshot,
+        onBlackMoonHowl: (event) => received.push(event)
+    });
+
+    t.after(() => {
+        session.awareness.destroy();
+        session.doc.destroy();
+    });
+    session.instanceId = 'receiver_one';
+    session.handleBlackMoonHowlMessage({
+        effectId: ' black_moon_remote ',
+        command: 'START',
+        startsAt: 1784342400456,
+        sentBy: 'gm_sender',
+        injectedText: '<script>ignored</script>'
+    });
+    session.handleBlackMoonHowlMessage({
+        effectId: 'sender_echo',
+        command: 'start',
+        startsAt: 1,
+        sentBy: 'receiver_one'
+    });
+    session.handleBlackMoonHowlMessage({
+        effectId: 'black_moon_remote',
+        command: 'cancel',
+        sentBy: 'gm_sender'
+    });
+
+    assert.deepEqual(received, [
+        {
+            effectId: 'black_moon_remote',
+            command: 'start',
+            startsAt: 1784342400456,
+            sentBy: 'gm_sender'
+        },
+        {
+            effectId: 'black_moon_remote',
+            command: 'cancel',
+            startsAt: 0,
+            sentBy: 'gm_sender'
+        }
+    ]);
+});
+
 test('received token previews dispatch sanitized positions with ephemeral metadata only', async (t) => {
     const { VTTCollabSession } = await collabModulePromise;
     const persistence = createPersistenceSpy();

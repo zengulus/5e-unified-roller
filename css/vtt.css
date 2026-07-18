@@ -612,6 +612,54 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel .vtt-entry-top-
     display: none;
 }
 
+/* The collapsed rail is a glanceable combat HUD, not a squeezed desktop drawer. */
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-turn-strip {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+        "round actions expand"
+        "copy copy copy";
+    gap: 0.45rem 0.55rem;
+    padding: 0.55rem 0.6rem 0.6rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-turn-strip > .vtt-panel-pill {
+    grid-area: round;
+    justify-self: start;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-turn-copy {
+    grid-area: copy;
+    padding-top: 0.42rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-turn-actions {
+    grid-area: actions;
+    justify-self: end;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-initiative-expand {
+    grid-area: expand;
+    justify-self: end;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-turn-copy strong {
+    font-size: 0.9rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-turn-copy small {
+    font-size: 0.7rem;
+}
+
+body:not([data-active-vtt-panel="combat"]) #vtt-initiative-workspace:has(.vtt-initiative-list > .vtt-empty),
+body:not([data-active-vtt-panel="combat"]) #vtt-clock-panel:has(.vtt-clock-list > .vtt-empty) {
+    display: none;
+}
+
+body:not([data-active-vtt-panel="combat"]) .vtt-combat-workspace-panel:not([hidden]) {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
 .vtt-combat-turn-strip {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -4807,6 +4855,79 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     color: rgba(248, 252, 255, 0.98);
 }
 
+.vtt-black-moon-source-hidden {
+    color: transparent !important;
+    caret-color: transparent !important;
+    text-shadow: none !important;
+    -webkit-text-fill-color: transparent !important;
+}
+
+.vtt-black-moon-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    overflow: hidden;
+    contain: strict;
+    background: transparent;
+    color: #fff;
+    pointer-events: auto;
+    user-select: none;
+}
+
+.vtt-black-moon-replacements {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    contain: layout paint style;
+}
+
+.vtt-black-moon-replacement {
+    position: absolute;
+    box-sizing: border-box;
+    display: block;
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.vtt-black-moon-overlay[data-phase="black"] {
+    background: #000;
+}
+
+.vtt-black-moon-centre {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 1.35rem;
+    padding: 2rem;
+    background: #000;
+    color: #fff;
+    text-align: center;
+}
+
+.vtt-black-moon-centre[hidden] {
+    display: none;
+}
+
+.vtt-black-moon-question,
+.vtt-black-moon-answer {
+    min-height: 1.25em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+}
+
+.vtt-black-moon-question {
+    font-size: clamp(1.35rem, 3.4vw, 3.2rem);
+}
+
+.vtt-black-moon-answer {
+    font-size: clamp(1.7rem, 4.6vw, 4rem);
+}
+
 @media (max-width: 1200px) {
     .vtt-shell {
         --vtt-overlay-top: 4.5rem;
@@ -4934,11 +5055,6 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
     .vtt-view-menu #vtt-scene-panel-toggle,
     .vtt-view-menu #vtt-spawn-panel-toggle,
     .vtt-view-menu #vtt-inspector-panel-toggle {
-        display: none;
-    }
-
-    /* Empty clocks do not need a permanent card over the map; the full combat drawer still explains them. */
-    body:not([data-active-vtt-panel="combat"]) #vtt-clock-panel:has(.vtt-clock-list > .vtt-empty) {
         display: none;
     }
 

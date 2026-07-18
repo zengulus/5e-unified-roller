@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260719a">
+    <link rel="stylesheet" href="css/vtt.css?v=20260719c">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
@@ -338,6 +338,13 @@
                                     aria-controls="vtt-admin-panel">Diagnostics</button>
                             </div>
                         </div>
+                        <div class="vtt-menu-section" data-vtt-menu-dm-only="1">
+                            <div class="vtt-menu-title">DM tricks</div>
+                            <div class="vtt-menu-list">
+                                <button class="vtt-chip-btn" type="button" data-action="preview-black-moon-howl">Preview Black Moon Howl</button>
+                                <button class="vtt-chip-btn danger" type="button" data-action="trigger-black-moon-howl">Black Moon Howl · Everyone</button>
+                            </div>
+                        </div>
                         <div class="vtt-menu-section">
                             <div class="vtt-menu-title">Role</div>
                             <div class="vtt-menu-list">
@@ -408,6 +415,20 @@
             </div>
 
             <div class="vtt-initiative-scroll">
+                <section class="vtt-panel vtt-combat-workspace-panel" id="vtt-clock-panel"
+                    role="tabpanel" aria-labelledby="vtt-combat-clocks-tab">
+                    <div class="vtt-panel-head">
+                        <div>
+                            <h2>Scene Clocks</h2>
+                            <div class="vtt-combat-scope" id="vtt-clock-scope">Current scene</div>
+                        </div>
+                        <div class="vtt-panel-head-actions">
+                            <button class="vtt-chip-btn" data-action="add-scene-clock" data-dm-only="1">New Clock</button>
+                        </div>
+                    </div>
+                    <div class="vtt-clock-list" id="vtt-clock-list"></div>
+                </section>
+
                 <section class="vtt-panel vtt-combat-workspace-panel" id="vtt-initiative-workspace"
                     role="tabpanel" aria-labelledby="vtt-combat-turns-tab">
                     <div class="vtt-panel-head">
@@ -433,20 +454,6 @@
                     <div class="vtt-initiative-list" id="vtt-initiative-list"></div>
                     <div class="vtt-popover vtt-initiative-popover" id="vtt-initiative-detail-panel"
                         role="region" aria-label="Initiative entry details" hidden></div>
-                </section>
-
-                <section class="vtt-panel vtt-combat-workspace-panel" id="vtt-clock-panel"
-                    role="tabpanel" aria-labelledby="vtt-combat-clocks-tab">
-                    <div class="vtt-panel-head">
-                        <div>
-                            <h2>Scene Clocks</h2>
-                            <div class="vtt-combat-scope" id="vtt-clock-scope">Current scene</div>
-                        </div>
-                        <div class="vtt-panel-head-actions">
-                            <button class="vtt-chip-btn" data-action="add-scene-clock" data-dm-only="1">New Clock</button>
-                        </div>
-                    </div>
-                    <div class="vtt-clock-list" id="vtt-clock-list"></div>
                 </section>
             </div>
         </aside>
@@ -505,7 +512,7 @@
     <script src="js/vector-field.js?v=20260224g"></script>
     <script src="js/dice.js?v=20260710a"></script>
     <script>
-        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260718d')
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260719c')
             .then(() => window.RTF_VTT_COLLAB || null)
             .catch((err) => {
                 console.warn('VTT collaboration module failed to load', err);
@@ -565,10 +572,11 @@
     <script src="js/vtt-stage-input.js?v=20260718d"></script>
     <script src="js/vtt-field-router.js?v=20260718d"></script>
     <script src="js/vtt-actions-rolls.js?v=20260718d"></script>
-    <script src="js/vtt-actions-table.js?v=20260718d"></script>
+    <script src="js/vtt-actions-table.js?v=20260719c"></script>
     <script src="js/vtt-actions-scenes.js?v=20260718d"></script>
     <script src="js/vtt-actions-selection.js?v=20260718d"></script>
-    <script src="js/vtt.js?v=20260719a"></script>
+    <script src="js/vtt-black-moon.js?v=20260719c"></script>
+    <script src="js/vtt.js?v=20260719c"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

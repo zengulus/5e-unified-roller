@@ -76,6 +76,13 @@
         throw new Error('VTT DOM registry module failed to load.');
     }
     const dom = vttDomFactory.create(document);
+    const blackMoonFactory = window.RTF_VTT_BLACK_MOON;
+    if (!blackMoonFactory || typeof blackMoonFactory.create !== 'function') {
+        throw new Error('Black Moon Howl presentation module failed to load.');
+    }
+    const blackMoonController = blackMoonFactory.create({ document, window });
+    let activeBlackMoonRun = null;
+    let blackMoonBroadcastPending = false;
 
     const escapeHtml = (value = '') => String(value)
         .replace(/&/g, '&amp;')
@@ -913,6 +920,95 @@
     const isDM = () => sessionState.role === 'dm';
     const isPlayer = () => sessionState.role === 'player';
     const isSpectator = () => sessionState.role === 'spectator';
+
+    const runBlackMoonHowlLocally = async ({ effectId, startsAt = 0, audience = 'local' } = {}) => {
+        const id = String(effectId || buildId('black_moon')).trim();
+        if (blackMoonController.isActive()) {
+            return { ok: false, reason: 'active', effectId: activeBlackMoonRun && activeBlackMoonRun.effectId || id };
+        }
+        const run = { effectId: id, audience };
+        activeBlackMoonRun = run;
+        const result = await blackMoonController.trigger({ effectId: id, startsAt });
+        if (activeBlackMoonRun === run) activeBlackMoonRun = null;
+        return result;
+    };
+
+    const triggerBlackMoonHowls = async (options = {}) => {
+        const source = options && typeof options === 'object' ? options : {};
+        const audience = String(source.audience || 'all').trim().toLowerCase() === 'local' ? 'local' : 'all';
+        if (!isDM()) return { ok: false, reason: 'dm-only' };
+        if (blackMoonBroadcastPending || blackMoonController.isActive()) {
+            return { ok: false, reason: 'active', effectId: activeBlackMoonRun && activeBlackMoonRun.effectId || '' };
+        }
+        const effectId = buildId('black_moon');
+        if (audience === 'local') {
+            return runBlackMoonHowlLocally({ effectId, audience });
+        }
+
+        const transport = getVTTCollabTransport();
+        if (!isVTTCollabReady() || !transport || typeof transport.broadcastBlackMoonHowl !== 'function') {
+            return { ok: false, reason: 'room-unavailable', effectId };
+        }
+        const startsAt = Date.now() + 350;
+        blackMoonBroadcastPending = true;
+        let broadcastResult;
+        try {
+            broadcastResult = await transport.broadcastBlackMoonHowl({ effectId, command: 'start', startsAt });
+        } finally {
+            blackMoonBroadcastPending = false;
+        }
+        if (!broadcastResult || !broadcastResult.ok) {
+            return {
+                ok: false,
+                reason: broadcastResult && broadcastResult.reason || 'send-failed',
+                effectId
+            };
+        }
+
+        // The relay excludes its sender, so the GM explicitly runs the same timed effect locally.
+        const result = await runBlackMoonHowlLocally({ effectId, startsAt, audience: 'all' });
+        if (!result.ok && result.reason === 'error') {
+            transport.broadcastBlackMoonHowl({ effectId, command: 'cancel' }).catch(() => { });
+        }
+        return result;
+    };
+
+    const cancelBlackMoonHowls = () => {
+        const run = activeBlackMoonRun;
+        const cancelled = blackMoonController.cancel();
+        activeBlackMoonRun = null;
+        if (run && run.audience === 'all' && isDM()) {
+            const transport = getVTTCollabTransport();
+            if (transport && typeof transport.broadcastBlackMoonHowl === 'function') {
+                transport.broadcastBlackMoonHowl({ effectId: run.effectId, command: 'cancel' }).catch(() => { });
+            }
+        }
+        return cancelled;
+    };
+
+    const handleRemoteBlackMoonHowl = (event) => {
+        const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
+        const effectId = String(detail.effectId || '').trim();
+        if (!effectId) return;
+        if (detail.command === 'cancel') {
+            if (activeBlackMoonRun && activeBlackMoonRun.effectId === effectId) {
+                blackMoonController.cancel();
+                activeBlackMoonRun = null;
+            }
+            return;
+        }
+        runBlackMoonHowlLocally({
+            effectId,
+            startsAt: Math.max(0, Number(detail.startsAt) || 0),
+            audience: 'remote'
+        }).catch((err) => {
+            blackMoonController.cancel();
+            console.error('Remote Black Moon Howl failed', err);
+        });
+    };
+
+    window.triggerBlackMoonHowls = triggerBlackMoonHowls;
+    window.cancelBlackMoonHowls = cancelBlackMoonHowls;
     const canUseSharedPlayerTools = () => !isSpectator();
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
         const wasOpen = !!(uiRuntime.npcSearch.open || uiRuntime.npcSearch.state);
@@ -6925,6 +7021,7 @@
         renderToolsMenu,
         renderViewMenu,
         reportVTTAdminActionError,
+        triggerBlackMoonHowls,
         setActiveVTTPanel,
         setCombatView,
         setToolMode,
@@ -7616,6 +7713,7 @@
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerUp);
         window.addEventListener(C.STORE_UPDATED_EVENT, handleStoreUpdate);
+        window.addEventListener('rtf-vtt-black-moon-howl', handleRemoteBlackMoonHowl);
         window.addEventListener('storage', handleStorageEvent);
         window.addEventListener('resize', () => {
             if (stageState.view.fitOnNextMapLoad) {

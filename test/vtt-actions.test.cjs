@@ -14,7 +14,7 @@ const actionGroups = [
     {
         name: 'table',
         controllerName: 'Table',
-        expectedActionCount: 59,
+        expectedActionCount: 61,
         factory: require('../js/vtt-actions-table.js')
     },
     {
@@ -74,7 +74,7 @@ test('VTT action ownership is complete, exclusive, and rejects unknown actions',
     }));
     const allActions = instances.flatMap((group) => group.actions);
 
-    assert.equal(allActions.length, 137);
+    assert.equal(allActions.length, 139);
     instances.forEach((group) => {
         assert.equal(group.actions.length, group.expectedActionCount, `${group.name} action count`);
         assert.equal(new Set(group.actions).size, group.actions.length, `${group.name} has no duplicate entries`);
@@ -181,6 +181,34 @@ test('table actions clear request state before changing the active ping tool', (
         'tool:ping:question',
         'render:question'
     ]);
+});
+
+test('Black Moon Howl actions are DM-only and route local versus everyone audiences', () => {
+    const calls = [];
+    let dm = true;
+    const tableGroup = actionGroups.find((group) => group.name === 'table');
+    const actions = tableGroup.factory.create({
+        state: {},
+        isDM: () => dm,
+        closeViewMenu: () => calls.push('close'),
+        renderViewMenu: () => calls.push('render'),
+        triggerBlackMoonHowls: ({ audience }) => {
+            calls.push(`trigger:${audience}`);
+            return Promise.resolve({ ok: true });
+        },
+        reportVTTAdminActionError: (error) => calls.push(`error:${error.message}`)
+    });
+
+    actions.handle({ dataset: {} }, 'preview-black-moon-howl', '');
+    actions.handle({ dataset: {} }, 'trigger-black-moon-howl', '');
+    assert.deepEqual(calls, [
+        'close', 'render', 'trigger:local',
+        'close', 'render', 'trigger:all'
+    ]);
+
+    dm = false;
+    actions.handle({ dataset: {} }, 'trigger-black-moon-howl', '');
+    assert.equal(calls.length, 6);
 });
 
 test('new scene clocks begin as private manual drafts and open the single clock editor', () => {

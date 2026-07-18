@@ -16,6 +16,8 @@ const LIVE_SYNC_CONFIRM_WINDOW_MS = 45000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const TOKEN_POSITION_PREVIEW_EVENT = 'vtt-token-position-preview';
+const BLACK_MOON_HOWL_EVENT = 'vtt-black-moon-howl';
+const BLACK_MOON_HOWL_DOM_EVENT = 'rtf-vtt-black-moon-howl';
 const VTT_ADMIN_EVENT_APPLY_SNAPSHOT = 'vtt-admin-apply-snapshot';
 const VTT_ADMIN_EVENT_BUST = 'vtt-admin-bust';
 const DEFAULT_VTT_CELL_PX = 70;
@@ -2095,6 +2097,10 @@ class VTTCollabSession {
             if (channel !== this.channel) return;
             this.handleTokenPositionPreviewMessage(payload);
         });
+        channel.on('broadcast', { event: BLACK_MOON_HOWL_EVENT }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleBlackMoonHowlMessage(payload);
+        });
         channel.on('broadcast', { event: VTT_ADMIN_EVENT_APPLY_SNAPSHOT }, ({ payload }) => {
             if (channel !== this.channel) return;
             this.handleAdminSnapshotMessage(payload);
@@ -2415,6 +2421,32 @@ class VTTCollabSession {
         };
         if (payload.settled) meta.settled = true;
         this.options.applyPositionChanges(changes, meta);
+    }
+
+    handleBlackMoonHowlMessage(payload) {
+        if (this.destroyed || !payload || typeof payload !== 'object') return;
+        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
+        if (sentBy && sentBy === this.instanceId) return;
+        const effectId = toTrimmedString(payload.effectId, '', 120).trim();
+        const command = toTrimmedString(payload.command, 'start', 16).trim().toLowerCase();
+        if (!effectId || !['start', 'cancel'].includes(command)) return;
+        const detail = {
+            effectId,
+            command,
+            startsAt: command === 'start' ? Math.max(0, toNonNegativeInt(payload.startsAt, 0)) : 0,
+            sentBy
+        };
+        if (typeof this.options.onBlackMoonHowl === 'function') {
+            try {
+                this.options.onBlackMoonHowl(detail);
+            } catch (err) {
+                console.warn('RTF_VTT_COLLAB: Black Moon Howl callback failed', err);
+            }
+            return;
+        }
+        if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.CustomEvent === 'function') {
+            globalThis.dispatchEvent(new globalThis.CustomEvent(BLACK_MOON_HOWL_DOM_EVENT, { detail }));
+        }
     }
 
     handleAdminSnapshotMessage(payload) {
@@ -3035,6 +3067,24 @@ class VTTCollabSession {
             ok: !!sent,
             reason: sent ? 'preview-sent' : 'send-failed'
         }));
+    }
+
+    async broadcastBlackMoonHowl(options = {}) {
+        const source = options && typeof options === 'object' ? options : {};
+        if (!this.canSeedRelayRoom) return { ok: false, reason: 'dm-only' };
+        if (!this.connected) return { ok: false, reason: 'disconnected' };
+        const effectId = toTrimmedString(source.effectId, '', 120).trim();
+        const command = toTrimmedString(source.command, 'start', 16).trim().toLowerCase();
+        if (!effectId || !['start', 'cancel'].includes(command)) return { ok: false, reason: 'invalid' };
+        const payload = {
+            effectId,
+            command,
+            startsAt: command === 'start' ? Math.max(0, toNonNegativeInt(source.startsAt, Date.now())) : 0,
+            sentBy: this.instanceId,
+            sentAt: Date.now()
+        };
+        const sent = await this.sendBroadcast(BLACK_MOON_HOWL_EVENT, payload);
+        return { ok: !!sent, reason: sent ? 'sent' : 'send-failed', effectId };
     }
 
     updateTokenPositions(changes, options = {}) {

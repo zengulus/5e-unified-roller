@@ -193,6 +193,67 @@ try {
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
         assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'open panels must not persist across reloads');
 
+        assert.equal(await page.evaluate(() => typeof window.triggerBlackMoonHowls), 'function');
+        assert.equal(await page.evaluate(() => typeof window.cancelBlackMoonHowls), 'function');
+        await page.locator('#vtt-dm-dock [data-vtt-master-menu-toggle]').click();
+        assert.equal(await page.getByRole('button', { name: 'Preview Black Moon Howl' }).isVisible(), true);
+        assert.equal(await page.getByRole('button', { name: 'Black Moon Howl · Everyone' }).isVisible(), true);
+        await page.locator('#vtt-dm-dock [data-vtt-master-menu-toggle]').click();
+        const originalCaseText = await page.locator('#vtt-case-name').textContent();
+        await page.evaluate(() => {
+            window.__blackMoonLocalTest = window.triggerBlackMoonHowls({ audience: 'local' });
+        });
+        await page.locator('.vtt-black-moon-overlay').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('body').getAttribute('data-black-moon-active'), 'true');
+        assert.ok(await page.locator('.vtt-black-moon-replacement').count() > 0);
+        assert.equal(await page.locator('#vtt-case-name').textContent(), originalCaseText, 'the effect must not mutate original interface text');
+        assert.equal(await page.locator('#vtt-topbar').getAttribute('inert'), '');
+        assert.equal((await page.evaluate(() => window.triggerBlackMoonHowls({ audience: 'local' }))).reason, 'active');
+        assert.equal(await page.evaluate(() => window.cancelBlackMoonHowls()), true);
+        assert.equal((await page.evaluate(() => window.__blackMoonLocalTest)).reason, 'cancelled');
+        assert.equal(await page.locator('.vtt-black-moon-overlay').count(), 0);
+        assert.equal(await page.locator('body').getAttribute('data-black-moon-active'), null);
+        assert.equal(await page.locator('#vtt-topbar').getAttribute('inert'), null);
+        assert.equal(await page.locator('#vtt-case-name').textContent(), originalCaseText);
+
+        const fastBlackMoonResult = await page.evaluate(async () => {
+            const controller = window.RTF_VTT_BLACK_MOON.create({
+                document,
+                window,
+                timings: {
+                    replacementMs: 35,
+                    holdMs: 20,
+                    questionTypeMs: 35,
+                    questionPauseMs: 20,
+                    answerTypeMs: 25,
+                    answerHoldMs: 20
+                }
+            });
+            const observed = { black: false, question: false, answer: false };
+            const poll = window.setInterval(() => {
+                const overlay = document.querySelector('.vtt-black-moon-overlay');
+                if (!overlay) return;
+                if (overlay.dataset.phase === 'black') observed.black = true;
+                if (overlay.querySelector('.vtt-black-moon-question')?.textContent === 'DOES THE BLACK MOON HOWL?') observed.question = true;
+                if (overlay.querySelector('.vtt-black-moon-answer')?.textContent === 'YES') observed.answer = true;
+            }, 2);
+            const result = await controller.trigger({ effectId: 'black_moon_fast_sequence' });
+            window.clearInterval(poll);
+            return {
+                result,
+                observed,
+                overlayCount: document.querySelectorAll('.vtt-black-moon-overlay').length,
+                active: document.body.hasAttribute('data-black-moon-active'),
+                topbarInert: document.querySelector('#vtt-topbar').hasAttribute('inert')
+            };
+        });
+        assert.equal(fastBlackMoonResult.result.reason, 'complete');
+        assert.deepEqual(fastBlackMoonResult.observed, { black: true, question: true, answer: true });
+        assert.deepEqual(
+            [fastBlackMoonResult.overlayCount, fastBlackMoonResult.active, fastBlackMoonResult.topbarInert],
+            [0, false, false]
+        );
+
         await page.setViewportSize({ width: 900, height: 800 });
         await page.locator('#vtt-dm-dock [data-panel="setup"]').click();
         await page.waitForTimeout(250);
@@ -420,6 +481,33 @@ try {
         assert.equal(await describedClock.getAttribute('title'), clockDescription);
         assert.equal(await describedClock.getAttribute('aria-describedby'), 'vtt-clock-description-0');
         await page.locator('#vtt-initiative-panel .vtt-drawer-close').click();
+        assert.equal(await page.evaluate(() => {
+            const clocks = document.getElementById('vtt-clock-panel');
+            const initiative = document.getElementById('vtt-initiative-workspace');
+            return !!(clocks.compareDocumentPosition(initiative) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }), true, 'clocks must precede initiative in the persistent combat rail');
+        assert.equal(await page.locator('#vtt-initiative-workspace').evaluate((element) => getComputedStyle(element).display), 'none');
+        assert.notEqual(await page.locator('#vtt-clock-panel').evaluate((element) => getComputedStyle(element).display), 'none');
+        const compactCombatLayout = await page.evaluate(() => {
+            const rect = (selector) => {
+                const bounds = document.querySelector(selector).getBoundingClientRect();
+                return { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right };
+            };
+            return {
+                round: rect('#vtt-round-pill'),
+                actions: rect('.vtt-combat-turn-actions'),
+                expand: rect('.vtt-initiative-expand'),
+                copy: rect('.vtt-combat-turn-copy')
+            };
+        });
+        assert.ok(
+            compactCombatLayout.copy.top >= Math.max(
+                compactCombatLayout.round.bottom,
+                compactCombatLayout.actions.bottom,
+                compactCombatLayout.expand.bottom
+            ) - 1,
+            'compact turn copy should occupy its own row below the controls'
+        );
         assert.equal(await describedClock.locator('.vtt-clock-note').isHidden(), true);
         await describedClock.hover();
         assert.equal(await describedClock.locator('.vtt-clock-note').isVisible(), true);

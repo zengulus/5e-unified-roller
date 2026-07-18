@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ravnica-tools-v20';
+const CACHE_NAME = 'ravnica-tools-v21';
 const SHELL_ASSETS = [
     './',
     './manifest.json',
@@ -98,6 +98,7 @@ const SHELL_ASSETS = [
     './js/vtt-actions-scenes.js',
     './js/vtt-actions-selection.js',
     './js/vtt-actions-table.js',
+    './js/vtt-black-moon.js',
     './js/vtt-geometry.js',
     './js/vtt-markup.js',
     './js/vtt-proximity.js',

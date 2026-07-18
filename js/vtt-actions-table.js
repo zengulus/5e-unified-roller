@@ -43,6 +43,7 @@
             "force-vtt-authoritative",
             "open-global-settings",
             "open-global-sync",
+            "preview-black-moon-howl",
             "open-quick-spawn",
             "quick-spawn-all-players",
             "quick-spawn-custom",
@@ -70,6 +71,7 @@
             "token-retry-image",
             "token-set-bloodied",
             "token-set-full-hp",
+            "trigger-black-moon-howl",
             "zoom-in",
             "zoom-out",
             "zoom-reset"
@@ -176,6 +178,7 @@
             renderToolsMenu,
             renderViewMenu,
             reportVTTAdminActionError,
+            triggerBlackMoonHowls,
             setActiveVTTPanel,
             setCombatView,
             setToolMode,
@@ -331,6 +334,20 @@
                 closeViewMenu();
                 renderViewMenu();
                 if (globalMenuButton instanceof HTMLElement) globalMenuButton.click();
+                return;
+            }
+            if (action === 'preview-black-moon-howl' || action === 'trigger-black-moon-howl') {
+                if (!isDM() || typeof triggerBlackMoonHowls !== 'function') return;
+                closeViewMenu();
+                renderViewMenu();
+                Promise.resolve(triggerBlackMoonHowls({
+                    audience: action === 'preview-black-moon-howl' ? 'local' : 'all'
+                })).then((result) => {
+                    if (!result || result.ok || ['active', 'duplicate', 'cancelled'].includes(result.reason)) return;
+                    throw new Error(result.reason === 'room-unavailable'
+                        ? 'The live VTT room is not ready, so Black Moon Howl was not triggered.'
+                        : `Black Moon Howl failed: ${result.reason || 'unknown error'}`);
+                }).catch((err) => reportVTTAdminActionError(err, 'Black Moon Howl failed.'));
                 return;
             }
             if (action === 'toggle-tools-menu') {
