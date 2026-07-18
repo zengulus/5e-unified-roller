@@ -36,7 +36,7 @@
         replacementMs: 1800,
         holdMs: 2000,
         questionTypeMs: 1250,
-        questionPauseMs: 650,
+        questionPauseMs: 1000,
         answerTypeMs: 240,
         answerHoldMs: 550
     });
