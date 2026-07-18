@@ -37,7 +37,6 @@
             clearSpawnDrag,
             clearTemplatePlacementState,
             clearTokenPortraitPreview,
-            clearTransientDrawerState,
             closeActiveVTTPanel,
             closeDMUnlockModal,
             closeInitiativeDetail,
@@ -723,6 +722,14 @@
             if (runtime.spawnDragState) {
                 runtime.spawnDragState.clientX = event.clientX;
                 runtime.spawnDragState.clientY = event.clientY;
+                if (!runtime.spawnDragState.moved) {
+                    const moveDistance = Math.hypot(
+                        event.clientX - toNumber(runtime.spawnDragState.startClientX, event.clientX),
+                        event.clientY - toNumber(runtime.spawnDragState.startClientY, event.clientY)
+                    );
+                    if (moveDistance <= TOKEN_CLICK_MOVE_PX) return;
+                    runtime.spawnDragState.moved = true;
+                }
                 runtime.spawnDragState.overStage = isClientPointInsideStage(event.clientX, event.clientY);
                 renderSpawnGhost();
                 return;
@@ -881,9 +888,14 @@
         const handlePointerUp = (event) => {
             cancelInteractionRender();
             if (runtime.spawnDragState) {
-                const shouldSpawn = isDM() && event && isClientPointInsideStage(event.clientX, event.clientY);
+                const completedSpawnDrag = { ...runtime.spawnDragState };
+                const shouldSpawn = isDM()
+                    && completedSpawnDrag.moved
+                    && event
+                    && event.type !== 'pointercancel'
+                    && isClientPointInsideStage(event.clientX, event.clientY);
                 const nextWorldPoint = shouldSpawn ? screenToWorld(event.clientX, event.clientY) : null;
-                const descriptor = { kind: runtime.spawnDragState.kind, id: runtime.spawnDragState.id };
+                const descriptor = { kind: completedSpawnDrag.kind, id: completedSpawnDrag.id };
                 clearSpawnDrag();
                 if (shouldSpawn) {
                     spawnTokenFromDescriptor(descriptor.kind, descriptor.id, nextWorldPoint);
@@ -1123,15 +1135,18 @@
                 runtime.viewMenuOpen = false;
                 needsRender = true;
             }
-            if (runtime.toolsMenuOpen && !targetEl.closest('.vtt-topbar-tools')) {
+            if (runtime.toolsMenuOpen
+                && !targetEl.closest('#vtt-tools-menu')
+                && !targetEl.closest('#vtt-tools-menu-toggle')) {
                 runtime.toolsMenuOpen = false;
                 needsRender = true;
             }
             if (runtime.playerRollMenuOpen
-                && !targetEl.closest('#vtt-player-roll-panel')
+                && !targetEl.closest('#vtt-player-roll-rail')
+                && !targetEl.closest('[data-action="open-vtt-panel"][data-panel="player-rolls"]')
                 && !targetEl.closest('#vtt-sheet-action-popover')
                 && !targetEl.closest('#vtt-npc-roll-popover')) {
-                runtime.playerRollMenuOpen = false;
+                closeActiveVTTPanel({ restoreFocus: false });
                 needsRender = true;
             }
             if (runtime.initiativeDetailState && !targetEl.closest('#vtt-initiative-detail-panel') && !targetEl.closest('.vtt-entry')) {
@@ -1331,29 +1346,39 @@
                 }
             }
             if (event.key === 'Escape') {
-                const exitedActiveTool = runtime.localToolState.mode !== TOOL_MODE_NAVIGATE;
-                const clearedTransientDrawerState = clearTransientDrawerState();
-                const cancelledAskRollPick = cancelAskRollPickMode();
-                const closedMenu = closeQuickSpawnMenu();
-                const closedNavMenu = closeNavMenu();
-                const closedViewMenu = closeViewMenu();
-                const closedToolsMenu = closeToolsMenu();
-                const closedStageContext = closeStageContextMenu();
-                const clearedSpawn = clearSpawnDrag();
-                const clearedTemplatePlacement = clearTemplatePlacementState();
-                const closedVTTPanel = closeActiveVTTPanel();
-                const closedInitiativeDetail = closeInitiativeDetail();
-                const closedTokenInspector = closeTokenInspectorPopover();
-                const closedSheetActions = closeSheetActionPopover();
-                const closedNPCRoll = closeNPCRollPopover();
-                const closedPlayerRollMenu = runtime.playerRollMenuOpen;
-                runtime.playerRollMenuOpen = false;
-                if (exitedActiveTool) setToolMode(TOOL_MODE_NAVIGATE);
                 if (runtime.previewTokenId) {
                     runtime.previewTokenId = '';
                     renderStage();
                     event.preventDefault();
-                } else if (exitedActiveTool || clearedTransientDrawerState || cancelledAskRollPick || closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedVTTPanel || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll || closedPlayerRollMenu) {
+                    return;
+                }
+                const closeTopLayer = [
+                    closeStageContextMenu,
+                    closeTokenInspectorPopover,
+                    closeSheetActionPopover,
+                    closeNPCRollPopover,
+                    closeInitiativeDetail,
+                    closeNPCSearch,
+                    () => closeQuickSpawnMenu({ restoreFocus: true }),
+                    closeViewMenu,
+                    closeToolsMenu,
+                    closeNavMenu,
+                    clearSpawnDrag,
+                    clearTemplatePlacementState,
+                    cancelAskRollPickMode
+                ].find((closeLayer) => closeLayer());
+                if (closeTopLayer) {
+                    render();
+                    event.preventDefault();
+                    return;
+                }
+                if (runtime.localToolState.mode !== TOOL_MODE_NAVIGATE) {
+                    setToolMode(TOOL_MODE_NAVIGATE);
+                    render();
+                    event.preventDefault();
+                    return;
+                }
+                if (closeActiveVTTPanel()) {
                     render();
                     event.preventDefault();
                 }

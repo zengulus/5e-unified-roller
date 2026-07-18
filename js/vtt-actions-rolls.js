@@ -126,7 +126,7 @@
             setAskRollPickMode,
             setRolePreference,
             stopYouTubeMusicFrame,
-            toggleDrawerPreference,
+            toggleUIPreference,
             updateMonsterRollOverrideForToken,
             withDraft,
             youtubeAudioPlayerEl
@@ -168,7 +168,12 @@
             if (action === 'open-vtt-panel') {
                 const panel = String(actionEl.dataset.panel || '').trim();
                 const activePanel = getAllowedVTTPanel(state.uiState.activeVttPanel);
-                setActiveVTTPanel(activePanel === panel ? '' : panel);
+                const isDrawerTab = !!actionEl.closest('.vtt-drawer-tabs');
+                const isMenuItem = !!actionEl.closest('#vtt-view-menu');
+                setActiveVTTPanel(!isDrawerTab && !isMenuItem && activePanel === panel ? '' : panel, {
+                    opener: actionEl,
+                    focus: !isDrawerTab
+                });
                 closeViewMenu();
                 return;
             }
@@ -196,7 +201,7 @@
                 return;
             }
             if (action === 'toggle-topbar-pin') {
-                toggleDrawerPreference('topbarCollapsed');
+                toggleUIPreference('topbarCollapsed');
                 return;
             }
             if (action === 'close-dm-unlock') {
@@ -503,4 +508,3 @@
 
     return Object.freeze({ create });
 }));
-

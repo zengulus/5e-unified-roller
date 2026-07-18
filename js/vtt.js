@@ -59,6 +59,7 @@
     const getWorldSizeForScene = (...args) => requireStageView().getWorldSizeForScene(...args);
     const isClientPointInsideStage = (...args) => requireStageView().isClientPointInsideStage(...args);
     const markTokenVisualEffect = (...args) => requireStageView().markTokenVisualEffect(...args);
+    const previewTokenPositions = (...args) => requireStageView().previewTokenPositions(...args);
     const queueRemoteTokenTween = (...args) => requireStageView().queueRemoteTokenTween(...args);
     const queueRemoteTweensFromSnapshots = (...args) => requireStageView().queueRemoteTweensFromSnapshots(...args);
     const reconcileSnapshotWithRecentLocalDragDrops = (...args) => requireStageView().reconcileSnapshotWithRecentLocalDragDrops(...args);
@@ -874,9 +875,11 @@
     const isSpectator = () => sessionState.role === 'spectator';
     const canUseSharedPlayerTools = () => !isSpectator();
     const closeNPCSearch = ({ clearQuery = false } = {}) => {
+        const wasOpen = !!(uiRuntime.npcSearch.open || uiRuntime.npcSearch.state);
         uiRuntime.npcSearch.open = false;
         uiRuntime.npcSearch.state = null;
         if (clearQuery) uiRuntime.npcSearch.query = '';
+        return wasOpen;
     };
     const normalizeToolMode = (value) => {
         const token = String(value || '').trim().toLowerCase();
@@ -979,32 +982,93 @@
         return true;
     };
 
+    let activeVTTPanelOpener = null;
+    let vttPanelLayoutRevision = 0;
+    let pendingVTTStageCenter = null;
+
+    const captureVTTStageCenter = () => {
+        if (!dom.stageEl) return null;
+        const rect = dom.stageEl.getBoundingClientRect();
+        const view = stageState.view.local;
+        const zoom = Math.max(0.01, toNumber(view.zoom, 1));
+        if (!rect.width || !rect.height) return null;
+        if (pendingVTTStageCenter
+            && toNumber(view.x, 0) === pendingVTTStageCenter.viewX
+            && toNumber(view.y, 0) === pendingVTTStageCenter.viewY
+            && zoom === pendingVTTStageCenter.zoom) {
+            return pendingVTTStageCenter;
+        }
+        pendingVTTStageCenter = {
+            x: (rect.width / 2 - toNumber(view.x, 0)) / zoom,
+            y: (rect.height / 2 - toNumber(view.y, 0)) / zoom,
+            viewX: toNumber(view.x, 0),
+            viewY: toNumber(view.y, 0),
+            zoom
+        };
+        return pendingVTTStageCenter;
+    };
+
+    const restoreVTTStageCenterAfterLayout = (worldPoint) => {
+        if (!worldPoint || !dom.stageEl) return;
+        const revision = ++vttPanelLayoutRevision;
+        window.setTimeout(() => {
+            if (revision !== vttPanelLayoutRevision || !dom.stageEl) return;
+            if (pendingVTTStageCenter === worldPoint) pendingVTTStageCenter = null;
+            const rect = dom.stageEl.getBoundingClientRect();
+            const view = stageState.view.local;
+            const zoom = Math.max(0.01, toNumber(view.zoom, 1));
+            if (!rect.width || !rect.height) return;
+            if (toNumber(view.x, 0) !== worldPoint.viewX
+                || toNumber(view.y, 0) !== worldPoint.viewY
+                || zoom !== worldPoint.zoom) return;
+            view.x = Math.round(rect.width / 2 - worldPoint.x * zoom);
+            view.y = Math.round(rect.height / 2 - worldPoint.y * zoom);
+            applyWorldTransform();
+        }, 220);
+    };
+
+    const resolveVTTPanelOpener = (candidate) => {
+        const opener = candidate instanceof HTMLElement ? candidate : document.activeElement;
+        if (!(opener instanceof HTMLElement) || !opener.closest('#vtt-view-menu')) return opener;
+        return Array.from(dom.viewMenuToggleEls || []).find((toggleEl) => (
+            toggleEl instanceof HTMLElement && toggleEl.getClientRects().length > 0
+        )) || opener;
+    };
+
+    const findVisibleVTTPanelLauncher = (panel) => Array.from(
+        document.querySelectorAll('[data-action="open-vtt-panel"][data-panel]')
+    ).find((buttonEl) => (
+        buttonEl instanceof HTMLElement
+        && String(buttonEl.dataset.panel || '').trim() === panel
+        && !buttonEl.closest('.vtt-drawer-tabs')
+        && buttonEl.getClientRects().length > 0
+    )) || null;
+
     const getAllowedVTTPanel = (panel) => {
         const clean = String(panel || '').trim();
         if (!clean) return '';
-        if (clean === 'combat' || clean === 'inspector') return clean;
-        if (isDM() && (clean === 'setup' || clean === 'spawn' || clean === 'admin' || clean === 'dm-tools')) return clean;
+        if (clean === 'combat') return clean;
+        if (isDM() && (clean === 'setup' || clean === 'spawn' || clean === 'inspector' || clean === 'admin')) return clean;
         if (isPlayer() && clean === 'player-rolls') return clean;
         return '';
     };
 
-    const saveActivePanelPreference = (previousPanel) => {
-        if ((previousPanel || '') === (uiRuntime.preferences.activeVttPanel || '')) return;
-        persistUIPreferences();
-    };
-
     const setActiveVTTPanel = (panel, options = {}) => {
-        const previousPanel = uiRuntime.preferences.activeVttPanel || '';
+        const stageCenter = captureVTTStageCenter();
         const nextPanel = getAllowedVTTPanel(panel);
+        const opener = resolveVTTPanelOpener(options.opener);
+        if (nextPanel && opener instanceof HTMLElement && !opener.closest('.vtt-drawer-tabs')) {
+            activeVTTPanelOpener = opener;
+        }
+        if (!nextPanel) activeVTTPanelOpener = null;
         uiRuntime.preferences.activeVttPanel = nextPanel;
-        if (nextPanel !== 'dm-tools') uiRuntime.menus.toolsOpen = false;
+        uiRuntime.menus.toolsOpen = false;
         if (nextPanel !== 'player-rolls') uiRuntime.playerRoll.menuOpen = false;
         if (nextPanel === 'player-rolls') uiRuntime.playerRoll.menuOpen = true;
-        if (nextPanel === 'dm-tools') uiRuntime.menus.toolsOpen = true;
-        saveActivePanelPreference(previousPanel);
         applyUIPreferences();
         renderToolsMenu();
         renderPlayerRollMenu();
+        restoreVTTStageCenterAfterLayout(stageCenter);
         if (options.focus === false || !nextPanel) return;
         window.requestAnimationFrame(() => {
             const focusTarget = nextPanel === 'combat'
@@ -1018,18 +1082,22 @@
         });
     };
 
-    const closeActiveVTTPanel = () => {
-        const clearedTransient = clearTransientDrawerState();
+    const closeActiveVTTPanel = (options = {}) => {
         const cancelledAskRollPick = cancelAskRollPickMode();
-        if (!uiRuntime.preferences.activeVttPanel && !uiRuntime.menus.toolsOpen && !clearedTransient && !cancelledAskRollPick) return false;
-        const previousPanel = uiRuntime.preferences.activeVttPanel || '';
+        if (!uiRuntime.preferences.activeVttPanel && !uiRuntime.menus.toolsOpen && !cancelledAskRollPick) return false;
+        const stageCenter = captureVTTStageCenter();
         uiRuntime.preferences.activeVttPanel = '';
         uiRuntime.menus.toolsOpen = false;
         uiRuntime.playerRoll.menuOpen = false;
-        saveActivePanelPreference(previousPanel);
         applyUIPreferences();
         renderToolsMenu();
         renderPlayerRollMenu();
+        restoreVTTStageCenterAfterLayout(stageCenter);
+        const returnTarget = activeVTTPanelOpener;
+        activeVTTPanelOpener = null;
+        if (options.restoreFocus !== false && returnTarget && returnTarget.isConnected && typeof returnTarget.focus === 'function') {
+            window.requestAnimationFrame(() => returnTarget.focus({ preventScroll: true }));
+        }
         return true;
     };
 
@@ -1336,12 +1404,6 @@
     const applyUIPreferences = () => {
         if (dom.body) {
             dom.body.dataset.topbarCollapsed = uiRuntime.preferences.topbarCollapsed ? '1' : '0';
-            dom.body.dataset.settingsCollapsed = uiRuntime.preferences.settingsCollapsed ? '1' : '0';
-            dom.body.dataset.initiativeCollapsed = uiRuntime.preferences.initiativeCollapsed ? '1' : '0';
-            dom.body.dataset.playerRollRailCollapsed = uiRuntime.preferences.playerRollRailCollapsed ? '1' : '0';
-            dom.body.dataset.scenePanelCollapsed = uiRuntime.preferences.scenePanelCollapsed ? '1' : '0';
-            dom.body.dataset.spawnPanelCollapsed = uiRuntime.preferences.spawnPanelCollapsed ? '1' : '0';
-            dom.body.dataset.inspectorPanelCollapsed = uiRuntime.preferences.inspectorPanelCollapsed ? '1' : '0';
             dom.body.dataset.gridHidden = uiRuntime.preferences.showGrid ? '0' : '1';
             dom.body.dataset.tokenNamesHidden = uiRuntime.preferences.showTokenNames ? '0' : '1';
             dom.body.dataset.activeVttPanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
@@ -1360,8 +1422,8 @@
         }
         if (dom.settingsRailTabEl) {
             dom.settingsRailTabEl.textContent = 'Close';
-            dom.settingsRailTabEl.title = 'Close drawer';
-            dom.settingsRailTabEl.setAttribute('aria-label', 'Close drawer');
+            dom.settingsRailTabEl.title = 'Close table workspace';
+            dom.settingsRailTabEl.setAttribute('aria-label', 'Close table workspace');
             dom.settingsRailTabEl.removeAttribute('aria-pressed');
         }
         if (dom.playerRollRailTabEl) {
@@ -1371,9 +1433,9 @@
             dom.playerRollRailTabEl.removeAttribute('aria-pressed');
         }
         if (dom.initiativeRailTabEl) {
-            dom.initiativeRailTabEl.textContent = 'Close';
-            dom.initiativeRailTabEl.title = 'Close combat drawer';
-            dom.initiativeRailTabEl.setAttribute('aria-label', 'Close combat drawer');
+            dom.initiativeRailTabEl.textContent = 'Collapse';
+            dom.initiativeRailTabEl.title = 'Collapse combat panel';
+            dom.initiativeRailTabEl.setAttribute('aria-label', 'Collapse combat panel');
             dom.initiativeRailTabEl.removeAttribute('aria-pressed');
         }
         if (dom.tokenNamesToggleEl) {
@@ -1385,13 +1447,22 @@
             dom.gridToggleEl.setAttribute('aria-pressed', uiRuntime.preferences.showGrid ? 'true' : 'false');
         }
         const activePanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
+        document.querySelectorAll('[data-action="open-vtt-panel"][data-panel]').forEach((buttonEl) => {
+            const isActive = String(buttonEl.dataset.panel || '').trim() === activePanel;
+            buttonEl.setAttribute('aria-expanded', isActive ? 'true' : 'false');
+            if (buttonEl.closest('.vtt-drawer-tabs')) buttonEl.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
         if (dom.sidebarEl) {
             dom.sidebarEl.tabIndex = -1;
-            dom.sidebarEl.setAttribute('aria-hidden', activePanel === 'setup' || activePanel === 'spawn' || activePanel === 'inspector' ? 'false' : 'true');
+            const sidebarOpen = activePanel === 'setup' || activePanel === 'spawn' || activePanel === 'inspector';
+            dom.sidebarEl.inert = !sidebarOpen;
+            dom.sidebarEl.setAttribute('aria-hidden', sidebarOpen ? 'false' : 'true');
         }
         if (dom.playerRollPanelEl) {
             dom.playerRollPanelEl.tabIndex = -1;
-            dom.playerRollPanelEl.setAttribute('aria-hidden', activePanel === 'player-rolls' ? 'false' : 'true');
+            const playerActionsOpen = activePanel === 'player-rolls';
+            if (dom.playerRollRailEl) dom.playerRollRailEl.inert = !playerActionsOpen;
+            dom.playerRollPanelEl.setAttribute('aria-hidden', playerActionsOpen ? 'false' : 'true');
         }
         if (dom.initiativePanelEl) {
             dom.initiativePanelEl.tabIndex = -1;
@@ -1402,7 +1473,9 @@
         }
         if (dom.adminPanelEl) {
             dom.adminPanelEl.tabIndex = -1;
-            dom.adminPanelEl.setAttribute('aria-hidden', activePanel === 'admin' ? 'false' : 'true');
+            const adminOpen = activePanel === 'admin';
+            dom.adminPanelEl.inert = !adminOpen;
+            dom.adminPanelEl.setAttribute('aria-hidden', adminOpen ? 'false' : 'true');
         }
         if (dom.playerRollsButtonEl) {
             dom.playerRollsButtonEl.setAttribute('aria-expanded', activePanel === 'player-rolls' ? 'true' : 'false');
@@ -1410,38 +1483,29 @@
         renderViewMenu();
     };
 
-    const loadUIPreferences = () => {
+    const loadUIPreferences = (options = {}) => {
+        const preservedActivePanel = options.preserveActivePanel
+            ? getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel)
+            : '';
         try {
             const raw = localStorage.getItem(getUIPrefsStorageKey());
             const parsed = raw ? JSON.parse(raw) : {};
             uiRuntime.preferences = {
                 topbarCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'topbarCollapsed') ? !!parsed.topbarCollapsed : true,
-                settingsCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'settingsCollapsed') ? !!parsed.settingsCollapsed : true,
-                initiativeCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'initiativeCollapsed') ? !!parsed.initiativeCollapsed : true,
-                playerRollRailCollapsed: parsed && Object.prototype.hasOwnProperty.call(parsed, 'playerRollRailCollapsed') ? !!parsed.playerRollRailCollapsed : true,
-                scenePanelCollapsed: !!(parsed && parsed.scenePanelCollapsed),
-                spawnPanelCollapsed: !!(parsed && parsed.spawnPanelCollapsed),
-                inspectorPanelCollapsed: !!(parsed && parsed.inspectorPanelCollapsed),
                 showGrid: parsed && parsed.showGrid !== undefined ? !!parsed.showGrid : true,
                 showTokenNames: parsed && parsed.showTokenNames !== undefined ? !!parsed.showTokenNames : true,
                 sceneViewMode: parsed && parsed.sceneViewMode === C.SCENE_VIEW_LOCAL ? C.SCENE_VIEW_LOCAL : C.SCENE_VIEW_SHARED,
                 localSceneId: String(parsed && parsed.localSceneId || '').trim(),
-                activeVttPanel: getAllowedVTTPanel(parsed && parsed.activeVttPanel)
+                activeVttPanel: preservedActivePanel
             };
         } catch (err) {
             uiRuntime.preferences = {
                 topbarCollapsed: true,
-                settingsCollapsed: true,
-                initiativeCollapsed: true,
-                playerRollRailCollapsed: true,
-                scenePanelCollapsed: false,
-                spawnPanelCollapsed: false,
-                inspectorPanelCollapsed: false,
                 showGrid: true,
                 showTokenNames: true,
                 sceneViewMode: C.SCENE_VIEW_SHARED,
                 localSceneId: '',
-                activeVttPanel: ''
+                activeVttPanel: preservedActivePanel
             };
         }
         applyUIPreferences();
@@ -1449,7 +1513,8 @@
 
     const persistUIPreferences = () => {
         try {
-            localStorage.setItem(getUIPrefsStorageKey(), JSON.stringify(uiRuntime.preferences));
+            const { activeVttPanel, ...persistentPreferences } = uiRuntime.preferences;
+            localStorage.setItem(getUIPrefsStorageKey(), JSON.stringify(persistentPreferences));
         } catch (err) {
             // Ignore local-only preference persistence failures.
         }
@@ -1464,59 +1529,12 @@
         });
     };
 
-    const toggleDrawerPreference = (key, suppressDatasetKey = '') => {
-        uiRuntime.preferences[key] = !uiRuntime.preferences[key];
-        if (dom.body && suppressDatasetKey) {
-            dom.body.dataset[suppressDatasetKey] = uiRuntime.preferences[key] ? '1' : '0';
-        }
-        if (dom.body) {
-            if (key === 'settingsCollapsed') dom.body.dataset.settingsPreview = '0';
-            if (key === 'playerRollRailCollapsed') dom.body.dataset.playerRollPreview = '0';
-            if (key === 'initiativeCollapsed') dom.body.dataset.initiativePreview = '0';
-        }
-        persistUIPreferences();
-        applyUIPreferences();
-        window.requestAnimationFrame(() => {
-            applyWorldTransform();
-        });
-    };
-
-    const clearHoverSuppression = (suppressDatasetKey = '') => {
-        if (!dom.body || !suppressDatasetKey) return;
-        dom.body.dataset[suppressDatasetKey] = '0';
-    };
-
-    const clearTransientDrawerState = () => {
-        if (!dom.body) return false;
-        const keys = [
-            'settingsPreview',
-            'playerRollPreview',
-            'initiativePreview',
-            'settingsHoverSuppressed',
-            'playerRollHoverSuppressed',
-            'initiativeHoverSuppressed'
-        ];
-        let changed = false;
-        keys.forEach((key) => {
-            if (dom.body.dataset[key] === '0') return;
-            dom.body.dataset[key] = '0';
-            changed = true;
-        });
-        return changed;
-    };
-
     const cancelAskRollPickMode = () => {
         const wasActive = !!(stageState.tool.askRollPickMode || stageState.tool.pendingAskRollRequest);
         stageState.tool.askRollPickMode = false;
         stageState.tool.pendingAskRollRequest = null;
         if (wasActive && stageState.tool.current.mode === C.TOOL_MODE_PING) setToolMode(C.TOOL_MODE_NAVIGATE);
         return wasActive;
-    };
-
-    const setDrawerPreview = (previewDatasetKey = '', suppressDatasetKey = '', active = false) => {
-        if (!dom.body || !previewDatasetKey) return;
-        if (active && suppressDatasetKey && dom.body.dataset[suppressDatasetKey] === '1') return;
-        dom.body.dataset[previewDatasetKey] = active ? '1' : '0';
     };
 
     const getActiveScene = (state = sessionState.snapshot) => {
@@ -2122,6 +2140,7 @@
     };
 
     const spawnTokenFromDescriptor = (kind, id = '', worldPoint = null) => {
+        const quickSpawnState = uiRuntime.overlays.quickSpawn;
         const nextToken = buildTokenFromSpawnDescriptor(kind, id);
         if (!nextToken) return false;
         if (kind === 'npc' || kind === 'monster') closeNPCSearch({ clearQuery: true });
@@ -2145,6 +2164,12 @@
             stageState.selection.evidenceNoteId = '';
             uiRuntime.overlays.quickSpawn = null;
         });
+        if (quickSpawnState) {
+            window.requestAnimationFrame(() => {
+                const focusTarget = resolveQuickSpawnReturnFocus(quickSpawnState);
+                if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({ preventScroll: true });
+            });
+        }
         return true;
     };
 
@@ -2180,6 +2205,7 @@
     };
 
     const spawnAllPlayersAtWorldPoint = (worldPoint = null) => {
+        const quickSpawnState = uiRuntime.overlays.quickSpawn;
         const players = getPlayers().filter(Boolean);
         if (!players.length) return false;
         closeNPCSearch();
@@ -2219,6 +2245,12 @@
             stageState.selection.evidenceNoteId = '';
             uiRuntime.overlays.quickSpawn = null;
         });
+        if (quickSpawnState) {
+            window.requestAnimationFrame(() => {
+                const focusTarget = resolveQuickSpawnReturnFocus(quickSpawnState);
+                if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({ preventScroll: true });
+            });
+        }
         return true;
     };
 
@@ -2763,10 +2795,30 @@
         }
     };
 
-    const closeQuickSpawnMenu = () => {
+    const resolveQuickSpawnReturnFocus = (quickSpawnState) => {
+        const source = quickSpawnState && typeof quickSpawnState === 'object' ? quickSpawnState : {};
+        if (source.returnFocusEl instanceof HTMLElement && source.returnFocusEl.isConnected) return source.returnFocusEl;
+        const matchingLauncher = Array.from(document.querySelectorAll('[data-action]')).find((element) => (
+            element instanceof HTMLElement
+            && String(element.dataset.action || '') === String(source.returnFocusAction || '')
+            && String(element.dataset.spawnKind || '') === String(source.returnFocusSpawnKind || '')
+            && String(element.dataset.id || '') === String(source.returnFocusId || '')
+            && element.getClientRects().length > 0
+        ));
+        return matchingLauncher || dom.stageEl;
+    };
+
+    const closeQuickSpawnMenu = (options = {}) => {
         if (!uiRuntime.overlays.quickSpawn) return false;
+        const quickSpawnState = uiRuntime.overlays.quickSpawn;
         uiRuntime.overlays.quickSpawn = null;
         renderQuickSpawnMenu();
+        if (options.restoreFocus) {
+            window.requestAnimationFrame(() => {
+                const focusTarget = resolveQuickSpawnReturnFocus(quickSpawnState);
+                if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus({ preventScroll: true });
+            });
+        }
         return true;
     };
 
@@ -2858,7 +2910,7 @@
         return true;
     };
 
-    const openQuickSpawnMenu = (clientX, clientY) => {
+    const openQuickSpawnMenu = (clientX, clientY, options = {}) => {
         if (!dom.stageEl || !isDM()) return false;
         closeStageContextMenu();
         closeNPCSearch();
@@ -2867,14 +2919,25 @@
         closeTokenInspectorPopover();
         closeInitiativeDetail();
         const rect = dom.stageEl.getBoundingClientRect();
+        const returnFocusEl = options.returnFocusEl instanceof HTMLElement ? options.returnFocusEl : dom.stageEl;
         uiRuntime.overlays.quickSpawn = {
             worldPoint: screenToWorld(clientX, clientY),
             clientX: Math.round(clientX),
             clientY: Math.round(clientY),
             stageX: Math.round(clientX - rect.left),
-            stageY: Math.round(clientY - rect.top)
+            stageY: Math.round(clientY - rect.top),
+            returnFocusEl,
+            returnFocusAction: String(returnFocusEl && returnFocusEl.dataset.action || ''),
+            returnFocusSpawnKind: String(returnFocusEl && returnFocusEl.dataset.spawnKind || ''),
+            returnFocusId: String(returnFocusEl && returnFocusEl.dataset.id || '')
         };
         renderQuickSpawnMenu();
+        if (options.focus) {
+            window.requestAnimationFrame(() => {
+                const firstAction = dom.quickSpawnMenuEl && dom.quickSpawnMenuEl.querySelector('button:not(:disabled)');
+                if (firstAction instanceof HTMLElement) firstAction.focus({ preventScroll: true });
+            });
+        }
         return true;
     };
 
@@ -2899,9 +2962,12 @@
             kind,
             id: String(id || '').trim(),
             label: getSpawnDescriptorLabel(kind, id),
+            startClientX: event.clientX,
+            startClientY: event.clientY,
             clientX: event.clientX,
             clientY: event.clientY,
-            overStage: isClientPointInsideStage(event.clientX, event.clientY)
+            moved: false,
+            overStage: false
         };
         stageState.preview.tokenId = '';
         renderSpawnGhost();
@@ -2919,6 +2985,7 @@
     };
 
     const setRolePreference = (role) => {
+        const stageCenter = captureVTTStageCenter();
         const previousRole = sessionState.role;
         sessionState.role = normalizeLocalRole(role);
         const store = getStore();
@@ -2951,10 +3018,18 @@
         clearPendingTouchContext();
         closeViewMenu();
         closeToolsMenu();
-        if (!getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel)) uiRuntime.preferences.activeVttPanel = '';
+        const allowedPanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
+        if (!allowedPanel) {
+            uiRuntime.preferences.activeVttPanel = '';
+            activeVTTPanelOpener = null;
+        }
         clearTemplatePlacementState();
         if (dom.body) dom.body.dataset.vttRole = sessionState.role;
         render();
+        if (allowedPanel && (!activeVTTPanelOpener || activeVTTPanelOpener.getClientRects().length === 0)) {
+            activeVTTPanelOpener = findVisibleVTTPanelLauncher(allowedPanel);
+        }
+        restoreVTTStageCenterAfterLayout(stageCenter);
         if (resources.sessionController && typeof resources.sessionController.handleRoleChanged === 'function') {
             resources.sessionController.handleRoleChanged(previousRole, sessionState.role);
         }
@@ -3179,6 +3254,10 @@
             }
             return;
         }
+        if (meta && meta.ephemeral) {
+            previewTokenPositions(changes, { settled: !!meta.settled });
+            return;
+        }
         if (meta && meta.snapshot) {
             const store = getStore();
             const nextSnapshot = store && typeof store.normalizeVTTStateSnapshot === 'function'
@@ -3188,7 +3267,6 @@
             if (sessionState.initialLoadPending) {
                 sessionState.initialLoadPending = false;
             }
-            queueRemoteTweensFromSnapshots(sessionState.snapshot, nextSnapshot);
             const synced = ensureRosterLinkedPlayerPresentationPersisted(nextSnapshot, { reason: 'roster-player-presentation-sync' });
             sessionState.snapshot = deepClone(synced.snapshot);
             sessionState.stateCaseId = targetCaseId;
@@ -3202,8 +3280,6 @@
             normalizeSelections();
             if (followedRemoteScene) render();
             else renderStage();
-            positionTokenInspectorPopover();
-            positionInitiativeDetail();
             return;
         }
         if (!sessionState.snapshot) return;
@@ -3243,9 +3319,6 @@
         const followedRemoteScene = maybeFollowRemoteActivityForDM(new Set(queuedTweens.map((tween) => tween.sceneId)), sessionState.snapshot);
         normalizeSelections();
         if (followedRemoteScene) render();
-        else renderStage();
-        positionTokenInspectorPopover();
-        positionInitiativeDetail();
     };
 
     const getVTTCollabPendingStatus = () => (
@@ -3336,15 +3409,15 @@
             const players = getPlayers();
             dom.playerSpawnListEl.innerHTML = [
                 `
-                    <button class="vtt-token-spawn" type="button" data-spawn-kind="custom">
+                    <button class="vtt-token-spawn" type="button" data-action="open-quick-spawn" data-spawn-kind="custom">
                         <span class="vtt-token-spawn-name">Custom Token</span>
-                        <span class="vtt-token-spawn-meta">Drag onto the stage</span>
+                        <span class="vtt-token-spawn-meta">Click for quick add · drag to place</span>
                     </button>
                 `,
                 ...players.map((player) => `
-                    <button class="vtt-token-spawn" type="button" data-spawn-kind="player" data-id="${escapeHtml(String(player.id || ''))}">
+                    <button class="vtt-token-spawn" type="button" data-action="spawn-player" data-spawn-kind="player" data-id="${escapeHtml(String(player.id || ''))}">
                         <span class="vtt-token-spawn-name">${escapeHtml(player.name || 'Player')}</span>
-                        <span class="vtt-token-spawn-meta">Drag onto the stage · AC ${escapeHtml(String(player.ac ?? '-'))} · PP ${escapeHtml(String(player.pp ?? '-'))}</span>
+                        <span class="vtt-token-spawn-meta">Click to add · drag to place · AC ${escapeHtml(String(player.ac ?? '-'))} · PP ${escapeHtml(String(player.pp ?? '-'))}</span>
                     </button>
                 `),
                 players.length ? '' : '<div class="vtt-empty">No players in the shared store yet.</div>'
@@ -3590,7 +3663,7 @@
 
     const renderSpawnGhost = () => {
         if (!dom.spawnGhostEl) return;
-        if (!stageState.pointer.spawnDrag || !isDM()) {
+        if (!stageState.pointer.spawnDrag || !stageState.pointer.spawnDrag.moved || !isDM()) {
             dom.spawnGhostEl.hidden = true;
             dom.spawnGhostEl.innerHTML = '';
             if (dom.body) dom.body.dataset.spawnDragging = '0';
@@ -5505,7 +5578,7 @@
         }
         if (dom.toolsMenuToggleEl) {
             dom.toolsMenuToggleEl.setAttribute('aria-expanded', uiRuntime.menus.toolsOpen ? 'true' : 'false');
-            dom.toolsMenuToggleEl.setAttribute('aria-pressed', activePanel === 'dm-tools' ? 'true' : 'false');
+            dom.toolsMenuToggleEl.setAttribute('aria-pressed', uiRuntime.menus.toolsOpen ? 'true' : 'false');
         }
     };
 
@@ -5999,6 +6072,7 @@
             && collabTransport
             && (
                 typeof collabTransport.syncSnapshot === 'function'
+                || typeof collabTransport.previewTokenPositions === 'function'
                 || typeof collabTransport.updateTokenPositions === 'function'
             );
         if (!canSyncLivePosition && requiresLiveVTTRoom()) {
@@ -6018,14 +6092,35 @@
         }
 
         if (canSyncLivePosition) {
-            if (typeof collabTransport.updateTokenPositions === 'function') {
-                Promise.resolve(collabTransport.updateTokenPositions([{
+            if (!force && typeof collabTransport.previewTokenPositions === 'function') {
+                // Keep live pointer motion off the canonical snapshot/persistence path.
+                Promise.resolve(collabTransport.previewTokenPositions([{
                     sceneId: scene.id,
                     tokenId: localToken.id,
                     x: localToken.x,
                     y: localToken.y
-                }], force ? { flushNow: true } : {})).catch((err) => {
+                }])).catch((err) => {
+                    console.warn('VTT collaboration drag preview failed', err);
+                });
+                stageState.pointer.lastDragSyncAt = now;
+                return;
+            }
+            if (typeof collabTransport.updateTokenPositions === 'function') {
+                const positionChange = {
+                    sceneId: scene.id,
+                    tokenId: localToken.id,
+                    x: localToken.x,
+                    y: localToken.y
+                };
+                Promise.resolve(collabTransport.updateTokenPositions([
+                    positionChange
+                ], force ? { flushNow: true } : {})).catch((err) => {
                     console.warn('VTT collaboration drag sync failed', err);
+                }).then(() => {
+                    if (!force || typeof collabTransport.previewTokenPositions !== 'function') return null;
+                    return collabTransport.previewTokenPositions([positionChange], { settled: true });
+                }).catch((err) => {
+                    console.warn('VTT collaboration drag settle failed', err);
                 });
                 stageState.pointer.lastDragSyncAt = now;
                 return;
@@ -6228,7 +6323,7 @@
         setAskRollPickMode,
         setRolePreference,
         stopYouTubeMusicFrame,
-        toggleDrawerPreference,
+        toggleUIPreference,
         updateMonsterRollOverrideForToken,
         withDraft,
         youtubeAudioPlayerEl: dom.youtubeAudioPlayerEl
@@ -6766,12 +6861,24 @@
             return;
         }
         if (event.key === getUIPrefsStorageKey()) {
-            loadUIPreferences();
+            loadUIPreferences({ preserveActivePanel: true });
             return;
         }
         if (event.key && event.key === getRolePrefsStorageKey()) {
+            const stageCenter = captureVTTStageCenter();
             loadRolePreference();
+            const allowedPanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
+            if (!allowedPanel) {
+                uiRuntime.preferences.activeVttPanel = '';
+                activeVTTPanelOpener = null;
+            }
+            if (!isDM()) uiRuntime.menus.toolsOpen = false;
+            if (!isPlayer()) uiRuntime.playerRoll.menuOpen = false;
             render();
+            if (allowedPanel && (!activeVTTPanelOpener || activeVTTPanelOpener.getClientRects().length === 0)) {
+                activeVTTPanelOpener = findVisibleVTTPanelLauncher(allowedPanel);
+            }
+            restoreVTTStageCenterAfterLayout(stageCenter);
             return;
         }
         if (event.key === C.SHEET_STORAGE_KEY) {
@@ -6807,7 +6914,6 @@
             clearSpawnDrag,
             clearTemplatePlacementState,
             clearTokenPortraitPreview,
-            clearTransientDrawerState,
             closeActiveVTTPanel,
             closeDMUnlockModal,
             closeInitiativeDetail,
@@ -6966,15 +7072,6 @@
             }, true);
         }
         if (dom.initiativeListEl) dom.initiativeListEl.addEventListener('contextmenu', handleInitiativeContextMenu);
-        if (dom.settingsRailTabEl) dom.settingsRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('settingsHoverSuppressed'));
-        if (dom.playerRollRailTabEl) dom.playerRollRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('playerRollHoverSuppressed'));
-        if (dom.initiativeRailTabEl) dom.initiativeRailTabEl.addEventListener('pointerleave', () => clearHoverSuppression('initiativeHoverSuppressed'));
-        if (dom.settingsRailTabEl) dom.settingsRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('settingsPreview', 'settingsHoverSuppressed', uiRuntime.preferences.settingsCollapsed));
-        if (dom.playerRollRailTabEl) dom.playerRollRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('playerRollPreview', 'playerRollHoverSuppressed', uiRuntime.preferences.playerRollRailCollapsed));
-        if (dom.initiativeRailTabEl) dom.initiativeRailTabEl.addEventListener('pointerenter', () => setDrawerPreview('initiativePreview', 'initiativeHoverSuppressed', uiRuntime.preferences.initiativeCollapsed));
-        if (dom.sidebarEl) dom.sidebarEl.addEventListener('pointerleave', () => setDrawerPreview('settingsPreview', '', false));
-        if (dom.playerRollRailEl) dom.playerRollRailEl.addEventListener('pointerleave', () => setDrawerPreview('playerRollPreview', '', false));
-        if (dom.initiativePanelEl) dom.initiativePanelEl.addEventListener('pointerleave', () => setDrawerPreview('initiativePreview', '', false));
         document.addEventListener('pointermove', handlePointerMove);
         document.addEventListener('pointerup', handlePointerUp);
         document.addEventListener('pointercancel', handlePointerUp);

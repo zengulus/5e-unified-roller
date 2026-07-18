@@ -259,18 +259,8 @@ const handleYSyncBroadcast = (room, sender, payload) => {
   sendYSyncMessage(sender, replyEncoder, room);
   sendYSyncStatus(sender, room);
 
-  if (messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2) {
-    broadcastToRoom(room, sender, {
-      type: 'broadcast',
-      event: 'y-sync',
-      payload: {
-        update: payload.update,
-        room: buildRoomMeta(room),
-        relayedBy: SERVICE_NAME
-      }
-    });
-  }
-
+  // Applied document updates are relayed by attachRoomDocObserver. Rebroadcasting
+  // the inbound packet here would deliver the same update twice.
   if (messageType === syncProtocol.messageYjsSyncStep1) {
     const requestEncoder = encoding.createEncoder();
     syncProtocol.writeSyncStep1(requestEncoder, room.doc);

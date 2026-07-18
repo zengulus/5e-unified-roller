@@ -14,7 +14,7 @@ const actionGroups = [
     {
         name: 'table',
         controllerName: 'Table',
-        expectedActionCount: 62,
+        expectedActionCount: 57,
         factory: require('../js/vtt-actions-table.js')
     },
     {
@@ -74,7 +74,7 @@ test('VTT action ownership is complete, exclusive, and rejects unknown actions',
     }));
     const allActions = instances.flatMap((group) => group.actions);
 
-    assert.equal(allActions.length, 137);
+    assert.equal(allActions.length, 132);
     instances.forEach((group) => {
         assert.equal(group.actions.length, group.expectedActionCount, `${group.name} action count`);
         assert.equal(new Set(group.actions).size, group.actions.length, `${group.name} has no duplicate entries`);

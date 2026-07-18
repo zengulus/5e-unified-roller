@@ -138,11 +138,16 @@ const createStageHarness = () => {
         clearSpawnDrag: recordClose('clear-spawn'),
         clearTemplatePlacementState: recordClose('clear-template'),
         clearTokenPortraitPreview: () => calls.push('clear-preview'),
-        clearTransientDrawerState: recordClose('clear-transient'),
-        closeActiveVTTPanel: recordClose('close-panel'),
+        closeActiveVTTPanel: () => {
+            calls.push('close-panel');
+            const wasOpen = runtime.playerRollMenuOpen;
+            runtime.playerRollMenuOpen = false;
+            return wasOpen;
+        },
         closeDMUnlockModal: recordClose('close-dm-unlock'),
         closeInitiativeDetail: recordClose('close-initiative'),
         closeNPCRollPopover: recordClose('close-npc-roll'),
+        closeNPCSearch: recordClose('close-npc-search'),
         closeNavMenu: recordClose('close-nav'),
         closeQuickSpawnMenu: recordClose('close-quick-spawn'),
         closeSheetActionPopover: recordClose('close-sheet'),
@@ -246,7 +251,7 @@ test('VTT stage input wiring supplies every API, DOM, config, and runtime field'
     };
     assert.deepEqual(
         { api: required.api.size, dom: required.dom.size, config: required.config.size },
-        { api: 82, dom: 4, config: 17 }
+        { api: 81, dom: 4, config: 17 }
     );
 
     const createMatch = controllerSource.match(
@@ -365,7 +370,7 @@ test('VTT stage context selection opens the token menu before dependent renders'
     ]);
 });
 
-test('VTT Escape closes transient input state and clears portrait preview', () => {
+test('VTT Escape closes only the topmost transient layer', () => {
     const harness = createStageHarness();
     harness.runtime.playerRollMenuOpen = true;
     harness.runtime.previewTokenId = 'preview_token';
@@ -380,24 +385,37 @@ test('VTT Escape closes transient input state and clears portrait preview', () =
     });
 
     assert.equal(prevented, 1);
-    assert.equal(harness.runtime.playerRollMenuOpen, false);
+    assert.equal(harness.runtime.playerRollMenuOpen, true);
     assert.equal(harness.runtime.previewTokenId, '');
+    assert.deepEqual(harness.calls, ['render-stage']);
+
+    harness.calls.length = 0;
+    harness.input.handleDocumentKeyDown({
+        target: harness.stageEl,
+        key: 'Escape',
+        preventDefault: () => {
+            prevented += 1;
+        }
+    });
+
+    assert.equal(prevented, 2);
+    assert.equal(harness.runtime.playerRollMenuOpen, false);
     assert.deepEqual(harness.calls, [
-        'clear-transient',
-        'cancel-ask',
-        'close-quick-spawn',
-        'close-nav',
-        'close-view',
-        'close-tools',
         'close-context',
-        'clear-spawn',
-        'clear-template',
-        'close-panel',
-        'close-initiative',
         'close-inspector',
         'close-sheet',
         'close-npc-roll',
-        'render-stage'
+        'close-initiative',
+        'close-npc-search',
+        'close-quick-spawn',
+        'close-view',
+        'close-tools',
+        'close-nav',
+        'clear-spawn',
+        'clear-template',
+        'cancel-ask',
+        'close-panel',
+        'render'
     ]);
 });
 

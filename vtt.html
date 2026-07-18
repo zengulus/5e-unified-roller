@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260718b">
+    <link rel="stylesheet" href="css/vtt.css?v=20260718c">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
@@ -54,14 +54,27 @@
     </header>
 
     <main class="vtt-shell">
-        <aside class="vtt-sidebar" id="vtt-settings-panel">
-            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="close-vtt-panel"
-                id="vtt-settings-rail-tab"
-                aria-controls="vtt-settings-panel" aria-label="Close drawer">Close</button>
+        <aside class="vtt-sidebar vtt-drawer" id="vtt-settings-panel" aria-label="Table workspace">
+            <header class="vtt-drawer-bar">
+                <div class="vtt-drawer-heading">
+                    <span>Table workspace</span>
+                    <strong>Scene tools</strong>
+                </div>
+                <nav class="vtt-drawer-tabs" aria-label="Scene tool panels">
+                    <button type="button" data-action="open-vtt-panel" data-panel="setup"
+                        aria-controls="vtt-scene-panel">Scene</button>
+                    <button type="button" data-action="open-vtt-panel" data-panel="spawn"
+                        aria-controls="vtt-spawn-panel">Add</button>
+                    <button type="button" data-action="open-vtt-panel" data-panel="inspector"
+                        aria-controls="vtt-inspector-panel">Inspect</button>
+                </nav>
+                <button class="vtt-drawer-close" type="button" data-action="close-vtt-panel"
+                    id="vtt-settings-rail-tab" aria-controls="vtt-settings-panel" aria-label="Close table workspace">Close</button>
+            </header>
             <div class="vtt-sidebar-scroll">
                 <section class="vtt-panel" data-dm-only="1" id="vtt-scene-panel">
                     <div class="vtt-panel-head">
-                        <h2>Scene</h2>
+                        <h2>Scene setup</h2>
                         <div class="vtt-panel-head-actions">
                             <span class="vtt-panel-pill" id="vtt-scene-panel-scene-label">Scene 1</span>
                             <button class="vtt-chip-btn" data-action="create-scene">New Scene</button>
@@ -151,7 +164,7 @@
 
                 <section class="vtt-panel" data-dm-only="1" id="vtt-spawn-panel">
                     <div class="vtt-panel-head">
-                        <h2>Spawn</h2>
+                        <h2>Add to scene</h2>
                         <div class="vtt-panel-head-actions">
                             <button class="vtt-chip-btn" data-action="open-quick-spawn">Quick Spawn</button>
                             <div class="vtt-popover-anchor">
@@ -182,13 +195,20 @@
             </div>
         </aside>
 
-        <aside class="vtt-player-roll-rail vtt-player-focus-rail" id="vtt-player-roll-rail" data-player-only="1">
-            <button class="vtt-side-rail-tab vtt-side-rail-tab-left" type="button" data-action="close-vtt-panel"
-                id="vtt-player-roll-rail-tab"
-                aria-controls="vtt-player-roll-panel" aria-label="Close player controls">Close</button>
+        <aside class="vtt-player-roll-rail vtt-player-focus-rail vtt-drawer" id="vtt-player-roll-rail" data-player-only="1"
+            aria-label="Player actions">
+            <header class="vtt-drawer-bar">
+                <div class="vtt-drawer-heading">
+                    <span>Player</span>
+                    <strong>Actions</strong>
+                </div>
+                <button class="vtt-drawer-close" type="button" data-action="close-vtt-panel"
+                    id="vtt-player-roll-rail-tab" aria-controls="vtt-player-roll-panel"
+                    aria-label="Close player actions">Close</button>
+            </header>
             <section class="vtt-panel vtt-player-roll-panel vtt-player-focus-panel" id="vtt-player-roll-panel">
                 <div class="vtt-panel-head">
-                    <h2>Player Actions</h2>
+                    <h2>Roll and act</h2>
                 </div>
                 <div class="vtt-player-roll-menu" id="vtt-player-roll-menu">
                 </div>
@@ -208,6 +228,9 @@
                             <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
                                 data-panel="player-rolls" id="vtt-player-rolls-btn"
                                 aria-controls="vtt-player-roll-panel" aria-expanded="false">Actions</button>
+                            <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                data-panel="combat" id="vtt-player-combat-btn"
+                                aria-controls="vtt-initiative-panel" aria-expanded="false">Combat</button>
                             <button class="vtt-dock-btn" type="button" data-action="set-ping-mode"
                                 data-ping-variant="attention" id="vtt-player-ping-btn" aria-pressed="false">Ping</button>
                             <button class="vtt-dock-btn" type="button" data-action="toggle-ruler-mode"
@@ -235,15 +258,21 @@
                                     id="vtt-ruler-toggle" aria-pressed="false" title="Measure distance">Measure</button>
                             </div>
                             <div class="vtt-dock-group" role="group" aria-label="Drawing and visibility">
-                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
-                                    data-panel="dm-tools" id="vtt-tools-menu-toggle"
+                                <button class="vtt-dock-btn" type="button" data-action="toggle-tools-menu"
+                                    id="vtt-tools-menu-toggle"
                                     aria-controls="vtt-tools-menu" aria-expanded="false" title="Templates and pins">Draw</button>
                                 <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
                                     data-tool-mode="fog" id="vtt-tool-mode-fog" aria-pressed="false" title="Paint fog">Fog</button>
                             </div>
-                            <div class="vtt-dock-group" role="group" aria-label="Content">
-                                <button class="vtt-dock-btn strong" type="button" data-action="open-quick-spawn"
-                                    title="Spawn tokens and notes">Spawn</button>
+                            <div class="vtt-dock-group" role="group" aria-label="Table panels">
+                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                    data-panel="setup" aria-controls="vtt-settings-panel" title="Manage scenes and maps">Scene</button>
+                                <button class="vtt-dock-btn strong" type="button" data-action="open-vtt-panel"
+                                    data-panel="spawn" aria-controls="vtt-settings-panel" title="Add tokens and notes">Add</button>
+                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                    data-panel="inspector" aria-controls="vtt-settings-panel" title="Inspect the selection">Inspect</button>
+                                <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
+                                    data-panel="combat" aria-controls="vtt-initiative-panel" title="Open clocks and initiative">Combat</button>
                                 <button class="vtt-dock-btn" type="button" data-action="toggle-view-menu"
                                     data-vtt-master-menu-toggle aria-controls="vtt-view-menu" aria-expanded="false">Menu</button>
                             </div>
@@ -277,12 +306,12 @@
                     </section>
                     <div class="vtt-popover vtt-view-menu vtt-master-menu" id="vtt-view-menu" hidden>
                         <div class="vtt-menu-section">
-                            <div class="vtt-menu-title">Table</div>
+                            <div class="vtt-menu-title">Table panels</div>
                             <div class="vtt-menu-list">
                                 <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="combat"
-                                    aria-controls="vtt-initiative-panel">Combat Drawer</button>
+                                    aria-controls="vtt-initiative-panel">Combat</button>
                                 <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="inspector" data-vtt-menu-dm-only="1"
-                                    aria-controls="vtt-settings-panel">Inspector Drawer</button>
+                                    aria-controls="vtt-settings-panel">Inspector</button>
                                 <button class="vtt-chip-btn" data-action="toggle-token-names" id="vtt-token-names-toggle"
                                     aria-pressed="true">Token Names: On</button>
                                 <button class="vtt-chip-btn" data-action="toggle-grid" id="vtt-grid-toggle"
@@ -299,14 +328,14 @@
                             </div>
                         </div>
                         <div class="vtt-menu-section" data-vtt-menu-dm-only="1">
-                            <div class="vtt-menu-title">DM Drawers</div>
+                            <div class="vtt-menu-title">DM workspace</div>
                             <div class="vtt-menu-list">
                                 <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="setup"
-                                    aria-controls="vtt-settings-panel">Setup Drawer</button>
+                                    aria-controls="vtt-settings-panel">Scene setup</button>
                                 <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="spawn"
-                                    aria-controls="vtt-settings-panel">Spawn Drawer</button>
+                                    aria-controls="vtt-settings-panel">Add to scene</button>
                                 <button class="vtt-chip-btn" data-action="open-vtt-panel" data-panel="admin"
-                                    aria-controls="vtt-admin-panel">Admin Drawer</button>
+                                    aria-controls="vtt-admin-panel">Diagnostics</button>
                             </div>
                         </div>
                         <div class="vtt-menu-section">
@@ -345,10 +374,16 @@
             </div>
         </section>
 
-        <aside class="vtt-initiative-panel" id="vtt-initiative-panel">
-            <button class="vtt-side-rail-tab vtt-side-rail-tab-right" type="button" data-action="close-vtt-panel"
-                id="vtt-initiative-rail-tab"
-                aria-controls="vtt-initiative-panel" aria-label="Close combat drawer">Close</button>
+        <aside class="vtt-initiative-panel vtt-drawer" id="vtt-initiative-panel" aria-label="Combat">
+            <header class="vtt-drawer-bar vtt-combat-drawer-bar">
+                <div class="vtt-drawer-heading">
+                    <span>Table panel</span>
+                    <strong>Combat</strong>
+                </div>
+                <button class="vtt-drawer-close" type="button" data-action="close-vtt-panel"
+                    id="vtt-initiative-rail-tab" aria-controls="vtt-initiative-panel"
+                    aria-label="Collapse combat panel">Collapse</button>
+            </header>
             <div class="vtt-initiative-scroll">
                 <section class="vtt-panel" id="vtt-clock-panel">
                     <div class="vtt-panel-head">
@@ -384,12 +419,18 @@
             <div class="vtt-popover vtt-initiative-popover" id="vtt-initiative-detail-panel" hidden></div>
         </aside>
 
-        <aside class="vtt-admin-panel" id="vtt-admin-panel" data-dm-only="1" aria-label="VTT admin drawer">
-            <button class="vtt-side-rail-tab vtt-side-rail-tab-right" type="button" data-action="close-vtt-panel"
-                aria-controls="vtt-admin-panel" aria-label="Close admin drawer">Close</button>
+        <aside class="vtt-admin-panel vtt-drawer" id="vtt-admin-panel" data-dm-only="1" aria-label="VTT diagnostics">
+            <header class="vtt-drawer-bar">
+                <div class="vtt-drawer-heading">
+                    <span>System</span>
+                    <strong>Diagnostics</strong>
+                </div>
+                <button class="vtt-drawer-close" type="button" data-action="close-vtt-panel"
+                    aria-controls="vtt-admin-panel" aria-label="Close diagnostics">Close</button>
+            </header>
             <section class="vtt-panel">
                 <div class="vtt-panel-head">
-                    <h2>Admin</h2>
+                    <h2>Recovery tools</h2>
                 </div>
                 <div class="vtt-menu-section">
                     <div class="vtt-menu-title">Table Appearance</div>
@@ -432,7 +473,7 @@
     <script src="js/vector-field.js?v=20260224g"></script>
     <script src="js/dice.js?v=20260710a"></script>
     <script>
-        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260718b')
+        window.RTF_VTT_COLLAB_READY = import('./js/vtt-collab.js?v=20260718c')
             .then(() => window.RTF_VTT_COLLAB || null)
             .catch((err) => {
                 console.warn('VTT collaboration module failed to load', err);
@@ -480,7 +521,7 @@
         </form>
     </div>
     <script src="js/vtt-config.js?v=20260718a"></script>
-    <script src="js/vtt-runtime-state.js?v=20260718a"></script>
+    <script src="js/vtt-runtime-state.js?v=20260718c"></script>
     <script src="js/vtt-dom.js?v=20260718a"></script>
     <script src="js/vtt-inspector-markup.js?v=20260718a"></script>
     <script src="js/vtt-geometry.js?v=20260718a"></script>
@@ -488,14 +529,14 @@
     <script src="js/vtt-rolls.js?v=20260714b"></script>
     <script src="js/vtt-proximity.js?v=20260714b"></script>
     <script src="js/vtt-markup.js?v=20260718a"></script>
-    <script src="js/vtt-stage-view.js?v=20260718b"></script>
-    <script src="js/vtt-stage-input.js?v=20260718b"></script>
+    <script src="js/vtt-stage-view.js?v=20260718c"></script>
+    <script src="js/vtt-stage-input.js?v=20260718c"></script>
     <script src="js/vtt-field-router.js?v=20260714b"></script>
-    <script src="js/vtt-actions-rolls.js?v=20260714b"></script>
-    <script src="js/vtt-actions-table.js?v=20260718a"></script>
-    <script src="js/vtt-actions-scenes.js?v=20260714b"></script>
+    <script src="js/vtt-actions-rolls.js?v=20260718c"></script>
+    <script src="js/vtt-actions-table.js?v=20260718c"></script>
+    <script src="js/vtt-actions-scenes.js?v=20260718c"></script>
     <script src="js/vtt-actions-selection.js?v=20260718a"></script>
-    <script src="js/vtt.js?v=20260718b"></script>
+    <script src="js/vtt.js?v=20260718c"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

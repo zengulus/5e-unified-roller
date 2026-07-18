@@ -15,6 +15,7 @@ const SYNC_RECONCILE_INTERVAL_MS = 15000;
 const LIVE_SYNC_CONFIRM_WINDOW_MS = 45000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
+const TOKEN_POSITION_PREVIEW_EVENT = 'vtt-token-position-preview';
 const VTT_ADMIN_EVENT_APPLY_SNAPSHOT = 'vtt-admin-apply-snapshot';
 const VTT_ADMIN_EVENT_BUST = 'vtt-admin-bust';
 const DEFAULT_VTT_CELL_PX = 70;
@@ -1651,6 +1652,7 @@ class VTTCollabSession {
         this.originBootstrap = { kind: 'vtt-collab-bootstrap' };
         this.originLocalSnapshot = { kind: 'vtt-collab-local-snapshot' };
         this.originPosition = { kind: 'vtt-collab-local-position' };
+        this.originPositionPreview = { kind: 'vtt-collab-position-preview' };
         this.originRemoteSync = { kind: 'vtt-collab-remote-sync' };
         this.originRemoteRestore = { kind: 'vtt-collab-remote-restore' };
         this.originManualFlush = { kind: 'vtt-collab-manual-flush' };
@@ -2033,6 +2035,10 @@ class VTTCollabSession {
             if (channel !== this.channel) return;
             this.handleSyncRequestMessage(payload);
         });
+        channel.on('broadcast', { event: TOKEN_POSITION_PREVIEW_EVENT }, ({ payload }) => {
+            if (channel !== this.channel) return;
+            this.handleTokenPositionPreviewMessage(payload);
+        });
         channel.on('broadcast', { event: VTT_ADMIN_EVENT_APPLY_SNAPSHOT }, ({ payload }) => {
             if (channel !== this.channel) return;
             this.handleAdminSnapshotMessage(payload);
@@ -2323,6 +2329,23 @@ class VTTCollabSession {
         const requestedBy = toTrimmedString(payload.requestedBy, '', 120).trim();
         if (requestedBy && requestedBy === this.instanceId) return;
         this.sendSyncStep1();
+    }
+
+    handleTokenPositionPreviewMessage(payload) {
+        if (this.destroyed || !payload || typeof payload !== 'object') return;
+        const sentBy = toTrimmedString(payload.sentBy, '', 120).trim();
+        if (sentBy && sentBy === this.instanceId) return;
+        const changes = (Array.isArray(payload.changes) ? payload.changes : [])
+            .map(sanitizePositionChange)
+            .filter(Boolean);
+        if (!changes.length || typeof this.options.applyPositionChanges !== 'function') return;
+        const meta = {
+            origin: this.originPositionPreview,
+            ephemeral: true,
+            sentAt: Math.max(0, toNonNegativeInt(payload.sentAt, 0))
+        };
+        if (payload.settled) meta.settled = true;
+        this.options.applyPositionChanges(changes, meta);
     }
 
     handleAdminSnapshotMessage(payload) {
@@ -2912,6 +2935,23 @@ class VTTCollabSession {
         };
     }
 
+    previewTokenPositions(changes, options = {}) {
+        // Drag samples are intentionally ephemeral; the final drop is the only Y.Doc mutation.
+        const cleanChanges = (Array.isArray(changes) ? changes : []).map(sanitizePositionChange).filter(Boolean);
+        if (!cleanChanges.length) return Promise.resolve({ ok: true, reason: 'unchanged' });
+        if (!this.connected) return Promise.resolve({ ok: false, reason: 'disconnected' });
+        const settled = !!(options && options.settled);
+        return this.sendBroadcast(TOKEN_POSITION_PREVIEW_EVENT, {
+            changes: cleanChanges,
+            sentBy: this.instanceId,
+            sentAt: Date.now(),
+            ...(settled ? { settled: true } : {})
+        }).then((sent) => ({
+            ok: !!sent,
+            reason: sent ? 'preview-sent' : 'send-failed'
+        }));
+    }
+
     updateTokenPositions(changes, options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
         const cleanChanges = (Array.isArray(changes) ? changes : []).map(sanitizePositionChange).filter(Boolean);
@@ -2934,7 +2974,6 @@ class VTTCollabSession {
             this.scheduleCloudFlush({ forceCompatibilityMirror: true });
             this.requestPeerReconcile('token-drop');
         } else {
-            this.requestPeerReconcile('token-position');
             this.scheduleCloudFlush();
         }
         return Promise.resolve({ ok: true, changes: applied });

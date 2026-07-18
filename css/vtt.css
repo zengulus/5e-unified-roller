@@ -436,7 +436,8 @@ body[data-vtt-role="dm"][data-topbar-collapsed="0"] .vtt-audio-player {
     top: var(--vtt-overlay-top);
     z-index: 34;
     display: grid;
-    gap: 1rem;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0.65rem;
     --vtt-rail-width: min(360px, calc(100vw - 2rem));
     width: var(--vtt-rail-width);
     max-height: calc(100vh - var(--vtt-overlay-top) - 0.75rem);
@@ -446,10 +447,7 @@ body[data-vtt-role="dm"][data-topbar-collapsed="0"] .vtt-audio-player {
 .vtt-sidebar {
     left: 1rem;
     align-content: start;
-    overflow-y: auto;
-    overflow-x: hidden;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
+    overflow: visible;
 }
 
 .vtt-player-roll-rail {
@@ -465,12 +463,12 @@ body[data-vtt-role="dm"][data-topbar-collapsed="0"] .vtt-audio-player {
     transition: width 160ms ease, max-height 160ms ease;
 }
 
-.vtt-initiative-panel > .vtt-side-rail-tab {
+.vtt-drawer-bar.vtt-combat-drawer-bar {
     display: none;
 }
 
 .vtt-admin-panel {
-    right: 1rem;
+    left: 1rem;
 }
 
 .vtt-sidebar-scroll,
@@ -478,6 +476,101 @@ body[data-vtt-role="dm"][data-topbar-collapsed="0"] .vtt-audio-player {
     display: grid;
     gap: 1rem;
     min-width: 0;
+}
+
+.vtt-sidebar-scroll,
+.vtt-player-roll-rail > .vtt-panel,
+.vtt-initiative-scroll,
+.vtt-admin-panel > .vtt-panel {
+    min-height: 0;
+    max-height: calc(100vh - var(--vtt-overlay-top) - 4.5rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.vtt-drawer-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    padding: 0.55rem;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.8rem;
+    background: rgba(7, 11, 19, 0.96);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(14px);
+}
+
+.vtt-drawer-heading {
+    display: grid;
+    gap: 0.08rem;
+    min-width: 6.3rem;
+}
+
+.vtt-drawer-heading span {
+    color: rgba(221, 230, 241, 0.58);
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.vtt-drawer-heading strong {
+    overflow: hidden;
+    color: rgba(248, 252, 255, 0.98);
+    font-size: 0.86rem;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vtt-drawer-tabs {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.24rem;
+    min-width: 0;
+    padding: 0.2rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.65rem;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.vtt-drawer-tabs button,
+.vtt-drawer-close {
+    min-height: 2rem;
+    padding: 0.34rem 0.52rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.52rem;
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(239, 246, 255, 0.88);
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.vtt-drawer-tabs button {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.vtt-drawer-tabs button:hover,
+.vtt-drawer-tabs button:focus-visible,
+.vtt-drawer-tabs button[aria-pressed="true"],
+.vtt-drawer-close:hover,
+.vtt-drawer-close:focus-visible {
+    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.54);
+    background: rgba(var(--accent-rgb, 78, 205, 196), 0.16);
+    color: #fff;
+    outline: none;
+}
+
+.vtt-drawer-close {
+    flex: 0 0 auto;
 }
 
 body:not([data-active-vtt-panel="combat"]) .vtt-initiative-panel {
@@ -760,8 +853,8 @@ body[data-active-vtt-panel="combat"] .vtt-initiative-panel {
     max-height: calc(100vh - var(--vtt-overlay-top) - 0.75rem);
 }
 
-body[data-active-vtt-panel="combat"] .vtt-initiative-panel > .vtt-side-rail-tab {
-    display: inline-flex;
+body[data-active-vtt-panel="combat"] .vtt-combat-drawer-bar {
+    display: flex;
 }
 
 body[data-active-vtt-panel="setup"] #vtt-spawn-panel,
@@ -838,18 +931,6 @@ body[data-active-vtt-panel="combat"] .vtt-initiative-compact-actions {
 
 .vtt-panel-body {
     min-width: 0;
-}
-
-body[data-scene-panel-collapsed="1"] #vtt-scene-panel .vtt-panel-body,
-body[data-spawn-panel-collapsed="1"] #vtt-spawn-panel .vtt-panel-body,
-body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-body {
-    display: none;
-}
-
-body[data-scene-panel-collapsed="1"] #vtt-scene-panel .vtt-panel-head,
-body[data-spawn-panel-collapsed="1"] #vtt-spawn-panel .vtt-panel-head,
-body[data-inspector-panel-collapsed="1"] #vtt-inspector-panel .vtt-panel-head {
-    margin-bottom: 0;
 }
 
 .vtt-panel-head-actions .vtt-panel-pill {
@@ -2606,6 +2687,13 @@ body:not([data-vtt-role="dm"]) .vtt-map-note.is-selected .vtt-map-note-meta {
 }
 
 .vtt-token.is-dragging {
+    cursor: grabbing;
+    transition: none;
+    will-change: transform;
+}
+
+.vtt-token.is-remote-drag-preview {
+    transition: transform 120ms linear;
     will-change: transform;
 }
 
@@ -4256,48 +4344,6 @@ body[data-vtt-role="spectator"] [data-player-only="1"] {
     display: none;
 }
 
-.vtt-side-rail-tab {
-    position: absolute;
-    top: -2.55rem;
-    z-index: 3;
-    display: inline-grid;
-    place-items: center;
-    min-width: 3.6rem;
-    height: 2.15rem;
-    min-height: 0;
-    padding: 0 0.7rem;
-    border: 1px solid rgba(var(--accent-rgb, 78, 205, 196), 0.34);
-    background:
-        linear-gradient(180deg, rgba(var(--accent-rgb, 78, 205, 196), 0.2), rgba(255, 255, 255, 0.045)),
-        rgba(7, 11, 19, 0.94);
-    color: rgba(244, 249, 255, 0.94);
-    font: inherit;
-    font-size: 0.76rem;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    line-height: 1;
-    cursor: pointer;
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
-}
-
-.vtt-side-rail-tab-left {
-    left: 0;
-    border-radius: 0.7rem;
-}
-
-.vtt-side-rail-tab-right {
-    right: 0;
-    border-radius: 0.7rem;
-}
-
-.vtt-side-rail-tab:hover,
-.vtt-side-rail-tab:focus-visible {
-    border-color: rgba(var(--accent-rgb, 78, 205, 196), 0.58);
-    background:
-        linear-gradient(180deg, rgba(var(--accent-rgb, 78, 205, 196), 0.28), rgba(255, 255, 255, 0.06)),
-        rgba(10, 18, 30, 0.98);
-}
-
 .vtt-player-roll-menu {
     display: grid;
     gap: 0.75rem;
@@ -4677,42 +4723,20 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         white-space: normal;
     }
 
-    /* Drawers are a focused desktop state: expose a real close handle and remove obscured dock controls. */
-    .vtt-sidebar > .vtt-side-rail-tab,
-    .vtt-player-roll-rail > .vtt-side-rail-tab,
-    .vtt-initiative-panel > .vtt-side-rail-tab,
-    .vtt-admin-panel > .vtt-side-rail-tab {
-        top: 0.65rem;
+    .vtt-stage-panel {
+        transition: margin 160ms ease;
     }
 
-    .vtt-sidebar > .vtt-side-rail-tab-left,
-    .vtt-player-roll-rail > .vtt-side-rail-tab-left {
-        left: 100%;
-        border-left: 0;
-        border-radius: 0 0.7rem 0.7rem 0;
+    body[data-active-vtt-panel="setup"] .vtt-stage-panel,
+    body[data-active-vtt-panel="spawn"] .vtt-stage-panel,
+    body[data-active-vtt-panel="inspector"] .vtt-stage-panel,
+    body[data-active-vtt-panel="player-rolls"] .vtt-stage-panel,
+    body[data-active-vtt-panel="admin"] .vtt-stage-panel {
+        margin-left: clamp(414px, calc(32vw + 2rem), 462px);
     }
 
-    .vtt-initiative-panel > .vtt-side-rail-tab-right,
-    .vtt-admin-panel > .vtt-side-rail-tab-right {
-        right: 100%;
-        border-right: 0;
-        border-radius: 0.7rem 0 0 0.7rem;
-    }
-
-    .vtt-table-hud {
-        transition: opacity 140ms ease, transform 140ms ease;
-    }
-
-    body[data-active-vtt-panel="setup"] .vtt-table-hud,
-    body[data-active-vtt-panel="spawn"] .vtt-table-hud,
-    body[data-active-vtt-panel="inspector"] .vtt-table-hud,
-    body[data-active-vtt-panel="player-rolls"] .vtt-table-hud {
-        left: clamp(414px, calc(32vw + 2rem), 462px);
-    }
-
-    body[data-active-vtt-panel="combat"] .vtt-table-hud,
-    body[data-active-vtt-panel="admin"] .vtt-table-hud {
-        right: clamp(414px, calc(32vw + 2rem), 462px);
+    body[data-active-vtt-panel="combat"] .vtt-stage-panel {
+        margin-right: clamp(414px, calc(32vw + 2rem), 462px);
     }
 
     .vtt-sidebar,
@@ -4739,9 +4763,13 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         left: 0.5rem;
     }
 
-    .vtt-initiative-panel,
-    .vtt-admin-panel {
+    .vtt-initiative-panel {
         right: 0.5rem;
+    }
+
+    .vtt-admin-panel {
+        left: 0.5rem;
+        right: auto;
     }
 
     body[data-active-vtt-panel="setup"] .vtt-sidebar,
@@ -4770,15 +4798,6 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
         box-sizing: border-box;
         width: var(--vtt-rail-width);
         transition: transform 160ms ease, max-height 160ms ease;
-    }
-
-    body[data-settings-collapsed="0"] .vtt-sidebar > .vtt-sidebar-scroll,
-    body[data-player-roll-rail-collapsed="0"] .vtt-player-roll-rail > .vtt-panel,
-    body[data-initiative-collapsed="0"] .vtt-initiative-panel > .vtt-initiative-scroll,
-    body[data-settings-preview="1"] .vtt-sidebar > .vtt-sidebar-scroll,
-    body[data-player-roll-preview="1"] .vtt-player-roll-rail > .vtt-panel,
-    body[data-initiative-preview="1"] .vtt-initiative-panel > .vtt-initiative-scroll {
-        transform: translateX(0);
     }
 
     .vtt-sidebar > .vtt-sidebar-scroll,
@@ -4845,6 +4864,39 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
 
     .vtt-stage {
         border-radius: 0.9rem;
+    }
+}
+
+@media (min-width: 861px) and (max-width: 1280px) and (hover: hover) and (pointer: fine) {
+    body[data-active-vtt-panel="setup"] .vtt-command-dock,
+    body[data-active-vtt-panel="spawn"] .vtt-command-dock,
+    body[data-active-vtt-panel="inspector"] .vtt-command-dock,
+    body[data-active-vtt-panel="player-rolls"] .vtt-command-dock,
+    body[data-active-vtt-panel="combat"] .vtt-command-dock,
+    body[data-active-vtt-panel="admin"] .vtt-command-dock {
+        box-sizing: border-box;
+        grid-template-columns: minmax(0, 1fr);
+        width: 100%;
+        max-width: 100%;
+    }
+
+    body[data-active-vtt-panel="setup"] .vtt-dock-copy,
+    body[data-active-vtt-panel="spawn"] .vtt-dock-copy,
+    body[data-active-vtt-panel="inspector"] .vtt-dock-copy,
+    body[data-active-vtt-panel="player-rolls"] .vtt-dock-status,
+    body[data-active-vtt-panel="combat"] .vtt-dock-copy,
+    body[data-active-vtt-panel="combat"] .vtt-dock-status,
+    body[data-active-vtt-panel="admin"] .vtt-dock-copy {
+        display: none;
+    }
+
+    body[data-active-vtt-panel="setup"] .vtt-dock-actions,
+    body[data-active-vtt-panel="spawn"] .vtt-dock-actions,
+    body[data-active-vtt-panel="inspector"] .vtt-dock-actions,
+    body[data-active-vtt-panel="player-rolls"] .vtt-dock-actions,
+    body[data-active-vtt-panel="combat"] .vtt-dock-actions,
+    body[data-active-vtt-panel="admin"] .vtt-dock-actions {
+        justify-content: center;
     }
 }
 
@@ -4983,10 +5035,6 @@ body[data-ask-roll-pick="1"] .vtt-player-focus-result {
 
     .vtt-initiative-panel {
         right: 0.75rem;
-    }
-
-    body[data-settings-collapsed="0"] .vtt-stage-panel {
-        padding-top: 0;
     }
 
     .vtt-panel {

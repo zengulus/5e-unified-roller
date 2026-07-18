@@ -211,7 +211,10 @@
             if (action === 'add-custom-token') {
                 if (!stageEl) return;
                 const rect = stageEl.getBoundingClientRect();
-                openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2, {
+                    focus: true,
+                    returnFocusEl: actionEl
+                });
                 return;
             }
 
@@ -240,4 +243,3 @@
 
     return Object.freeze({ create });
 }));
-

@@ -192,12 +192,6 @@
             ui: {
                 preferences: {
                     topbarCollapsed: true,
-                    settingsCollapsed: true,
-                    initiativeCollapsed: true,
-                    playerRollRailCollapsed: true,
-                    scenePanelCollapsed: false,
-                    spawnPanelCollapsed: false,
-                    inspectorPanelCollapsed: false,
                     showGrid: true,
                     showTokenNames: true,
                     sceneViewMode,

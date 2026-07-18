@@ -55,13 +55,8 @@
             "toggle-clock-hidden",
             "toggle-evidence-hidden-quick",
             "toggle-grid",
-            "toggle-initiative",
-            "toggle-inspector-panel",
             "toggle-npc-search",
             "toggle-ruler-mode",
-            "toggle-scene-panel",
-            "toggle-settings",
-            "toggle-spawn-panel",
             "toggle-stealth-mode",
             "toggle-token-hidden-quick",
             "toggle-token-names",
@@ -263,7 +258,10 @@
             if (action === 'context-quick-spawn') {
                 const menuState = state.stageContextMenuState ? { ...state.stageContextMenuState } : null;
                 closeStageContextMenu();
-                if (menuState) openQuickSpawnMenu(menuState.clientX, menuState.clientY);
+                if (menuState) openQuickSpawnMenu(menuState.clientX, menuState.clientY, {
+                    focus: true,
+                    returnFocusEl: stageEl
+                });
                 render();
                 return;
             }
@@ -293,7 +291,9 @@
                 return;
             }
             if (action === 'toggle-tools-menu') {
-                setActiveVTTPanel(state.uiState.activeVttPanel === 'dm-tools' ? '' : 'dm-tools');
+                const nextOpen = !state.toolsMenuOpen;
+                if (nextOpen) setActiveVTTPanel('');
+                state.toolsMenuOpen = nextOpen;
                 state.viewMenuOpen = false;
                 renderViewMenu();
                 renderToolsMenu();
@@ -325,30 +325,11 @@
             }
             if (action === 'open-quick-spawn') {
                 if (!isDM() || !stageEl) return;
-                setActiveVTTPanel('');
                 const rect = stageEl.getBoundingClientRect();
-                openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2);
-                return;
-            }
-            if (action === 'toggle-settings') {
-                if (!isDM()) return;
-                setActiveVTTPanel(state.uiState.activeVttPanel === 'setup' ? '' : 'setup');
-                return;
-            }
-            if (action === 'toggle-initiative') {
-                setActiveVTTPanel(state.uiState.activeVttPanel === 'combat' ? '' : 'combat');
-                return;
-            }
-            if (action === 'toggle-scene-panel') {
-                toggleUIPreference('scenePanelCollapsed');
-                return;
-            }
-            if (action === 'toggle-spawn-panel') {
-                toggleUIPreference('spawnPanelCollapsed');
-                return;
-            }
-            if (action === 'toggle-inspector-panel') {
-                toggleUIPreference('inspectorPanelCollapsed');
+                openQuickSpawnMenu(rect.left + rect.width / 2, rect.top + rect.height / 2, {
+                    focus: true,
+                    returnFocusEl: actionEl
+                });
                 return;
             }
             if (action === 'close-token-inspector') {

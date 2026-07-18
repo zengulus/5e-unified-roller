@@ -26,11 +26,14 @@ const base = `http://${host}:${server.address().port}`;
 const browser = await chromium.launch({ headless: true, chromiumSandbox: false });
 
 async function withPage(name, run, contextOptions = {}) {
+    const filter = String(process.env.TEST_FILTER || '').trim().toLowerCase();
+    if (filter && !name.toLowerCase().includes(filter)) return;
     const context = await browser.newContext(contextOptions);
     await context.addInitScript(() => {
         localStorage.setItem('rtf_connect_import_bust_v1', 'connect-login-required-20260428a');
     });
     const page = await context.newPage();
+    page.setDefaultTimeout(5000);
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     try {
@@ -107,6 +110,20 @@ try {
         await page.locator('#vtt-player-rolls-btn').click();
         assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'player-rolls');
         assert.equal(await page.locator('#vtt-player-roll-panel').isVisible(), true);
+        await page.locator('#vtt-player-rolls-btn').click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'the Actions launcher should toggle its panel closed');
+        await page.locator('#vtt-player-rolls-btn').click();
+        await page.locator('#vtt-player-measure-btn').click();
+        await page.waitForTimeout(25);
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '');
+        assert.equal(await page.evaluate(() => document.activeElement?.id), 'vtt-player-measure-btn', 'outside dismissal must not steal focus from the chosen command');
+        await page.locator('#vtt-player-measure-btn').click();
+        await page.locator('#vtt-player-rolls-btn').click();
+        await page.locator('#vtt-stage').click({ position: { x: 20, y: 180 } });
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'clicking the map should close Player Actions completely');
+        await page.waitForTimeout(250);
+        assert.equal(await page.locator('#vtt-player-roll-panel').isHidden(), true);
+        await page.locator('#vtt-player-rolls-btn').click();
         await page.locator('#vtt-player-roll-rail-tab').click();
         assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '');
 
@@ -163,8 +180,147 @@ try {
         assert.equal(await page.locator('#vtt-dm-unlock-modal').isHidden(), true);
         assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
 
-        await page.locator('#vtt-dm-dock [data-action="open-quick-spawn"]').click();
+        await page.evaluate(() => {
+            localStorage.setItem('rtf_vtt_ui_case_primary', JSON.stringify({
+                activeVttPanel: 'setup',
+                scenePanelCollapsed: true,
+                spawnPanelCollapsed: true,
+                inspectorPanelCollapsed: true
+            }));
+        });
+        await page.reload();
+        assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'open panels must not persist across reloads');
+
+        await page.setViewportSize({ width: 900, height: 800 });
+        await page.locator('#vtt-dm-dock [data-panel="setup"]').click();
+        await page.waitForTimeout(250);
+        const narrowStageBox = await page.locator('#vtt-stage').boundingBox();
+        const narrowDockButtonBoxes = await page.locator('#vtt-dm-dock .vtt-dock-btn:visible').evaluateAll((buttons) => (
+            buttons.map((button) => {
+                const rect = button.getBoundingClientRect();
+                return { left: rect.left, right: rect.right };
+            })
+        ));
+        assert.equal(narrowDockButtonBoxes.length > 0, true);
+        assert.equal(narrowDockButtonBoxes.every((box) => box.left >= narrowStageBox.x - 1 && box.right <= narrowStageBox.x + narrowStageBox.width + 1), true, 'drawer reflow must keep every dock command reachable at narrow desktop widths');
+        await page.locator('#vtt-settings-rail-tab').click();
+        await page.waitForTimeout(250);
+        await page.setViewportSize({ width: 1280, height: 720 });
+
+        const closedStageWidth = (await page.locator('#vtt-stage').boundingBox()).width;
+        const readStageWorldCenter = () => page.evaluate(() => {
+            const stage = document.querySelector('#vtt-stage').getBoundingClientRect();
+            const worldTransform = new DOMMatrix(getComputedStyle(document.querySelector('#vtt-world')).transform);
+            const zoom = Math.max(0.01, Number.parseFloat(document.querySelector('#vtt-stage-zoom-reset').textContent) / 100);
+            return [(stage.width / 2 - worldTransform.m41) / zoom, (stage.height / 2 - worldTransform.m42) / zoom];
+        });
+        const closedWorldCenter = await readStageWorldCenter();
+        const scenePanelButton = page.locator('#vtt-dm-dock [data-panel="setup"]');
+        await scenePanelButton.click();
+        await page.waitForTimeout(50);
+        await scenePanelButton.click();
+        await page.waitForTimeout(300);
+        const rapidToggleWorldCenter = await readStageWorldCenter();
+        assert.ok(
+            Math.abs(rapidToggleWorldCenter[0] - closedWorldCenter[0]) <= 1
+                && Math.abs(rapidToggleWorldCenter[1] - closedWorldCenter[1]) <= 1,
+            'rapid drawer toggles should preserve the original map focal point'
+        );
+        await scenePanelButton.click();
+        await page.waitForTimeout(250);
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'setup');
+        assert.equal(await page.locator('#vtt-scene-panel-body').isVisible(), true, 'legacy collapsed preferences must not hide panel bodies');
+        assert.ok((await page.locator('#vtt-stage').boundingBox()).width < closedStageWidth, 'an open drawer should reserve usable map space');
+        const openWorldCenter = await readStageWorldCenter();
+        assert.ok(
+            Math.abs(openWorldCenter[0] - closedWorldCenter[0]) <= 1 && Math.abs(openWorldCenter[1] - closedWorldCenter[1]) <= 1,
+            `drawer reflow should preserve the map focal point (${closedWorldCenter.join(',')} -> ${openWorldCenter.join(',')})`
+        );
+        await page.locator('.vtt-drawer-tabs [data-panel="spawn"]').click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'spawn');
+        assert.equal(await page.locator('#vtt-spawn-panel').isVisible(), true);
+        assert.equal(await page.locator('.vtt-drawer-tabs [data-panel="spawn"]').getAttribute('aria-pressed'), 'true');
+        assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-panel')), 'spawn', 'switching workspace tabs should keep focus on the chosen tab');
+        await page.locator('.vtt-drawer-tabs [data-panel="inspector"]').click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'inspector');
+        await page.locator('#vtt-settings-rail-tab').click();
+        await page.waitForTimeout(25);
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '');
+        assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-panel')), 'setup', 'closing should restore its launcher focus');
+
+        await page.locator('#vtt-dm-dock [data-panel="inspector"]').click();
+        const rolePeer = await page.context().newPage();
+        try {
+            await rolePeer.goto(`${base}/vtt.html`);
+            await rolePeer.evaluate(() => window.RTF_STORE.setVTTLocalRole('player', window.RTF_STORE.getActiveCaseId()));
+            await page.waitForFunction(() => document.body.dataset.vttRole === 'player');
+            assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'a cross-tab role change must clear an incompatible local drawer');
+            await rolePeer.evaluate(() => window.RTF_STORE.setVTTLocalRole('dm', window.RTF_STORE.getActiveCaseId()));
+            await page.waitForFunction(() => document.body.dataset.vttRole === 'dm');
+            assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'restoring the role must not resurrect a transient drawer');
+        } finally {
+            await rolePeer.close();
+        }
+
+        const compactCombatOpen = page.locator('.vtt-initiative-expand');
+        assert.equal(await page.locator('.vtt-combat-drawer-bar').isHidden(), true);
+        await compactCombatOpen.click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'combat');
+        assert.equal(await page.locator('.vtt-combat-drawer-bar').isVisible(), true);
+        await page.locator('#vtt-initiative-rail-tab').click();
+        await page.waitForTimeout(25);
+        assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('vtt-initiative-expand')), true, 'collapsing Combat should return focus to its compact Open control');
+
+        const dmMenuButton = page.locator('#vtt-dm-dock [data-vtt-master-menu-toggle]');
+        await compactCombatOpen.click();
+        await dmMenuButton.click();
+        await page.locator('#vtt-view-menu [data-panel="combat"]').click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'combat', 'choosing an already-open panel from Menu should keep it open');
+        await page.locator('#vtt-initiative-rail-tab').click();
+        await page.waitForTimeout(25);
+        assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-vtt-master-menu-toggle')), true);
+
+        await dmMenuButton.click();
+        await page.getByRole('button', { name: 'Diagnostics' }).click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'admin');
+        assert.equal(await page.locator('#vtt-admin-panel').isVisible(), true);
+        await page.locator('#vtt-admin-panel .vtt-drawer-close').click();
+        await page.waitForTimeout(25);
+        assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-vtt-master-menu-toggle')), true, 'menu-launched drawers should restore focus to the visible Menu button');
+
+        await page.locator('#vtt-tools-menu-toggle').click();
+        await page.locator('#vtt-tool-size-input').fill('6');
+        assert.equal(await page.locator('#vtt-tools-menu').isVisible(), true, 'interacting with Draw controls must keep the popover open');
+        await page.locator('#vtt-stage').click({ position: { x: closedStageWidth / 2, y: 180 } });
+        assert.equal(await page.locator('#vtt-tools-menu').isHidden(), true, 'clicking the map should dismiss Draw controls');
+
+        await page.locator('#vtt-dm-dock [data-panel="spawn"]').click();
+        const customSpawnRow = page.locator('#vtt-player-spawn-list [data-spawn-kind="custom"]');
+        const tokenCountBeforeDrag = await page.locator('.vtt-token').count();
+        const customSpawnBox = await customSpawnRow.boundingBox();
+        const spawnStageBox = await page.locator('#vtt-stage').boundingBox();
+        await page.mouse.move(customSpawnBox.x + customSpawnBox.width / 2, customSpawnBox.y + customSpawnBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(spawnStageBox.x + spawnStageBox.width * 0.45, spawnStageBox.y + spawnStageBox.height * 0.4, { steps: 4 });
+        await page.mouse.up();
+        assert.equal(await page.locator('.vtt-token').count(), tokenCountBeforeDrag + 1, 'dragging an Add row onto the usable map should place one token');
+
+        const tokenCountBeforeAddClick = await page.locator('.vtt-token').count();
+        await customSpawnRow.click();
+        assert.equal(await page.locator('.vtt-token').count(), tokenCountBeforeAddClick, 'a click on a draggable row must not drop behind the drawer');
+        assert.equal(await page.locator('#vtt-quick-spawn-menu').isVisible(), true);
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'spawn', 'Quick Spawn should stay anchored to the open Add workspace');
+        await page.waitForTimeout(25);
+        assert.equal(await page.evaluate(() => !!document.activeElement?.closest('#vtt-quick-spawn-menu')), true, 'Quick Spawn should move keyboard focus into its actions');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(25);
+        assert.equal(await page.locator('#vtt-quick-spawn-menu').isHidden(), true);
+        assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-spawn-kind')), 'custom', 'Escape should return focus to the Quick Spawn launcher');
+        await customSpawnRow.click();
         await page.locator('#vtt-quick-spawn-menu [data-action="quick-spawn-custom"]').click();
+        await page.locator('#vtt-settings-rail-tab').click();
+        await page.waitForTimeout(250);
         const spawnedToken = page.locator('.vtt-token').first();
         const tokenBox = await spawnedToken.boundingBox();
         assert.ok(tokenBox, 'spawned token must have a drag target');
@@ -288,6 +444,7 @@ try {
             return [entry.submissionId, entry.submittedAt];
         }), ['roll_packet', 1234]);
 
+        await page.locator('#vtt-dm-dock [data-panel="combat"]').click();
         await page.getByRole('button', { name: 'Reset to Round 1' }).click();
         assert.equal(await page.locator('#vtt-round-pill').textContent(), 'Round 1');
 
@@ -323,6 +480,34 @@ try {
         ), primaryCaseId);
         assert.equal(await page.locator('#vtt-stage-title').textContent(), sourceStageTitle);
         assert.match(await page.locator('#vtt-sync-chip').getAttribute('aria-label'), /Forced VTT preflight failure/);
+
+        if (await page.locator('.vtt-combat-drawer-bar').isVisible()) {
+            await page.locator('#vtt-initiative-rail-tab').click();
+        }
+        await page.locator('#vtt-dm-dock [data-panel="combat"]').click();
+        await page.locator('#vtt-dm-dock [data-vtt-master-menu-toggle]').click();
+        await page.locator('#vtt-role-toggle').click();
+        assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'player');
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'combat');
+        await page.locator('#vtt-initiative-rail-tab').click();
+        await page.waitForTimeout(25);
+        assert.equal(await page.evaluate(() => document.activeElement?.id), 'vtt-player-combat-btn', 'role changes should remap Combat focus to the visible launcher');
+
+        await page.locator('#vtt-player-dock [data-vtt-master-menu-toggle]').click();
+        await page.locator('#vtt-role-toggle').click();
+        await page.locator('#vtt-dm-unlock-input').fill('setDMMode');
+        await page.locator('#vtt-dm-unlock-form').evaluate((form) => form.requestSubmit());
+        assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'dm');
+
+        await page.locator('#vtt-dm-dock [data-panel="inspector"]').click();
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), 'inspector');
+        await page.locator('#vtt-dm-dock [data-vtt-master-menu-toggle]').click();
+        await page.locator('#vtt-role-toggle').click();
+        await page.waitForTimeout(200);
+        assert.equal(await page.locator('body').getAttribute('data-vtt-role'), 'player');
+        assert.equal(await page.locator('body').getAttribute('data-active-vtt-panel'), '', 'role changes must not leave an invisible DM drawer active');
+        assert.equal(await page.locator('#vtt-settings-panel').isHidden(), true);
+        assert.ok((await page.locator('#vtt-stage').boundingBox()).width >= closedStageWidth - 1, 'closing a role-incompatible drawer should return the map space');
     });
 } finally {
     await browser.close();

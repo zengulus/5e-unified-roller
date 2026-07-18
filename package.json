@@ -7,8 +7,9 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "npm run test:unit && npm run test:assets && npm run test:interactions && npm run test:smoke",
+    "test": "npm run test:unit && npm run test:relay && npm run test:assets && npm run test:interactions && npm run test:smoke",
     "test:unit": "node --test test/*.test.cjs",
+    "test:relay": "node --test render-collab/test/*.test.mjs",
     "test:assets": "node scripts/check-sw-assets.mjs",
     "test:interactions": "node scripts/test-interactions.mjs",
     "test:smoke": "node scripts/smoke-static.mjs"

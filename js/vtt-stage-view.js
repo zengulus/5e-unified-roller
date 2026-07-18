@@ -872,7 +872,37 @@
         const isClientPointInsideStage = (clientX, clientY) => {
             if (!dom.stageEl) return false;
             const rect = dom.stageEl.getBoundingClientRect();
-            return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+            if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return false;
+            if (!root.document || typeof root.document.elementFromPoint !== 'function') return true;
+            const hitEl = root.document.elementFromPoint(clientX, clientY);
+            if (!(hitEl instanceof root.Element)) return true;
+            if (hitEl.closest('.vtt-drawer, .vtt-table-hud, .vtt-topbar, .vtt-popover')) return false;
+            return !!hitEl.closest('#vtt-stage');
+        };
+
+        const previewTokenPositions = (changes = [], options = {}) => {
+            const scene = getActiveScene();
+            const { tokenLayerEl } = dom;
+            if (!scene || !scene.grid || !tokenLayerEl) return 0;
+            const tokenElements = new Map(Array.from(tokenLayerEl.children)
+                .filter((tokenEl) => tokenEl instanceof root.HTMLElement && tokenEl.classList.contains('vtt-token'))
+                .map((tokenEl) => [String(tokenEl.dataset.tokenId || '').trim(), tokenEl]));
+            let applied = 0;
+            (Array.isArray(changes) ? changes : []).forEach((change) => {
+                if (!change || String(change.sceneId || '').trim() !== String(scene.id || '').trim()) return;
+                const tokenEl = tokenElements.get(String(change.tokenId || '').trim());
+                if (!(tokenEl instanceof root.HTMLElement)) return;
+                const worldLeft = toNumber(scene.grid.offsetX, 0) + normalizeTokenCoordinate(change.x, 0) * scene.grid.cellPx;
+                const worldTop = toNumber(scene.grid.offsetY, 0) + normalizeTokenCoordinate(change.y, 0) * scene.grid.cellPx;
+                tokenEl.dataset.worldLeft = String(worldLeft);
+                tokenEl.dataset.worldTop = String(worldTop);
+                tokenEl.style.left = '0px';
+                tokenEl.style.top = '0px';
+                tokenEl.style.transform = `translate3d(${scaleForZoom(worldLeft)}px, ${scaleForZoom(worldTop)}px, 0)`;
+                tokenEl.classList.toggle('is-remote-drag-preview', !options.settled);
+                applied += 1;
+            });
+            return applied;
         };
 
         const loadMapForScene = (scene) => {
@@ -1196,10 +1226,6 @@
             const scene = getActiveScene();
             const { tokenLayerEl, proximityPromptStackEl } = dom;
             if (!scene || !scene.grid || !tokenLayerEl) return;
-            if (scene.stealthMode) {
-                renderStage();
-                return;
-            }
             const tokensById = new Map((Array.isArray(scene.tokens) ? scene.tokens : [])
                 .filter(Boolean)
                 .map((token) => [String(token.id || ''), token]));
@@ -1278,7 +1304,7 @@
                     && visibleEvidenceNotes.length === 0;
                 stageEmptyEl.hidden = !isEmptyScene;
                 stageEmptyEl.textContent = state.isDM
-                    ? 'This scene is empty. Open Menu, then Setup to add a map, or use Spawn to place a token.'
+                    ? 'This scene is empty. Open Scene to add a map, or Add to place a token.'
                     : (state.localRole === 'spectator'
                         ? 'Waiting for the GM to share the scene.'
                         : 'Waiting for the GM to share a map or place a visible token.');
@@ -1339,6 +1365,7 @@
             getWorldSizeForScene,
             isClientPointInsideStage,
             markTokenVisualEffect,
+            previewTokenPositions,
             queueRemoteTokenTween,
             queueRemoteTweensFromSnapshots,
             reconcileSnapshotWithRecentLocalDragDrops,
