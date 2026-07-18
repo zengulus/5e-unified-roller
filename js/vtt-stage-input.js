@@ -462,8 +462,9 @@
             const worldTop = toNumber(scene.grid.offsetY, 0) + normalizeTokenCoordinate(token.y, 0) * cellPx;
             tokenEl.dataset.worldLeft = String(worldLeft);
             tokenEl.dataset.worldTop = String(worldTop);
-            tokenEl.style.left = `${scaleForZoom(worldLeft)}px`;
-            tokenEl.style.top = `${scaleForZoom(worldTop)}px`;
+            tokenEl.style.left = '0px';
+            tokenEl.style.top = '0px';
+            tokenEl.style.transform = `translate3d(${scaleForZoom(worldLeft)}px, ${scaleForZoom(worldTop)}px, 0)`;
             tokenEl.classList.add('is-dragging');
             return true;
         };

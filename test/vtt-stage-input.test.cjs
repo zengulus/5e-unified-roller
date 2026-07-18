@@ -480,8 +480,9 @@ test('VTT token drag previews only the dragged DOM node and force-syncs on drop'
     assert.deepEqual({ x: harness.token.x, y: harness.token.y }, { x: 3, y: 4 });
     assert.equal(tokenEl.dataset.worldLeft, '30');
     assert.equal(tokenEl.dataset.worldTop, '40');
-    assert.equal(tokenEl.style.left, '30px');
-    assert.equal(tokenEl.style.top, '40px');
+    assert.equal(tokenEl.style.left, '0px');
+    assert.equal(tokenEl.style.top, '0px');
+    assert.equal(tokenEl.style.transform, 'translate3d(30px, 40px, 0)');
     assert.equal(tokenEl.classList.contains('is-dragging'), true);
     assert.equal(harness.calls.includes('render-stage'), false, 'pointermove must avoid a full-stage render');
     assert.deepEqual(harness.calls, ['sync:false']);

@@ -6018,6 +6018,18 @@
         }
 
         if (canSyncLivePosition) {
+            if (typeof collabTransport.updateTokenPositions === 'function') {
+                Promise.resolve(collabTransport.updateTokenPositions([{
+                    sceneId: scene.id,
+                    tokenId: localToken.id,
+                    x: localToken.x,
+                    y: localToken.y
+                }], force ? { flushNow: true } : {})).catch((err) => {
+                    console.warn('VTT collaboration drag sync failed', err);
+                });
+                stageState.pointer.lastDragSyncAt = now;
+                return;
+            }
             const sessionSnapshot = typeof collabTransport.getSnapshot === 'function'
                 ? deepClone(collabTransport.getSnapshot())
                 : readSharedVTTSnapshot();
@@ -6028,16 +6040,7 @@
             const nextToken = nextScene && Array.isArray(nextScene.tokens)
                 ? nextScene.tokens.find((entry) => entry && entry.id === localToken.id)
                 : null;
-            if (typeof collabTransport.updateTokenPositions === 'function') {
-                Promise.resolve(collabTransport.updateTokenPositions([{
-                    sceneId: scene.id,
-                    tokenId: localToken.id,
-                    x: localToken.x,
-                    y: localToken.y
-                }], force ? { flushNow: true } : {})).catch((err) => {
-                    console.warn('VTT collaboration drag sync failed', err);
-                });
-            } else if (nextToken && typeof collabTransport.syncSnapshot === 'function') {
+            if (nextToken && typeof collabTransport.syncSnapshot === 'function') {
                 nextToken.x = localToken.x;
                 nextToken.y = localToken.y;
                 Promise.resolve(collabTransport.syncSnapshot(nextSnapshot, {

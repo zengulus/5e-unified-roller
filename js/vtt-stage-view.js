@@ -171,6 +171,8 @@
         const tokenVisualEffects = new Map();
         const tokenHpSnapshot = new Map();
         const layerMarkupCache = new WeakMap();
+        const sceneDerivedCache = new WeakMap();
+        let fogRenderCache = { signature: '', cellSet: new Set(), edgeMarkup: '' };
 
         const commitLayerMarkup = (layerEl, markup) => {
             if (!layerEl) return false;
@@ -179,6 +181,76 @@
             layerEl.innerHTML = nextMarkup;
             layerMarkupCache.set(layerEl, nextMarkup);
             return true;
+        };
+
+        const buildFogRenderSignature = (scene) => {
+            if (!scene) return '';
+            const grid = scene.grid || {};
+            const fog = Array.isArray(scene.fog) ? scene.fog : [];
+            const fogParts = fog.map((entry) => {
+                const value = entry || {};
+                return [value.col, value.row, value.cols, value.rows, value.x, value.y, value.w, value.h].join(':');
+            });
+            return [
+                scene.id || '',
+                grid.cellPx,
+                grid.offsetX,
+                grid.offsetY,
+                worldSize.width,
+                worldSize.height,
+                fogParts.join('|')
+            ].join(';');
+        };
+
+        const getFogRenderData = (scene) => {
+            const signature = buildFogRenderSignature(scene);
+            if (fogRenderCache.signature === signature) return fogRenderCache;
+            const cellSet = Array.isArray(scene && scene.fog)
+                ? geometry.collectFogCellSet(scene, scene.fog)
+                : new Set();
+            fogRenderCache = {
+                signature,
+                cellSet,
+                edgeMarkup: geometry.buildFogEdgeMarkup(scene, cellSet)
+            };
+            return fogRenderCache;
+        };
+
+        const buildSceneDerivedSignature = (scene, role, fogSignature) => {
+            const tokenParts = (Array.isArray(scene && scene.tokens) ? scene.tokens : []).map((token) => {
+                const value = token || {};
+                const vision = value.vision || {};
+                return [
+                    value.id, value.x, value.y, value.w, value.h, value.side, value.hidden,
+                    value.stealthRoll, vision.enabled, vision.baseRangeCells, vision.arcDeg, vision.facingDeg
+                ].join(':');
+            });
+            const noteParts = (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes : []).map((note) => {
+                const value = note || {};
+                return [value.id, value.x, value.y, value.w, value.h, value.shape, value.hidden].join(':');
+            });
+            return [role || '', fogSignature, scene && scene.stealthMode ? '1' : '0', tokenParts.join('|'), noteParts.join('|')].join(';');
+        };
+
+        const getSceneDerivedData = (scene, role, fogCellSet, fogSignature, state) => {
+            let roleCache = sceneDerivedCache.get(scene);
+            if (!roleCache) {
+                roleCache = new Map();
+                sceneDerivedCache.set(scene, roleCache);
+            }
+            const cacheKey = String(role || '');
+            const cached = roleCache.get(cacheKey);
+            const signature = buildSceneDerivedSignature(scene, role, fogSignature);
+            if (cached && cached.signature === signature && cached.fogCellSet === fogCellSet) return cached;
+            const derived = {
+                signature,
+                fogCellSet,
+                visibleEvidenceNotes: geometry.getVisibleEvidenceNotesForRole(scene, role, fogCellSet),
+                visibleTokens: geometry.getVisibleTokensForRole(scene, role, fogCellSet),
+                stealthStatusMap: geometry.buildStealthStatusMap(scene, state, fogCellSet)
+            };
+            roleCache.set(cacheKey, derived);
+            return derived;
         };
 
         const setWorldSize = (nextSize) => {
@@ -589,7 +661,7 @@
 
         const scaleForZoom = (value) => Math.max(0, Math.round(value * localView.zoom * 1000) / 1000);
 
-        const applyRenderedWorldGeometry = (scene = getActiveScene()) => {
+        const applyRenderedWorldGeometry = (scene = getActiveScene(), options = {}) => {
             const {
                 mapWorldEl,
                 worldEl,
@@ -612,7 +684,13 @@
             worldEl.style.width = `${scaleForZoom(worldSize.width)}px`;
             worldEl.style.height = `${scaleForZoom(worldSize.height)}px`;
 
-            fogLayerEl.querySelectorAll('.vtt-fog-mask, .vtt-fog-reveal-shimmer').forEach((maskEl) => {
+            const updateFog = options.fog !== false;
+            const updateNotes = options.notes !== false;
+            const updateTemplates = options.templates !== false;
+            const updateTokens = options.tokens !== false;
+            const updateVision = options.vision !== false;
+
+            if (updateFog) fogLayerEl.querySelectorAll('.vtt-fog-mask, .vtt-fog-reveal-shimmer').forEach((maskEl) => {
                 if (!(maskEl instanceof root.HTMLElement)) return;
                 const worldLeft = toNumber(maskEl.dataset.worldLeft, 0);
                 const worldTop = toNumber(maskEl.dataset.worldTop, 0);
@@ -625,7 +703,7 @@
                 maskEl.style.setProperty('--vtt-fog-texture-y', `${-scaleForZoom(worldTop)}px`);
             });
 
-            fogLayerEl.querySelectorAll('.vtt-fog-texture-clip').forEach((textureEl) => {
+            if (updateFog) fogLayerEl.querySelectorAll('.vtt-fog-texture-clip').forEach((textureEl) => {
                 if (!(textureEl instanceof root.HTMLElement)) return;
                 const worldLeft = toNumber(textureEl.dataset.worldLeft, 0);
                 const worldTop = toNumber(textureEl.dataset.worldTop, 0);
@@ -640,7 +718,7 @@
                 textureEl.style.setProperty('--vtt-fog-texture-gutter', `${tilePx}px`);
             });
 
-            fogLayerEl.querySelectorAll('.vtt-fog-edge-svg').forEach((edgeEl) => {
+            if (updateFog) fogLayerEl.querySelectorAll('.vtt-fog-edge-svg').forEach((edgeEl) => {
                 if (!(edgeEl instanceof root.SVGSVGElement)) return;
                 const worldLeft = toNumber(edgeEl.dataset.worldLeft, 0);
                 const worldTop = toNumber(edgeEl.dataset.worldTop, 0);
@@ -652,7 +730,7 @@
                 edgeEl.style.height = `${scaleForZoom(worldHeight)}px`;
             });
 
-            noteLayerEl.querySelectorAll('.vtt-map-note').forEach((noteEl) => {
+            if (updateNotes) noteLayerEl.querySelectorAll('.vtt-map-note').forEach((noteEl) => {
                 if (!(noteEl instanceof root.HTMLElement)) return;
                 noteEl.style.left = `${scaleForZoom(toNumber(noteEl.dataset.worldLeft, 0))}px`;
                 noteEl.style.top = `${scaleForZoom(toNumber(noteEl.dataset.worldTop, 0))}px`;
@@ -661,7 +739,7 @@
                 applyEvidenceNoteChipPresentation(noteEl);
             });
 
-            templateLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
+            if (updateTemplates) templateLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
                 if (!(itemEl instanceof root.HTMLElement)) return;
                 itemEl.style.left = `${scaleForZoom(toNumber(itemEl.dataset.worldLeft, 0))}px`;
                 itemEl.style.top = `${scaleForZoom(toNumber(itemEl.dataset.worldTop, 0))}px`;
@@ -670,7 +748,7 @@
                 if (itemEl.dataset.worldRotation !== undefined) itemEl.style.transform = `rotate(${toNumber(itemEl.dataset.worldRotation, 0)}deg)`;
             });
 
-            visionLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
+            if (updateVision) visionLayerEl.querySelectorAll('.vtt-overlay-item').forEach((itemEl) => {
                 if (!(itemEl instanceof root.HTMLElement)) return;
                 itemEl.style.left = `${scaleForZoom(toNumber(itemEl.dataset.worldLeft, 0))}px`;
                 itemEl.style.top = `${scaleForZoom(toNumber(itemEl.dataset.worldTop, 0))}px`;
@@ -681,10 +759,13 @@
 
             if (proximityPromptStackEl && !proximityPromptStackEl.hidden) positionProximityPrompt(scene);
 
-            tokenLayerEl.querySelectorAll('.vtt-token').forEach((tokenEl) => {
+            if (updateTokens) tokenLayerEl.querySelectorAll('.vtt-token').forEach((tokenEl) => {
                 if (!(tokenEl instanceof root.HTMLElement)) return;
-                tokenEl.style.left = `${scaleForZoom(toNumber(tokenEl.dataset.worldLeft, 0))}px`;
-                tokenEl.style.top = `${scaleForZoom(toNumber(tokenEl.dataset.worldTop, 0))}px`;
+                const renderedLeft = scaleForZoom(toNumber(tokenEl.dataset.worldLeft, 0));
+                const renderedTop = scaleForZoom(toNumber(tokenEl.dataset.worldTop, 0));
+                tokenEl.style.left = '0px';
+                tokenEl.style.top = '0px';
+                tokenEl.style.transform = `translate3d(${renderedLeft}px, ${renderedTop}px, 0)`;
                 tokenEl.style.width = `${scaleForZoom(toNumber(tokenEl.dataset.worldWidth, 0))}px`;
                 tokenEl.style.height = `${scaleForZoom(toNumber(tokenEl.dataset.worldHeight, 0))}px`;
                 tokenEl.style.setProperty('--vtt-token-font-scale', String(clamp(localView.zoom, 0.9, 1.9)));
@@ -914,7 +995,7 @@
 
         const renderVisionLayer = (scene, visibleTokens, sceneSize = worldSize, now = Date.now()) => {
             const { visionLayerEl } = dom;
-            if (!visionLayerEl) return;
+            if (!visionLayerEl) return false;
             const showStealthCones = !!(scene && scene.stealthMode);
             const handleMarkup = showStealthCones
                 ? visibleTokens
@@ -926,13 +1007,14 @@
                     .join('')
                 : '';
             const pingMarkup = getRenderableScenePings(scene, now).map((ping) => buildPingMarkup(ping, scene)).join('');
-            commitLayerMarkup(visionLayerEl, `${handleMarkup}${pingMarkup}`);
+            const changed = commitLayerMarkup(visionLayerEl, `${handleMarkup}${pingMarkup}`);
             schedulePingExpiryRender(scene);
+            return changed;
         };
 
         const renderTemplateLayer = (scene, visibleTokens, sceneSize = worldSize, now = Date.now()) => {
             const { templateLayerEl } = dom;
-            if (!templateLayerEl) return;
+            if (!templateLayerEl) return false;
             const state = getStageState();
             const showStealthCones = !!(scene && scene.stealthMode);
             const visibleTemplates = getRenderableSceneTemplates(scene);
@@ -950,8 +1032,9 @@
                 ? markup.buildAreaTemplateMarkup(state.templatePlacementState.template, scene, { preview: true })
                 : '';
             const rulerMarkup = markup.buildRulerMarkup(scene, state.rulerState);
-            commitLayerMarkup(templateLayerEl, `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`);
+            const changed = commitLayerMarkup(templateLayerEl, `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`);
             scheduleTemplateExpiryRender(scene);
+            return changed;
         };
 
         const buildTokenClassName = (options = {}) => {
@@ -1000,18 +1083,28 @@
 
         const renderTokenLayer = (scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime, fogCellSet = null) => {
             const { tokenLayerEl } = dom;
-            if (!tokenLayerEl || !scene || !scene.grid) return;
+            if (!tokenLayerEl || !scene || !scene.grid) return false;
+            let geometryChanged = false;
+            const tokenElements = new Map();
+            Array.from(tokenLayerEl.children).forEach((tokenEl) => {
+                if (!(tokenEl instanceof root.HTMLElement) || !tokenEl.classList.contains('vtt-token')) return;
+                const tokenId = String(tokenEl.dataset.tokenId || '').trim();
+                if (tokenId) tokenElements.set(tokenId, tokenEl);
+            });
             const liveIds = new Set();
             visibleTokens.forEach((token) => {
                 const tokenId = String(token && token.id || '').trim();
                 if (tokenId) liveIds.add(tokenId);
             });
-            Array.from(tokenLayerEl.querySelectorAll('.vtt-token')).forEach((tokenEl) => {
-                const tokenId = String(tokenEl.getAttribute('data-token-id') || '').trim();
-                if (!liveIds.has(tokenId)) tokenEl.remove();
+            tokenElements.forEach((tokenEl, tokenId) => {
+                if (!liveIds.has(tokenId)) {
+                    tokenEl.remove();
+                    tokenElements.delete(tokenId);
+                    geometryChanged = true;
+                }
             });
 
-            let nextTokenEl = tokenLayerEl.querySelector('.vtt-token');
+            let nextTokenEl = tokenLayerEl.firstElementChild;
             visibleTokens.forEach((token) => {
                 const tokenId = String(token && token.id || '').trim();
                 if (!tokenId) return;
@@ -1033,12 +1126,14 @@
                     tokenHpSnapshot.delete(tokenId);
                 }
                 const visualEffectKind = getTokenVisualEffectKind(tokenId, renderTime);
-                const escapedId = root.CSS && root.CSS.escape ? root.CSS.escape(tokenId) : tokenId.replace(/"/g, '\\"');
-                let tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
-                if (!tokenEl) tokenEl = root.document.createElement('div');
+                let tokenEl = tokenElements.get(tokenId);
+                if (!tokenEl) {
+                    tokenEl = root.document.createElement('div');
+                    geometryChanged = true;
+                }
                 if (tokenEl !== nextTokenEl) tokenLayerEl.insertBefore(tokenEl, nextTokenEl);
                 nextTokenEl = tokenEl.nextElementSibling;
-                tokenEl.className = buildTokenClassName({
+                const className = buildTokenClassName({
                     token,
                     usableImageUrl,
                     moodEmoji,
@@ -1048,27 +1143,53 @@
                     stealthStatus,
                     visualEffectKind
                 });
-                tokenEl.dataset.tokenId = tokenId;
-                tokenEl.dataset.id = tokenId;
-                tokenEl.dataset.action = 'select-token';
-                tokenEl.setAttribute('role', 'button');
-                tokenEl.tabIndex = 0;
-                tokenEl.dataset.side = token.side || 'neutral';
                 const canMove = canRoleMoveToken(token);
                 const sideLabel = String(token.side || 'neutral');
-                tokenEl.setAttribute(
-                    'aria-label',
-                    `${String(token.label || 'Token')}, ${sideLabel}. ${canMove ? 'Movable.' : 'Movement locked.'} Right-click for actions.`
-                );
-                tokenEl.dataset.stealthStatus = stealthStatus;
-                tokenEl.dataset.bloodied = isBloodied ? '1' : '0';
-                tokenEl.dataset.worldLeft = String(scene.grid.offsetX + renderedCells.x * scene.grid.cellPx);
-                tokenEl.dataset.worldTop = String(scene.grid.offsetY + renderedCells.y * scene.grid.cellPx);
-                tokenEl.dataset.worldWidth = String(token.w * scene.grid.cellPx);
-                tokenEl.dataset.worldHeight = String(token.h * scene.grid.cellPx);
-                tokenEl.style.setProperty('--vtt-token-damage', String(getTokenDamageFraction(token)));
+                const ariaLabel = `${String(token.label || 'Token')}, ${sideLabel}. ${canMove ? 'Movable.' : 'Movement locked.'} Right-click for actions.`;
+                const worldLeft = String(scene.grid.offsetX + renderedCells.x * scene.grid.cellPx);
+                const worldTop = String(scene.grid.offsetY + renderedCells.y * scene.grid.cellPx);
+                const worldWidth = String(token.w * scene.grid.cellPx);
+                const worldHeight = String(token.h * scene.grid.cellPx);
+                if (
+                    tokenEl.dataset.worldLeft !== worldLeft
+                    || tokenEl.dataset.worldTop !== worldTop
+                    || tokenEl.dataset.worldWidth !== worldWidth
+                    || tokenEl.dataset.worldHeight !== worldHeight
+                ) geometryChanged = true;
+                const stateSignature = JSON.stringify({
+                    className,
+                    tokenId,
+                    side: token.side || 'neutral',
+                    ariaLabel,
+                    stealthStatus,
+                    bloodied: isBloodied ? '1' : '0',
+                    worldLeft,
+                    worldTop,
+                    worldWidth,
+                    worldHeight,
+                    damage: String(getTokenDamageFraction(token))
+                });
+                if (tokenEl.dataset.stateSignature !== stateSignature) {
+                    tokenEl.className = className;
+                    tokenEl.dataset.tokenId = tokenId;
+                    tokenEl.dataset.id = tokenId;
+                    tokenEl.dataset.action = 'select-token';
+                    tokenEl.setAttribute('role', 'button');
+                    tokenEl.tabIndex = 0;
+                    tokenEl.dataset.side = token.side || 'neutral';
+                    tokenEl.setAttribute('aria-label', ariaLabel);
+                    tokenEl.dataset.stealthStatus = stealthStatus;
+                    tokenEl.dataset.bloodied = isBloodied ? '1' : '0';
+                    tokenEl.dataset.worldLeft = worldLeft;
+                    tokenEl.dataset.worldTop = worldTop;
+                    tokenEl.dataset.worldWidth = worldWidth;
+                    tokenEl.dataset.worldHeight = worldHeight;
+                    tokenEl.style.setProperty('--vtt-token-damage', String(getTokenDamageFraction(token)));
+                    tokenEl.dataset.stateSignature = stateSignature;
+                }
                 renderTokenStableContent(tokenEl, token, usableImageUrl, moodEmoji, moodText);
             });
+            return geometryChanged;
         };
 
         renderTokenMotionFrame = (renderTime = Date.now()) => {
@@ -1079,24 +1200,26 @@
                 renderStage();
                 return;
             }
+            const tokensById = new Map((Array.isArray(scene.tokens) ? scene.tokens : [])
+                .filter(Boolean)
+                .map((token) => [String(token.id || ''), token]));
+            const tokenElements = new Map(Array.from(tokenLayerEl.children)
+                .filter((tokenEl) => tokenEl instanceof root.HTMLElement && tokenEl.classList.contains('vtt-token'))
+                .map((tokenEl) => [String(tokenEl.dataset.tokenId || ''), tokenEl]));
             remoteTokenTweens.forEach((tween) => {
                 if (!tween || tween.sceneId !== scene.id) return;
-                const token = Array.isArray(scene.tokens)
-                    ? scene.tokens.find((entry) => entry && entry.id === tween.tokenId)
-                    : null;
+                const token = tokensById.get(String(tween.tokenId || ''));
                 if (!token) return;
-                const escapedId = root.CSS && root.CSS.escape
-                    ? root.CSS.escape(String(token.id || ''))
-                    : String(token.id || '').replace(/"/g, '\\"');
-                const tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
+                const tokenEl = tokenElements.get(String(token.id || ''));
                 if (!(tokenEl instanceof root.HTMLElement)) return;
                 const renderedCells = getRenderableTokenCells(token, scene, renderTime);
                 const worldLeft = scene.grid.offsetX + renderedCells.x * scene.grid.cellPx;
                 const worldTop = scene.grid.offsetY + renderedCells.y * scene.grid.cellPx;
                 tokenEl.dataset.worldLeft = String(worldLeft);
                 tokenEl.dataset.worldTop = String(worldTop);
-                tokenEl.style.left = `${scaleForZoom(worldLeft)}px`;
-                tokenEl.style.top = `${scaleForZoom(worldTop)}px`;
+                tokenEl.style.left = '0px';
+                tokenEl.style.top = '0px';
+                tokenEl.style.transform = `translate3d(${scaleForZoom(worldLeft)}px, ${scaleForZoom(worldTop)}px, 0)`;
             });
             if (proximityPromptStackEl && !proximityPromptStackEl.hidden) positionProximityPrompt(scene);
         };
@@ -1126,29 +1249,29 @@
             const mapDisplaySize = getLoadedMapSizeForScene(scene);
             mapImageEl.style.display = mapDisplaySize.width && mapDisplaySize.height ? 'block' : 'none';
 
-            const fogCellSet = Array.isArray(scene.fog)
-                ? geometry.collectFogCellSet(scene, scene.fog)
-                : new Set();
+            const fogRenderData = getFogRenderData(scene);
+            const fogCellSet = fogRenderData.cellSet;
 
             evaluateProximityTriggers();
 
-            const fogEdgeMarkup = geometry.buildFogEdgeMarkup(scene, fogCellSet);
+            const fogEdgeMarkup = fogRenderData.edgeMarkup;
             const fogPreviewMarkup = state.fogPlacementState && state.fogPlacementState.sceneId === scene.id && state.fogPlacementState.mask
                 ? geometry.buildFogMaskMarkup(scene, state.fogPlacementState.mask, state.fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
                 : '';
             const fogRevealMarkup = buildFogRevealShimmerMarkup(renderTime);
-            commitLayerMarkup(fogLayerEl, `${fogEdgeMarkup}${fogPreviewMarkup}${fogRevealMarkup}`);
+            const fogChanged = commitLayerMarkup(fogLayerEl, `${fogEdgeMarkup}${fogPreviewMarkup}${fogRevealMarkup}`);
 
-            const visibleEvidenceNotes = geometry.getVisibleEvidenceNotesForRole(scene, state.localRole, fogCellSet);
+            const derived = getSceneDerivedData(scene, state.localRole, fogCellSet, fogRenderData.signature, state.vttState);
+            const visibleEvidenceNotes = derived.visibleEvidenceNotes;
             const evidenceMarkup = visibleEvidenceNotes
                 .map((note) => buildEvidenceNoteMarkup(note, scene, { selected: note.id === state.selectedEvidenceNoteId }))
                 .join('');
             const evidencePreviewMarkup = state.evidenceNotePlacementState && state.evidenceNotePlacementState.sceneId === scene.id && state.evidenceNotePlacementState.note
                 ? buildEvidenceNoteMarkup(state.evidenceNotePlacementState.note, scene, { preview: true, selected: true })
                 : '';
-            commitLayerMarkup(noteLayerEl, `${evidenceMarkup}${evidencePreviewMarkup}`);
+            const notesChanged = commitLayerMarkup(noteLayerEl, `${evidenceMarkup}${evidencePreviewMarkup}`);
 
-            const visibleTokens = geometry.getVisibleTokensForRole(scene, state.localRole, fogCellSet);
+            const visibleTokens = derived.visibleTokens;
             if (stageEmptyEl) {
                 const isEmptyScene = !String(scene.mapImageUrl || '').trim()
                     && visibleTokens.length === 0
@@ -1165,13 +1288,19 @@
             const focusedEntryToken = getVisibleSceneTokenForEntry(getEntryById(state.selectedEntryId), state.vttState, state.localRole);
             const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
             const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
-            const stealthStatusMap = geometry.buildStealthStatusMap(scene, state.vttState, fogCellSet);
+            const stealthStatusMap = derived.stealthStatusMap;
 
-            renderTemplateLayer(scene, visibleTokens, worldSize, renderTime);
-            renderTokenLayer(scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime, fogCellSet);
-            renderVisionLayer(scene, visibleTokens, worldSize, renderTime);
+            const templatesChanged = renderTemplateLayer(scene, visibleTokens, worldSize, renderTime);
+            const tokensChanged = renderTokenLayer(scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime, fogCellSet);
+            const visionChanged = renderVisionLayer(scene, visibleTokens, worldSize, renderTime);
 
-            applyRenderedWorldGeometry(scene);
+            applyRenderedWorldGeometry(scene, {
+                fog: fogChanged,
+                notes: notesChanged,
+                templates: templatesChanged,
+                tokens: tokensChanged,
+                vision: visionChanged
+            });
             if (hasActiveSceneRemoteTweens(scene.id, renderTime)) scheduleRemoteTokenTweenRender();
             if (getFitViewOnNextMapLoad() && scene.mapImageUrl && mapLoadState.url === scene.mapImageUrl && mapLoadState.loaded) {
                 setFitViewOnNextMapLoad(false);

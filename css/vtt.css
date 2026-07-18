@@ -2605,6 +2605,10 @@ body:not([data-vtt-role="dm"]) .vtt-map-note.is-selected .vtt-map-note-meta {
     overflow: visible;
 }
 
+.vtt-token.is-dragging {
+    will-change: transform;
+}
+
 .vtt-token::after {
     position: absolute;
     left: 50%;

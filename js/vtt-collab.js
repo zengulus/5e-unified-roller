@@ -266,6 +266,39 @@ const sanitizePositionChange = (entry) => {
     };
 };
 
+const applyTokenPositionsToSnapshot = (snapshot, changes, stamp = Date.now()) => {
+    if (!snapshot || typeof snapshot !== 'object' || !Array.isArray(snapshot.scenes)) return snapshot;
+    const changesByScene = new Map();
+    (Array.isArray(changes) ? changes : []).forEach((entry) => {
+        const change = sanitizePositionChange(entry);
+        if (!change) return;
+        if (!changesByScene.has(change.sceneId)) changesByScene.set(change.sceneId, new Map());
+        changesByScene.get(change.sceneId).set(change.tokenId, change);
+    });
+    if (!changesByScene.size) return snapshot;
+
+    let changed = false;
+    const scenes = snapshot.scenes.map((scene) => {
+        const sceneChanges = changesByScene.get(String(scene && scene.id || '').trim());
+        if (!sceneChanges || !Array.isArray(scene.tokens)) return scene;
+        let sceneChanged = false;
+        const tokens = scene.tokens.map((token) => {
+            const change = sceneChanges.get(String(token && token.id || '').trim());
+            if (!change || !token || (token.x === change.x && token.y === change.y)) return token;
+            sceneChanged = true;
+            changed = true;
+            return { ...token, x: change.x, y: change.y };
+        });
+        return sceneChanged ? { ...scene, tokens } : scene;
+    });
+    if (!changed) return snapshot;
+    return {
+        ...snapshot,
+        updatedAt: Math.max(0, toNonNegativeInt(stamp, Date.now()) || Date.now()),
+        scenes
+    };
+};
+
 const buildPositionChangeKey = (sceneId = '', tokenId = '') => {
     const cleanSceneId = toTrimmedString(sceneId, '', 120).trim();
     const cleanTokenId = toTrimmedString(tokenId, '', 120).trim();
@@ -1621,6 +1654,7 @@ class VTTCollabSession {
         this.originRemoteSync = { kind: 'vtt-collab-remote-sync' };
         this.originRemoteRestore = { kind: 'vtt-collab-remote-restore' };
         this.originManualFlush = { kind: 'vtt-collab-manual-flush' };
+        this.positionChangesInFlight = null;
 
         this.handleDocUpdate = this.handleDocUpdate.bind(this);
         this.handleAfterTransaction = this.handleAfterTransaction.bind(this);
@@ -2422,12 +2456,6 @@ class VTTCollabSession {
     handleDocUpdate(update, origin) {
         if (this.destroyed || !this.connected) return;
         if (origin === this.originRemoteSync) return;
-        if (origin === this.originPosition) {
-            console.debug('RTF_VTT_COLLAB: Broadcasting token position update to Render relay.', {
-                roomId: this.roomId,
-                bytes: update && update.length ? update.length : 0
-            });
-        }
         const encoder = encoding.createEncoder();
         syncProtocol.writeUpdate(encoder, update);
         this.sendBroadcast('y-sync', { update: encodeBase64(encoding.toUint8Array(encoder)) });
@@ -2435,10 +2463,13 @@ class VTTCollabSession {
     }
 
     handleAfterTransaction(transaction) {
-        const next = serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
-        const diff = diffVTTSnapshots(this.lastSnapshot, next, this.coerceSnapshot.bind(this));
         const origin = transaction ? transaction.origin : null;
         const isBootstrap = origin === this.originBootstrap;
+        const isLocalPosition = origin === this.originPosition && Array.isArray(this.positionChangesInFlight);
+        const previous = this.lastSnapshot;
+        const next = isLocalPosition
+            ? applyTokenPositionsToSnapshot(previous, this.positionChangesInFlight, getDocUpdatedAt(this.doc))
+            : serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
         this.lastSnapshot = next;
         this.pendingSnapshot = next;
         if (!isBootstrap) {
@@ -2460,6 +2491,7 @@ class VTTCollabSession {
             && origin !== this.originManualFlush;
 
         if (shouldDispatchSnapshot) {
+            const diff = diffVTTSnapshots(previous, next, this.coerceSnapshot.bind(this));
             if (!diff.structural && diff.positions.length && typeof this.options.applyPositionChanges === 'function') {
                 this.options.applyPositionChanges(diff.positions, { origin, snapshot: next });
             } else if ((diff.structural || diff.positions.length) && typeof this.options.applySnapshot === 'function') {
@@ -2882,7 +2914,14 @@ class VTTCollabSession {
 
     updateTokenPositions(changes, options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
-        const applied = applyTokenPositionChangesToDoc(this.doc, changes, this.originPosition, Date.now());
+        const cleanChanges = (Array.isArray(changes) ? changes : []).map(sanitizePositionChange).filter(Boolean);
+        this.positionChangesInFlight = cleanChanges;
+        let applied;
+        try {
+            applied = applyTokenPositionChangesToDoc(this.doc, cleanChanges, this.originPosition, Date.now());
+        } finally {
+            this.positionChangesInFlight = null;
+        }
         if (!applied.length) {
             if (opts.flushNow) {
                 this.scheduleCloudFlush({ forceCompatibilityMirror: true });
