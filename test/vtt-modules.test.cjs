@@ -107,6 +107,31 @@ test('VTT geometry applies and removes fog as normalized cells', () => {
     assert.deepEqual(geometry.applyFogMaskMutation(targetScene, mask, 'remove'), []);
 });
 
+test('VTT geometry reuses precomputed fog cells across role visibility checks', () => {
+    const targetScene = {
+        ...scene,
+        fog: [{ id: 'fog_0_0', col: 0, row: 0 }],
+        evidenceNotes: [{ id: 'note', hidden: false, shape: 'zone', x: 0, y: 0, w: 10, h: 10 }],
+        tokens: [
+            { id: 'covered', side: 'player', x: 0, y: 0, w: 1, h: 1 },
+            { id: 'clear', side: 'player', x: 2, y: 0, w: 1, h: 1 }
+        ]
+    };
+    const precomputedFogCells = new Set(['2,0']);
+
+    assert.equal(geometry.isTokenUnderFog(targetScene, targetScene.tokens[0]), true);
+    assert.equal(geometry.isTokenUnderFog(targetScene, targetScene.tokens[0], precomputedFogCells), false);
+    assert.equal(geometry.isTokenHiddenForRole(targetScene.tokens[1], targetScene, 'player', precomputedFogCells), true);
+    assert.deepEqual(
+        geometry.getVisibleTokensForRole(targetScene, 'player', precomputedFogCells).map((token) => token.id),
+        ['covered']
+    );
+    assert.deepEqual(
+        geometry.getVisibleEvidenceNotesForRole(targetScene, 'player', precomputedFogCells).map((note) => note.id),
+        ['note']
+    );
+});
+
 test('VTT rules build sheet actions without storage or controller state', () => {
     const character = {
         meta: { level: 5 },
@@ -283,6 +308,7 @@ test('VTT geometry keeps evidence and stealth calculations independent of the co
     assert.equal(note.shape, 'pin');
     assert.equal(note.id, 'evidence_test');
     assert.equal(geometry.buildStealthStatusMap(targetScene).get('hero'), 'detected');
+    assert.equal(geometry.buildStealthStatusMap(targetScene, state, new Set(['0,0'])).has('hero'), false);
 });
 
 test('VTT markup builders render deterministic overlays from explicit state', () => {

@@ -17,7 +17,6 @@
         askRollPickMode: ['stage', 'tool', 'askRollPickMode'],
         fitViewOnNextMapLoad: ['stage', 'view', 'fitOnNextMapLoad'],
         initiativeDetailState: ['ui', 'overlays', 'initiativeDetail'],
-        lastContextPointerState: ['stage', 'pointer', 'lastContext'],
         localPingVariant: ['stage', 'tool', 'pingVariant'],
         localRole: ['session', 'role'],
         localRollMode: ['ui', 'playerRoll', 'mode'],
@@ -64,9 +63,7 @@
         evidenceNotePlacementState: ['stage', 'placement', 'evidenceNote'],
         fogPlacementState: ['stage', 'placement', 'fog'],
         initiativeDetailState: ['ui', 'overlays', 'initiativeDetail'],
-        lastContextPointerState: ['stage', 'pointer', 'lastContext'],
         lastDragSyncAt: ['stage', 'pointer', 'lastDragSyncAt'],
-        lastStageToolPointerDownState: ['stage', 'pointer', 'lastToolPointerDown'],
         localRole: ['session', 'role'],
         localToolState: ['stage', 'tool', 'current'],
         localView: Object.freeze({ path: ['stage', 'view', 'local'], readOnly: true }),
@@ -174,9 +171,7 @@
                     drag: null,
                     pan: null,
                     lastDragSyncAt: 0,
-                    spawnDrag: null,
-                    lastContext: null,
-                    lastToolPointerDown: null
+                    spawnDrag: null
                 },
                 tool: {
                     current: { mode: toolMode, sizeCells: toolSizeCells },

@@ -35,6 +35,7 @@
         scenePanelSceneLabelEl: 'vtt-scene-panel-scene-label',
         stageTitleEl: 'vtt-stage-title',
         stageMetaEl: 'vtt-stage-meta',
+        stageEmptyEl: 'vtt-stage-empty',
         modeChipEl: 'vtt-mode-chip',
         roundPillEl: 'vtt-round-pill',
         selectionPillEl: 'vtt-selection-pill',

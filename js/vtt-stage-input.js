@@ -131,10 +131,28 @@
         const HTMLSelectElement = root.HTMLSelectElement;
         const CSS = root.CSS;
 
-        let lastTokenPointerDownId = '';
-        let lastTokenPointerDownAt = 0;
+        let lastTokenPointerDownState = null;
         let lastEvidenceNotePointerDownState = null;
         let pendingTouchContextState = null;
+        let interactionRenderFrame = 0;
+
+        const scheduleInteractionRender = () => {
+            if (interactionRenderFrame) return;
+            if (typeof window.requestAnimationFrame !== 'function') {
+                renderStage();
+                return;
+            }
+            interactionRenderFrame = window.requestAnimationFrame(() => {
+                interactionRenderFrame = 0;
+                renderStage();
+            });
+        };
+
+        const cancelInteractionRender = () => {
+            if (!interactionRenderFrame) return;
+            if (typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(interactionRenderFrame);
+            interactionRenderFrame = 0;
+        };
 
         const getEventTargetElement = (event) => {
             const target = event && event.target;
@@ -299,17 +317,26 @@
             if (!token) return false;
             const canMoveToken = canRoleMoveToken(token, runtime.localRole);
             const now = Date.now();
-            const isDoublePress = lastTokenPointerDownId === token.id && now - lastTokenPointerDownAt <= TOKEN_DOUBLE_CLICK_MS;
-            lastTokenPointerDownId = token.id;
-            lastTokenPointerDownAt = now;
+            const previousPress = lastTokenPointerDownState;
+            const isDoublePress = !!(
+                previousPress
+                && previousPress.tokenId === token.id
+                && now - previousPress.at <= TOKEN_DOUBLE_CLICK_MS
+                && Math.hypot(event.clientX - previousPress.clientX, event.clientY - previousPress.clientY) <= STAGE_TOOL_DOUBLE_PRESS_PX
+            );
+            lastTokenPointerDownState = {
+                tokenId: token.id,
+                at: now,
+                clientX: event.clientX,
+                clientY: event.clientY
+            };
             activateTokenSelection(token.id);
             renderInitiativeList();
             renderInitiativeDetail();
             renderTokenInspector();
             renderToolsMenu();
             if (isDoublePress && isDM()) {
-                lastTokenPointerDownId = '';
-                lastTokenPointerDownAt = 0;
+                lastTokenPointerDownState = null;
                 runtime.previewTokenId = '';
                 openTokenInspectorPopover(token.id, event.clientX, event.clientY);
                 renderTokenInspectorPopover();
@@ -317,8 +344,7 @@
                 return true;
             }
             if (isDoublePress && canMoveToken) {
-                lastTokenPointerDownId = '';
-                lastTokenPointerDownAt = 0;
+                lastTokenPointerDownState = null;
                 snapTokenToGrid(token.id);
                 return true;
             }
@@ -421,6 +447,26 @@
             }
             return true;
         };
+
+        const previewTokenDrag = (scene, token) => {
+            if (!stageEl || !scene || !scene.grid || !token) return false;
+            const tokenId = String(token.id || '').trim();
+            if (!tokenId) return false;
+            const escapedId = typeof CSS !== 'undefined' && CSS.escape
+                ? CSS.escape(tokenId)
+                : tokenId.replace(/"/g, '\\"');
+            const tokenEl = stageEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
+            if (!(tokenEl instanceof HTMLElement)) return false;
+            const cellPx = getSceneCellPx(scene);
+            const worldLeft = toNumber(scene.grid.offsetX, 0) + normalizeTokenCoordinate(token.x, 0) * cellPx;
+            const worldTop = toNumber(scene.grid.offsetY, 0) + normalizeTokenCoordinate(token.y, 0) * cellPx;
+            tokenEl.dataset.worldLeft = String(worldLeft);
+            tokenEl.dataset.worldTop = String(worldTop);
+            tokenEl.style.left = `${scaleForZoom(worldLeft)}px`;
+            tokenEl.style.top = `${scaleForZoom(worldTop)}px`;
+            tokenEl.classList.add('is-dragging');
+            return true;
+        };
     
         const handleStagePointerDown = (event) => {
             const targetEl = getEventTargetElement(event);
@@ -437,31 +483,6 @@
             const scene = getActiveScene();
             if (!scene) return;
             const worldPoint = screenToWorld(event.clientX, event.clientY);
-            if (runtime.localToolState.mode !== TOOL_MODE_NAVIGATE) {
-                const now = Date.now();
-                const previousPress = runtime.lastStageToolPointerDownState;
-                const pressDistance = previousPress
-                    ? Math.hypot(event.clientX - previousPress.clientX, event.clientY - previousPress.clientY)
-                    : Infinity;
-                const isDoublePress = previousPress
-                    && previousPress.mode === runtime.localToolState.mode
-                    && now - previousPress.at <= TOKEN_DOUBLE_CLICK_MS
-                    && pressDistance <= STAGE_TOOL_DOUBLE_PRESS_PX;
-                runtime.lastStageToolPointerDownState = {
-                    at: now,
-                    mode: runtime.localToolState.mode,
-                    clientX: event.clientX,
-                    clientY: event.clientY
-                };
-                if (isDoublePress) {
-                    setToolMode(TOOL_MODE_NAVIGATE);
-                    render();
-                    event.preventDefault();
-                    return;
-                }
-            } else {
-                runtime.lastStageToolPointerDownState = null;
-            }
             if (runtime.localToolState.mode === TOOL_MODE_PING) {
                 if (!canUseSharedPlayerTools()) return;
                 if (runtime.pendingAskRollRequest) {
@@ -485,6 +506,10 @@
                 event.preventDefault();
                 return;
             }
+            if (beginTouchContextInteraction(event, scene, worldPoint)) {
+                event.preventDefault();
+                return;
+            }
             const tokenElAtPoint = runtime.localToolState.mode === TOOL_MODE_NAVIGATE
                 ? getTokenElementAtClientPoint(event.clientX, event.clientY, targetEl)
                 : null;
@@ -503,10 +528,6 @@
                 renderStage();
                 const renderedNoteEl = getEvidenceNoteElementAtClientPoint(event.clientX, event.clientY, targetEl);
                 beginEvidenceNotePointerInteraction(event, scene, worldPoint, renderedNoteEl || noteEl);
-                event.preventDefault();
-                return;
-            }
-            if (beginTouchContextInteraction(event, scene, worldPoint)) {
                 event.preventDefault();
                 return;
             }
@@ -672,8 +693,7 @@
                 return;
             }
     
-            lastTokenPointerDownId = '';
-            lastTokenPointerDownAt = 0;
+            lastTokenPointerDownState = null;
             lastEvidenceNotePointerDownState = null;
             if (runtime.localToolState.mode === TOOL_MODE_NAVIGATE && runtime.selectedEvidenceNoteId) {
                 runtime.selectedEvidenceNoteId = '';
@@ -762,7 +782,7 @@
                     runtime.fogPlacementState.currentWorldPoint,
                     runtime.fogPlacementState.mask && runtime.fogPlacementState.mask.id
                 );
-                renderStage();
+                scheduleInteractionRender();
                 return;
             }
             if (runtime.evidenceNotePlacementState) {
@@ -780,7 +800,7 @@
                     runtime.evidenceNotePlacementState.note && runtime.evidenceNotePlacementState.note.id,
                     runtime.evidenceNotePlacementState.note || {}
                 );
-                renderStage();
+                scheduleInteractionRender();
                 return;
             }
             if (runtime.templatePlacementState) {
@@ -794,7 +814,7 @@
                 } else {
                     runtime.templatePlacementState.template.angleDeg = getTemplateAngleFromWorldPoint(scene, runtime.templatePlacementState.template, worldPoint);
                 }
-                renderStage();
+                scheduleInteractionRender();
                 return;
             }
             if (runtime.templateRotateState) {
@@ -806,7 +826,7 @@
                     return;
                 }
                 runtime.templateRotateState.angleDeg = getTemplateAngleFromWorldPoint(scene, template, screenToWorld(event.clientX, event.clientY));
-                renderStage();
+                scheduleInteractionRender();
                 return;
             }
             if (runtime.visionConeRotateState) {
@@ -818,14 +838,14 @@
                     return;
                 }
                 runtime.visionConeRotateState.angleDeg = getTemplateAngleFromWorldPoint(scene, getTokenCenterInCells(token), screenToWorld(event.clientX, event.clientY));
-                renderStage();
+                scheduleInteractionRender();
                 return;
             }
             if (runtime.rulerState && runtime.rulerState.dragging) {
                 const scene = getActiveScene();
                 if (!scene) return;
                 runtime.rulerState.end = snapWorldPointToTemplateAnchor(scene, screenToWorld(event.clientX, event.clientY));
-                renderStage();
+                scheduleInteractionRender();
                 return;
             }
             if (runtime.dragState) {
@@ -833,19 +853,19 @@
                 if (!scene) return;
                 const token = getTokenById(runtime.dragState.tokenId);
                 if (!token || !canRoleMoveToken(token, runtime.localRole)) return;
-                lastTokenPointerDownId = '';
-                lastTokenPointerDownAt = 0;
                 const worldPoint = screenToWorld(event.clientX, event.clientY);
                 if (!runtime.dragState.moved) {
                     const moveDistance = Math.hypot(
                         event.clientX - toNumber(runtime.dragState.startClientX, event.clientX),
                         event.clientY - toNumber(runtime.dragState.startClientY, event.clientY)
                     );
-                    if (moveDistance > TOKEN_CLICK_MOVE_PX) runtime.dragState.moved = true;
+                    if (moveDistance <= TOKEN_CLICK_MOVE_PX) return;
+                    runtime.dragState.moved = true;
+                    lastTokenPointerDownState = null;
                 }
                 token.x = normalizeTokenCoordinate((worldPoint.x - scene.grid.offsetX) / scene.grid.cellPx - runtime.dragState.anchorX, token.x);
                 token.y = normalizeTokenCoordinate((worldPoint.y - scene.grid.offsetY) / scene.grid.cellPx - runtime.dragState.anchorY, token.y);
-                renderStage();
+                if (!previewTokenDrag(scene, token)) renderStage();
                 syncDraggedState(false);
                 return;
             }
@@ -858,6 +878,7 @@
         };
     
         const handlePointerUp = (event) => {
+            cancelInteractionRender();
             if (runtime.spawnDragState) {
                 const shouldSpawn = isDM() && event && isClientPointInsideStage(event.clientX, event.clientY);
                 const nextWorldPoint = shouldSpawn ? screenToWorld(event.clientX, event.clientY) : null;
@@ -1013,13 +1034,15 @@
                     );
                     completedDragState.moved = moveDistance > TOKEN_CLICK_MOVE_PX;
                 }
-                suppressLocalDragTween(completedDragSceneId, completedDragState.tokenId);
-                const completedToken = getTokenById(completedDragState.tokenId, runtime.vttState);
-                if (completedToken) {
-                    rememberRecentLocalDragDrop(completedDragSceneId, completedDragState.tokenId, completedToken.x, completedToken.y);
+                if (completedDragState.moved) {
+                    suppressLocalDragTween(completedDragSceneId, completedDragState.tokenId);
+                    const completedToken = getTokenById(completedDragState.tokenId, runtime.vttState);
+                    if (completedToken) {
+                        rememberRecentLocalDragDrop(completedDragSceneId, completedDragState.tokenId, completedToken.x, completedToken.y);
+                    }
+                    markTokenVisualEffect(completedDragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
+                    syncDraggedState(true);
                 }
-                markTokenVisualEffect(completedDragState.tokenId, 'drop-pulse', TOKEN_DROP_PULSE_MS);
-                syncDraggedState(true);
                 runtime.lastDragSyncAt = 0;
                 runtime.dragState = null;
                 if (!completedDragState.moved) {
@@ -1042,21 +1065,35 @@
                 if (stageEl) stageEl.classList.remove('is-panning');
             }
         };
+
+        const handleStageDoubleClick = (event) => {
+            const targetEl = getEventTargetElement(event);
+            if (!targetEl || runtime.localToolState.mode !== TOOL_MODE_NAVIGATE) return;
+            const tokenEl = getTokenElementAtClientPoint(event.clientX, event.clientY, targetEl);
+            if (!tokenEl) return;
+            const token = getTokenById(String(tokenEl.getAttribute('data-token-id') || ''));
+            if (!token) return;
+            activateTokenSelection(token.id);
+            lastTokenPointerDownState = null;
+            runtime.dragState = null;
+            runtime.previewTokenId = '';
+            if (isDM()) {
+                openTokenInspectorPopover(token.id, event.clientX, event.clientY);
+                renderInitiativeList();
+                renderInitiativeDetail();
+                renderTokenInspector();
+                renderTokenInspectorPopover();
+                renderToolsMenu();
+                renderStage();
+            } else if (canRoleMoveToken(token, runtime.localRole)) {
+                snapTokenToGrid(token.id);
+            }
+            event.preventDefault();
+        };
     
         const handleDocumentPointerDown = (event) => {
             const targetEl = getEventTargetElement(event);
             if (!targetEl) return;
-            if (event.button === 2) {
-                const tokenEl = targetEl.closest('.vtt-token');
-                runtime.lastContextPointerState = {
-                    altKey: !!(event.altKey || (typeof event.getModifierState === 'function' && event.getModifierState('Alt'))),
-                    shiftKey: !!(event.shiftKey || (typeof event.getModifierState === 'function' && event.getModifierState('Shift'))),
-                    clientX: Math.round(toNumber(event.clientX, 0)),
-                    clientY: Math.round(toNumber(event.clientY, 0)),
-                    tokenId: tokenEl ? String(tokenEl.getAttribute('data-token-id') || '').trim() : '',
-                    at: Date.now()
-                };
-            }
             const spawnEl = event.button === 0 ? targetEl.closest('[data-spawn-kind]') : null;
             if (spawnEl instanceof HTMLElement) {
                 const kind = String(spawnEl.dataset.spawnKind || '').trim();
@@ -1166,7 +1203,9 @@
                 runtime.previewTokenId = '';
                 openStageContextMenu(event.clientX, event.clientY, {
                     noteId,
-                    worldPoint: screenToWorld(event.clientX, event.clientY)
+                    worldPoint: screenToWorld(event.clientX, event.clientY),
+                    altKey: !!event.altKey,
+                    shiftKey: !!event.shiftKey
                 });
                 renderInitiativeList();
                 renderInitiativeDetail();
@@ -1185,7 +1224,9 @@
                 runtime.previewTokenId = '';
                 openStageContextMenu(event.clientX, event.clientY, {
                     tokenId: token.id,
-                    worldPoint: screenToWorld(event.clientX, event.clientY)
+                    worldPoint: screenToWorld(event.clientX, event.clientY),
+                    altKey: !!event.altKey,
+                    shiftKey: !!event.shiftKey
                 });
                 renderInitiativeList();
                 renderInitiativeDetail();
@@ -1201,7 +1242,9 @@
             if (runtime.previewTokenId) runtime.previewTokenId = '';
             event.preventDefault();
             openStageContextMenu(event.clientX, event.clientY, {
-                worldPoint: screenToWorld(event.clientX, event.clientY)
+                worldPoint: screenToWorld(event.clientX, event.clientY),
+                altKey: !!event.altKey,
+                shiftKey: !!event.shiftKey
             });
             renderStage();
         };
@@ -1240,7 +1283,54 @@
                 || target instanceof HTMLSelectElement
                 || (target instanceof HTMLElement && target.isContentEditable)
             );
+            const isKeyboardContextRequest = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey);
+            if (isKeyboardContextRequest && !isEditableTarget && target instanceof HTMLElement) {
+                const tokenEl = target.closest('.vtt-token');
+                const noteEl = target.closest('.vtt-map-note');
+                const isStageTarget = target === stageEl;
+                if (tokenEl || noteEl || isStageTarget) {
+                    const targetRect = (tokenEl || noteEl || stageEl).getBoundingClientRect();
+                    const clientX = Math.round(targetRect.left + targetRect.width / 2);
+                    const clientY = Math.round(targetRect.top + targetRect.height / 2);
+                    const contextOptions = {
+                        worldPoint: screenToWorld(clientX, clientY),
+                        source: 'keyboard',
+                        altKey: false,
+                        shiftKey: false
+                    };
+                    if (tokenEl) {
+                        const tokenId = String(tokenEl.getAttribute('data-token-id') || '').trim();
+                        if (tokenId) {
+                            activateTokenSelection(tokenId);
+                            contextOptions.tokenId = tokenId;
+                        }
+                    } else if (noteEl) {
+                        const noteId = String(noteEl.getAttribute('data-note-id') || '').trim();
+                        if (noteId) {
+                            activateEvidenceNoteSelection(noteId);
+                            contextOptions.noteId = noteId;
+                        }
+                    }
+                    openStageContextMenu(clientX, clientY, contextOptions);
+                    renderInitiativeList();
+                    renderInitiativeDetail();
+                    renderTokenInspector();
+                    renderTokenInspectorPopover();
+                    renderStage();
+                    const focusFirstContextAction = () => {
+                        const firstAction = root.document && root.document.querySelector
+                            ? root.document.querySelector('#vtt-stage-context-menu .vtt-stage-context-item')
+                            : null;
+                        if (firstAction && typeof firstAction.focus === 'function') firstAction.focus();
+                    };
+                    if (typeof root.requestAnimationFrame === 'function') root.requestAnimationFrame(focusFirstContextAction);
+                    else focusFirstContextAction();
+                    event.preventDefault();
+                    return;
+                }
+            }
             if (event.key === 'Escape') {
+                const exitedActiveTool = runtime.localToolState.mode !== TOOL_MODE_NAVIGATE;
                 const clearedTransientDrawerState = clearTransientDrawerState();
                 const cancelledAskRollPick = cancelAskRollPickMode();
                 const closedMenu = closeQuickSpawnMenu();
@@ -1257,11 +1347,12 @@
                 const closedNPCRoll = closeNPCRollPopover();
                 const closedPlayerRollMenu = runtime.playerRollMenuOpen;
                 runtime.playerRollMenuOpen = false;
+                if (exitedActiveTool) setToolMode(TOOL_MODE_NAVIGATE);
                 if (runtime.previewTokenId) {
                     runtime.previewTokenId = '';
                     renderStage();
                     event.preventDefault();
-                } else if (clearedTransientDrawerState || cancelledAskRollPick || closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedVTTPanel || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll || closedPlayerRollMenu) {
+                } else if (exitedActiveTool || clearedTransientDrawerState || cancelledAskRollPick || closedMenu || closedNavMenu || closedViewMenu || closedToolsMenu || closedStageContext || clearedSpawn || clearedTemplatePlacement || closedVTTPanel || closedInitiativeDetail || closedTokenInspector || closedSheetActions || closedNPCRoll || closedPlayerRollMenu) {
                     render();
                     event.preventDefault();
                 }
@@ -1272,6 +1363,10 @@
             ) {
                 return;
             }
+            const isStageKeyboardContext = target === document.body
+                || target === stageEl
+                || (target instanceof HTMLElement && !!target.closest('.vtt-token'));
+            if (!isStageKeyboardContext) return;
             if (!runtime.selectedTokenId || event.defaultPrevented) return;
             if (event.altKey || event.ctrlKey || event.metaKey) return;
             const selectedToken = getTokenById(runtime.selectedTokenId);
@@ -1291,10 +1386,8 @@
     
 
         const resetPressHistory = () => {
-            lastTokenPointerDownId = '';
-            lastTokenPointerDownAt = 0;
+            lastTokenPointerDownState = null;
             lastEvidenceNotePointerDownState = null;
-            runtime.lastStageToolPointerDownState = null;
         };
 
         return Object.freeze({
@@ -1305,6 +1398,7 @@
             handlePointerMove,
             handlePointerUp,
             handleStageContextMenu,
+            handleStageDoubleClick,
             handleStageDragStart,
             handleStagePointerDown,
             handleStageWheel,

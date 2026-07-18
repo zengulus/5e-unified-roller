@@ -26,6 +26,7 @@
             "prev-turn",
             "remove-entry",
             "reset-initiative-round",
+            "select-evidence-note",
             "select-entry",
             "select-token",
             "set-token-size",
@@ -36,12 +37,14 @@
     const create = (deps = {}) => {
         const state = deps.state;
         const {
+            activateEvidenceNoteSelection,
             activateTokenSelection,
             addTokenToInitiative,
             advanceTurn,
             assignSelectedEntryToToken,
             canDeleteLiveVTTState,
             cloneTokenById,
+            focusViewOnToken,
             getActiveScene,
             isDM,
             openInitiativeDetail,
@@ -55,6 +58,7 @@
             resetInitiativeToRoundOne,
             setInitiativeEntryRosterOwner,
             showTokenPortraitPreview,
+            syncTokenSelectionFromEntry,
             toNumber,
             updateSelectedEntry,
             updateSelectedToken,
@@ -135,6 +139,19 @@
                 if (state.initiativeDetailState && state.initiativeDetailState.entryId !== id) {
                     state.initiativeDetailState = null;
                 }
+                const linkedToken = typeof syncTokenSelectionFromEntry === 'function'
+                    ? syncTokenSelectionFromEntry(id)
+                    : null;
+                if (linkedToken && typeof focusViewOnToken === 'function') focusViewOnToken(linkedToken);
+                renderInitiativeList();
+                renderInitiativeDetail();
+                renderTokenInspector();
+                renderStage();
+                return;
+            }
+
+            if (action === 'select-evidence-note') {
+                if (typeof activateEvidenceNoteSelection !== 'function' || !activateEvidenceNoteSelection(id)) return;
                 renderInitiativeList();
                 renderInitiativeDetail();
                 renderTokenInspector();
@@ -210,4 +227,3 @@
 
     return Object.freeze({ create });
 }));
-

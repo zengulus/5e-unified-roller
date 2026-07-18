@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1e1e1e">
     <link rel="stylesheet" href="css/theme.css?v=20260222e">
     <link rel="stylesheet" href="css/player-nav.css?v=20260428a">
-    <link rel="stylesheet" href="css/vtt.css?v=20260714a">
+    <link rel="stylesheet" href="css/vtt.css?v=20260718a">
 </head>
 
 <body data-player-nav="vtt" data-sync-autoconnect="1">
@@ -50,7 +50,7 @@
             </div>
         </div>
         <button class="vtt-topbar-tab" type="button" data-action="toggle-topbar-pin"
-            id="vtt-topbar-tab" aria-controls="vtt-topbar" aria-label="Pin menu open">Menu 📌</button>
+            id="vtt-topbar-tab" aria-controls="vtt-topbar" aria-label="Show table information and view controls">Table info</button>
     </header>
 
     <main class="vtt-shell">
@@ -77,6 +77,9 @@
                             <span>Map Image URL</span>
                             <input type="text" id="scene-map-url" data-scene-field="mapImageUrl" placeholder="https://...">
                         </label>
+                        <details class="vtt-scene-manage-disclosure vtt-scene-audio-disclosure">
+                            <summary>Optional scene music</summary>
+                            <div class="vtt-scene-manage-body">
                         <div class="vtt-scene-music-editor">
                             <label class="vtt-field">
                                 <span>Music Level</span>
@@ -111,6 +114,8 @@
                                 <input type="text" id="scene-music-active-title" data-scene-music-title="active" placeholder="Track title">
                             </label>
                         </div>
+                            </div>
+                        </details>
                         <div class="vtt-field-grid">
                             <label class="vtt-field">
                                 <span>Map Scale</span>
@@ -183,7 +188,7 @@
                 aria-controls="vtt-player-roll-panel" aria-label="Close player controls">Close</button>
             <section class="vtt-panel vtt-player-roll-panel vtt-player-focus-panel" id="vtt-player-roll-panel">
                 <div class="vtt-panel-head">
-                    <h2>Player Controls</h2>
+                    <h2>Player Actions</h2>
                 </div>
                 <div class="vtt-player-roll-menu" id="vtt-player-roll-menu">
                 </div>
@@ -191,17 +196,18 @@
         </aside>
 
         <section class="vtt-stage-panel">
-            <div class="vtt-stage" id="vtt-stage">
+            <div class="vtt-stage" id="vtt-stage" tabindex="0"
+                aria-label="Virtual tabletop. Select a token, use arrow keys to move an allowed token, or right-click for actions.">
                 <div class="vtt-table-hud" id="vtt-table-hud">
                     <section class="vtt-command-dock vtt-player-dock" id="vtt-player-dock" data-player-only="1"
                         aria-label="Player table controls">
                         <div class="vtt-dock-status" id="vtt-player-dock-status">Player controls</div>
                         <div class="vtt-dock-actions">
                             <button class="vtt-dock-btn strong" type="button" data-action="focus-own-token"
-                                id="vtt-player-find-token">Token</button>
+                                id="vtt-player-find-token">My Token</button>
                             <button class="vtt-dock-btn" type="button" data-action="open-vtt-panel"
                                 data-panel="player-rolls" id="vtt-player-rolls-btn"
-                                aria-controls="vtt-player-roll-panel" aria-expanded="false">Roll</button>
+                                aria-controls="vtt-player-roll-panel" aria-expanded="false">Actions</button>
                             <button class="vtt-dock-btn" type="button" data-action="set-ping-mode"
                                 data-ping-variant="attention" id="vtt-player-ping-btn" aria-pressed="false">Ping</button>
                             <button class="vtt-dock-btn" type="button" data-action="toggle-ruler-mode"
@@ -334,6 +340,7 @@
                     <div class="vtt-proximity-prompt-stack" id="vtt-proximity-prompt-stack" aria-live="polite"></div>
                 </div>
                 <div class="vtt-mode-chip" id="vtt-mode-chip" hidden></div>
+                <div class="vtt-stage-empty" id="vtt-stage-empty" role="status" hidden></div>
                 <div class="vtt-quick-spawn-menu vtt-popover" id="vtt-quick-spawn-menu" hidden></div>
             </div>
         </section>
@@ -356,7 +363,14 @@
                 <section class="vtt-panel">
                     <div class="vtt-panel-head">
                         <h2>Initiative</h2>
-                        <span class="vtt-panel-pill" id="vtt-round-pill">Round 1</span>
+                        <div class="vtt-initiative-head-actions">
+                            <span class="vtt-panel-pill" id="vtt-round-pill">Round 1</span>
+                            <div class="vtt-initiative-compact-actions">
+                                <button class="vtt-inline-btn" type="button" data-action="next-turn" data-dm-only="1">Next</button>
+                                <button class="vtt-inline-btn vtt-initiative-expand" type="button" data-action="open-vtt-panel"
+                                    data-panel="combat" aria-controls="vtt-initiative-panel" aria-expanded="false">Open</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="vtt-initiative-toolbar" data-dm-only="1">
                         <button class="vtt-chip-btn" data-action="prev-turn">Prev</button>
@@ -465,23 +479,23 @@
             </div>
         </form>
     </div>
-    <script src="js/vtt-config.js?v=20260714a"></script>
-    <script src="js/vtt-runtime-state.js?v=20260714a"></script>
-    <script src="js/vtt-dom.js?v=20260714a"></script>
-    <script src="js/vtt-inspector-markup.js?v=20260714a"></script>
-    <script src="js/vtt-geometry.js?v=20260714b"></script>
+    <script src="js/vtt-config.js?v=20260718a"></script>
+    <script src="js/vtt-runtime-state.js?v=20260718a"></script>
+    <script src="js/vtt-dom.js?v=20260718a"></script>
+    <script src="js/vtt-inspector-markup.js?v=20260718a"></script>
+    <script src="js/vtt-geometry.js?v=20260718a"></script>
     <script src="js/vtt-rules.js?v=20260714b"></script>
     <script src="js/vtt-rolls.js?v=20260714b"></script>
     <script src="js/vtt-proximity.js?v=20260714b"></script>
-    <script src="js/vtt-markup.js?v=20260714b"></script>
-    <script src="js/vtt-stage-view.js?v=20260714b"></script>
-    <script src="js/vtt-stage-input.js?v=20260714b"></script>
+    <script src="js/vtt-markup.js?v=20260718a"></script>
+    <script src="js/vtt-stage-view.js?v=20260718a"></script>
+    <script src="js/vtt-stage-input.js?v=20260718a"></script>
     <script src="js/vtt-field-router.js?v=20260714b"></script>
     <script src="js/vtt-actions-rolls.js?v=20260714b"></script>
-    <script src="js/vtt-actions-table.js?v=20260714b"></script>
+    <script src="js/vtt-actions-table.js?v=20260718a"></script>
     <script src="js/vtt-actions-scenes.js?v=20260714b"></script>
-    <script src="js/vtt-actions-selection.js?v=20260714b"></script>
-    <script src="js/vtt.js?v=20260714e"></script>
+    <script src="js/vtt-actions-selection.js?v=20260718a"></script>
+    <script src="js/vtt.js?v=20260718a"></script>
     <script src="js/vtt-fog-unified.js?v=20260425a"></script>
 </body>
 

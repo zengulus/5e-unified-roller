@@ -121,6 +121,14 @@ try {
         await page.mouse.wheel(0, -180);
         await page.waitForTimeout(50);
         assert.notEqual(await page.locator('#vtt-map-world').getAttribute('style'), transformBeforeWheel, 'wheel input must update the stage transform');
+        await page.locator('#vtt-stage').focus();
+        await page.keyboard.press('Shift+F10');
+        assert.equal(await page.locator('#vtt-stage-context-menu').isVisible(), true, 'keyboard context-menu input must open stage actions');
+        await page.waitForTimeout(25);
+        assert.equal(await page.evaluate(() => !!document.activeElement?.closest('#vtt-stage-context-menu')), true, 'keyboard context actions must receive focus');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(25);
+        assert.equal(await page.evaluate(() => document.activeElement?.id), 'vtt-stage', 'closing keyboard context actions must restore stage focus');
         await page.mouse.click(stagePoint.x, stagePoint.y, { button: 'right' });
         assert.equal(await page.locator('#vtt-stage-context-menu').isVisible(), true, 'right click must open the stage context menu');
         await page.keyboard.press('Escape');
@@ -157,7 +165,51 @@ try {
 
         await page.locator('#vtt-dm-dock [data-action="open-quick-spawn"]').click();
         await page.locator('#vtt-quick-spawn-menu [data-action="quick-spawn-custom"]').click();
-        await page.locator('.vtt-token').first().dblclick();
+        const spawnedToken = page.locator('.vtt-token').first();
+        const tokenBox = await spawnedToken.boundingBox();
+        assert.ok(tokenBox, 'spawned token must have a drag target');
+        const tokenPositionBeforeJitter = await page.evaluate(() => {
+            const token = window.RTF_STORE.getVTTState().scenes[0].tokens[0];
+            return [token.x, token.y];
+        });
+        const tokenCenter = {
+            x: tokenBox.x + tokenBox.width / 2,
+            y: tokenBox.y + tokenBox.height / 2
+        };
+        await page.mouse.move(tokenCenter.x, tokenCenter.y);
+        await page.mouse.down();
+        await page.mouse.move(tokenCenter.x + 2, tokenCenter.y + 2);
+        await page.mouse.up();
+        assert.deepEqual(await page.evaluate(() => {
+            const token = window.RTF_STORE.getVTTState().scenes[0].tokens[0];
+            return [token.x, token.y];
+        }), tokenPositionBeforeJitter, 'sub-threshold pointer jitter must not drag the token');
+        await spawnedToken.click({ button: 'right' });
+        assert.equal(await page.getByRole('button', { name: 'Custom roll (any dice)' }).isVisible(), true);
+        assert.equal(await page.getByRole('button', { name: 'Token inspector' }).isVisible(), true);
+        await page.keyboard.press('Escape');
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            const state = structuredClone(store.getVTTState());
+            state.scenes[0].tokens[0].sourceType = 'player';
+            store.updateVTTState(state);
+        });
+        await page.waitForTimeout(50);
+        await spawnedToken.click({ button: 'right' });
+        assert.equal(await page.getByRole('button', { name: 'Roll from character sheet' }).isVisible(), true);
+        await page.keyboard.press('Escape');
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            const state = structuredClone(store.getVTTState());
+            state.scenes[0].tokens[0].sourceType = 'monster';
+            state.scenes[0].tokens[0].side = 'enemy';
+            store.updateVTTState(state);
+        });
+        await page.waitForTimeout(50);
+        await spawnedToken.click({ button: 'right' });
+        assert.equal(await page.getByRole('button', { name: 'Roll stat block / NPC' }).isVisible(), true);
+        await page.keyboard.press('Escape');
+        await spawnedToken.dblclick();
         const inspector = page.locator('#vtt-token-inspector-popover');
         await inspector.getByText('Combat Actions', { exact: true }).click();
         assert.equal(await inspector.getByRole('button', { name: '-5 HP' }).isDisabled(), true);
@@ -172,25 +224,29 @@ try {
         await inspector.getByText('Stats & Size', { exact: true }).click();
         await inspector.locator('[data-token-field="hpCurrent"]').fill('8');
         await inspector.locator('[data-token-field="hpCurrent"]').press('Tab');
-        await inspector.getByText('Stats & Size', { exact: true }).click();
+        assert.equal(await inspector.locator('[data-inspector-section="stats"]').getAttribute('open'), '');
         await inspector.locator('[data-token-field="hpMax"]').fill('10');
         await inspector.locator('[data-token-field="hpMax"]').press('Tab');
-        await inspector.getByText('Combat Actions', { exact: true }).click();
+        assert.equal(await inspector.locator('[data-inspector-section="stats"]').getAttribute('open'), '');
         await inspector.getByRole('button', { name: '-5 HP' }).click();
         assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 3);
-        await inspector.getByText('Combat Actions', { exact: true }).click();
         await inspector.getByRole('button', { name: '+5 HP' }).click();
         assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 8);
-        await inspector.getByText('Combat Actions', { exact: true }).click();
         await inspector.getByRole('button', { name: 'Bloodied' }).click();
         assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 5);
-        await inspector.getByText('Combat Actions', { exact: true }).click();
         await inspector.getByRole('button', { name: 'Full HP' }).click();
         assert.equal(await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens[0].hpCurrent), 10);
         await inspector.getByRole('button', { name: 'Close token inspector' }).click();
 
         await page.locator('[data-action="create-scene"]').first().evaluate((button) => button.click());
         assert.equal(await page.locator('#vtt-scene-list [data-scene-picker="local"] option').count(), 2);
+        assert.match(await page.locator('#vtt-stage-title').textContent(), /^Preview:/);
+        assert.match(await page.locator('#vtt-stage-meta').textContent(), /Players see/);
+        assert.equal(await page.locator('.vtt-scene-summary-eyebrow').textContent(), 'DM Preview');
+        assert.equal(
+            await page.locator('.vtt-scene-summary-title').textContent(),
+            (await page.locator('#vtt-stage-title').textContent()).replace(/^Preview:\s*/, '')
+        );
 
         await page.locator('[data-action="open-vtt-panel"][data-panel="combat"]').first().evaluate((button) => button.click());
         await page.getByRole('button', { name: 'New Clock' }).click();
@@ -210,7 +266,11 @@ try {
             };
             store.updateVTTState(state, caseId);
         });
-        await page.locator('#vtt-initiative-list .vtt-entry').first().click();
+        await page.locator('#vtt-initiative-list .vtt-entry').first().focus();
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(25);
+        assert.equal(await page.locator('#vtt-initiative-list .vtt-entry').first().getAttribute('tabindex'), '0');
+        assert.match(await page.locator('#vtt-initiative-list .vtt-entry').first().getAttribute('class'), /is-selected/);
         await page.locator('#vtt-initiative-list [data-action="edit-entry"]').first().click();
         await page.getByRole('button', { name: 'Move Down' }).click();
         assert.deepEqual(await page.locator('#vtt-initiative-list .vtt-entry-name').allTextContents(), ['Slow', 'Fast']);

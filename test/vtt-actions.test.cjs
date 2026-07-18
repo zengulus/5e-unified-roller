@@ -26,7 +26,7 @@ const actionGroups = [
     {
         name: 'selection',
         controllerName: 'Selection',
-        expectedActionCount: 17,
+        expectedActionCount: 18,
         factory: require('../js/vtt-actions-selection.js')
     }
 ];
@@ -74,7 +74,7 @@ test('VTT action ownership is complete, exclusive, and rejects unknown actions',
     }));
     const allActions = instances.flatMap((group) => group.actions);
 
-    assert.equal(allActions.length, 136);
+    assert.equal(allActions.length, 137);
     instances.forEach((group) => {
         assert.equal(group.actions.length, group.expectedActionCount, `${group.name} action count`);
         assert.equal(new Set(group.actions).size, group.actions.length, `${group.name} has no duplicate entries`);
@@ -242,6 +242,11 @@ test('selection actions commit entry selection before rendering all dependent vi
     );
     const actions = selectionGroup.factory.create({
         state,
+        syncTokenSelectionFromEntry: (id) => {
+            calls.push(`sync:${id}`);
+            return { id: 'token_linked' };
+        },
+        focusViewOnToken: (token) => calls.push(`focus:${token.id}`),
         renderInitiativeList: recordRender('list'),
         renderInitiativeDetail: recordRender('detail'),
         renderTokenInspector: recordRender('inspector'),
@@ -254,6 +259,8 @@ test('selection actions commit entry selection before rendering all dependent vi
     assert.equal(state.selectedEvidenceNoteId, '');
     assert.equal(state.initiativeDetailState, null);
     assert.deepEqual(calls, [
+        'sync:entry_new',
+        'focus:token_linked',
         'list:entry_new::null',
         'detail:entry_new::null',
         'inspector:entry_new::null',

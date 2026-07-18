@@ -32,6 +32,108 @@ const normalizeTrigger = (trigger = {}) => ({
     ...trigger
 });
 
+class FakeInspectorNode {
+    constructor(tagName, attributes = {}, ownerDocument = null) {
+        this.tagName = String(tagName || '').toUpperCase();
+        this.attributes = new Map(Object.entries(attributes));
+        this.ownerDocument = ownerDocument;
+    }
+
+    hasAttribute(name) {
+        return this.attributes.has(name);
+    }
+
+    getAttribute(name) {
+        return this.attributes.has(name) ? this.attributes.get(name) : null;
+    }
+}
+
+class FakeInspectorControl extends FakeInspectorNode {
+    constructor(tagName, attributes, ownerDocument) {
+        super(tagName, attributes, ownerDocument);
+        this.selectionStart = null;
+        this.selectionEnd = null;
+        this.selectionDirection = 'none';
+        this.focusOptions = null;
+        this.restoredSelection = null;
+    }
+
+    focus(options) {
+        this.focusOptions = options;
+        this.ownerDocument.activeElement = this;
+    }
+
+    setSelectionRange(start, end, direction) {
+        this.selectionStart = start;
+        this.selectionEnd = end;
+        this.selectionDirection = direction;
+        this.restoredSelection = { start, end, direction };
+    }
+}
+
+class FakeInspectorSection extends FakeInspectorNode {
+    constructor(attributes, ownerDocument) {
+        super('details', attributes, ownerDocument);
+        this.open = Object.hasOwn(attributes, 'open');
+    }
+}
+
+const parseTestAttributes = (source = '') => {
+    const attributes = {};
+    String(source).replace(/([\w:-]+)(?:="([^"]*)")?/g, (_match, name, value) => {
+        attributes[name] = value === undefined ? '' : value;
+        return '';
+    });
+    return attributes;
+};
+
+class FakeInspectorPopover {
+    constructor(ownerDocument) {
+        this.ownerDocument = ownerDocument;
+        this.attributes = new Map();
+        this.hidden = true;
+        this.scrollTop = 0;
+        this.scrollLeft = 0;
+        this.sections = [];
+        this.controls = [];
+        this._innerHTML = '';
+    }
+
+    set innerHTML(markup) {
+        this._innerHTML = String(markup || '');
+        this.scrollTop = 0;
+        this.scrollLeft = 0;
+        this.sections = Array.from(this._innerHTML.matchAll(/<details\b([^>]*)>/g))
+            .map((match) => new FakeInspectorSection(parseTestAttributes(match[1]), this.ownerDocument));
+        this.controls = Array.from(this._innerHTML.matchAll(/<(input|select|textarea)\b([^>]*)>/g))
+            .map((match) => new FakeInspectorControl(match[1], parseTestAttributes(match[2]), this.ownerDocument));
+    }
+
+    get innerHTML() {
+        return this._innerHTML;
+    }
+
+    setAttribute(name, value) {
+        this.attributes.set(name, String(value));
+    }
+
+    getAttribute(name) {
+        return this.attributes.has(name) ? this.attributes.get(name) : null;
+    }
+
+    removeAttribute(name) {
+        this.attributes.delete(name);
+    }
+
+    querySelectorAll(selector) {
+        return selector === 'details[data-inspector-section]' ? this.sections : this.controls;
+    }
+
+    contains(node) {
+        return this.sections.includes(node) || this.controls.includes(node);
+    }
+}
+
 const createHarness = (overrides = {}) => {
     let lazyLoadCalls = 0;
     const monsterResources = overrides.monsterResources || { loading: false };
@@ -273,4 +375,65 @@ test('DM inspector popover renders the selected token and positions once', () =>
     assert.match(harness.dom.tokenInspectorPopoverEl.innerHTML, /Token Inspector/);
     assert.match(harness.dom.tokenInspectorPopoverEl.innerHTML, /Goblin &lt;Scout&gt;/);
     assert.equal(positionCalls, 1);
+});
+
+test('DM token inspector popover preserves accordions, scroll, focus, and caret across rerenders', () => {
+    const token = {
+        id: 'token_1',
+        label: 'Goblin Scout',
+        side: 'enemy',
+        moveAccess: 'dm',
+        moodLabel: 'Watching closely',
+        w: 1,
+        h: 1,
+        conditions: [],
+        triggers: []
+    };
+    const ownerDocument = { activeElement: null };
+    const popover = new FakeInspectorPopover(ownerDocument);
+    let positionSnapshot = null;
+    const harness = createHarness({
+        monsterResources: { loading: true },
+        dom: {
+            selectionPillEl: { textContent: '' },
+            tokenInspectorEl: { innerHTML: '' },
+            tokenInspectorPopoverEl: popover
+        },
+        deps: {
+            getInspectorState: () => ({ kind: 'token', targetId: token.id }),
+            getTokenById: (id) => id === token.id ? token : null,
+            positionTokenInspectorPopover: () => {
+                positionSnapshot = Object.fromEntries(popover.sections.map((section) => [
+                    section.getAttribute('data-inspector-section'),
+                    section.open
+                ]));
+            }
+        }
+    });
+
+    harness.api.renderTokenInspectorPopover();
+    const identitySection = popover.sections.find((section) => section.getAttribute('data-inspector-section') === 'identity');
+    const statsSection = popover.sections.find((section) => section.getAttribute('data-inspector-section') === 'stats');
+    identitySection.open = false;
+    statsSection.open = true;
+    popover.scrollTop = 237;
+    popover.scrollLeft = 4;
+
+    const moodField = popover.controls.find((control) => control.getAttribute('data-token-field') === 'moodLabel');
+    moodField.selectionStart = 3;
+    moodField.selectionEnd = 11;
+    moodField.selectionDirection = 'backward';
+    ownerDocument.activeElement = moodField;
+
+    harness.api.renderTokenInspectorPopover();
+
+    const restoredMoodField = popover.controls.find((control) => control.getAttribute('data-token-field') === 'moodLabel');
+    assert.notEqual(restoredMoodField, moodField);
+    assert.equal(ownerDocument.activeElement, restoredMoodField);
+    assert.deepEqual(restoredMoodField.focusOptions, { preventScroll: true });
+    assert.deepEqual(restoredMoodField.restoredSelection, { start: 3, end: 11, direction: 'backward' });
+    assert.equal(popover.scrollTop, 237);
+    assert.equal(popover.scrollLeft, 4);
+    assert.equal(positionSnapshot.identity, false, 'restored accordion state should be applied before positioning');
+    assert.equal(positionSnapshot.stats, true, 'the expanded section should remain expanded during positioning');
 });

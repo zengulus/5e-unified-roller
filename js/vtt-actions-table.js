@@ -161,7 +161,7 @@
                 if (!canUseSharedPlayerTools()) return;
                 const scene = getActiveScene();
                 const worldPoint = getStageContextWorldPoint();
-                const pingOptions = getPingVariantOptions(state.lastContextPointerState);
+                const pingOptions = getPingVariantOptions(state.stageContextMenuState);
                 closeStageContextMenu();
                 if (scene && worldPoint) queueSharedPing(scene, worldPoint, pingOptions);
                 render();
@@ -657,4 +657,3 @@
 
     return Object.freeze({ create });
 }));
-

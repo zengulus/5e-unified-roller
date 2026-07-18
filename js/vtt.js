@@ -960,7 +960,6 @@
         clearTemplatePlacementState();
         stageState.tool.current.mode = normalizeToolMode(mode);
         if (stageState.tool.current.mode !== C.TOOL_MODE_PING) stageState.tool.pendingAskRollRequest = null;
-        stageState.pointer.lastToolPointerDown = null;
     };
     const setAskRollPickMode = (enabled) => {
         stageState.tool.askRollPickMode = !!enabled && isPlayer() && canUseSharedPlayerTools();
@@ -1120,10 +1119,10 @@
                 dom.modeChipEl.textContent = `Ask to roll ${stageState.tool.pendingAskRollRequest.label} - click the map location`;
                 return;
             }
-            dom.modeChipEl.textContent = `${getPingVariantOptions().label} ping - click the map, double click or tap to go back`;
+            dom.modeChipEl.textContent = `${getPingVariantOptions().label} ping - click the map once · Esc or Select to cancel`;
             return;
         }
-        dom.modeChipEl.textContent = `Now in ${getToolModeLabel(activeMode)} - double click or tap to go back to normal`;
+        dom.modeChipEl.textContent = `${getToolModeLabel(activeMode)} active · Esc or Select to finish`;
     };
 
     const positionNPCSearchPopover = () => {
@@ -1193,6 +1192,23 @@
         if (top + height > bottomBoundary) {
             top = Math.max(margin, bottomBoundary - height);
         }
+        if (window.matchMedia('(min-width: 861px)').matches) {
+            const obstructionSelector = '.vtt-sidebar, .vtt-player-roll-rail, .vtt-initiative-panel, .vtt-admin-panel';
+            document.querySelectorAll(obstructionSelector).forEach((obstruction) => {
+                if (obstruction === dom.tokenInspectorPopoverEl) return;
+                const style = window.getComputedStyle(obstruction);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') return;
+                const rect = obstruction.getBoundingClientRect();
+                const overlapsVertically = top < rect.bottom && top + height > rect.top;
+                const overlapsHorizontally = left < rect.right && left + width > rect.left;
+                if (!overlapsVertically || !overlapsHorizontally) return;
+                if (rect.left >= window.innerWidth / 2) {
+                    left = Math.max(margin, rect.left - width - margin);
+                } else {
+                    left = Math.min(window.innerWidth - width - margin, rect.right + margin);
+                }
+            });
+        }
         dom.tokenInspectorPopoverEl.style.left = `${Math.round(left)}px`;
         dom.tokenInspectorPopoverEl.style.top = `${Math.round(top)}px`;
     };
@@ -1250,10 +1266,33 @@
 
     const closeStageContextMenu = () => {
         if (!uiRuntime.overlays.stageContextMenu && (!dom.stageContextMenuEl || dom.stageContextMenuEl.hidden)) return false;
+        const closingState = uiRuntime.overlays.stageContextMenu;
+        const shouldRestoreKeyboardFocus = !!(
+            closingState
+            && closingState.source === 'keyboard'
+            && dom.stageContextMenuEl
+            && typeof dom.stageContextMenuEl.contains === 'function'
+            && dom.stageContextMenuEl.contains(document.activeElement)
+        );
         uiRuntime.overlays.stageContextMenu = null;
         if (dom.stageContextMenuEl) {
             dom.stageContextMenuEl.hidden = true;
             dom.stageContextMenuEl.innerHTML = '';
+        }
+        if (shouldRestoreKeyboardFocus) {
+            window.requestAnimationFrame(() => {
+                const tokenId = String(closingState.tokenId || '').trim();
+                const noteId = String(closingState.noteId || '').trim();
+                const escapeSelector = (value) => window.CSS && typeof window.CSS.escape === 'function'
+                    ? window.CSS.escape(value)
+                    : value.replace(/"/g, '\\"');
+                const returnTarget = tokenId
+                    ? document.querySelector(`.vtt-token[data-token-id="${escapeSelector(tokenId)}"]`)
+                    : (noteId
+                        ? document.querySelector(`.vtt-map-note[data-note-id="${escapeSelector(noteId)}"]`)
+                        : dom.stageEl);
+                if (returnTarget && typeof returnTarget.focus === 'function') returnTarget.focus();
+            });
         }
         return true;
     };
@@ -1308,10 +1347,16 @@
             dom.body.dataset.activeVttPanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
         }
         if (dom.topbarTabEl) {
-            dom.topbarTabEl.textContent = 'Menu 📌';
-            dom.topbarTabEl.title = uiRuntime.preferences.topbarCollapsed ? 'Pin menu open' : 'Unpin menu';
-            dom.topbarTabEl.setAttribute('aria-label', uiRuntime.preferences.topbarCollapsed ? 'Pin menu open' : 'Unpin menu');
+            dom.topbarTabEl.textContent = uiRuntime.preferences.topbarCollapsed ? 'Table info' : 'Hide header';
+            dom.topbarTabEl.title = uiRuntime.preferences.topbarCollapsed ? 'Show table information and view controls' : 'Hide the table header';
+            dom.topbarTabEl.setAttribute('aria-label', uiRuntime.preferences.topbarCollapsed ? 'Show table information and view controls' : 'Hide the table header');
             dom.topbarTabEl.setAttribute('aria-pressed', uiRuntime.preferences.topbarCollapsed ? 'false' : 'true');
+        }
+        if (dom.topbarEl) {
+            dom.topbarEl.querySelectorAll('.vtt-topbar-brand, .vtt-topbar-toolbar').forEach((sectionEl) => {
+                sectionEl.inert = !!uiRuntime.preferences.topbarCollapsed;
+                sectionEl.setAttribute('aria-hidden', uiRuntime.preferences.topbarCollapsed ? 'true' : 'false');
+            });
         }
         if (dom.settingsRailTabEl) {
             dom.settingsRailTabEl.textContent = 'Close';
@@ -1350,7 +1395,10 @@
         }
         if (dom.initiativePanelEl) {
             dom.initiativePanelEl.tabIndex = -1;
-            dom.initiativePanelEl.setAttribute('aria-hidden', activePanel === 'combat' ? 'false' : 'true');
+            dom.initiativePanelEl.setAttribute('aria-hidden', 'false');
+            dom.initiativePanelEl.querySelectorAll('.vtt-initiative-expand').forEach((buttonEl) => {
+                buttonEl.setAttribute('aria-expanded', activePanel === 'combat' ? 'true' : 'false');
+            });
         }
         if (dom.adminPanelEl) {
             dom.adminPanelEl.tabIndex = -1;
@@ -3439,12 +3487,20 @@
             || (isPlayer() && canUseSharedPlayerTools());
         const canRollStatBlock = !!(token && isDM() && isNPCRollTarget(token));
         const canCustomRoll = isDM() || (isPlayer() && canUseSharedPlayerTools());
+        const canPing = canUseSharedPlayerTools();
         const canPreview = canPreviewTokenPortrait(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
         const activeScene = getActiveScene();
         const fogCount = activeScene && Array.isArray(activeScene.fog) ? activeScene.fog.length : 0;
-        const contextLabel = uiRuntime.overlays.stageContextMenu.source === 'touch' ? 'Touch actions' : 'Right-click actions';
+        const contextSource = uiRuntime.overlays.stageContextMenu.source;
+        const contextLabel = contextSource === 'touch'
+            ? 'Touch actions'
+            : (contextSource === 'keyboard' ? 'Keyboard actions' : 'Right-click actions');
+        const openMapTools = uiRuntime.overlays.stageContextMenu.source === 'keyboard';
+        dom.stageContextMenuEl.setAttribute('role', 'dialog');
+        dom.stageContextMenuEl.setAttribute('aria-modal', 'false');
+        dom.stageContextMenuEl.setAttribute('aria-label', contextLabel);
         if (dom.body) dom.body.dataset.vttContextTarget = note ? 'note' : (token ? 'token' : 'stage');
         dom.stageContextMenuEl.hidden = false;
         dom.stageContextMenuEl.innerHTML = note ? `
@@ -3454,7 +3510,7 @@
             </div>
             <div class="vtt-stage-context-list">
                 ${canEditNote ? '<button class="vtt-stage-context-item strong" type="button" data-action="context-note-inspector">Edit zone</button>' : ''}
-                <button class="vtt-stage-context-item" type="button" data-action="context-ping">Ping here</button>
+                ${canPing ? '<button class="vtt-stage-context-item" type="button" data-action="context-ping">Ping here</button>' : ''}
                 ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-toggle-hidden">${note.hidden ? 'Show to players' : 'Make DM only'}</button>` : ''}
                 ${canEditNote ? '<button class="vtt-stage-context-item" type="button" data-action="context-note-duplicate">Duplicate zone</button>' : ''}
                 ${canEditNote ? '<button class="vtt-stage-context-item danger" type="button" data-action="context-note-delete">Delete zone</button>' : ''}
@@ -3466,7 +3522,7 @@
                 <span>${escapeHtml(contextLabel)}</span>
             </div>
             <div class="vtt-stage-context-list">
-                <button class="vtt-stage-context-item strong" type="button" data-action="context-ping">Ping</button>
+                ${canPing ? '<button class="vtt-stage-context-item strong" type="button" data-action="context-ping">Ping here</button>' : ''}
                 ${canRollFromSheet ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-from-sheet">Roll from character sheet</button>' : ''}
                 ${canCustomRoll ? '<button class="vtt-stage-context-item" type="button" data-action="context-custom-roll">Custom roll (any dice)</button>' : ''}
                 ${canRollStatBlock ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-stat-block">Roll stat block / NPC</button>' : ''}
@@ -3475,7 +3531,7 @@
                 ${canPreview ? `<button class="vtt-stage-context-item" type="button" data-action="context-preview-token">${token.id === stageState.preview.tokenId ? 'Hide portrait' : 'Preview portrait'}</button>` : ''}
                 ${isDM() && !token ? '<button class="vtt-stage-context-item" type="button" data-action="context-quick-spawn">Quick spawn here</button><button class="vtt-stage-context-item" type="button" data-action="context-npc-search">NPC search here</button>' : ''}
             </div>
-            <details class="vtt-stage-context-details">
+            <details class="vtt-stage-context-details"${openMapTools ? ' open' : ''}>
                 <summary>Map tools</summary>
                 <div class="vtt-stage-context-section">
                 <div class="vtt-menu-title">Measure & Areas</div>
@@ -3488,7 +3544,7 @@
                 </div>
                 <label class="vtt-stage-context-size">
                     <span>Template size</span>
-                    <input type="number" id="vtt-tool-size-input" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="${escapeHtml(String(stageState.tool.current.sizeCells))}" aria-label="Circle radius and cone length in squares">
+                    <input type="number" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="${escapeHtml(String(stageState.tool.current.sizeCells))}" aria-label="Circle radius and cone length in squares">
                     <small>Circle radius / cone length, in squares</small>
                 </label>
                 ${isDM() ? `
@@ -3524,7 +3580,9 @@
             worldPoint: options.worldPoint || screenToWorld(clientX, clientY),
             tokenId: String(options.tokenId || '').trim(),
             noteId: String(options.noteId || '').trim(),
-            source: String(options.source || 'pointer').trim()
+            source: String(options.source || 'pointer').trim(),
+            altKey: !!options.altKey,
+            shiftKey: !!options.shiftKey
         };
         renderStageContextMenu();
         return true;
@@ -4666,8 +4724,8 @@
                     <div class="vtt-scene-summary-card">
                         <div class="vtt-scene-summary-top">
                             <div class="vtt-scene-summary-copy">
-                                <span class="vtt-scene-summary-eyebrow">Current Scene</span>
-                                <strong class="vtt-scene-summary-title">${escapeHtml(sharedScene && sharedScene.name ? sharedScene.name : (viewedScene && viewedScene.name ? viewedScene.name : 'Scene'))}</strong>
+                                <span class="vtt-scene-summary-eyebrow">${isLocalView ? 'DM Preview' : 'Shared Scene'}</span>
+                                <strong class="vtt-scene-summary-title">${escapeHtml(viewedScene && viewedScene.name ? viewedScene.name : 'Scene')}</strong>
                                 <span class="vtt-scene-summary-meta">${escapeHtml(describeScene(viewedScene))}</span>
                             </div>
                             <div class="vtt-scene-tag-row">
@@ -4677,7 +4735,7 @@
                         </div>
                         <div class="vtt-scene-summary-note">${escapeHtml(routeNote)}</div>
                         <div class="vtt-scene-action-row">
-                            <button class="vtt-chip-btn" data-action="view-scene-local" data-id="${escapeHtml(viewedSceneId)}"${viewedScene ? '' : ' disabled'}>DM Preview</button>
+                            <button class="vtt-chip-btn" data-action="view-scene-local" data-id="${escapeHtml(viewedSceneId)}"${viewedScene && !isLocalView ? '' : ' disabled'}>${isLocalView ? 'Previewing' : 'DM Preview'}</button>
                             <button class="vtt-chip-btn strong" data-action="show-scene-everyone" data-id="${escapeHtml(viewedSceneId)}"${viewedScene ? '' : ' disabled'}>Show Everyone</button>
                         </div>
                     </div>
@@ -5002,9 +5060,14 @@
         if (!dom.initiativeListEl || !dom.roundPillEl) return;
         const initiative = sessionState.snapshot && sessionState.snapshot.initiative ? sessionState.snapshot.initiative : { entries: [], round: 1, activeEntryId: '' };
         const visibleEntries = getVisibleInitiativeEntriesForRole(sessionState.snapshot, sessionState.role);
-        dom.roundPillEl.textContent = `Round ${initiative.round || 1}`;
+        const roundNumber = initiative.round || 1;
+        const isCombatDrawerOpen = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel) === 'combat';
+        dom.roundPillEl.textContent = isCombatDrawerOpen ? `Round ${roundNumber}` : `R${roundNumber}`;
+        dom.roundPillEl.setAttribute('aria-label', `Round ${roundNumber}`);
         if (!Array.isArray(initiative.entries) || !initiative.entries.length) {
-            dom.initiativeListEl.innerHTML = '<div class="vtt-empty">No combatants yet. Add a token to initiative or roll from the Character Sheet.</div>';
+            dom.initiativeListEl.innerHTML = isDM()
+                ? '<div class="vtt-empty">No combatants yet. Add a token from its inspector or roll initiative from a sheet.</div>'
+                : '<div class="vtt-empty">Combat has not started.</div>';
             return;
         }
         if (!visibleEntries.length) {
@@ -5021,8 +5084,11 @@
             const rosterPlayer = getRosterPlayerForRecord(entry);
             const localContext = isPlayer() ? getLocalPlayerFocusContext() : null;
             const isMine = !!(isPlayer() && localContext && localContext.playerId && rosterPlayer && String(rosterPlayer.id || '').trim() === localContext.playerId);
+            const turnStatus = isActive ? ' Current turn.' : (isNext ? ' Next turn.' : '');
+            const ownershipStatus = isMine ? ' Your combatant.' : '';
+            const entryLabel = `${entry.name || 'Combatant'}, initiative ${entry.total ?? 0}.${turnStatus}${ownershipStatus} Select and center its linked token.`;
             return `
-            <div class="vtt-entry${entry.id === stageState.selection.entryId ? ' is-selected' : ''}${isActive ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${isMine ? ' is-mine' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}">
+            <div class="vtt-entry${entry.id === stageState.selection.entryId ? ' is-selected' : ''}${isActive ? ' is-active-turn' : ''}${isHiddenToPlayers ? ' is-hidden' : ''}${isMine ? ' is-mine' : ''}" data-action="select-entry" data-id="${escapeHtml(entry.id)}" role="${isDM() ? 'group' : 'button'}" tabindex="0" aria-label="${escapeHtml(entryLabel)}">
                 <div class="vtt-entry-line">
                     <div class="vtt-entry-primary">
                         <div class="vtt-entry-name">${escapeHtml(entry.name || 'Combatant')}</div>
@@ -5056,14 +5122,14 @@
             : (context.identity && context.identity.characterName ? context.identity.characterName : 'Unlinked');
         const statusText = context.linkedPlayer
             ? (context.token ? `${linkedName} ready${context.isTurn ? ' - your turn' : ''}` : `${linkedName} linked - no visible token`)
-            : 'Link a roster entry to enable sheet-aware focus';
-        const tokenActionLabel = context.token ? (context.isTurn ? 'Your Token' : 'Find Token') : 'No Token';
+            : 'Choose a roster entry to enable sheet-aware actions';
+        const tokenActionLabel = context.token ? 'Center My Token' : 'No token yet';
         const rollMode = normalizeRollMode(uiRuntime.playerRoll.mode);
         const rollSearchResults = getPlayerRollSearchResults();
         const isRollSearching = normalizeSearchText(uiRuntime.queries.playerRoll).length > 0;
         return `
             <div class="vtt-player-focus-status${context.isTurn ? ' is-turn' : ''}">
-                <span class="vtt-player-focus-kicker">${escapeHtml(context.isTurn ? 'Your Turn' : 'Player Controls')}</span>
+                <span class="vtt-player-focus-kicker">${escapeHtml(context.isTurn ? 'Your Turn' : 'Player Actions')}</span>
                 <strong>${escapeHtml(statusText)}</strong>
             </div>
             <div class="vtt-player-focus-section">
@@ -5386,6 +5452,7 @@
         remoteTokenTweens: resources.remoteTokenTweens,
         dom: {
             stageEl: dom.stageEl,
+            stageEmptyEl: dom.stageEmptyEl,
             mapWorldEl: dom.mapWorldEl,
             worldEl: dom.worldEl,
             stageGridEl: dom.stageGridEl,
@@ -5427,7 +5494,13 @@
             const name = context.linkedPlayer && context.linkedPlayer.name
                 ? context.linkedPlayer.name
                 : (context.identity && context.identity.characterName ? context.identity.characterName : 'Unlinked');
-            dom.playerDockStatusEl.innerHTML = `<strong>${escapeHtml(context.isTurn ? 'Your Turn' : name)}</strong><span>${escapeHtml(context.token ? 'Ready at the table' : 'No visible token')}</span>`;
+            const heading = !context.linkedPlayer
+                ? 'Character not linked'
+                : (context.isTurn ? 'Your Turn' : name);
+            const detail = !context.linkedPlayer
+                ? 'Choose your roster entry to continue'
+                : (context.token ? 'Ready at the table' : 'Waiting for a visible token');
+            dom.playerDockStatusEl.innerHTML = `<strong>${escapeHtml(heading)}</strong><span>${escapeHtml(detail)}</span>`;
             if (dom.playerFindTokenEl) dom.playerFindTokenEl.disabled = !context.token;
         }
         if (dom.toolsMenuToggleEl) {
@@ -5460,7 +5533,7 @@
                         ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Double-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Arrow keys move the selected token by one cell.'
                         : (isSpectator()
                             ? 'Spectator mode: drag empty space to pan, scroll or pinch to zoom, and click visible pins or zones to read them.'
-                            : 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Double-click a token to snap it to the grid. Click pins or zones to read them. Arrow keys move the selected token by one cell. Right-click a token image to preview it.'))))))));
+                            : 'Drag empty space to pan and scroll or pinch to zoom. Drag only tokens you control. Double-click your movable token to snap it to the grid. Click pins or zones to read them. Arrow keys move the selected token by one cell. Right-click a token for rolls and other actions.'))))))));
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
         const dockToolStatus = stageState.tool.current.mode === C.TOOL_MODE_PING
             ? (stageState.tool.pendingAskRollRequest ? 'Ask roll' : 'Ping')
@@ -5489,9 +5562,13 @@
         }
         if (dom.activeSceneLabelEl) dom.activeSceneLabelEl.textContent = `Scene: ${sharedScene.name || 'Scene'}`;
         if (dom.scenePanelSceneLabelEl) dom.scenePanelSceneLabelEl.textContent = scene.name || 'Scene';
-        if (dom.stageTitleEl) dom.stageTitleEl.textContent = scene.name || 'Scene';
+        const isLocalScenePreview = isUsingLocalSceneView(sessionState.snapshot, sessionState.role);
+        if (dom.stageTitleEl) dom.stageTitleEl.textContent = isLocalScenePreview
+            ? `Preview: ${scene.name || 'Scene'}`
+            : (scene.name || 'Scene');
         if (dom.stageMetaEl) {
             const metaParts = [dockToolStatus, `${Math.round(stageState.view.local.zoom * 100)}%`];
+            if (isLocalScenePreview) metaParts.unshift(`Players see ${sharedScene.name || 'Scene'}`);
             if (scene.stealthMode) metaParts.push('Sight cones');
             dom.stageMetaEl.textContent = metaParts.join(' / ');
         }
@@ -6267,12 +6344,14 @@
     }
     const vttSelectionActions = vttSelectionActionFactory.create({
         state: vttActionState,
+        activateEvidenceNoteSelection,
         activateTokenSelection,
         addTokenToInitiative,
         advanceTurn,
         assignSelectedEntryToToken,
         canDeleteLiveVTTState,
         cloneTokenById,
+        focusViewOnToken,
         getActiveScene,
         isDM,
         openInitiativeDetail,
@@ -6286,6 +6365,7 @@
         resetInitiativeToRoundOne,
         setInitiativeEntryRosterOwner,
         showTokenPortraitPreview,
+        syncTokenSelectionFromEntry,
         toNumber,
         updateSelectedEntry,
         updateSelectedToken,
@@ -6306,7 +6386,7 @@
             return;
         }
 
-        if (!isDM() && action !== 'select-token' && action !== 'select-entry') return;
+        if (!isDM() && action !== 'select-token' && action !== 'select-entry' && action !== 'select-evidence-note') return;
 
         if (vttScenesActions.handles(action)) {
             vttScenesActions.handle(actionEl, action, id);
@@ -6819,9 +6899,32 @@
     const handlePointerMove = (...args) => requireStageInput().handlePointerMove(...args);
     const handlePointerUp = (...args) => requireStageInput().handlePointerUp(...args);
     const handleStageContextMenu = (...args) => requireStageInput().handleStageContextMenu(...args);
+    const handleStageDoubleClick = (...args) => requireStageInput().handleStageDoubleClick(...args);
     const handleStageDragStart = (...args) => requireStageInput().handleStageDragStart(...args);
     const handleStagePointerDown = (...args) => requireStageInput().handleStagePointerDown(...args);
     const handleStageWheel = (...args) => requireStageInput().handleStageWheel(...args);
+
+    const handleDocumentActionKeyDown = (event) => {
+        if (event.defaultPrevented || (event.key !== 'Enter' && event.key !== ' ')) return;
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.matches('button, a[href], input, select, textarea, summary')) return;
+        const actionEl = target.closest('[role="button"][data-action], .vtt-entry[data-action]');
+        if (!(actionEl instanceof HTMLElement)) return;
+        const action = String(actionEl.dataset.action || '').trim();
+        const id = String(actionEl.dataset.id || '').trim();
+        event.preventDefault();
+        actionEl.click();
+        if (id && (action === 'select-entry' || action === 'select-token' || action === 'select-evidence-note')) {
+            window.requestAnimationFrame(() => {
+                if (document.activeElement && document.activeElement !== document.body && document.contains(document.activeElement)) return;
+                const escapedAction = window.CSS && typeof window.CSS.escape === 'function' ? window.CSS.escape(action) : action;
+                const escapedId = window.CSS && typeof window.CSS.escape === 'function' ? window.CSS.escape(id) : id.replace(/"/g, '\\"');
+                const nextTarget = document.querySelector(`[data-action="${escapedAction}"][data-id="${escapedId}"]`);
+                if (nextTarget && typeof nextTarget.focus === 'function') nextTarget.focus();
+            });
+        }
+    };
 
     const bindEvents = () => {
         bindSyncChipActions();
@@ -6832,6 +6935,7 @@
             handleAction(actionEl);
         });
         document.addEventListener('pointerdown', handleDocumentPointerDown);
+        document.addEventListener('keydown', handleDocumentActionKeyDown);
         document.addEventListener('keydown', handleDocumentKeyDown);
         document.addEventListener('input', handleFieldChange);
         document.addEventListener('change', handleFieldChange);
@@ -6852,6 +6956,7 @@
         if (dom.stageEl) dom.stageEl.addEventListener('wheel', handleStageWheel, { passive: false });
         if (dom.stageEl) dom.stageEl.addEventListener('dragstart', handleStageDragStart);
         if (dom.stageEl) dom.stageEl.addEventListener('contextmenu', handleStageContextMenu);
+        if (dom.stageEl) dom.stageEl.addEventListener('dblclick', handleStageDoubleClick);
         if (dom.stageContextMenuEl) {
             dom.stageContextMenuEl.addEventListener('toggle', () => {
                 window.requestAnimationFrame(positionStageContextMenu);

@@ -59,6 +59,25 @@
         'EVIDENCE_NOTE_SHAPE_ZONE'
     ]);
 
+    const INSPECTOR_SECTION_SELECTOR = 'details[data-inspector-section]';
+    const INSPECTOR_FOCUS_ATTRIBUTES = Object.freeze([
+        'data-token-field',
+        'data-token-vision-field',
+        'data-token-monster-search',
+        'data-token-monster-id',
+        'data-token-monster-option',
+        'data-note-field',
+        'data-proximity-trigger-field'
+    ]);
+    const INSPECTOR_FOCUS_CONTEXT_ATTRIBUTES = Object.freeze([
+        'data-owner-kind',
+        'data-owner-id',
+        'data-trigger-id'
+    ]);
+    const INSPECTOR_FOCUS_SELECTOR = INSPECTOR_FOCUS_ATTRIBUTES
+        .map((attribute) => `[${attribute}]`)
+        .join(',');
+
     const validateDependencies = (deps) => {
         if (!deps || typeof deps !== 'object' || Array.isArray(deps)) {
             throw new TypeError('RTF_VTT_INSPECTOR_MARKUP.create requires a dependency object.');
@@ -292,6 +311,129 @@
         `;
         };
 
+        const getInspectorPopoverTarget = (popover) => ({
+            kind: String(popover && typeof popover.getAttribute === 'function'
+                ? popover.getAttribute('data-inspector-kind') || ''
+                : ''),
+            id: String(popover && typeof popover.getAttribute === 'function'
+                ? popover.getAttribute('data-inspector-target-id') || ''
+                : '')
+        });
+
+        const setInspectorPopoverTarget = (popover, kind = '', id = '') => {
+            if (!popover || typeof popover.setAttribute !== 'function') return;
+            if (!kind || !id) {
+                if (typeof popover.removeAttribute === 'function') {
+                    popover.removeAttribute('data-inspector-kind');
+                    popover.removeAttribute('data-inspector-target-id');
+                }
+                return;
+            }
+            popover.setAttribute('data-inspector-kind', kind);
+            popover.setAttribute('data-inspector-target-id', id);
+        };
+
+        const captureInspectorControlState = (popover) => {
+            const ownerDocument = popover && popover.ownerDocument
+                ? popover.ownerDocument
+                : (typeof document !== 'undefined' ? document : null);
+            const activeElement = ownerDocument ? ownerDocument.activeElement : null;
+            if (!activeElement || !popover || typeof popover.contains !== 'function' || !popover.contains(activeElement)) {
+                return null;
+            }
+            if (typeof activeElement.hasAttribute !== 'function' || typeof activeElement.getAttribute !== 'function') {
+                return null;
+            }
+            const identity = INSPECTOR_FOCUS_ATTRIBUTES
+                .filter((attribute) => activeElement.hasAttribute(attribute))
+                .map((attribute) => [attribute, String(activeElement.getAttribute(attribute) || '')]);
+            if (!identity.length) return null;
+            INSPECTOR_FOCUS_CONTEXT_ATTRIBUTES.forEach((attribute) => {
+                if (activeElement.hasAttribute(attribute)) {
+                    identity.push([attribute, String(activeElement.getAttribute(attribute) || '')]);
+                }
+            });
+            const selectionStart = Number.isInteger(activeElement.selectionStart)
+                ? activeElement.selectionStart
+                : null;
+            const selectionEnd = Number.isInteger(activeElement.selectionEnd)
+                ? activeElement.selectionEnd
+                : null;
+            return {
+                tagName: String(activeElement.tagName || '').toLowerCase(),
+                identity,
+                selectionStart,
+                selectionEnd,
+                selectionDirection: typeof activeElement.selectionDirection === 'string'
+                    ? activeElement.selectionDirection
+                    : undefined
+            };
+        };
+
+        const captureInspectorPopoverState = (popover, kind, id) => {
+            if (!popover || popover.hidden) return null;
+            const renderedTarget = getInspectorPopoverTarget(popover);
+            if (renderedTarget.kind !== kind || renderedTarget.id !== id) return null;
+            const sections = typeof popover.querySelectorAll === 'function'
+                ? Array.from(popover.querySelectorAll(INSPECTOR_SECTION_SELECTOR))
+                : [];
+            return {
+                sections: sections.map((section) => [
+                    String(section.getAttribute('data-inspector-section') || ''),
+                    !!section.open
+                ]).filter(([sectionId]) => !!sectionId),
+                scrollTop: Number.isFinite(popover.scrollTop) ? popover.scrollTop : 0,
+                scrollLeft: Number.isFinite(popover.scrollLeft) ? popover.scrollLeft : 0,
+                control: captureInspectorControlState(popover)
+            };
+        };
+
+        const restoreInspectorPopoverSections = (popover, savedState) => {
+            if (!popover || !savedState || !savedState.sections || typeof popover.querySelectorAll !== 'function') return;
+            const sectionState = new Map(savedState.sections);
+            Array.from(popover.querySelectorAll(INSPECTOR_SECTION_SELECTOR)).forEach((section) => {
+                const sectionId = String(section.getAttribute('data-inspector-section') || '');
+                if (sectionState.has(sectionId)) section.open = sectionState.get(sectionId);
+            });
+        };
+
+        const restoreInspectorPopoverFocusAndScroll = (popover, savedState) => {
+            if (!popover || !savedState) return;
+            const controlState = savedState.control;
+            if (controlState && typeof popover.querySelectorAll === 'function') {
+                const control = Array.from(popover.querySelectorAll(INSPECTOR_FOCUS_SELECTOR)).find((candidate) => {
+                    if (String(candidate.tagName || '').toLowerCase() !== controlState.tagName) return false;
+                    return controlState.identity.every(([attribute, value]) => (
+                        typeof candidate.hasAttribute === 'function'
+                        && candidate.hasAttribute(attribute)
+                        && String(candidate.getAttribute(attribute) || '') === value
+                    ));
+                });
+                if (control && typeof control.focus === 'function') {
+                    try {
+                        control.focus({ preventScroll: true });
+                    } catch (_err) {
+                        control.focus();
+                    }
+                    if (controlState.selectionStart !== null
+                        && controlState.selectionEnd !== null
+                        && typeof control.setSelectionRange === 'function') {
+                        try {
+                            control.setSelectionRange(
+                                controlState.selectionStart,
+                                controlState.selectionEnd,
+                                controlState.selectionDirection
+                            );
+                        } catch (_err) {
+                            // Number inputs and a few browser-specific controls do not expose a text selection.
+                        }
+                    }
+                }
+            }
+            popover.scrollTop = savedState.scrollTop;
+            popover.scrollLeft = savedState.scrollLeft;
+        };
+
         const buildDMTokenInspectorContent = (token) => {
             const rosterPlayer = getRosterPlayerForRecord(token);
             const isRosterManagedPlayer = !!rosterPlayer;
@@ -326,7 +468,7 @@
             const monsterAssignQuery = monster ? String(monster.name || '').trim() : '';
             return `
             <div class="vtt-inspector-stack">
-                <details class="vtt-inspector-section" open>
+                <details class="vtt-inspector-section" data-inspector-section="identity" open>
                     <summary>Identity & Appearance</summary>
                     <div class="vtt-inspector-section-body">
                 <label class="vtt-field">
@@ -368,7 +510,7 @@
                 </div>
                     </div>
                 </details>
-                <details class="vtt-inspector-section">
+                <details class="vtt-inspector-section" data-inspector-section="stats">
                     <summary>Stats & Size</summary>
                     <div class="vtt-inspector-section-body">
                 <div class="vtt-inspector-grid">
@@ -408,7 +550,7 @@
                 </div>
                     </div>
                 </details>
-                <details class="vtt-inspector-section">
+                <details class="vtt-inspector-section" data-inspector-section="combat">
                     <summary>Combat Actions</summary>
                     <div class="vtt-inspector-section-body">
                 <div class="vtt-subhead">Quick Actions</div>
@@ -427,14 +569,14 @@
                 </div>
                     </div>
                 </details>
-                <details class="vtt-inspector-section">
+                <details class="vtt-inspector-section" data-inspector-section="automation">
                     <summary>Automation</summary>
                     <div class="vtt-inspector-section-body">
                 <div class="vtt-subhead">Proximity Prompts</div>
                 ${buildProximityTriggerEditor('token', token.id, token.triggers)}
                     </div>
                 </details>
-                <details class="vtt-inspector-section">
+                <details class="vtt-inspector-section" data-inspector-section="monster">
                     <summary>Monster & Stat Block</summary>
                     <div class="vtt-inspector-section-body">
                 ${monster ? `
@@ -470,7 +612,7 @@
                 </div>
                     </div>
                 </details>
-                <details class="vtt-inspector-section">
+                <details class="vtt-inspector-section" data-inspector-section="advanced">
                     <summary>Visibility & Advanced</summary>
                     <div class="vtt-inspector-section-body">
                 <label class="vtt-inspector-check">
@@ -681,8 +823,14 @@
             const note = activePopoverKind === 'note' ? getEvidenceNoteById(activePopoverId) : null;
             if (!inspectorState || !isDM() || (!token && !note)) {
                 dom.tokenInspectorPopoverEl.hidden = true;
+                setInspectorPopoverTarget(dom.tokenInspectorPopoverEl);
                 return;
             }
+            const savedPopoverState = captureInspectorPopoverState(
+                dom.tokenInspectorPopoverEl,
+                activePopoverKind,
+                activePopoverId
+            );
             dom.tokenInspectorPopoverEl.innerHTML = activePopoverKind === 'note'
                 ? `
                     <div class="vtt-panel-head vtt-popover-head">
@@ -704,8 +852,15 @@
                     </div>
                     ${buildDMTokenInspectorContent(token)}
                 `;
+            setInspectorPopoverTarget(dom.tokenInspectorPopoverEl, activePopoverKind, activePopoverId);
+            restoreInspectorPopoverSections(dom.tokenInspectorPopoverEl, savedPopoverState);
+            if (typeof dom.tokenInspectorPopoverEl.setAttribute === 'function') {
+                dom.tokenInspectorPopoverEl.setAttribute('role', 'dialog');
+                dom.tokenInspectorPopoverEl.setAttribute('aria-label', activePopoverKind === 'note' ? 'Zone inspector' : 'Token inspector');
+            }
             dom.tokenInspectorPopoverEl.hidden = false;
             positionTokenInspectorPopover();
+            restoreInspectorPopoverFocusAndScroll(dom.tokenInspectorPopoverEl, savedPopoverState);
         };
 
         return Object.freeze({

@@ -718,11 +718,13 @@
             return !isEvidenceNoteCoveredByFog(scene, note, fogCellSet);
         };
 
-        const getVisibleEvidenceNotesForRole = (scene, role = getLocalRole()) => {
+        const getVisibleEvidenceNotesForRole = (scene, role = getLocalRole(), fogCellSet = null) => {
             const notes = getSceneEvidenceNotes(scene);
             if (role === 'dm') return notes;
-            const fogCellSet = collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
-            return notes.filter((note) => isEvidenceNoteVisibleToRole(note, scene, role, fogCellSet));
+            const resolvedFogCellSet = fogCellSet instanceof Set
+                ? fogCellSet
+                : collectFogCellSet(scene, Array.isArray(scene && scene.fog) ? scene.fog : []);
+            return notes.filter((note) => isEvidenceNoteVisibleToRole(note, scene, role, resolvedFogCellSet));
         };
 
 
@@ -738,9 +740,11 @@
         };
 
 
-        const isTokenUnderFog = (scene, token) => {
-            if (!scene || !token || !Array.isArray(scene.fog) || !scene.fog.length) return false;
-            const cellSet = collectFogCellSet(scene, scene.fog);
+        const isTokenUnderFog = (scene, token, fogCellSet = null) => {
+            if (!scene || !token) return false;
+            const cellSet = fogCellSet instanceof Set
+                ? fogCellSet
+                : collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
             if (!cellSet.size) return false;
             const left = Math.floor(toNumber(token.x, 0));
             const top = Math.floor(toNumber(token.y, 0));
@@ -754,15 +758,18 @@
             return false;
         };
 
-        const isTokenHiddenForRole = (token, scene, role = getLocalRole()) => {
+        const isTokenHiddenForRole = (token, scene, role = getLocalRole(), fogCellSet = null) => {
             if (role === 'dm') return false;
-            return !!(token && (token.hidden || isTokenUnderFog(scene, token)));
+            return !!(token && (token.hidden || isTokenUnderFog(scene, token, fogCellSet)));
         };
 
-        const getVisibleTokensForRole = (scene, role = getLocalRole()) => {
+        const getVisibleTokensForRole = (scene, role = getLocalRole(), fogCellSet = null) => {
             if (!scene || !Array.isArray(scene.tokens)) return [];
             if (role === 'dm') return scene.tokens;
-            return scene.tokens.filter((token) => !isTokenHiddenForRole(token, scene, role));
+            const resolvedFogCellSet = fogCellSet instanceof Set
+                ? fogCellSet
+                : collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
+            return scene.tokens.filter((token) => !isTokenHiddenForRole(token, scene, role, resolvedFogCellSet));
         };
 
         const getVisionConeRangeCells = (token) => {
@@ -831,14 +838,17 @@
             return summary;
         };
 
-        const buildStealthStatusMap = (scene, state) => {
+        const buildStealthStatusMap = (scene, state, fogCellSet = null) => {
             const statuses = new Map();
             const resolvedState = state === undefined ? getVTTState() : state;
             if (!scene || !scene.stealthMode || !Array.isArray(scene.tokens)) return statuses;
+            const resolvedFogCellSet = fogCellSet instanceof Set
+                ? fogCellSet
+                : collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
             scene.tokens.forEach((token) => {
                 const side = String(token && token.side || '').trim().toLowerCase();
                 if (side !== 'enemy' && side !== 'neutral') return;
-                if (isTokenHiddenForRole(token, scene, 'player')) return;
+                if (isTokenHiddenForRole(token, scene, 'player', resolvedFogCellSet)) return;
                 const summary = getStealthVisionTargetSummary(token, scene, resolvedState);
                 summary.unseenIds.forEach((tokenId) => {
                     if (!statuses.has(tokenId)) statuses.set(tokenId, STEALTH_STATUS_UNSEEN);

@@ -16,6 +16,17 @@ class FakeElement extends FakeNode {
         this.attributes = { ...attributes };
         this.dataset = { ...dataset };
         this.isContentEditable = false;
+        this.style = {
+            setProperty(name, value) {
+                this[name] = value;
+            }
+        };
+        const classes = new Set();
+        this.classList = {
+            add: (...names) => names.forEach((name) => classes.add(name)),
+            contains: (name) => classes.has(name),
+            remove: (...names) => names.forEach((name) => classes.delete(name))
+        };
     }
 
     closest() {
@@ -26,6 +37,10 @@ class FakeElement extends FakeNode {
         return Object.prototype.hasOwnProperty.call(this.attributes, name)
             ? this.attributes[name]
             : null;
+    }
+
+    querySelector() {
+        return null;
     }
 }
 
@@ -85,13 +100,21 @@ const getDestructuredKeys = (source, dependencyName) => {
 const createStageHarness = () => {
     const calls = [];
     const stageEl = new FakeHTMLElement();
+    const token = { id: 'token_one', x: 1, y: 2, w: 1, h: 1 };
+    const scene = {
+        id: 'scene_one',
+        grid: { cellPx: 10, offsetX: 0, offsetY: 0 },
+        tokens: [token]
+    };
+    const vttState = { activeSceneId: scene.id, scenes: [scene] };
     const runtime = {
         localRole: 'dm',
         localToolState: { mode: 'navigate', sizeCells: 4 },
         localView: { x: 0, y: 0, zoom: 1 },
         playerRollMenuOpen: false,
         previewTokenId: '',
-        selectedTokenId: ''
+        selectedTokenId: '',
+        vttState
     };
     const recordClose = (name, result = false) => () => {
         calls.push(name);
@@ -100,7 +123,13 @@ const createStageHarness = () => {
     const api = {
         activateEvidenceNoteSelection: (id) => calls.push(`select-note:${id}`),
         activateTokenSelection: (id) => calls.push(`select-token:${id}`),
+        applyPendingRemoteVTTSnapshot: () => {
+            calls.push('apply-remote');
+            return false;
+        },
+        buildRemoteTokenTweenKey: (sceneId, tokenId) => `${sceneId}:${tokenId}`,
         cancelAskRollPickMode: recordClose('cancel-ask'),
+        canMutateLiveVTTState: () => true,
         canRoleMoveToken: () => true,
         clampZoom: (zoom) => {
             calls.push(`clamp:${zoom}`);
@@ -108,6 +137,7 @@ const createStageHarness = () => {
         },
         clearSpawnDrag: recordClose('clear-spawn'),
         clearTemplatePlacementState: recordClose('clear-template'),
+        clearTokenPortraitPreview: () => calls.push('clear-preview'),
         clearTransientDrawerState: recordClose('clear-transient'),
         closeActiveVTTPanel: recordClose('close-panel'),
         closeDMUnlockModal: recordClose('close-dm-unlock'),
@@ -120,11 +150,25 @@ const createStageHarness = () => {
         closeTokenInspectorPopover: recordClose('close-inspector'),
         closeToolsMenu: recordClose('close-tools'),
         closeViewMenu: recordClose('close-view'),
-        getTokenById: (id) => id === 'token_one' ? { id } : null,
+        getActiveScene: (state = vttState) => {
+            const scenes = state && Array.isArray(state.scenes) ? state.scenes : [];
+            return scenes.find((entry) => entry.id === state.activeSceneId) || scenes[0] || null;
+        },
+        getSceneCellPx: (targetScene) => Number(targetScene && targetScene.grid && targetScene.grid.cellPx) || 10,
+        getTokenById: (id) => id === token.id ? token : null,
+        isDM: () => runtime.localRole === 'dm',
         isDMUnlockModalOpen: () => false,
         isRosterSelfModalOpen: () => false,
+        markTokenVisualEffect: (id, kind, duration) => calls.push(`effect:${id}:${kind}:${duration}`),
         moveSelectedTokenByCells: () => false,
+        normalizeTokenCoordinate: (value, fallback = 0) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed * 1000) / 1000) : fallback;
+        },
         openStageContextMenu: (x, y, options) => calls.push({ name: 'open-context', x, y, options }),
+        openTokenInspectorPopover: (id, x, y) => calls.push({ name: 'open-inspector', id, x, y }),
+        rememberRecentLocalDragDrop: (sceneId, tokenId, x, y) => calls.push(`remember:${sceneId}:${tokenId}:${x}:${y}`),
+        remoteTokenTweens: new Map(),
         render: () => calls.push('render'),
         renderInitiativeDetail: () => calls.push('render-detail'),
         renderInitiativeList: () => calls.push('render-list'),
@@ -135,8 +179,13 @@ const createStageHarness = () => {
         renderTokenInspector: () => calls.push('render-inspector'),
         renderTokenInspectorPopover: () => calls.push('render-inspector-popover'),
         renderToolsMenu: () => calls.push('render-tools'),
+        scaleForZoom: (value) => value,
         screenToWorld: (x, y) => ({ x: x + 1, y: y + 2 }),
         setZoomAtPoint: (zoom, x, y) => calls.push({ name: 'zoom', zoom, x, y }),
+        showTokenPortraitPreview: (id) => calls.push(`show-preview:${id}`),
+        snapTokenToGrid: (id) => calls.push(`snap:${id}`),
+        suppressLocalDragTween: (sceneId, tokenId) => calls.push(`suppress:${sceneId}:${tokenId}`),
+        syncDraggedState: (force) => calls.push(`sync:${force}`),
         toNumber: (value, fallback = 0) => {
             const parsed = Number(value);
             return Number.isFinite(parsed) ? parsed : fallback;
@@ -146,9 +195,24 @@ const createStageHarness = () => {
         runtime,
         api,
         dom: { body: null, initiativeListEl: null, noteLayerEl: null, stageEl },
-        config: {}
+        config: {
+            STAGE_TOOL_DOUBLE_PRESS_PX: 18,
+            TOKEN_CLICK_MOVE_PX: 5,
+            TOKEN_DOUBLE_CLICK_MS: 500,
+            TOKEN_DROP_PULSE_MS: 720,
+            TOOL_MODE_NAVIGATE: 'navigate'
+        }
     });
-    return { api, calls, input, runtime, stageEl };
+    return { api, calls, input, runtime, scene, stageEl, token, vttState };
+};
+
+const createTokenElement = (tokenId = 'token_one') => {
+    const tokenEl = new FakeHTMLElement({
+        attributes: { 'data-token-id': tokenId },
+        dataset: { tokenId }
+    });
+    tokenEl.closest = (selector) => selector === '.vtt-token' ? tokenEl : null;
+    return tokenEl;
 };
 
 test('VTT stage input validates its required top-level dependency ports', () => {
@@ -214,7 +278,7 @@ test('VTT stage input wiring supplies every API, DOM, config, and runtime field'
     const usedRuntime = new Set(
         [...moduleSource.matchAll(/\bruntime\.([A-Za-z_$][\w$]*)/g)].map((entry) => entry[1])
     );
-    assert.equal(usedRuntime.size, 36);
+    assert.equal(usedRuntime.size, 34);
     assert.deepEqual(
         [...exposedRuntime].sort(),
         [...usedRuntime].sort(),
@@ -287,7 +351,7 @@ test('VTT stage context selection opens the token menu before dependent renders'
             name: 'open-context',
             x: 40,
             y: 50,
-            options: { tokenId: 'token_one', worldPoint: { x: 41, y: 52 } }
+            options: { tokenId: 'token_one', worldPoint: { x: 41, y: 52 }, altKey: false, shiftKey: false }
         },
         'render-list',
         'render-detail',
@@ -335,4 +399,134 @@ test('VTT Escape closes transient input state and clears portrait preview', () =
         'close-npc-roll',
         'render-stage'
     ]);
+});
+
+test('VTT token jitter stays a click and preserves the following double press', () => {
+    const harness = createStageHarness();
+    const tokenEl = createTokenElement();
+    harness.stageEl.querySelector = () => tokenEl;
+
+    harness.input.handleStagePointerDown({
+        target: tokenEl,
+        button: 0,
+        clientX: 10,
+        clientY: 20,
+        preventDefault() { }
+    });
+    harness.calls.length = 0;
+
+    harness.input.handlePointerMove({
+        target: tokenEl,
+        clientX: 12,
+        clientY: 21
+    });
+
+    assert.deepEqual(
+        { x: harness.token.x, y: harness.token.y },
+        { x: 1, y: 2 },
+        'movement inside the click threshold must not alter the token'
+    );
+    assert.deepEqual(harness.calls, [], 'click jitter must not render or sync drag state');
+
+    harness.input.handlePointerUp({
+        target: tokenEl,
+        type: 'pointerup',
+        clientX: 12,
+        clientY: 21
+    });
+    assert.equal(harness.calls.some((call) => String(call).startsWith('sync:')), false);
+    harness.calls.length = 0;
+
+    let prevented = 0;
+    harness.input.handleStagePointerDown({
+        target: tokenEl,
+        button: 0,
+        clientX: 12,
+        clientY: 21,
+        preventDefault: () => {
+            prevented += 1;
+        }
+    });
+
+    assert.equal(prevented, 1);
+    assert.deepEqual(
+        harness.calls.find((call) => call && call.name === 'open-inspector'),
+        { name: 'open-inspector', id: 'token_one', x: 12, y: 21 },
+        'the second nearby press should retain the DM token-inspector gesture'
+    );
+    assert.equal(harness.runtime.dragState, null);
+});
+
+test('VTT token drag previews only the dragged DOM node and force-syncs on drop', () => {
+    const harness = createStageHarness();
+    const tokenEl = createTokenElement();
+    harness.stageEl.querySelector = () => tokenEl;
+
+    harness.input.handleStagePointerDown({
+        target: tokenEl,
+        button: 0,
+        clientX: 10,
+        clientY: 20,
+        preventDefault() { }
+    });
+    harness.calls.length = 0;
+
+    harness.input.handlePointerMove({
+        target: tokenEl,
+        clientX: 30,
+        clientY: 40
+    });
+
+    assert.deepEqual({ x: harness.token.x, y: harness.token.y }, { x: 3, y: 4 });
+    assert.equal(tokenEl.dataset.worldLeft, '30');
+    assert.equal(tokenEl.dataset.worldTop, '40');
+    assert.equal(tokenEl.style.left, '30px');
+    assert.equal(tokenEl.style.top, '40px');
+    assert.equal(tokenEl.classList.contains('is-dragging'), true);
+    assert.equal(harness.calls.includes('render-stage'), false, 'pointermove must avoid a full-stage render');
+    assert.deepEqual(harness.calls, ['sync:false']);
+
+    harness.calls.length = 0;
+    harness.input.handlePointerUp({
+        target: tokenEl,
+        type: 'pointerup',
+        clientX: 30,
+        clientY: 40
+    });
+
+    assert.equal(harness.runtime.dragState, null);
+    assert.ok(harness.calls.includes('sync:true'), 'drop must force the final shared position sync');
+    assert.ok(harness.calls.includes('remember:scene_one:token_one:3:4'));
+    assert.ok(harness.calls.includes('effect:token_one:drop-pulse:720'));
+});
+
+test('VTT native token double click opens the DM inspector and is wired on the stage', () => {
+    const harness = createStageHarness();
+    const tokenEl = createTokenElement();
+    harness.runtime.dragState = { tokenId: 'token_one', moved: false };
+    harness.runtime.previewTokenId = 'token_one';
+    let prevented = 0;
+
+    harness.input.handleStageDoubleClick({
+        target: tokenEl,
+        clientX: 44,
+        clientY: 55,
+        preventDefault: () => {
+            prevented += 1;
+        }
+    });
+
+    assert.equal(prevented, 1);
+    assert.equal(harness.runtime.dragState, null);
+    assert.equal(harness.runtime.previewTokenId, '');
+    assert.deepEqual(
+        harness.calls.find((call) => call && call.name === 'open-inspector'),
+        { name: 'open-inspector', id: 'token_one', x: 44, y: 55 }
+    );
+    assert.ok(harness.calls.includes('render-inspector-popover'));
+    assert.match(
+        readWorkspaceFile('js/vtt.js'),
+        /dom\.stageEl\.addEventListener\('dblclick', handleStageDoubleClick\)/,
+        'the stage must bind the native double-click handler'
+    );
 });

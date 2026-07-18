@@ -323,6 +323,7 @@
             const displayTitle = getEvidenceNoteDisplayTitle(note);
             const description = String(note && note.body || '').trim();
             const areaLabel = buildEvidenceNoteAreaLabel(note, scene);
+            const accessibleDescription = description || 'No marker details shared yet.';
             const highlightColor = getEvidenceNoteHighlightColor(note);
             const highlightRgb = getEvidenceNoteHighlightRgb(note);
             const kicker = note.hidden ? `DM Only · ${categoryLabel}` : categoryLabel;
@@ -333,8 +334,12 @@
             const noteH = Math.max(1, toNumber(note.h, 1));
             const worldLeft = isPin ? noteX - noteW / 2 : noteX;
             const worldTop = isPin ? noteY - noteH / 2 : noteY;
+            const interactionAttributes = preview
+                ? 'aria-hidden="true"'
+                : `role="button" tabindex="0" data-action="select-evidence-note" data-id="${escapeHtml(String(note.id || ''))}"`;
             return `
             <div class="${classes.join(' ')}"
+                ${interactionAttributes}
                 data-note-id="${escapeHtml(String(note.id || ''))}"
                 data-note-shape="${escapeHtml(normalizeEvidenceNoteShape(note.shape, 'zone'))}"
                 data-note-category="${escapeHtml(category)}"
@@ -343,6 +348,8 @@
                 data-world-top="${escapeHtml(String(worldTop))}"
                 data-world-width="${escapeHtml(String(noteW))}"
                 data-world-height="${escapeHtml(String(noteH))}"
+                aria-label="${escapeHtml(`${displayTitle}. ${accessibleDescription}. ${areaLabel}`)}"
+                title="${escapeHtml(`${displayTitle}: ${accessibleDescription}`)}"
                 style="--vtt-note-color:${escapeHtml(highlightColor)};--vtt-note-rgb:${escapeHtml(highlightRgb)};">
                 <div class="vtt-map-note-chip">
                     <span class="vtt-map-note-kicker">${escapeHtml(kicker)}</span>

@@ -170,6 +170,16 @@
         let fogRevealBursts = [];
         const tokenVisualEffects = new Map();
         const tokenHpSnapshot = new Map();
+        const layerMarkupCache = new WeakMap();
+
+        const commitLayerMarkup = (layerEl, markup) => {
+            if (!layerEl) return false;
+            const nextMarkup = String(markup || '');
+            if (layerMarkupCache.get(layerEl) === nextMarkup) return false;
+            layerEl.innerHTML = nextMarkup;
+            layerMarkupCache.set(layerEl, nextMarkup);
+            return true;
+        };
 
         const setWorldSize = (nextSize) => {
             worldSize.width = Math.max(1, Math.round(toNumber(nextSize && nextSize.width, defaultWorldSize.width)));
@@ -178,6 +188,7 @@
         };
 
         let renderStage = () => {};
+        let renderTokenMotionFrame = () => renderStage();
 
         const scheduleVisualEffectRender = (delayMs = 760) => {
             if (visualEffectTimer) return;
@@ -385,9 +396,14 @@
             if (remoteTokenTweenFrame || !hasActiveSceneRemoteTweens()) return;
             remoteTokenTweenFrame = root.requestAnimationFrame(() => {
                 remoteTokenTweenFrame = 0;
-                pruneRemoteTokenTweens();
-                renderStage();
-                if (hasActiveSceneRemoteTweens()) scheduleRemoteTokenTweenRender();
+                const renderTime = Date.now();
+                pruneRemoteTokenTweens(renderTime);
+                if (hasActiveSceneRemoteTweens(undefined, renderTime)) {
+                    renderTokenMotionFrame(renderTime);
+                    scheduleRemoteTokenTweenRender();
+                } else {
+                    renderStage();
+                }
             });
         };
 
@@ -910,7 +926,7 @@
                     .join('')
                 : '';
             const pingMarkup = getRenderableScenePings(scene, now).map((ping) => buildPingMarkup(ping, scene)).join('');
-            visionLayerEl.innerHTML = `${handleMarkup}${pingMarkup}`;
+            commitLayerMarkup(visionLayerEl, `${handleMarkup}${pingMarkup}`);
             schedulePingExpiryRender(scene);
         };
 
@@ -934,7 +950,7 @@
                 ? markup.buildAreaTemplateMarkup(state.templatePlacementState.template, scene, { preview: true })
                 : '';
             const rulerMarkup = markup.buildRulerMarkup(scene, state.rulerState);
-            templateLayerEl.innerHTML = `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`;
+            commitLayerMarkup(templateLayerEl, `${visionMarkup}${templateMarkup}${previewMarkup}${rulerMarkup}`);
             scheduleTemplateExpiryRender(scene);
         };
 
@@ -982,7 +998,7 @@
             tokenEl.dataset.renderSignature = signature;
         };
 
-        const renderTokenLayer = (scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime) => {
+        const renderTokenLayer = (scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime, fogCellSet = null) => {
             const { tokenLayerEl } = dom;
             if (!tokenLayerEl || !scene || !scene.grid) return;
             const liveIds = new Set();
@@ -995,6 +1011,7 @@
                 if (!liveIds.has(tokenId)) tokenEl.remove();
             });
 
+            let nextTokenEl = tokenLayerEl.querySelector('.vtt-token');
             visibleTokens.forEach((token) => {
                 const tokenId = String(token && token.id || '').trim();
                 if (!tokenId) return;
@@ -1002,7 +1019,7 @@
                 const usableImageUrl = getTokenImageRenderUrl(token);
                 const stealthStatus = String(stealthStatusMap.get(token.id) || '').trim();
                 const isBloodied = isTokenBloodied(token);
-                const isHiddenToPlayers = !!token.hidden || geometry.isTokenUnderFog(scene, token);
+                const isHiddenToPlayers = !!token.hidden || geometry.isTokenUnderFog(scene, token, fogCellSet);
                 const moodEmoji = normalizeMoodEmoji(token && token.moodEmoji);
                 const moodText = getTokenMoodText(token);
                 const currentHp = Number(token && token.hpCurrent);
@@ -1019,7 +1036,8 @@
                 const escapedId = root.CSS && root.CSS.escape ? root.CSS.escape(tokenId) : tokenId.replace(/"/g, '\\"');
                 let tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
                 if (!tokenEl) tokenEl = root.document.createElement('div');
-                tokenLayerEl.appendChild(tokenEl);
+                if (tokenEl !== nextTokenEl) tokenLayerEl.insertBefore(tokenEl, nextTokenEl);
+                nextTokenEl = tokenEl.nextElementSibling;
                 tokenEl.className = buildTokenClassName({
                     token,
                     usableImageUrl,
@@ -1033,7 +1051,15 @@
                 tokenEl.dataset.tokenId = tokenId;
                 tokenEl.dataset.id = tokenId;
                 tokenEl.dataset.action = 'select-token';
+                tokenEl.setAttribute('role', 'button');
+                tokenEl.tabIndex = 0;
                 tokenEl.dataset.side = token.side || 'neutral';
+                const canMove = canRoleMoveToken(token);
+                const sideLabel = String(token.side || 'neutral');
+                tokenEl.setAttribute(
+                    'aria-label',
+                    `${String(token.label || 'Token')}, ${sideLabel}. ${canMove ? 'Movable.' : 'Movement locked.'} Right-click for actions.`
+                );
                 tokenEl.dataset.stealthStatus = stealthStatus;
                 tokenEl.dataset.bloodied = isBloodied ? '1' : '0';
                 tokenEl.dataset.worldLeft = String(scene.grid.offsetX + renderedCells.x * scene.grid.cellPx);
@@ -1045,6 +1071,36 @@
             });
         };
 
+        renderTokenMotionFrame = (renderTime = Date.now()) => {
+            const scene = getActiveScene();
+            const { tokenLayerEl, proximityPromptStackEl } = dom;
+            if (!scene || !scene.grid || !tokenLayerEl) return;
+            if (scene.stealthMode) {
+                renderStage();
+                return;
+            }
+            remoteTokenTweens.forEach((tween) => {
+                if (!tween || tween.sceneId !== scene.id) return;
+                const token = Array.isArray(scene.tokens)
+                    ? scene.tokens.find((entry) => entry && entry.id === tween.tokenId)
+                    : null;
+                if (!token) return;
+                const escapedId = root.CSS && root.CSS.escape
+                    ? root.CSS.escape(String(token.id || ''))
+                    : String(token.id || '').replace(/"/g, '\\"');
+                const tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedId}"]`);
+                if (!(tokenEl instanceof root.HTMLElement)) return;
+                const renderedCells = getRenderableTokenCells(token, scene, renderTime);
+                const worldLeft = scene.grid.offsetX + renderedCells.x * scene.grid.cellPx;
+                const worldTop = scene.grid.offsetY + renderedCells.y * scene.grid.cellPx;
+                tokenEl.dataset.worldLeft = String(worldLeft);
+                tokenEl.dataset.worldTop = String(worldTop);
+                tokenEl.style.left = `${scaleForZoom(worldLeft)}px`;
+                tokenEl.style.top = `${scaleForZoom(worldTop)}px`;
+            });
+            if (proximityPromptStackEl && !proximityPromptStackEl.hidden) positionProximityPrompt(scene);
+        };
+
         renderStage = () => {
             const state = getStageState();
             if (state.initialVTTLoadPending) return;
@@ -1054,6 +1110,7 @@
             const {
                 mapWorldEl,
                 worldEl,
+                stageEmptyEl,
                 mapImageEl,
                 gridLayerEl,
                 fogLayerEl,
@@ -1080,27 +1137,38 @@
                 ? geometry.buildFogMaskMarkup(scene, state.fogPlacementState.mask, state.fogPlacementState.mode === 'remove' ? 'is-remove-preview' : 'is-preview')
                 : '';
             const fogRevealMarkup = buildFogRevealShimmerMarkup(renderTime);
-            fogLayerEl.innerHTML = `${fogEdgeMarkup}${fogPreviewMarkup}${fogRevealMarkup}`;
+            commitLayerMarkup(fogLayerEl, `${fogEdgeMarkup}${fogPreviewMarkup}${fogRevealMarkup}`);
 
-            const visibleEvidenceNotes = geometry.getVisibleEvidenceNotesForRole(scene);
+            const visibleEvidenceNotes = geometry.getVisibleEvidenceNotesForRole(scene, state.localRole, fogCellSet);
             const evidenceMarkup = visibleEvidenceNotes
                 .map((note) => buildEvidenceNoteMarkup(note, scene, { selected: note.id === state.selectedEvidenceNoteId }))
                 .join('');
             const evidencePreviewMarkup = state.evidenceNotePlacementState && state.evidenceNotePlacementState.sceneId === scene.id && state.evidenceNotePlacementState.note
                 ? buildEvidenceNoteMarkup(state.evidenceNotePlacementState.note, scene, { preview: true, selected: true })
                 : '';
-            noteLayerEl.innerHTML = `${evidenceMarkup}${evidencePreviewMarkup}`;
+            commitLayerMarkup(noteLayerEl, `${evidenceMarkup}${evidencePreviewMarkup}`);
 
-            const visibleTokens = geometry.getVisibleTokensForRole(scene);
+            const visibleTokens = geometry.getVisibleTokensForRole(scene, state.localRole, fogCellSet);
+            if (stageEmptyEl) {
+                const isEmptyScene = !String(scene.mapImageUrl || '').trim()
+                    && visibleTokens.length === 0
+                    && visibleEvidenceNotes.length === 0;
+                stageEmptyEl.hidden = !isEmptyScene;
+                stageEmptyEl.textContent = state.isDM
+                    ? 'This scene is empty. Open Menu, then Setup to add a map, or use Spawn to place a token.'
+                    : (state.localRole === 'spectator'
+                        ? 'Waiting for the GM to share the scene.'
+                        : 'Waiting for the GM to share a map or place a visible token.');
+            }
             const initiative = state.vttState && state.vttState.initiative ? state.vttState.initiative : { activeEntryId: '' };
             const activeTurnToken = getVisibleSceneTokenForEntry(getEntryById(initiative.activeEntryId), state.vttState, state.localRole);
             const focusedEntryToken = getVisibleSceneTokenForEntry(getEntryById(state.selectedEntryId), state.vttState, state.localRole);
             const activeTurnTokenId = activeTurnToken ? activeTurnToken.id : '';
             const focusedEntryTokenId = focusedEntryToken ? focusedEntryToken.id : '';
-            const stealthStatusMap = geometry.buildStealthStatusMap(scene, state.vttState);
+            const stealthStatusMap = geometry.buildStealthStatusMap(scene, state.vttState, fogCellSet);
 
             renderTemplateLayer(scene, visibleTokens, worldSize, renderTime);
-            renderTokenLayer(scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime);
+            renderTokenLayer(scene, visibleTokens, focusedEntryTokenId, activeTurnTokenId, stealthStatusMap, renderTime, fogCellSet);
             renderVisionLayer(scene, visibleTokens, worldSize, renderTime);
 
             applyRenderedWorldGeometry(scene);
