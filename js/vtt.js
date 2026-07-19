@@ -4813,6 +4813,7 @@
         normalizeProximityTriggerSkill,
         normalizeRollMode,
         postSheetDiscordRoll,
+        proximitySettleMs: C.PROXIMITY_TRIGGER_SETTLE_MS,
         promptStackEl: dom.proximityPromptStackEl,
         readJSONStorage,
         rollRawD20WithMode,

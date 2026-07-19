@@ -254,8 +254,47 @@
             withDraft
         } = deps;
         const promptStoragePrefix = String(deps.promptStoragePrefix || 'rtf_vtt_proximity_seen_');
+        const proximitySettleMs = Math.max(0, Math.round(toNumber(deps.proximitySettleMs, 400)));
+        const scheduleTimeout = typeof deps.setTimeout === 'function' ? deps.setTimeout : setTimeout;
+        const cancelTimeout = typeof deps.clearTimeout === 'function' ? deps.clearTimeout : clearTimeout;
         let activePrompt = null;
+        let lastRenderedPromptMarkup = '';
+        let lastEvaluatedPositionSignature = '';
+        let lastEvaluatedSceneId = '';
+        let pendingPositionSignature = '';
+        let proximityEvaluationTimer = 0;
         const suppressedPromptKeys = new Set();
+
+        const buildProximityPositionSignature = (scene) => {
+            const sceneId = String(scene && scene.id || '').trim();
+            const tokens = getVisibleTokensForRole(scene, 'player');
+            return `${sceneId}|${tokens.map((token) => [
+                String(token && token.id || '').trim(),
+                toNumber(token && token.x, 0),
+                toNumber(token && token.y, 0),
+                Math.max(1, toNumber(token && token.w, 1)),
+                Math.max(1, toNumber(token && token.h, 1))
+            ].join(':')).join(';')}`;
+        };
+
+        const cancelPendingProximityEvaluation = () => {
+            if (proximityEvaluationTimer) cancelTimeout(proximityEvaluationTimer);
+            proximityEvaluationTimer = 0;
+            pendingPositionSignature = '';
+        };
+
+        const schedulePendingProximityEvaluation = () => {
+            if (proximityEvaluationTimer) cancelTimeout(proximityEvaluationTimer);
+            proximityEvaluationTimer = scheduleTimeout(() => {
+                proximityEvaluationTimer = 0;
+                if (isDragging()) {
+                    schedulePendingProximityEvaluation();
+                    return;
+                }
+                evaluateProximityTriggers({ immediate: true });
+                renderProximityPrompt();
+            }, proximitySettleMs);
+        };
 
         const getProximitySeenStorageKey = () => `${promptStoragePrefix}${getActiveCaseId() || 'case'}`;
         const readProximitySeenMap = () => {
@@ -711,16 +750,40 @@
             if (isStartTurnPrompt(activePrompt)) activePrompt = null;
             return null;
         };
-        const evaluateProximityTriggers = () => {
+        const evaluateProximityTriggers = (options = {}) => {
             if (isDragging()) return;
             if (isInitialLoadPending()) {
+                cancelPendingProximityEvaluation();
                 activePrompt = null;
                 return;
             }
             const scene = getActiveScene();
             if (!scene) {
+                cancelPendingProximityEvaluation();
+                lastEvaluatedPositionSignature = '';
+                lastEvaluatedSceneId = '';
                 activePrompt = null;
                 return;
+            }
+            const sceneId = String(scene.id || '').trim();
+            const positionSignature = buildProximityPositionSignature(scene);
+            const immediate = !!(options && options.immediate);
+            if (lastEvaluatedSceneId && sceneId !== lastEvaluatedSceneId) {
+                cancelPendingProximityEvaluation();
+                lastEvaluatedPositionSignature = positionSignature;
+                lastEvaluatedSceneId = sceneId;
+            } else if (!immediate && lastEvaluatedPositionSignature && positionSignature !== lastEvaluatedPositionSignature) {
+                if (positionSignature !== pendingPositionSignature) {
+                    pendingPositionSignature = positionSignature;
+                    schedulePendingProximityEvaluation();
+                } else if (!proximityEvaluationTimer) {
+                    schedulePendingProximityEvaluation();
+                }
+                return;
+            } else {
+                if (pendingPositionSignature) cancelPendingProximityEvaluation();
+                lastEvaluatedPositionSignature = positionSignature;
+                lastEvaluatedSceneId = sceneId;
             }
             if (isStartTurnPrompt(activePrompt) && activePrompt.sceneId === scene.id) {
                 const source = findProximityPromptSource(scene, activePrompt);
@@ -752,8 +815,11 @@
             if (!promptStackEl) return;
             if (isDragging()) return;
             if (!activePrompt) {
-                promptStackEl.innerHTML = '';
-                promptStackEl.hidden = true;
+                if (lastRenderedPromptMarkup || !promptStackEl.hidden) {
+                    promptStackEl.innerHTML = '';
+                    promptStackEl.hidden = true;
+                    lastRenderedPromptMarkup = '';
+                }
                 return;
             }
             const scene = getSceneById(activePrompt.sceneId) || getActiveScene();
@@ -777,8 +843,7 @@
             const observerNote = canInteract || result
                 ? ''
                 : 'Only a linked player token in range can respond.';
-            promptStackEl.hidden = false;
-            promptStackEl.innerHTML = `
+            const nextMarkup = `
                 <div class="vtt-proximity-prompt-card">
                     <div class="vtt-proximity-prompt-top">
                         <div>
@@ -809,9 +874,15 @@
                     ` : (observerNote ? `<div class="vtt-proximity-prompt-note">${escapeHtml(observerNote)}</div>` : '')}
                 </div>
             `;
+            if (nextMarkup !== lastRenderedPromptMarkup) {
+                promptStackEl.innerHTML = nextMarkup;
+                lastRenderedPromptMarkup = nextMarkup;
+            }
+            if (promptStackEl.hidden) promptStackEl.hidden = false;
             if (!positionProximityPrompt(scene)) {
                 promptStackEl.innerHTML = '';
                 promptStackEl.hidden = true;
+                lastRenderedPromptMarkup = '';
             }
         };
         const dismissActiveProximityPrompt = () => {
@@ -911,7 +982,11 @@
 
 
         const reset = ({ clearSuppressed = false } = {}) => {
+            cancelPendingProximityEvaluation();
             activePrompt = null;
+            lastRenderedPromptMarkup = '';
+            lastEvaluatedPositionSignature = '';
+            lastEvaluatedSceneId = '';
             if (clearSuppressed) suppressedPromptKeys.clear();
             if (promptStackEl) {
                 promptStackEl.innerHTML = '';

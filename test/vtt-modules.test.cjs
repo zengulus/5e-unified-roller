@@ -233,7 +233,21 @@ test('VTT proximity owns trigger schema normalization and prompt selection state
 });
 
 test('VTT proximity controller evaluates and renders an in-range player prompt', () => {
-    const promptStackEl = { hidden: true, innerHTML: '', dataset: {}, style: {} };
+    let promptMarkup = '';
+    let promptMarkupWrites = 0;
+    const scheduledEvaluations = [];
+    const promptStackEl = {
+        hidden: true,
+        dataset: {},
+        style: {},
+        get innerHTML() {
+            return promptMarkup;
+        },
+        set innerHTML(value) {
+            promptMarkupWrites += 1;
+            promptMarkup = value;
+        }
+    };
     const targetScene = {
         id: 'scene_prompt',
         grid: { cellPx: 10, offsetX: 0, offsetY: 0 },
@@ -276,6 +290,11 @@ test('VTT proximity controller evaluates and renders an in-range player prompt',
         normalizeClockMax: (value) => value,
         normalizeRollMode: (value) => ['adv', 'dis'].includes(String(value || '').toLowerCase()) ? String(value).toLowerCase() : 'norm',
         postSheetDiscordRoll: async () => true,
+        setTimeout: (callback) => {
+            scheduledEvaluations.push(callback);
+            return scheduledEvaluations.length;
+        },
+        clearTimeout: () => {},
         promptStackEl,
         readJSONStorage: () => ({}),
         rollRawD20WithMode: () => ({ total: 10, formula: '1d20' }),
@@ -292,6 +311,21 @@ test('VTT proximity controller evaluates and renders an in-range player prompt',
     controller.renderProximityPrompt();
     assert.equal(promptStackEl.hidden, false);
     assert.match(promptStackEl.innerHTML, /A sigil catches your eye/);
+    assert.equal(promptMarkupWrites, 1);
+
+    controller.evaluateProximityTriggers();
+    controller.renderProximityPrompt();
+    assert.equal(promptMarkupWrites, 1, 'an unchanged prompt is repositioned without rebuilding its DOM');
+
+    targetScene.tokens[0].x = 5;
+    controller.evaluateProximityTriggers();
+    controller.renderProximityPrompt();
+    assert.equal(promptMarkupWrites, 1, 'movement keeps the current prompt stable during the settle window');
+    assert.equal(scheduledEvaluations.length, 1);
+
+    scheduledEvaluations[0]();
+    assert.equal(promptStackEl.hidden, true);
+    assert.equal(promptMarkupWrites, 2, 'the prompt is removed once after movement settles');
 });
 
 test('VTT proximity controller evaluates start-turn-near once per turn occurrence', () => {
