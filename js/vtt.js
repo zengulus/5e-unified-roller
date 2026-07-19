@@ -2919,10 +2919,15 @@
     const ensureRosterLinkedPlayerPresentationPersisted = (snapshot, options = {}) => {
         if (!snapshot) return { snapshot, mutated: false };
         const opts = options && typeof options === 'object' ? options : {};
-        const baseSnapshot = opts.persist === false ? null : deepClone(snapshot);
+        // Roster identity is authoritative, but only the DM may publish that
+        // identity into the shared VTT. Player browsers can have stale local
+        // roster caches; allowing each of them to persist its projection makes
+        // linked names oscillate between old and current values.
+        const shouldPersist = opts.persist !== false && isDM();
+        const baseSnapshot = shouldPersist ? deepClone(snapshot) : null;
         const mutated = syncRosterLinkedPlayerPresentation(snapshot);
         if (!mutated) return { snapshot, mutated: false };
-        if (opts.persist === false) return { snapshot, mutated: true };
+        if (!shouldPersist) return { snapshot, mutated: true };
         const saved = persistSharedVTTSnapshot(snapshot, {
             ...opts,
             baseSnapshot,
@@ -7470,6 +7475,19 @@
                 });
             }
             if (sessionState.snapshot && syncRosterLinkedPlayerPresentation(sessionState.snapshot)) {
+                if (isDM() && collabTransport && typeof collabTransport.syncSnapshot === 'function') {
+                    const rosterPinnedSnapshot = deepClone(sessionState.snapshot);
+                    const baseSnapshot = typeof collabTransport.getSnapshot === 'function'
+                        ? collabTransport.getSnapshot()
+                        : null;
+                    Promise.resolve(collabTransport.syncSnapshot(rosterPinnedSnapshot, {
+                        baseSnapshot,
+                        flushNow: true,
+                        reason: 'roster-player-presentation-sync'
+                    })).catch((err) => {
+                        console.warn('Failed pinning roster identity into live VTT', err);
+                    });
+                }
                 normalizeSelections();
                 render();
             }
