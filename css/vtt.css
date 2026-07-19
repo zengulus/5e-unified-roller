@@ -1995,7 +1995,6 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
     height: calc(100% + var(--vtt-fog-texture-gutter, 256px) * 2);
     background-repeat: repeat;
     background-size: var(--vtt-fog-texture-tile, 256px) var(--vtt-fog-texture-tile, 256px);
-    will-change: transform;
     transform: translate3d(0, 0, 0);
     contain: paint;
 }
@@ -2003,13 +2002,11 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-fog-texture-plane-a {
     background-image: url("../noiseTexture.png");
     opacity: 0.22;
-    animation: vtt-fog-texture-drift-a 32s linear infinite;
 }
 
 .vtt-fog-texture-plane-b {
     background-image: url("../noiseTexture2.png");
     opacity: 0.16;
-    animation: vtt-fog-texture-drift-b 43s linear infinite;
 }
 
 .vtt-fog-edge-path {
@@ -3062,14 +3059,10 @@ body:not([data-vtt-role="dm"]) .vtt-map-note.is-selected .vtt-map-note-meta {
 
 .vtt-token.is-selected .vtt-token-corona {
     opacity: 0.92;
-    animation: vtt-token-corona-flow 3s linear infinite;
 }
 
 .vtt-token.is-active-turn .vtt-token-corona {
     opacity: 0.72;
-    animation:
-        vtt-token-corona-flow 3s linear infinite,
-        vtt-active-turn-breathe 1.85s ease-in-out infinite;
 }
 
 .vtt-token.is-selected .vtt-token-corona::after {

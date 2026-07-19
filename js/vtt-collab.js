@@ -11,8 +11,8 @@ import { createCollabRelayChannel } from './collab-relay-client.js?v=20260504b';
 
 const LOCAL_MIRROR_DELAY_MS = 120;
 const CLOUD_FLUSH_DELAY_MS = 3500;
-const SYNC_RECONCILE_INTERVAL_MS = 15000;
-const LIVE_SYNC_CONFIRM_WINDOW_MS = 45000;
+const SYNC_RECONCILE_INTERVAL_MS = 60000;
+const LIVE_SYNC_CONFIRM_WINDOW_MS = 150000;
 const COMPATIBILITY_CLOUD_SYNC_MIN_INTERVAL_MS = 300000;
 const SYNC_RECONCILE_REQUEST_EVENT = 'y-sync-request';
 const TOKEN_POSITION_PREVIEW_EVENT = 'vtt-token-position-preview';
@@ -2337,12 +2337,7 @@ class VTTCollabSession {
         const fastPositionChanges = canApplyTokenPositionsToSnapshot(this.lastSnapshot, hintedPositionChanges)
             ? hintedPositionChanges
             : [];
-        const beforeSig = fastPositionChanges.length
-            ? ''
-            : buildSnapshotSignature(
-                this.lastSnapshot || serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this)),
-                this.coerceSnapshot.bind(this)
-            );
+        const snapshotBeforeSync = this.lastSnapshot;
         let update;
         try {
             update = decodeBase64(encoded);
@@ -2362,16 +2357,17 @@ class VTTCollabSession {
             });
             if (applyFailed) return;
             this.lastYSyncAt = Date.now();
-            const nextSnapshot = fastPositionChanges.length
-                ? this.lastSnapshot
-                : serializeDocSnapshot(this.doc, this.coerceSnapshot.bind(this));
-            const afterSig = fastPositionChanges.length
-                ? ''
-                : buildSnapshotSignature(nextSnapshot, this.coerceSnapshot.bind(this));
+            // afterTransaction synchronously refreshes lastSnapshot when a Yjs
+            // message actually changes the document. Reuse it here. Rebuilding
+            // and stringifying the entire VTT for sync-step-1/no-op checks made
+            // idle reconciliation scale with document size and peer count.
+            const nextSnapshot = this.lastSnapshot;
             const documentBearingMessage = messageType === syncProtocol.messageYjsUpdate || messageType === syncProtocol.messageYjsSyncStep2;
-            const inferredSeed = messageType === syncProtocol.messageYjsUpdate
+            const inferredSeed = !serverSeeded && (
+                messageType === syncProtocol.messageYjsUpdate
                 || (messageType === syncProtocol.messageYjsSyncStep2
-                    && (hasVTTContent(nextSnapshot, this.coerceSnapshot.bind(this)) || beforeSig !== afterSig));
+                    && (nextSnapshot !== snapshotBeforeSync || hasVTTContent(nextSnapshot, this.coerceSnapshot.bind(this))))
+            );
             this.renderRoomSeeded = serverSeeded || inferredSeed || this.renderRoomSeeded;
             this.docSyncConfirmed = documentBearingMessage || !!this.renderRoomSeeded;
             if (documentBearingMessage) {

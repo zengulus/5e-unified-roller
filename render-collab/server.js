@@ -69,6 +69,11 @@ const sendJson = (socket, packet) => {
   socket.send(JSON.stringify(packet));
 };
 
+const sendSerializedJson = (socket, serializedPacket) => {
+  if (!socket || socket.readyState !== 1 || !serializedPacket) return;
+  socket.send(serializedPacket);
+};
+
 const encodeBase64 = (bytes) => {
   if (!(bytes instanceof Uint8Array)) return '';
   return Buffer.from(bytes).toString('base64');
@@ -124,9 +129,12 @@ const sendYSyncMessage = (client, encoder, room = null) => {
 
 const broadcastToRoom = (room, sender, packet) => {
   if (!room) return;
+  // A room broadcast has identical contents for every recipient. Serialize it
+  // once so the relay's CPU cost does not grow with both event rate and peers.
+  const serializedPacket = JSON.stringify(packet);
   room.clients.forEach((client) => {
     if (client === sender) return;
-    sendJson(client.socket, packet);
+    sendSerializedJson(client.socket, serializedPacket);
   });
 };
 
@@ -271,12 +279,13 @@ const handleYSyncBroadcast = (room, sender, payload) => {
 const emitPresence = (room, event = 'sync') => {
   if (!room) return;
   const state = buildPresenceState(room);
+  const serializedPacket = JSON.stringify({
+    type: 'presence',
+    event,
+    state
+  });
   room.clients.forEach((client) => {
-    sendJson(client.socket, {
-      type: 'presence',
-      event,
-      state
-    });
+    sendSerializedJson(client.socket, serializedPacket);
   });
 };
 

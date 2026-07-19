@@ -884,13 +884,15 @@
             const scene = getActiveScene();
             const { tokenLayerEl } = dom;
             if (!scene || !scene.grid || !tokenLayerEl) return 0;
-            const tokenElements = new Map(Array.from(tokenLayerEl.children)
-                .filter((tokenEl) => tokenEl instanceof root.HTMLElement && tokenEl.classList.contains('vtt-token'))
-                .map((tokenEl) => [String(tokenEl.dataset.tokenId || '').trim(), tokenEl]));
             let applied = 0;
             (Array.isArray(changes) ? changes : []).forEach((change) => {
                 if (!change || String(change.sceneId || '').trim() !== String(scene.id || '').trim()) return;
-                const tokenEl = tokenElements.get(String(change.tokenId || '').trim());
+                const tokenId = String(change.tokenId || '').trim();
+                if (!tokenId) return;
+                const escapedTokenId = root.CSS && typeof root.CSS.escape === 'function'
+                    ? root.CSS.escape(tokenId)
+                    : tokenId.replace(/(["\\])/g, '\\$1');
+                const tokenEl = tokenLayerEl.querySelector(`.vtt-token[data-token-id="${escapedTokenId}"]`);
                 if (!(tokenEl instanceof root.HTMLElement)) return;
                 const worldLeft = toNumber(scene.grid.offsetX, 0) + normalizeTokenCoordinate(change.x, 0) * scene.grid.cellPx;
                 const worldTop = toNumber(scene.grid.offsetY, 0) + normalizeTokenCoordinate(change.y, 0) * scene.grid.cellPx;

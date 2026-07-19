@@ -3381,13 +3381,17 @@
         ui: {
             setSyncChip: ({ state = 'local', label = 'Local', detail = '', retryable = false } = {}) => {
                 if (!dom.syncChipEl) return;
-                dom.syncChipEl.dataset.state = state;
-                dom.syncChipEl.dataset.retryable = retryable ? 'true' : 'false';
-                dom.syncChipEl.textContent = label;
-                dom.syncChipEl.title = detail || label;
-                dom.syncChipEl.setAttribute('aria-label', detail || label);
-                dom.syncChipEl.setAttribute('role', retryable ? 'button' : 'status');
-                dom.syncChipEl.tabIndex = retryable ? 0 : -1;
+                const retryableValue = retryable ? 'true' : 'false';
+                const accessibleDetail = detail || label;
+                const role = retryable ? 'button' : 'status';
+                const tabIndex = retryable ? 0 : -1;
+                if (dom.syncChipEl.dataset.state !== state) dom.syncChipEl.dataset.state = state;
+                if (dom.syncChipEl.dataset.retryable !== retryableValue) dom.syncChipEl.dataset.retryable = retryableValue;
+                if (dom.syncChipEl.textContent !== label) dom.syncChipEl.textContent = label;
+                if (dom.syncChipEl.title !== accessibleDetail) dom.syncChipEl.title = accessibleDetail;
+                if (dom.syncChipEl.getAttribute('aria-label') !== accessibleDetail) dom.syncChipEl.setAttribute('aria-label', accessibleDetail);
+                if (dom.syncChipEl.getAttribute('role') !== role) dom.syncChipEl.setAttribute('role', role);
+                if (dom.syncChipEl.tabIndex !== tabIndex) dom.syncChipEl.tabIndex = tabIndex;
             },
             getSyncChipState: () => dom.syncChipEl ? String(dom.syncChipEl.dataset.state || '') : '',
             setActiveSceneLabel: (label) => {
