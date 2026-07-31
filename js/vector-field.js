@@ -312,6 +312,7 @@
         panel.id = 'accent-panel';
         panel.className = 'accent-panel';
         panel.setAttribute('aria-hidden', 'true');
+        panel.setAttribute('inert', '');
         panel.innerHTML = `
             <div class="accent-panel__backdrop" data-dismiss="accent"></div>
             <div class="accent-panel__card" role="dialog" aria-modal="true" aria-labelledby="accent-panel-title">
@@ -491,19 +492,62 @@
             });
         };
 
+        let returnFocusEl = null;
+        let returnFocusFallbackEl = null;
+
+        const restorePanelFocus = (element) => {
+            if (!element
+                || !element.isConnected
+                || typeof element.focus !== 'function'
+                || element.matches(':disabled')
+                || element.closest('[hidden], [inert]')
+                || !element.getClientRects().length) return false;
+            try {
+                element.focus({ preventScroll: true });
+            } catch (_err) {
+                element.focus();
+            }
+            return true;
+        };
+
+        const getAccentPanelFocusFallback = (opener) => {
+            if (!(opener instanceof HTMLElement)) return null;
+            const actions = opener.closest('.hero-actions');
+            const settingsTrigger = actions && actions.querySelector('.hero-menu-gear');
+            return settingsTrigger instanceof HTMLElement ? settingsTrigger : null;
+        };
+
         const closePanel = () => {
+            const wasOpen = panel.classList.contains('open');
+            const focusTarget = returnFocusEl;
+            const fallbackFocusTarget = returnFocusFallbackEl;
             panel.classList.remove('open');
             panel.setAttribute('aria-hidden', 'true');
+            panel.setAttribute('inert', '');
             document.body.classList.remove('accent-panel-open');
+            returnFocusEl = null;
+            returnFocusFallbackEl = null;
+            if (wasOpen && focusTarget) {
+                window.requestAnimationFrame(() => {
+                    if (!panel.classList.contains('open') && !restorePanelFocus(focusTarget)) {
+                        restorePanelFocus(fallbackFocusTarget);
+                    }
+                });
+            }
         };
 
         const openPanel = () => {
+            if (!panel.classList.contains('open')) {
+                returnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+                returnFocusFallbackEl = getAccentPanelFocusFallback(returnFocusEl);
+            }
             panel.classList.add('open');
             panel.setAttribute('aria-hidden', 'false');
+            panel.removeAttribute('inert');
             document.body.classList.add('accent-panel-open');
             positionIndicator();
             const closeBtn = panel.querySelector('.accent-panel__close');
-            if (closeBtn) closeBtn.focus();
+            restorePanelFocus(closeBtn);
             return true;
         };
 

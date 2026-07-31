@@ -173,12 +173,14 @@ body.accent-panel-open {
     justify-content: center;
     z-index: 5000;
     pointer-events: none;
+    visibility: hidden;
     opacity: 0;
     transition: opacity 0.25s ease;
 }
 
 .accent-panel.open {
     pointer-events: auto;
+    visibility: visible;
     opacity: 1;
 }
 

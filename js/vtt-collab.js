@@ -188,6 +188,7 @@ const fallbackSnapshot = () => ({
             },
             tokens: [],
             evidenceNotes: [],
+            annotations: [],
             clocks: [],
             pings: [],
             templates: [],
@@ -239,6 +240,7 @@ const getVTTContentScore = (snapshot, coerceSnapshot = (value) => value) => {
         score += (Array.isArray(scene && scene.tokens) ? scene.tokens.length : 0) * 1000;
         score += (Array.isArray(scene && scene.templates) ? scene.templates.length : 0) * 500;
         score += (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes.length : 0) * 500;
+        score += (Array.isArray(scene && scene.annotations) ? scene.annotations.length : 0) * 300;
         score += (Array.isArray(scene && scene.clocks) ? scene.clocks.length : 0) * 400;
         score += (Array.isArray(scene && scene.fog) ? scene.fog.length : 0) * 200;
         score += toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim() ? 600 : 0;
@@ -620,6 +622,35 @@ const serializeYTemplateRecord = (record, templateId) => ({
     expiresAt: record.get('expiresAt')
 });
 
+const syncYAnnotationRecord = (record, annotation) => {
+    const source = annotation && typeof annotation === 'object' ? annotation : {};
+    setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
+    setYScalar(record, 'points', stringifyJsonArray(source.points));
+    setYScalar(record, 'kind', source.kind || 'pen');
+    setYScalar(record, 'color', source.color || '');
+    setYScalar(record, 'width', source.width);
+    setYScalar(record, 'visibility', source.visibility || 'shared');
+    setYScalar(record, 'authorKind', source.authorKind || 'dm');
+    setYScalar(record, 'authorPlayerId', source.authorPlayerId || '');
+    setYScalar(record, 'createdAt', source.createdAt || 0);
+    removeExtraneousMapKeys(record, new Set([
+        'id', 'points', 'kind', 'color', 'width', 'visibility',
+        'authorKind', 'authorPlayerId', 'createdAt'
+    ]));
+};
+
+const serializeYAnnotationRecord = (record, annotationId) => ({
+    id: toTrimmedString(record.get('id'), annotationId, 120).trim() || annotationId,
+    points: parseJsonArray(record.get('points')),
+    kind: toTrimmedString(record.get('kind'), 'pen', 20),
+    color: toTrimmedString(record.get('color'), '', 20),
+    width: record.get('width'),
+    visibility: toTrimmedString(record.get('visibility'), 'shared', 20),
+    authorKind: toTrimmedString(record.get('authorKind'), 'dm', 20),
+    authorPlayerId: toTrimmedString(record.get('authorPlayerId'), '', 120),
+    createdAt: record.get('createdAt') || 0
+});
+
 const syncYEvidenceNoteRecord = (record, note) => {
     const source = note && typeof note === 'object' ? note : {};
     setYScalar(record, 'id', toTrimmedString(source.id, '', 120).trim());
@@ -765,6 +796,12 @@ const syncYSceneRecord = (record, scene) => {
         syncYTemplateRecord
     );
     syncOrderedEntityCollection(
+        ensureYMapEntry(record, 'annotations'),
+        ensureYArrayEntry(record, 'annotationOrder'),
+        source.annotations,
+        syncYAnnotationRecord
+    );
+    syncOrderedEntityCollection(
         ensureYMapEntry(record, 'evidenceNotes'),
         ensureYArrayEntry(record, 'evidenceOrder'),
         source.evidenceNotes,
@@ -791,6 +828,7 @@ const syncYSceneRecord = (record, scene) => {
     removeExtraneousMapKeys(record, new Set([
         'id', 'name', 'mapImageUrl', 'mapScale', 'stealthMode',
         'grid', 'music', 'tokens', 'tokenOrder', 'templates', 'templateOrder',
+        'annotations', 'annotationOrder',
         'evidenceNotes', 'evidenceOrder', 'clocks', 'clockOrder',
         'pings', 'pingOrder', 'fog', 'fogOrder'
     ]));
@@ -806,6 +844,7 @@ const serializeYSceneRecord = (record, sceneId) => ({
     music: serializeYMusicMap(record, 'music'),
     tokens: serializeOrderedEntityCollection(getYMapEntry(record, 'tokens'), getYArrayEntry(record, 'tokenOrder'), serializeYTokenRecord),
     templates: serializeOrderedEntityCollection(getYMapEntry(record, 'templates'), getYArrayEntry(record, 'templateOrder'), serializeYTemplateRecord),
+    annotations: serializeOrderedEntityCollection(getYMapEntry(record, 'annotations'), getYArrayEntry(record, 'annotationOrder'), serializeYAnnotationRecord),
     evidenceNotes: serializeOrderedEntityCollection(getYMapEntry(record, 'evidenceNotes'), getYArrayEntry(record, 'evidenceOrder'), serializeYEvidenceNoteRecord),
     clocks: serializeOrderedEntityCollection(getYMapEntry(record, 'clocks'), getYArrayEntry(record, 'clockOrder'), serializeYClockRecord),
     pings: serializeOrderedEntityCollection(getYMapEntry(record, 'pings'), getYArrayEntry(record, 'pingOrder'), serializeYPingRecord),
@@ -965,6 +1004,20 @@ const patchYTemplateRecord = (record, baseTemplate = {}, nextTemplate = {}) => {
     mutated = patchYScalar(record, 'sizeCells', baseTemplate.sizeCells, nextTemplate.sizeCells) || mutated;
     mutated = patchYScalar(record, 'angleDeg', baseTemplate.angleDeg, nextTemplate.angleDeg) || mutated;
     mutated = patchYScalar(record, 'expiresAt', baseTemplate.expiresAt, nextTemplate.expiresAt) || mutated;
+    return mutated;
+};
+
+const patchYAnnotationRecord = (record, baseAnnotation = {}, nextAnnotation = {}) => {
+    let mutated = false;
+    mutated = patchYScalar(record, 'id', baseAnnotation.id, nextAnnotation.id) || mutated;
+    mutated = patchYScalar(record, 'points', stringifyJsonArray(baseAnnotation.points), stringifyJsonArray(nextAnnotation.points)) || mutated;
+    mutated = patchYScalar(record, 'kind', baseAnnotation.kind || 'pen', nextAnnotation.kind || 'pen') || mutated;
+    mutated = patchYScalar(record, 'color', baseAnnotation.color || '', nextAnnotation.color || '') || mutated;
+    mutated = patchYScalar(record, 'width', baseAnnotation.width, nextAnnotation.width) || mutated;
+    mutated = patchYScalar(record, 'visibility', baseAnnotation.visibility || 'shared', nextAnnotation.visibility || 'shared') || mutated;
+    mutated = patchYScalar(record, 'authorKind', baseAnnotation.authorKind || 'dm', nextAnnotation.authorKind || 'dm') || mutated;
+    mutated = patchYScalar(record, 'authorPlayerId', baseAnnotation.authorPlayerId || '', nextAnnotation.authorPlayerId || '') || mutated;
+    mutated = patchYScalar(record, 'createdAt', baseAnnotation.createdAt || 0, nextAnnotation.createdAt || 0) || mutated;
     return mutated;
 };
 
@@ -1142,6 +1195,14 @@ const patchYSceneRecord = (record, baseScene = {}, nextScene = {}) => {
         nextItems: nextScene.templates || [],
         syncRecord: syncYTemplateRecord,
         patchRecord: patchYTemplateRecord
+    }) || mutated;
+    mutated = patchOrderedEntityCollection({
+        containerMap: ensureYMapEntry(record, 'annotations'),
+        orderArray: ensureYArrayEntry(record, 'annotationOrder'),
+        baseItems: baseScene.annotations || [],
+        nextItems: nextScene.annotations || [],
+        syncRecord: syncYAnnotationRecord,
+        patchRecord: patchYAnnotationRecord
     }) || mutated;
     mutated = patchOrderedEntityCollection({
         containerMap: ensureYMapEntry(record, 'evidenceNotes'),
@@ -1588,6 +1649,7 @@ const diffVTTSnapshots = (previousSnapshot, nextSnapshot, coerceSnapshot) => {
             return { structural: true, positions: [] };
         }
         if (!compareOrderedEntityCollections(previousScene && previousScene.templates || [], scene && scene.templates || [])
+            || !compareOrderedEntityCollections(previousScene && previousScene.annotations || [], scene && scene.annotations || [])
             || !compareOrderedEntityCollections(previousScene && previousScene.evidenceNotes || [], scene && scene.evidenceNotes || [])
             || !compareOrderedEntityCollections(previousScene && previousScene.clocks || [], scene && scene.clocks || [])
             || !compareOrderedEntityCollections(previousScene && previousScene.pings || [], scene && scene.pings || [])

@@ -7,6 +7,10 @@ body[data-player-nav="vtt"] {
     overflow-x: hidden;
 }
 
+body[data-player-nav="vtt"].vtt-modal-open {
+    overflow: hidden;
+}
+
 body[data-player-nav="vtt"] canvas#vector-cloud {
     display: none;
 }
@@ -119,6 +123,45 @@ body[data-player-nav="vtt"] .vtt-topbar-meta {
 
 .vtt-topbar-actions .hero-action-bar:empty {
     display: none;
+}
+
+.vtt-header-board-menu {
+    position: relative;
+}
+
+.vtt-header-board-menu > summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.vtt-header-board-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.vtt-header-board-popover {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 0.55rem);
+    right: 0;
+    display: grid;
+    gap: 0.45rem;
+    width: min(260px, calc(100vw - 2rem));
+    padding: 0.9rem;
+    border: 1px solid var(--line, rgba(255,255,255,0.14));
+    border-radius: 0.9rem;
+    background: var(--panel, #171b22);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+}
+
+.vtt-header-board-popover span {
+    color: var(--muted, #aab2c0);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.vtt-header-board-popover .vtt-chip-btn {
+    justify-content: center;
+    text-align: center;
 }
 
 .vtt-topbar-menu .hero-btn {
@@ -1807,6 +1850,12 @@ body[data-active-vtt-panel="combat"] .vtt-initiative-compact-actions {
     pointer-events: none;
 }
 
+.vtt-stage-empty[data-state="map-error"] {
+    border-color: rgba(255, 172, 84, 0.52);
+    background: rgba(55, 28, 8, 0.9);
+    color: rgba(255, 237, 211, 0.96);
+}
+
 body[data-spawn-dragging="1"] .vtt-stage {
     cursor: copy;
 }
@@ -1846,6 +1895,7 @@ body[data-tool-mode="ping"] .vtt-stage,
 body[data-tool-mode="circle"] .vtt-stage,
 body[data-tool-mode="cone"] .vtt-stage,
 body[data-tool-mode="note"] .vtt-stage,
+body[data-tool-mode="draw"] .vtt-stage,
 body[data-tool-mode="fog"] .vtt-stage,
 body[data-tool-mode="fog-remove"] .vtt-stage {
     cursor: crosshair;
@@ -1885,6 +1935,7 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 .vtt-grid-layer,
 .vtt-fog-layer,
 .vtt-note-layer,
+.vtt-annotation-layer,
 .vtt-template-layer,
 .vtt-token-layer,
 .vtt-vision-layer,
@@ -1931,6 +1982,24 @@ body[data-grid-hidden="1"] .vtt-stage-grid {
 
 .vtt-template-layer {
     z-index: 3;
+}
+
+.vtt-annotation-layer {
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.vtt-annotation,
+.vtt-annotation * {
+    pointer-events: none;
+}
+
+.vtt-annotation-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
 }
 
 .vtt-token-layer {
@@ -4518,7 +4587,7 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-popover {
 .vtt-modal-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 70;
+    z-index: 10001;
     display: grid;
     place-items: center;
     padding: 1rem;
@@ -4569,6 +4638,59 @@ body:not([data-active-vtt-panel="combat"]) .vtt-initiative-popover {
 
 .vtt-roster-self-card {
     width: min(34rem, calc(100vw - 2rem));
+}
+
+.vtt-case-board-backdrop {
+    padding: clamp(0.65rem, 1.5vw, 1.25rem);
+}
+
+.vtt-case-board-card {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: min(88rem, calc(100vw - 1.3rem));
+    height: min(56rem, calc(100vh - 1.3rem));
+    min-height: min(34rem, calc(100vh - 1.3rem));
+    padding: 0;
+    overflow: hidden;
+}
+
+.vtt-case-board-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    padding: 0.8rem 0.95rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(15, 21, 32, 0.98);
+}
+
+.vtt-case-board-head h2 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.vtt-case-board-head p {
+    margin: 0.2rem 0 0;
+    color: var(--muted, #aab2c0);
+    font-size: 0.76rem;
+}
+
+.vtt-case-board-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.45rem;
+}
+
+.vtt-case-board-frame {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    border: 0;
+    background: #10151e;
 }
 
 .vtt-roster-self-list {

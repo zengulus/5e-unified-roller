@@ -6,6 +6,7 @@
         throw new Error('VTT configuration module failed to load.');
     }
     const C = vttConfig.constants;
+    const TOOL_MODE_DRAW = 'draw';
     const vttSessionModuleReady = import('./vtt-session.js?v=20260718d')
         .then(() => window.RTF_VTT_SESSION || null)
         .catch((err) => {
@@ -394,6 +395,10 @@
             ...note,
             id: buildId('evidence')
         }));
+        const clonedAnnotations = deepClone(Array.isArray(source && source.annotations) ? source.annotations : []).map((annotation) => ({
+            ...annotation,
+            id: buildId('annotation')
+        }));
         const sourceClocks = deepClone(Array.isArray(source && source.clocks) ? source.clocks : []);
         const clonedClockIdMap = new Map();
         const clonedClocks = sourceClocks.map((clock) => {
@@ -441,6 +446,7 @@
             tokens: clonedTokens,
             templates: clonedTemplates,
             evidenceNotes: clonedEvidenceNotes,
+            annotations: clonedAnnotations,
             clocks: clonedClocks,
             pings: [],
             fog: deepClone(Array.isArray(source && source.fog) ? source.fog : [])
@@ -588,7 +594,7 @@
         getSceneEvidenceNotes,
         getStealthVisionTargetSummary,
         getTemplateAngleFromWorldPoint,
-        getTemplateWorldPoint,
+            getTemplateWorldPoint,
         getTokenCenterInCells,
         getTokenVisionFacingDeg,
         getVisibleEvidenceNotesForRole,
@@ -603,19 +609,53 @@
         normalizeEvidenceNoteShape,
         normalizeEvidenceNoteTitle
     } = vttGeometry;
+    const getRetainedSharedTemplates = (scene, now = Date.now()) => {
+        const limit = Math.max(1, Math.round(toNumber(C.MAX_SHARED_TEMPLATES_PER_SCENE, 18)));
+        return getRenderableSceneTemplates(scene, now).slice(-limit);
+    };
+    const compactSharedTemplatesForScene = (scene, now = Date.now()) => {
+        if (!scene || !Array.isArray(scene.templates)) return false;
+        const retainedTemplates = getRetainedSharedTemplates(scene, now);
+        if (retainedTemplates.length === scene.templates.length) return false;
+        scene.templates = retainedTemplates;
+        return true;
+    };
+    const compactSharedTemplatesInSnapshot = (snapshot, now = Date.now()) => {
+        if (!snapshot || !Array.isArray(snapshot.scenes)) return false;
+        return snapshot.scenes.reduce((changed, scene) => (
+            compactSharedTemplatesForScene(scene, now) || changed
+        ), false);
+    };
+    const snapshotNeedsSharedTemplateCompaction = (snapshot, now = Date.now()) => {
+        if (!snapshot || !Array.isArray(snapshot.scenes)) return false;
+        return snapshot.scenes.some((scene) => (
+            Array.isArray(scene && scene.templates)
+            && getRetainedSharedTemplates(scene, now).length !== scene.templates.length
+        ));
+    };
     const queueSharedTransientTemplate = (template) => {
-        if (!canUseSharedPlayerTools()) return;
-        if (!template) return;
+        const sourceScene = getActiveScene();
+        if (!template || !isSharedSceneForBroadcast(sourceScene)) return false;
+        const now = Date.now();
         const payload = {
             ...template,
-            expiresAt: Date.now() + C.TEMPLATE_SHARED_LIFETIME_MS
+            expiresAt: now + C.TEMPLATE_SHARED_LIFETIME_MS
         };
-        withDraft((draft) => {
-            const scene = getActiveScene(draft);
-            if (!scene) return;
+        const sourceSceneId = String(sourceScene.id || '').trim();
+        let queued = false;
+        const persisted = withDraft((draft) => {
+            const sharedSceneId = getSharedSceneId(draft);
+            const scene = Array.isArray(draft.scenes)
+                ? draft.scenes.find((entry) => String(entry && entry.id || '').trim() === sourceSceneId)
+                : null;
+            if (!scene || sourceSceneId !== sharedSceneId) return;
             if (!Array.isArray(scene.templates)) scene.templates = [];
+            compactSharedTemplatesForScene(scene, now);
             scene.templates.push(payload);
-        });
+            compactSharedTemplatesForScene(scene, now);
+            queued = true;
+        }, { reason: 'shared-transient-template' });
+        return !!persisted && queued;
     };
     const normalizePingVariant = (value) => {
         const clean = String(value || '').trim().toLowerCase();
@@ -630,8 +670,7 @@
         return C.PING_VARIANT_OPTIONS[normalizePingVariant(variant)] || C.PING_VARIANT_OPTIONS.attention;
     };
     const queueSharedPing = (scene, worldPoint, options = {}) => {
-        if (!canUseSharedPlayerTools()) return false;
-        if (!scene || !worldPoint) return false;
+        if (!scene || !worldPoint || !isSharedSceneForBroadcast(scene)) return false;
         const now = Date.now();
         const variant = String(options.variant || 'attention').trim().slice(0, 40) || 'attention';
         const label = String(options.label || 'Ping').trim().slice(0, 80) || 'Ping';
@@ -656,13 +695,19 @@
             expiresAt: now + (askRoll ? 2 * 60 * 1000 : C.PING_SHARED_LIFETIME_MS)
         };
         if (askRoll && askRoll.label) ping.askRoll = askRoll;
-        withDraft((draft) => {
-            const draftScene = getActiveScene(draft);
-            if (!draftScene) return;
+        const sourceSceneId = String(scene.id || '').trim();
+        let queued = false;
+        const persisted = withDraft((draft) => {
+            const sharedSceneId = getSharedSceneId(draft);
+            const draftScene = Array.isArray(draft.scenes)
+                ? draft.scenes.find((entry) => String(entry && entry.id || '').trim() === sourceSceneId)
+                : null;
+            if (!draftScene || sourceSceneId !== sharedSceneId) return;
             const activePings = getRenderableScenePings(draftScene, now);
             draftScene.pings = activePings.concat(ping).slice(-18);
-        });
-        return true;
+            queued = true;
+        }, { reason: 'shared-ping' });
+        return !!persisted && queued;
     };
     const removeSharedPingById = (pingId) => {
         const targetId = String(pingId || '').trim();
@@ -911,6 +956,14 @@
         if (impact && impact.endsEncounter) consequences.push('The active encounter scoped to this scene will end.');
         return window.confirm(`Delete "${sceneName}"?\n\n${consequences.join('\n')}\n\nThis cannot be undone.`);
     };
+    const confirmClearSceneFog = (scene) => {
+        const sceneName = String(scene && scene.name || 'this scene').trim() || 'this scene';
+        const fogCount = Array.isArray(scene && scene.fog) ? scene.fog.length : 0;
+        return window.confirm(
+            `Clear all fog from "${sceneName}"?\n\n`
+            + `This will reveal ${fogCount} fog cell${fogCount === 1 ? '' : 's'} to every connected player. This cannot be undone.`
+        );
+    };
     const normalizeLocalRole = (role) => {
         const clean = String(role || '').trim().toLowerCase();
         if (clean === 'dm') return 'dm';
@@ -1019,7 +1072,7 @@
     };
     const normalizeToolMode = (value) => {
         const token = String(value || '').trim().toLowerCase();
-        if (token === C.TOOL_MODE_PING || token === C.TOOL_MODE_RULER || token === C.TOOL_MODE_CIRCLE || token === C.TOOL_MODE_CONE || token === C.TOOL_MODE_NOTE || token === C.TOOL_MODE_FOG || token === C.TOOL_MODE_FOG_REMOVE) return token;
+        if (token === C.TOOL_MODE_PING || token === C.TOOL_MODE_RULER || token === C.TOOL_MODE_CIRCLE || token === C.TOOL_MODE_CONE || token === C.TOOL_MODE_NOTE || token === TOOL_MODE_DRAW || token === C.TOOL_MODE_FOG || token === C.TOOL_MODE_FOG_REMOVE) return token;
         return C.TOOL_MODE_NAVIGATE;
     };
     const getToolModeLabel = (mode = stageState.tool.current.mode) => {
@@ -1029,6 +1082,7 @@
         if (clean === C.TOOL_MODE_CIRCLE) return 'Circle';
         if (clean === C.TOOL_MODE_CONE) return 'Cone';
         if (clean === C.TOOL_MODE_NOTE) return 'Pin / Zone';
+        if (clean === TOOL_MODE_DRAW) return 'Draw';
         if (clean === C.TOOL_MODE_FOG) return 'Fog';
         if (clean === C.TOOL_MODE_FOG_REMOVE) return 'Unfog';
         return 'Navigate';
@@ -1085,7 +1139,7 @@
         return true;
     };
     const clearTemplatePlacementState = () => {
-        if (!stageState.placement.template && !stageState.placement.templateRotate && !stageState.placement.visionConeRotate && !stageState.placement.ruler && !stageState.placement.fog && !stageState.placement.evidenceNote && !stageState.placement.evidenceNoteDrag) return false;
+        if (!stageState.placement.annotation && !stageState.placement.template && !stageState.placement.templateRotate && !stageState.placement.visionConeRotate && !stageState.placement.ruler && !stageState.placement.fog && !stageState.placement.evidenceNote && !stageState.placement.evidenceNoteDrag) return false;
         stageState.placement.template = null;
         stageState.placement.templateRotate = null;
         stageState.placement.visionConeRotate = null;
@@ -1093,6 +1147,7 @@
         stageState.placement.fog = null;
         stageState.placement.evidenceNote = null;
         stageState.placement.evidenceNoteDrag = null;
+        stageState.placement.annotation = null;
         return true;
     };
     const setToolMode = (mode) => {
@@ -1245,10 +1300,26 @@
     };
 
     const renderToolsMenu = () => {
+        const canBroadcastFromCurrentScene = canBroadcastFromViewedScene();
+        const localPlayerContext = isPlayer() ? getLocalPlayerFocusContext() : null;
+        const canPlayerDraw = !!(
+            isPlayer()
+            && canBroadcastFromCurrentScene
+            && String(localPlayerContext && localPlayerContext.playerId || '').trim()
+        );
+        const broadcastToolsUnavailableMessage = isUsingLocalSceneView(sessionState.snapshot, sessionState.role)
+            ? 'Return to the shared scene to send markers to players.'
+            : 'This role cannot send shared markers.';
         if (!isDM() && [C.TOOL_MODE_NOTE, C.TOOL_MODE_FOG, C.TOOL_MODE_FOG_REMOVE].includes(stageState.tool.current.mode)) {
             setToolMode(C.TOOL_MODE_NAVIGATE);
         }
+        if (!isDM() && stageState.tool.current.mode === TOOL_MODE_DRAW && !canPlayerDraw) {
+            setToolMode(C.TOOL_MODE_NAVIGATE);
+        }
         if (isSpectator() && ![C.TOOL_MODE_NAVIGATE, C.TOOL_MODE_RULER].includes(stageState.tool.current.mode)) {
+            setToolMode(C.TOOL_MODE_NAVIGATE);
+        }
+        if (!canBroadcastFromCurrentScene && [C.TOOL_MODE_PING, C.TOOL_MODE_CIRCLE, C.TOOL_MODE_CONE].includes(stageState.tool.current.mode)) {
             setToolMode(C.TOOL_MODE_NAVIGATE);
         }
         if (dom.toolsMenuEl) dom.toolsMenuEl.hidden = !uiRuntime.menus.toolsOpen;
@@ -1257,20 +1328,28 @@
         if (dom.toolModeNavigateEl) dom.toolModeNavigateEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_NAVIGATE ? 'true' : 'false');
         if (dom.toolModePingEl) {
             dom.toolModePingEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_PING ? 'true' : 'false');
-            dom.toolModePingEl.disabled = isSpectator();
+            dom.toolModePingEl.disabled = !canBroadcastFromCurrentScene;
+            dom.toolModePingEl.title = canBroadcastFromCurrentScene ? 'Ping the map' : broadcastToolsUnavailableMessage;
         }
         if (dom.toolModeCircleEl) {
             dom.toolModeCircleEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_CIRCLE ? 'true' : 'false');
-            dom.toolModeCircleEl.disabled = isSpectator();
+            dom.toolModeCircleEl.disabled = !canBroadcastFromCurrentScene;
+            dom.toolModeCircleEl.title = canBroadcastFromCurrentScene ? 'Place a shared circle marker' : broadcastToolsUnavailableMessage;
         }
         if (dom.toolModeConeEl) {
             dom.toolModeConeEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_CONE ? 'true' : 'false');
-            dom.toolModeConeEl.disabled = isSpectator();
+            dom.toolModeConeEl.disabled = !canBroadcastFromCurrentScene;
+            dom.toolModeConeEl.title = canBroadcastFromCurrentScene ? 'Place a shared cone marker' : broadcastToolsUnavailableMessage;
         }
         if (dom.toolModeNoteEl) {
             dom.toolModeNoteEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_NOTE ? 'true' : 'false');
             dom.toolModeNoteEl.hidden = !isDM();
             dom.toolModeNoteEl.disabled = false;
+        }
+        if (dom.toolModeDrawEl) {
+            dom.toolModeDrawEl.setAttribute('aria-pressed', stageState.tool.current.mode === TOOL_MODE_DRAW ? 'true' : 'false');
+            dom.toolModeDrawEl.hidden = !isDM();
+            dom.toolModeDrawEl.disabled = false;
         }
         if (dom.toolModeFogEl) {
             dom.toolModeFogEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_FOG ? 'true' : 'false');
@@ -1824,6 +1903,13 @@
         isUsingLocalSceneView(state, role) ? String(uiRuntime.preferences.localSceneId || '').trim() : getSharedSceneId(state)
     );
 
+    const isSharedSceneForBroadcast = (scene = getActiveScene(), state = sessionState.snapshot) => {
+        if (!canUseSharedPlayerTools() || !scene || !state) return false;
+        const sceneId = String(scene.id || '').trim();
+        return !!sceneId && sceneId === getSharedSceneId(state);
+    };
+    const canBroadcastFromViewedScene = () => isSharedSceneForBroadcast();
+
     const setSceneViewPreference = (mode, sceneId = '') => {
         const cleanMode = mode === C.SCENE_VIEW_LOCAL && isDM() ? C.SCENE_VIEW_LOCAL : C.SCENE_VIEW_SHARED;
         const cleanSceneId = String(sceneId || '').trim();
@@ -1833,7 +1919,7 @@
     };
     const maybeFollowRemoteActivityForDM = (sceneIds = new Set(), state = sessionState.snapshot) => {
         if (!isDM() || !isUsingLocalSceneView(state, sessionState.role)) return false;
-        if (stageState.pointer.drag || stageState.pointer.spawnDrag || stageState.placement.fog || stageState.placement.evidenceNote || stageState.placement.evidenceNoteDrag || stageState.placement.template || stageState.placement.templateRotate || stageState.placement.visionConeRotate || stageState.placement.ruler) return false;
+        if (stageState.pointer.drag || stageState.pointer.spawnDrag || stageState.placement.annotation || stageState.placement.fog || stageState.placement.evidenceNote || stageState.placement.evidenceNoteDrag || stageState.placement.template || stageState.placement.templateRotate || stageState.placement.visionConeRotate || stageState.placement.ruler) return false;
         const sharedSceneId = getSharedSceneId(state);
         if (!sharedSceneId || !sceneIds.has(sharedSceneId)) return false;
         const viewedSceneId = getViewedSceneId(state, sessionState.role);
@@ -2040,6 +2126,15 @@
         if (role === 'dm') return true;
         if (role === 'spectator') return false;
         if (normalizeMoveAccess(token.moveAccess, token.sourceType === 'player' ? 'player' : 'dm') !== 'player') return false;
+        const sourceType = String(token.sourceType || '').trim();
+        if (sourceType === 'player') {
+            const tokenPlayerId = String(token.sourceId || '').trim();
+            const localPlayerId = String(getLocalPlayerFocusContext().playerId || '').trim();
+            // A roster player token has no trustworthy local owner until its roster entry is
+            // linked to a local sheet. Keep it locked rather than granting every player client
+            // control during that setup window.
+            return !!(tokenPlayerId && localPlayerId && tokenPlayerId === localPlayerId);
+        }
         const linkedSheetKey = getTokenLinkedSheetKey(token);
         if (linkedSheetKey) return hasLocalSheetKey(linkedSheetKey);
         return true;
@@ -2094,6 +2189,7 @@
         sessionState.pendingRemoteSnapshot = null;
         stageState.pointer.drag = null;
         stageState.pointer.pan = null;
+        clearTemplatePlacementState();
         stageState.view.fitOnNextMapLoad = true;
 
         loadUIPreferences();
@@ -2119,7 +2215,7 @@
                     dom.mapImageEl.removeAttribute('src');
                     dom.mapImageEl.style.display = 'none';
                 }
-                [dom.gridLayerEl, dom.fogLayerEl, dom.noteLayerEl, dom.templateLayerEl, dom.tokenLayerEl, dom.visionLayerEl]
+                [dom.gridLayerEl, dom.fogLayerEl, dom.annotationLayerEl, dom.noteLayerEl, dom.templateLayerEl, dom.tokenLayerEl, dom.visionLayerEl]
                     .filter(Boolean)
                     .forEach((layer) => layer.replaceChildren());
                 renderSceneList();
@@ -2816,6 +2912,7 @@
         if (entry.hidden) return true;
         const scene = getCombatScene(state);
         const linkedToken = getSceneTokenForEntry(scene, entry);
+        if (role === 'player' && linkedToken && isLocalPlayerOwnToken(linkedToken)) return false;
         return !!(linkedToken && isTokenHiddenForRole(linkedToken, scene, role));
     };
 
@@ -2849,7 +2946,7 @@
         const scene = getCombatScene(state);
         const linkedToken = getSceneTokenForEntry(scene, entry);
         if (!linkedToken) return null;
-        if (role !== 'dm' && isTokenHiddenForRole(linkedToken, scene, role)) return null;
+        if (role !== 'dm' && isTokenHiddenForRole(linkedToken, scene, role) && !isLocalPlayerOwnToken(linkedToken)) return null;
         return linkedToken;
     };
 
@@ -2970,6 +3067,7 @@
 
         mutator(draft);
 
+        compactSharedTemplatesInSnapshot(draft);
         coerceSnapshotFogToCellMasks(draft);
 
         const saved = persistSharedVTTSnapshot(draft, {
@@ -2986,9 +3084,18 @@
         return true;
     };
 
+    const pruneExpiredSharedTemplates = (now = Date.now()) => {
+        if (!canUseSharedPlayerTools()) return false;
+        const snapshot = readSharedVTTSnapshot();
+        if (!snapshot || !snapshotNeedsSharedTemplateCompaction(snapshot, now)) return false;
+        return withDraft(() => {}, { reason: 'prune-expired-shared-templates' });
+    };
+
     const normalizeSelections = () => {
         const scene = getActiveScene();
         const tokens = getVisibleTokensForRole(scene);
+        const localOwnToken = isPlayer() ? getLocalPlayerFocusContext().token : null;
+        if (localOwnToken && !tokens.some((token) => token.id === localOwnToken.id)) tokens.push(localOwnToken);
         const visibleEvidenceNotes = getVisibleEvidenceNotesForRole(scene);
         const visibleClocks = getVisibleSceneClocksForRole(scene);
         const visibleEntries = getVisibleInitiativeEntriesForRole(sessionState.snapshot, sessionState.role);
@@ -3035,6 +3142,9 @@
         }
         if (stageState.placement.evidenceNote && (!scene || stageState.placement.evidenceNote.sceneId !== scene.id)) {
             stageState.placement.evidenceNote = null;
+        }
+        if (stageState.placement.annotation && (!scene || stageState.placement.annotation.sceneId !== scene.id)) {
+            stageState.placement.annotation = null;
         }
         if (stageState.placement.evidenceNoteDrag && (!scene || stageState.placement.evidenceNoteDrag.sceneId !== scene.id || !visibleEvidenceNotes.some((note) => note.id === stageState.placement.evidenceNoteDrag.noteId))) {
             stageState.placement.evidenceNoteDrag = null;
@@ -3285,6 +3395,112 @@
         }
     };
 
+    let containedVTTModalEl = null;
+    let vttModalInertRecords = null;
+
+    const getOpenVTTModal = () => {
+        if (dom.caseBoardModalEl && !dom.caseBoardModalEl.hidden) return dom.caseBoardModalEl;
+        if (dom.dmUnlockModalEl && !dom.dmUnlockModalEl.hidden) return dom.dmUnlockModalEl;
+        if (dom.rosterSelfModalEl && !dom.rosterSelfModalEl.hidden) return dom.rosterSelfModalEl;
+        return null;
+    };
+
+    const isVTTElementFocusable = (element) => !!(
+        element
+        && element.isConnected
+        && typeof element.focus === 'function'
+        && !element.matches(':disabled')
+        && !element.closest('[hidden], [inert]')
+        && element.getClientRects().length > 0
+    );
+
+    const focusVTTModalElement = (element) => {
+        if (!isVTTElementFocusable(element)) return false;
+        try {
+            element.focus({ preventScroll: true });
+        } catch (_err) {
+            element.focus();
+        }
+        return true;
+    };
+
+    const focusVTTModalFallback = () => {
+        const fallback = [
+            ...(Array.isArray(dom.viewMenuToggleEls) ? dom.viewMenuToggleEls : []),
+            dom.stageEl
+        ].find(isVTTElementFocusable);
+        return focusVTTModalElement(fallback);
+    };
+
+    const releaseVTTModalContainment = () => {
+        if (vttModalInertRecords) {
+            vttModalInertRecords.forEach(({ element, hadAttribute, value }) => {
+                if (!element || !element.isConnected) return;
+                if (hadAttribute) element.setAttribute('inert', value === null ? '' : value);
+                else element.removeAttribute('inert');
+            });
+        }
+        vttModalInertRecords = null;
+        containedVTTModalEl = null;
+        if (document.body) document.body.classList.remove('vtt-modal-open');
+    };
+
+    const syncVTTModalContainment = () => {
+        const activeModal = getOpenVTTModal();
+        if (activeModal === containedVTTModalEl) return;
+
+        releaseVTTModalContainment();
+        if (!activeModal || !document.body) return;
+
+        vttModalInertRecords = Array.from(document.body.children)
+            .filter((element) => element !== activeModal)
+            .map((element) => ({
+                element,
+                hadAttribute: element.hasAttribute('inert'),
+                value: element.getAttribute('inert')
+            }));
+        vttModalInertRecords.forEach(({ element }) => element.setAttribute('inert', ''));
+        containedVTTModalEl = activeModal;
+        document.body.classList.add('vtt-modal-open');
+    };
+
+    const getVTTModalFocusableElements = (modalEl) => {
+        if (!modalEl) return [];
+        return Array.from(modalEl.querySelectorAll([
+            'a[href]',
+            'button:not([disabled])',
+            'input:not([disabled]):not([type="hidden"])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            'iframe',
+            '[tabindex]:not([tabindex="-1"])'
+        ].join(','))).filter((element) => (
+            isVTTElementFocusable(element)
+        ));
+    };
+
+    const handleVTTModalFocusTrap = (event) => {
+        if (event.defaultPrevented || event.key !== 'Tab') return;
+        const activeModal = getOpenVTTModal();
+        if (!activeModal) return;
+        const focusableElements = getVTTModalFocusableElements(activeModal);
+        if (!focusableElements.length) {
+            event.preventDefault();
+            focusVTTModalElement(activeModal);
+            return;
+        }
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+        const activeElement = document.activeElement;
+        if (!activeModal.contains(activeElement) || (event.shiftKey && activeElement === firstElement)) {
+            event.preventDefault();
+            focusVTTModalElement(event.shiftKey ? lastElement : firstElement);
+        } else if (!event.shiftKey && activeElement === lastElement) {
+            event.preventDefault();
+            focusVTTModalElement(firstElement);
+        }
+    };
+
     const isDMUnlockModalOpen = () => !!(dom.dmUnlockModalEl && !dom.dmUnlockModalEl.hidden);
 
     const closeDMUnlockModal = ({ restoreFocus = true, refreshRosterSelf = true } = {}) => {
@@ -3296,10 +3512,10 @@
         }
         if (dom.dmUnlockModalEl.hidden) return false;
         dom.dmUnlockModalEl.hidden = true;
-        if (restoreFocus && uiRuntime.modals.dmUnlock.returnFocusEl && typeof uiRuntime.modals.dmUnlock.returnFocusEl.focus === 'function') {
-            uiRuntime.modals.dmUnlock.returnFocusEl.focus();
-        }
+        syncVTTModalContainment();
+        const returnFocusEl = uiRuntime.modals.dmUnlock.returnFocusEl;
         uiRuntime.modals.dmUnlock.returnFocusEl = null;
+        if (restoreFocus && !focusVTTModalElement(returnFocusEl)) focusVTTModalFallback();
         if (refreshRosterSelf && isPlayer()) {
             window.requestAnimationFrame(renderRosterSelfModal);
         }
@@ -3318,13 +3534,14 @@
         clearTemplatePlacementState();
         uiRuntime.modals.dmUnlock.returnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : dom.roleToggleEl;
         dom.dmUnlockModalEl.hidden = false;
+        syncVTTModalContainment();
         if (dom.dmUnlockErrorEl) {
             dom.dmUnlockErrorEl.hidden = true;
             dom.dmUnlockErrorEl.textContent = 'That password was not accepted.';
         }
         dom.dmUnlockInputEl.value = '';
         window.requestAnimationFrame(() => {
-            dom.dmUnlockInputEl.focus();
+            focusVTTModalElement(dom.dmUnlockInputEl);
             dom.dmUnlockInputEl.select();
         });
         return true;
@@ -3820,7 +4037,11 @@
             || (isPlayer() && canUseSharedPlayerTools());
         const canRollStatBlock = !!(token && isDM() && isNPCRollTarget(token));
         const canCustomRoll = isDM() || (isPlayer() && canUseSharedPlayerTools());
-        const canPing = canUseSharedPlayerTools();
+        const canBroadcastSharedMarkers = canBroadcastFromViewedScene();
+        const sharedMarkerUnavailableMessage = isUsingLocalSceneView(sessionState.snapshot, sessionState.role)
+            ? 'Shared pings and templates are unavailable while previewing a local scene. Return to the shared scene to send markers to players.'
+            : 'This role cannot send shared pings or templates.';
+        const canPing = canBroadcastSharedMarkers;
         const canPreview = canPreviewTokenPortrait(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
@@ -3871,15 +4092,14 @@
                 <div class="vtt-stage-context-grid">
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="navigate">Navigate</button>
                     <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="ruler">Ruler</button>
-                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="circle">Circle</button>
-                    <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="cone">Cone</button>
+                    ${canBroadcastSharedMarkers ? '<button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="circle">Circle</button><button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="cone">Cone</button>' : ''}
                     ${isDM() ? '<button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="note">Pins/Zones</button>' : ''}
                 </div>
-                <label class="vtt-stage-context-size">
+                ${canBroadcastSharedMarkers ? `<label class="vtt-stage-context-size">
                     <span>Template size</span>
                     <input type="number" data-tool-size-field="sizeCells" min="1" max="99" step="1" value="${escapeHtml(String(stageState.tool.current.sizeCells))}" aria-label="Circle radius and cone length in squares">
                     <small>Circle radius / cone length, in squares</small>
-                </label>
+                </label>` : `<div class="vtt-stage-context-hint">${escapeHtml(sharedMarkerUnavailableMessage)}</div>`}
                 ${isDM() ? `
                     <button class="vtt-stage-context-item" type="button" data-action="toggle-stealth-mode">Sight Cones: ${getActiveScene() && getActiveScene().stealthMode ? 'On' : 'Off'}</button>
                 ` : ''}
@@ -3890,7 +4110,7 @@
                     <div class="vtt-stage-context-grid">
                         <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog">Fog</button>
                         <button class="vtt-stage-context-item" type="button" data-action="context-set-tool" data-tool-mode="fog-remove">Unfog</button>
-                        ${fogCount > 0 ? '<button class="vtt-stage-context-item" type="button" data-action="clear-scene-fog">Clear</button>' : ''}
+                        ${fogCount > 0 ? `<button class="vtt-stage-context-item" type="button" data-action="clear-scene-fog">Clear Fog (${fogCount})</button>` : ''}
                     </div>
                 </div>
             ` : ''}
@@ -4196,7 +4416,9 @@
             ? scene.tokens.find((entry) =>
                 String(entry && entry.sourceType || '').trim() === 'player'
                 && String(entry && entry.sourceId || '').trim() === playerId
-                && !isTokenHiddenForRole(entry, scene, 'player')
+                // Explicitly hidden tokens remain DM-only. A player's own non-hidden token
+                // stays available when it enters fog so it can continue to be located and moved.
+                && !entry.hidden
             ) || null
             : null;
         const entry = token ? findEntryForToken(token.id) : (playerId && sessionState.snapshot && sessionState.snapshot.initiative && Array.isArray(sessionState.snapshot.initiative.entries)
@@ -4237,16 +4459,82 @@
         if (!dom.rosterSelfModalEl) return false;
         const wasOpen = !dom.rosterSelfModalEl.hidden;
         dom.rosterSelfModalEl.hidden = true;
+        syncVTTModalContainment();
         uiRuntime.modals.rosterSelf.error = '';
         if (dom.rosterSelfErrorEl) {
             dom.rosterSelfErrorEl.hidden = true;
             dom.rosterSelfErrorEl.textContent = '';
         }
-        if (restoreFocus && uiRuntime.modals.rosterSelf.returnFocusEl && typeof uiRuntime.modals.rosterSelf.returnFocusEl.focus === 'function') {
-            uiRuntime.modals.rosterSelf.returnFocusEl.focus();
-        }
+        const returnFocusEl = uiRuntime.modals.rosterSelf.returnFocusEl;
         uiRuntime.modals.rosterSelf.returnFocusEl = null;
+        if (restoreFocus && !focusVTTModalElement(returnFocusEl)) focusVTTModalFallback();
         return wasOpen;
+    };
+
+    let caseBoardReturnFocusEl = null;
+
+    const getVTTCaseBoardUrl = () => {
+        const url = new URL('board.html', window.location.href);
+        url.searchParams.set('embedded', 'vtt');
+        url.searchParams.set('caseId', getActiveCaseId());
+        return url.toString();
+    };
+
+    const syncVTTCaseBoardEmbed = () => {
+        const caseId = getActiveCaseId();
+        const url = getVTTCaseBoardUrl();
+        [dom.caseBoardPopoutEl, dom.caseBoardHeaderPopoutEl].filter(Boolean).forEach((linkEl) => {
+            linkEl.href = url;
+        });
+        if (dom.caseBoardCaseLabelEl) {
+            dom.caseBoardCaseLabelEl.textContent = `Case: ${getActiveCaseName()} · Shared editable board`;
+        }
+        const isOpen = !!(dom.caseBoardModalEl && !dom.caseBoardModalEl.hidden);
+        if (isOpen && dom.caseBoardFrameEl && (
+            !dom.caseBoardFrameEl.getAttribute('src')
+            || dom.caseBoardFrameEl.dataset.caseId !== caseId
+        )) {
+            dom.caseBoardFrameEl.dataset.caseId = caseId;
+            dom.caseBoardFrameEl.src = url;
+        }
+        return url;
+    };
+
+    const closeVTTCaseBoard = ({ restoreFocus = true } = {}) => {
+        if (!dom.caseBoardModalEl || dom.caseBoardModalEl.hidden) return false;
+        dom.caseBoardModalEl.hidden = true;
+        syncVTTModalContainment();
+        const returnFocusEl = caseBoardReturnFocusEl;
+        caseBoardReturnFocusEl = null;
+        if (restoreFocus && !focusVTTModalElement(returnFocusEl)) focusVTTModalFallback();
+        return true;
+    };
+
+    const openVTTCaseBoard = (opener = null) => {
+        if (!dom.caseBoardModalEl) return false;
+        closeViewMenu();
+        closeToolsMenu();
+        closeQuickSpawnMenu();
+        closeStageContextMenu();
+        closeTokenInspectorPopover();
+        closeInitiativeDetail();
+        const requestedOpener = opener instanceof HTMLElement
+            ? opener
+            : (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+        const headerBoardSummary = dom.headerBoardMenuEl && typeof dom.headerBoardMenuEl.querySelector === 'function'
+            ? dom.headerBoardMenuEl.querySelector('summary')
+            : null;
+        if (dom.headerBoardMenuEl) dom.headerBoardMenuEl.open = false;
+        caseBoardReturnFocusEl = requestedOpener && requestedOpener.closest('#vtt-header-board-menu')
+            ? headerBoardSummary
+            : requestedOpener;
+        dom.caseBoardModalEl.hidden = false;
+        syncVTTCaseBoardEmbed();
+        syncVTTModalContainment();
+        window.requestAnimationFrame(() => {
+            focusVTTModalElement(dom.caseBoardModalEl);
+        });
+        return true;
     };
 
     const isRosterSelfModalOpen = () => !!(dom.rosterSelfModalEl && !dom.rosterSelfModalEl.hidden);
@@ -4317,12 +4605,13 @@
             dom.rosterSelfConfirmEl.disabled = !uiRuntime.modals.rosterSelf.selectedId;
         }
         dom.rosterSelfModalEl.hidden = false;
+        syncVTTModalContainment();
 
         if (wasHidden) {
             window.requestAnimationFrame(() => {
                 const selectedButton = dom.rosterSelfListEl ? dom.rosterSelfListEl.querySelector('[aria-pressed="true"]') : null;
                 const focusTarget = selectedButton || dom.rosterSelfConfirmEl;
-                if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+                focusVTTModalElement(focusTarget);
             });
         }
     };
@@ -5888,7 +6177,7 @@
         normalizeEvidenceNoteShape,
         getEvidenceNoteCategoryShortLabel,
         getTemplateWorldPoint,
-        pingVariantOptions: C.PING_VARIANT_OPTIONS
+            pingVariantOptions: C.PING_VARIANT_OPTIONS
     });
     const buildClockPieMarkup = (clock) => vttMarkup.buildClockPieMarkup(clock);
     const vttStageViewFactory = window.RTF_VTT_STAGE_VIEW;
@@ -5910,6 +6199,7 @@
         getAskRollRequestFromPing,
         getEntryById,
         getFitViewOnNextMapLoad: () => stageState.view.fitOnNextMapLoad,
+        getLocalPlayerFocusContext,
         getLocalRole: () => sessionState.role,
         getRenderableScenePings,
         getRenderableSceneTemplates,
@@ -5930,7 +6220,8 @@
             templatePlacementState: stageState.placement.template,
             rulerState: stageState.placement.ruler,
             fogPlacementState: stageState.placement.fog,
-            evidenceNotePlacementState: stageState.placement.evidenceNote
+            evidenceNotePlacementState: stageState.placement.evidenceNote,
+            annotationPlacementState: stageState.placement.annotation
         }),
         getTokenDamageFraction,
         getTokenImageRenderUrl,
@@ -5945,6 +6236,7 @@
         normalizeTokenCoordinate,
         positionProximityPrompt: (...args) => vttProximityController.positionProximityPrompt(...args),
         positiveModulo,
+        pruneExpiredSharedTemplates,
         renderProximityPrompt,
         setFitViewOnNextMapLoad: (value) => {
             stageState.view.fitOnNextMapLoad = !!value;
@@ -5962,6 +6254,7 @@
             mapImageEl: dom.mapImageEl,
             gridLayerEl: dom.gridLayerEl,
             fogLayerEl: dom.fogLayerEl,
+            annotationLayerEl: dom.annotationLayerEl,
             noteLayerEl: dom.noteLayerEl,
             templateLayerEl: dom.templateLayerEl,
             tokenLayerEl: dom.tokenLayerEl,
@@ -5986,14 +6279,44 @@
     const renderTableDocks = () => {
         const activePanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
         const isRulerActive = stageState.tool.current.mode === C.TOOL_MODE_RULER;
+        const playerContext = isPlayer() ? getLocalPlayerFocusContext() : null;
+        const playerCanDraw = !!(
+            playerContext
+            && String(playerContext.playerId || '').trim()
+            && canBroadcastFromViewedScene()
+        );
+        const playerCanUndoDraw = !!(
+            playerCanDraw
+            && getActiveScene()
+            && Array.isArray(getActiveScene().annotations)
+            && getActiveScene().annotations.some((annotation) => (
+                String(annotation && annotation.authorKind || '').trim() === 'player'
+                && String(annotation && annotation.authorPlayerId || '').trim() === String(playerContext.playerId || '').trim()
+            ))
+        );
         if (dom.playerMeasureButtonEl) dom.playerMeasureButtonEl.setAttribute('aria-pressed', isRulerActive ? 'true' : 'false');
         if (dom.playerPingButtonEl) {
             dom.playerPingButtonEl.disabled = isSpectator();
             dom.playerPingButtonEl.setAttribute('aria-pressed', stageState.tool.current.mode === C.TOOL_MODE_PING ? 'true' : 'false');
         }
+        if (dom.playerDrawButtonEl) {
+            dom.playerDrawButtonEl.disabled = !playerCanDraw;
+            dom.playerDrawButtonEl.setAttribute('aria-pressed', stageState.tool.current.mode === TOOL_MODE_DRAW ? 'true' : 'false');
+            dom.playerDrawButtonEl.title = playerCanDraw
+                ? 'Draw a shared mark on the map'
+                : 'Link your roster entry before drawing shared marks.';
+        }
+        if (dom.playerUndoAnnotationButtonEl) {
+            dom.playerUndoAnnotationButtonEl.disabled = !playerCanUndoDraw;
+            dom.playerUndoAnnotationButtonEl.title = playerCanUndoDraw
+                ? 'Remove your most recent shared mark'
+                : (playerCanDraw
+                    ? 'You have no shared marks to undo.'
+                    : 'Link your roster entry before changing shared marks.');
+        }
         if (dom.playerRollsButtonEl) dom.playerRollsButtonEl.setAttribute('aria-expanded', activePanel === 'player-rolls' ? 'true' : 'false');
         if (isPlayer() && dom.playerDockStatusEl) {
-            const context = getLocalPlayerFocusContext();
+            const context = playerContext || getLocalPlayerFocusContext();
             const name = context.linkedPlayer && context.linkedPlayer.name
                 ? context.linkedPlayer.name
                 : (context.identity && context.identity.characterName ? context.identity.characterName : 'Unlinked');
@@ -6016,48 +6339,41 @@
         const scene = getActiveScene();
         if (!scene) return;
         const sharedScene = getSceneById(getSharedSceneId(sessionState.snapshot), sessionState.snapshot) || scene;
-        const toolMeta = stageState.tool.current.mode === C.TOOL_MODE_PING
-            ? (stageState.tool.pendingAskRollRequest
+        const isLocalScenePreview = isUsingLocalSceneView(sessionState.snapshot, sessionState.role);
+        let toolMeta = isDM()
+            ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Right-click empty space for quick spawn and NPC search.'
+            : (isSpectator()
+                ? 'Spectator mode: drag empty space to pan, scroll or pinch to zoom, and click visible pins or zones to read them.'
+                : 'Drag empty space to pan and scroll or pinch to zoom. Drag only tokens you control. Click pins or zones to read them.');
+        if (stageState.tool.current.mode === C.TOOL_MODE_PING) {
+            toolMeta = stageState.tool.pendingAskRollRequest
                 ? `Ask-to-roll active: click the map where you want to place ${stageState.tool.pendingAskRollRequest.label}.`
-                : `${getPingVariantOptions().label} ping active: click the map to show every connected player a short-lived marker.`)
-            : (stageState.tool.current.mode === C.TOOL_MODE_RULER
-            ? 'Ruler active: click and hold on the stage to measure squares and feet.'
-            : (stageState.tool.current.mode === C.TOOL_MODE_CIRCLE
-                ? `Circle tool active: click and hold to preview a ${stageState.tool.current.sizeCells}-square radius circle. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
-                : (stageState.tool.current.mode === C.TOOL_MODE_CONE
-                    ? `Cone tool active: click and hold to preview a ${stageState.tool.current.sizeCells}-square cone. Origins snap to the nearest square center or grid intersection. Hold for a moment to leave a 5-second shared marker.`
-                    : (stageState.tool.current.mode === C.TOOL_MODE_NOTE
-                        ? 'Pin / Zone tool active: click to place a point pin, or drag a rectangle to tag a zone. Both can be shared to players or kept DM-only.'
-                    : (stageState.tool.current.mode === C.TOOL_MODE_FOG
-                        ? 'Fog tool active: tap or drag on the map to add hidden rectangles. Tokens under fog are hidden from players.'
-                        : (stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE
-                            ? 'Unfog tool active: tap or drag on the map to remove fog rectangles from that area.'
-                    : (isDM()
-                        ? 'Drag empty space to pan. Scroll or pinch to zoom. Drag tokens freely. Drag roster entries onto the stage to spawn them. Right-click empty space for quick spawn and NPC search at that spot. Double-click a token to open the inspector at that spot. Touch: long-press empty space for quick spawn or long-press a token for the inspector. Arrow keys move the selected token by one cell.'
-                        : (isSpectator()
-                            ? 'Spectator mode: drag empty space to pan, scroll or pinch to zoom, and click visible pins or zones to read them.'
-                            : 'Drag empty space to pan and scroll or pinch to zoom. Drag only tokens you control. Double-click your movable token to snap it to the grid. Click pins or zones to read them. Arrow keys move the selected token by one cell. Right-click a token for rolls and other actions.'))))))));
+                : (isLocalScenePreview ? 'Ping is unavailable while previewing a local scene.' : `${getPingVariantOptions().label} ping active: click the map to signal players.`);
+        } else if (stageState.tool.current.mode === C.TOOL_MODE_RULER) toolMeta = 'Ruler active: click and hold on the stage to measure squares and feet.';
+        else if (stageState.tool.current.mode === C.TOOL_MODE_CIRCLE) toolMeta = `Circle tool active: click and hold to preview a ${stageState.tool.current.sizeCells}-square radius circle.`;
+        else if (stageState.tool.current.mode === C.TOOL_MODE_CONE) toolMeta = `Cone tool active: click and hold to preview a ${stageState.tool.current.sizeCells}-square cone.`;
+        else if (stageState.tool.current.mode === C.TOOL_MODE_NOTE) toolMeta = 'Pin / Zone tool active: click to place a point pin, or drag a rectangle to tag a zone.';
+        else if (stageState.tool.current.mode === TOOL_MODE_DRAW) toolMeta = isDM()
+            ? 'Draw tool active: drag on the map to leave a shared annotation. Use Undo my mark or Clear marks from the Draw menu.'
+            : 'Mark tool active: drag on the map to leave a shared annotation. Undo mark removes your latest mark.';
+        else if (stageState.tool.current.mode === C.TOOL_MODE_FOG) toolMeta = 'Fog tool active: tap or drag on the map to add hidden rectangles.';
+        else if (stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE) toolMeta = 'Unfog tool active: tap or drag on the map to remove fog rectangles.';
         const stealthMeta = scene.stealthMode ? 'Stealth mode is on: enemy and neutral sight cones are visible.' : 'Stealth mode is off.';
-        const dockToolStatus = stageState.tool.current.mode === C.TOOL_MODE_PING
-            ? (stageState.tool.pendingAskRollRequest ? 'Ask roll' : 'Ping')
-            : (stageState.tool.current.mode === C.TOOL_MODE_RULER
-                ? 'Measure'
-                : (stageState.tool.current.mode === C.TOOL_MODE_CIRCLE
-                    ? `Circle ${stageState.tool.current.sizeCells}`
-                    : (stageState.tool.current.mode === C.TOOL_MODE_CONE
-                        ? `Cone ${stageState.tool.current.sizeCells}`
-                        : (stageState.tool.current.mode === C.TOOL_MODE_NOTE
-                            ? 'Pins'
-                            : (stageState.tool.current.mode === C.TOOL_MODE_FOG
-                                ? 'Fog'
-                                : (stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE
-                                    ? 'Unfog'
-                                    : (isSpectator() ? 'View' : 'Select')))))));
+        let dockToolStatus = isSpectator() ? 'View' : 'Select';
+        if (stageState.tool.current.mode === C.TOOL_MODE_PING) dockToolStatus = stageState.tool.pendingAskRollRequest ? 'Ask roll' : 'Ping';
+        else if (stageState.tool.current.mode === C.TOOL_MODE_RULER) dockToolStatus = 'Measure';
+        else if (stageState.tool.current.mode === C.TOOL_MODE_CIRCLE) dockToolStatus = `Circle ${stageState.tool.current.sizeCells}`;
+        else if (stageState.tool.current.mode === C.TOOL_MODE_CONE) dockToolStatus = `Cone ${stageState.tool.current.sizeCells}`;
+        else if (stageState.tool.current.mode === C.TOOL_MODE_NOTE) dockToolStatus = 'Pins';
+        else if (stageState.tool.current.mode === TOOL_MODE_DRAW) dockToolStatus = isDM() ? 'Draw' : 'Mark';
+        else if (stageState.tool.current.mode === C.TOOL_MODE_FOG) dockToolStatus = 'Fog';
+        else if (stageState.tool.current.mode === C.TOOL_MODE_FOG_REMOVE) dockToolStatus = 'Unfog';
         applyUIPreferences();
         renderToolsMenu();
         renderModeChip();
         renderSceneList();
         if (dom.caseNameEl) dom.caseNameEl.textContent = getActiveCaseName();
+        syncVTTCaseBoardEmbed();
         if (dom.roleToggleEl) dom.roleToggleEl.textContent = isDM() ? 'Leave DM' : 'DM Mode';
         if (dom.spectatorToggleEl) {
             dom.spectatorToggleEl.textContent = isSpectator() ? 'Leave Spectator' : 'Spectator';
@@ -6065,7 +6381,6 @@
         }
         if (dom.activeSceneLabelEl) dom.activeSceneLabelEl.textContent = `Scene: ${sharedScene.name || 'Scene'}`;
         if (dom.scenePanelSceneLabelEl) dom.scenePanelSceneLabelEl.textContent = scene.name || 'Scene';
-        const isLocalScenePreview = isUsingLocalSceneView(sessionState.snapshot, sessionState.role);
         if (dom.stageTitleEl) dom.stageTitleEl.textContent = isLocalScenePreview
             ? `Preview: ${scene.name || 'Scene'}`
             : (scene.name || 'Scene');
@@ -6972,6 +7287,8 @@
     const vttTableActions = vttTableActionFactory.create({
         state: vttActionState,
         EVIDENCE_NOTE_SHAPE_PIN: C.EVIDENCE_NOTE_SHAPE_PIN,
+        TOOL_MODE_CIRCLE: C.TOOL_MODE_CIRCLE,
+        TOOL_MODE_CONE: C.TOOL_MODE_CONE,
         TOOL_MODE_FOG: C.TOOL_MODE_FOG,
         TOOL_MODE_FOG_REMOVE: C.TOOL_MODE_FOG_REMOVE,
         TOOL_MODE_NAVIGATE: C.TOOL_MODE_NAVIGATE,
@@ -6982,6 +7299,7 @@
         buildId,
         bustAllVTTRosterAssociations,
         bustVTTLiveCache,
+        canBroadcastFromViewedScene,
         canDeleteLiveVTTState,
         canUseSharedPlayerTools,
         clearTokenPortraitPreview,
@@ -6990,6 +7308,7 @@
         closeStageContextMenu,
         closeTokenInspectorPopover,
         closeViewMenu,
+        confirmClearSceneFog,
         createEvidenceNoteAtWorldPoint,
         deleteEvidenceNoteById,
         duplicateEvidenceNoteById,
@@ -7120,12 +7439,52 @@
         if (!action) return;
         const id = String(actionEl.dataset.id || '').trim();
 
+        if (action === 'open-case-board') {
+            openVTTCaseBoard(actionEl);
+            return;
+        }
+        if (action === 'close-case-board') {
+            closeVTTCaseBoard();
+            return;
+        }
+
         if (vttRollsActions.handles(action)) {
             vttRollsActions.handle(actionEl, action, id);
             return;
         }
         if (vttTableActions.handles(action)) {
             vttTableActions.handle(actionEl, action, id);
+            return;
+        }
+
+        if (action === 'undo-annotation' || action === 'clear-annotations') {
+            if (action === 'clear-annotations' && !isDM()) return;
+            const localPlayerId = isPlayer()
+                ? String(getLocalPlayerFocusContext().playerId || '').trim()
+                : '';
+            if (action === 'undo-annotation' && !isDM() && !localPlayerId) return;
+            withDraft((draft) => {
+                const scene = getActiveScene(draft);
+                if (!scene || !Array.isArray(scene.annotations)) return;
+                if (action === 'clear-annotations') {
+                    scene.annotations = [];
+                    return;
+                }
+                let annotationIndex = -1;
+                for (let index = scene.annotations.length - 1; index >= 0; index -= 1) {
+                    const annotation = scene.annotations[index];
+                    const authorKind = String(annotation && annotation.authorKind || '').trim();
+                    const authorPlayerId = String(annotation && annotation.authorPlayerId || '').trim();
+                    const isLocalAuthor = isDM()
+                        ? (authorKind === 'dm' || (!authorKind && !authorPlayerId))
+                        : (authorKind === 'player' && authorPlayerId === localPlayerId);
+                    if (isLocalAuthor) {
+                        annotationIndex = index;
+                        break;
+                    }
+                }
+                if (annotationIndex !== -1) scene.annotations.splice(annotationIndex, 1);
+            }, { reason: action });
             return;
         }
 
@@ -7695,6 +8054,15 @@
         }
     };
 
+    const handleCaseBoardKeyDown = (event) => {
+        if (event.defaultPrevented || event.key !== 'Escape') return;
+        if (!dom.caseBoardModalEl || dom.caseBoardModalEl.hidden) return;
+        if (closeVTTCaseBoard()) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    };
+
     const bindEvents = () => {
         bindSyncChipActions();
         bindAccentControls();
@@ -7704,6 +8072,8 @@
             handleAction(actionEl);
         });
         document.addEventListener('pointerdown', handleDocumentPointerDown);
+        document.addEventListener('keydown', handleVTTModalFocusTrap, true);
+        document.addEventListener('keydown', handleCaseBoardKeyDown, true);
         document.addEventListener('keydown', handleDocumentActionKeyDown);
         document.addEventListener('keydown', handleDocumentKeyDown);
         document.addEventListener('input', handleFieldChange);

@@ -101,7 +101,11 @@
             const geometry = getVisionConeGeometry(renderedToken, scene, sceneSize);
             if (!geometry) return '';
             const targetSummary = options.targetSummary
-                || getStealthVisionTargetSummary(renderedToken, scene, options.state);
+                || getStealthVisionTargetSummary(renderedToken, scene, options.state, {
+                    role: options.role,
+                    fogCellSet: options.fogCellSet,
+                    visibleTokenIds: options.visibleTokenIds
+                });
             const hasDetectedTargets = targetSummary.detectedIds.length > 0;
             const hasUnseenTargets = targetSummary.unseenIds.length > 0;
             const fill = hasDetectedTargets
@@ -382,6 +386,31 @@
         `;
         };
 
+        const buildAnnotationMarkup = (annotation, scene, options = {}) => {
+            if (!annotation || !scene) return '';
+            const points = Array.isArray(annotation.points) ? annotation.points : [];
+            if (points.length < 2) return '';
+            const color = normalizeHexColor(annotation.color, '#58d4f7');
+            const width = clamp(toNumber(annotation.width, 4), 1, 20);
+            const path = points.map((point, index) => `${index ? 'L' : 'M'} ${toNumber(point.x, 0).toFixed(2)} ${toNumber(point.y, 0).toFixed(2)}`).join(' ');
+            const arrow = annotation.kind === 'arrow' ? (() => {
+                const end = points[points.length - 1];
+                const prev = points[Math.max(0, points.length - 2)];
+                const angle = Math.atan2(toNumber(end.y, 0) - toNumber(prev.y, 0), toNumber(end.x, 0) - toNumber(prev.x, 0));
+                const size = 12 + width;
+                const left = { x: toNumber(end.x, 0) - Math.cos(angle - Math.PI / 6) * size, y: toNumber(end.y, 0) - Math.sin(angle - Math.PI / 6) * size };
+                const right = { x: toNumber(end.x, 0) - Math.cos(angle + Math.PI / 6) * size, y: toNumber(end.y, 0) - Math.sin(angle + Math.PI / 6) * size };
+                return `<path d="M ${left.x.toFixed(2)} ${left.y.toFixed(2)} L ${toNumber(end.x, 0).toFixed(2)} ${toNumber(end.y, 0).toFixed(2)} L ${right.x.toFixed(2)} ${right.y.toFixed(2)}" fill="none" stroke="${escapeHtml(color)}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
+            })() : '';
+            const minX = Math.min(...points.map((point) => toNumber(point.x, 0)));
+            const minY = Math.min(...points.map((point) => toNumber(point.y, 0)));
+            const maxX = Math.max(...points.map((point) => toNumber(point.x, 0)));
+            const maxY = Math.max(...points.map((point) => toNumber(point.y, 0)));
+            const visibility = String(annotation.visibility || 'shared');
+            if (visibility === 'dm' && !options.isDM) return '';
+            return `<div class="vtt-overlay-item vtt-annotation" data-annotation-id="${escapeHtml(String(annotation.id || ''))}" data-world-left="${minX}" data-world-top="${minY}" data-world-width="${Math.max(1, maxX - minX)}" data-world-height="${Math.max(1, maxY - minY)}" aria-hidden="true"><svg class="vtt-annotation-svg" viewBox="${minX} ${minY} ${Math.max(1, maxX - minX)} ${Math.max(1, maxY - minY)}" preserveAspectRatio="none"><path d="${escapeHtml(path)}" fill="none" stroke="${escapeHtml(color)}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" opacity="${annotation.kind === 'highlighter' ? '0.35' : '0.9'}"/>${arrow}</svg></div>`;
+        };
+
         return Object.freeze({
             buildClockPieMarkup,
             buildVisionConeMarkup,
@@ -390,7 +419,8 @@
             buildPingMarkup,
             buildAskRollMarkup,
             buildEvidenceNoteMarkup,
-            buildRulerMarkup
+            buildRulerMarkup,
+            buildAnnotationMarkup
         });
     };
 

@@ -32,6 +32,7 @@ const EXPECTED_CONSTANT_KEYS = [
     'GUILDLESS_TOKEN_MIN',
     'LIVE_STATUS_DROPOUT_GRACE_MS',
     'LOCAL_DRAG_TWEEN_SUPPRESS_MS',
+    'MAX_SHARED_TEMPLATES_PER_SCENE',
     'MAX_VTT_MAP_SCALE',
     'MIN_VTT_MAP_SCALE',
     'MONSTER_ASSIGN_RESULT_LIMIT',
@@ -102,6 +103,7 @@ const EXPECTED_DEFAULT_STATE = {
         tokens: [],
         templates: [],
         evidenceNotes: [],
+        annotations: [],
         clocks: [],
         pings: [],
         fog: []
@@ -208,6 +210,8 @@ test('VTT config numeric values obey world, timing, interaction, and limit invar
 
     assert.ok(constants.DRAG_SYNC_INTERVAL_MS < constants.REMOTE_TOKEN_TWEEN_MS);
     assert.ok(constants.TEMPLATE_HOLD_PERSIST_MS < constants.TEMPLATE_SHARED_LIFETIME_MS);
+    assert.ok(Number.isInteger(constants.MAX_SHARED_TEMPLATES_PER_SCENE));
+    assert.ok(constants.MAX_SHARED_TEMPLATES_PER_SCENE > 0);
     assert.ok(constants.TOKEN_CLICK_MOVE_PX < constants.STAGE_TOOL_DOUBLE_PRESS_PX);
     assert.ok(constants.TOUCH_CONTEXT_MOVE_PX < constants.STAGE_TOOL_DOUBLE_PRESS_PX);
     assert.ok(constants.EVIDENCE_NOTE_CHIP_MIN_WIDTH_PX < constants.EVIDENCE_NOTE_CHIP_MAX_WIDTH_PX);
@@ -238,12 +242,14 @@ test('createDefaultVTTState returns fresh independent snapshots with the expecte
     assert.notStrictEqual(first.scenes[0].grid, second.scenes[0].grid);
     assert.notStrictEqual(first.scenes[0].music, second.scenes[0].music);
     assert.notStrictEqual(first.scenes[0].music.tracks, second.scenes[0].music.tracks);
+    assert.notStrictEqual(first.scenes[0].annotations, second.scenes[0].annotations);
     assert.notStrictEqual(first.initiative, second.initiative);
 
     first.activeSceneId = 'scene_changed';
     first.scenes[0].grid.cellPx = 140;
     first.scenes[0].music.tracks.active = 'battle.mp3';
     first.scenes[0].tokens.push({ id: 'token_one' });
+    first.scenes[0].annotations.push({ id: 'annotation_one' });
     first.initiative.entries.push({ id: 'token_one' });
 
     assert.deepEqual(second, EXPECTED_DEFAULT_STATE);

@@ -119,6 +119,8 @@
         const state = deps.state;
         const {
             EVIDENCE_NOTE_SHAPE_PIN,
+            TOOL_MODE_CIRCLE,
+            TOOL_MODE_CONE,
             TOOL_MODE_FOG,
             TOOL_MODE_FOG_REMOVE,
             TOOL_MODE_NAVIGATE,
@@ -129,6 +131,7 @@
             buildId,
             bustAllVTTRosterAssociations,
             bustVTTLiveCache,
+            canBroadcastFromViewedScene,
             canDeleteLiveVTTState,
             canUseSharedPlayerTools,
             clearTokenPortraitPreview,
@@ -137,6 +140,7 @@
             closeStageContextMenu,
             closeTokenInspectorPopover,
             closeViewMenu,
+            confirmClearSceneFog,
             createEvidenceNoteAtWorldPoint,
             deleteEvidenceNoteById,
             duplicateEvidenceNoteById,
@@ -196,10 +200,17 @@
             updateSelectedToken,
             withDraft
         } = deps;
+        const TOOL_MODE_DRAW = 'draw';
+        const canBroadcastFromViewedSceneSafely = typeof canBroadcastFromViewedScene === 'function'
+            ? canBroadcastFromViewedScene
+            : () => true;
+        const confirmClearSceneFogSafely = typeof confirmClearSceneFog === 'function'
+            ? confirmClearSceneFog
+            : () => true;
 
         const handle = (actionEl, action, id) => {
             if (action === 'context-ping') {
-                if (!canUseSharedPlayerTools()) return;
+                if (!canBroadcastFromViewedSceneSafely() || !canUseSharedPlayerTools()) return;
                 const scene = getActiveScene();
                 const worldPoint = getStageContextWorldPoint();
                 const pingOptions = getPingVariantOptions(state.stageContextMenuState);
@@ -294,6 +305,7 @@
             if (action === 'context-set-tool') {
                 const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
                 if (isSpectator() && ![TOOL_MODE_NAVIGATE, TOOL_MODE_RULER].includes(nextMode)) return;
+                if ([TOOL_MODE_CIRCLE, TOOL_MODE_CONE].includes(nextMode) && !canBroadcastFromViewedSceneSafely()) return;
                 if (nextMode === TOOL_MODE_NOTE && !isDM()) return;
                 if ((nextMode === TOOL_MODE_FOG || nextMode === TOOL_MODE_FOG_REMOVE) && !isDM()) return;
                 closeStageContextMenu();
@@ -365,7 +377,7 @@
                 return;
             }
             if (action === 'set-ping-mode') {
-                if (isSpectator()) return;
+                if (isSpectator() || !canBroadcastFromViewedSceneSafely()) return;
                 state.askRollPickMode = false;
                 state.pendingAskRollRequest = null;
                 state.localPingVariant = normalizePingVariant(actionEl.dataset.pingVariant);
@@ -376,7 +388,17 @@
             if (action === 'set-tool-mode') {
                 const nextMode = normalizeToolMode(actionEl.dataset.toolMode);
                 if (isSpectator() && ![TOOL_MODE_NAVIGATE, TOOL_MODE_RULER].includes(nextMode)) return;
+                if ([TOOL_MODE_CIRCLE, TOOL_MODE_CONE].includes(nextMode) && !canBroadcastFromViewedSceneSafely()) return;
                 if (nextMode === TOOL_MODE_NOTE && !isDM()) return;
+                if (nextMode === TOOL_MODE_DRAW && !isDM()) {
+                    const localPlayer = typeof getLocalPlayerFocusContext === 'function'
+                        ? getLocalPlayerFocusContext()
+                        : null;
+                    if (!isPlayer()
+                        || !canUseSharedPlayerTools()
+                        || !canBroadcastFromViewedSceneSafely()
+                        || !String(localPlayer && localPlayer.playerId || '').trim()) return;
+                }
                 if ((nextMode === TOOL_MODE_FOG || nextMode === TOOL_MODE_FOG_REMOVE) && !isDM()) return;
                 closeViewMenu();
                 setToolMode(nextMode);
@@ -422,6 +444,9 @@
             if (action === 'clear-scene-fog') {
                 if (!isDM()) return;
                 if (!canDeleteLiveVTTState('clear-scene-fog')) return;
+                const currentScene = getActiveScene();
+                if (!currentScene || !Array.isArray(currentScene.fog) || !currentScene.fog.length) return;
+                if (!confirmClearSceneFogSafely(currentScene)) return;
                 closeStageContextMenu();
                 withDraft((draft) => {
                     const scene = getActiveScene(draft);

@@ -183,6 +183,64 @@ test('table actions clear request state before changing the active ping tool', (
     ]);
 });
 
+test('shared marker tools cannot activate while the viewed scene is not shared', () => {
+    const calls = [];
+    const tableGroup = actionGroups.find((group) => group.name === 'table');
+    const actions = tableGroup.factory.create({
+        state: {
+            askRollPickMode: true,
+            pendingAskRollRequest: { label: 'Perception' },
+            localPingVariant: 'attention'
+        },
+        TOOL_MODE_CIRCLE: 'circle',
+        TOOL_MODE_CONE: 'cone',
+        TOOL_MODE_NAVIGATE: 'navigate',
+        TOOL_MODE_RULER: 'ruler',
+        canBroadcastFromViewedScene: () => false,
+        isSpectator: () => false,
+        normalizePingVariant: () => 'attention',
+        normalizeToolMode: (value) => value,
+        setToolMode: (mode) => calls.push(`tool:${mode}`),
+        render: () => calls.push('render')
+    });
+
+    actions.handle({ dataset: { pingVariant: 'attention' } }, 'set-ping-mode', '');
+    actions.handle({ dataset: { toolMode: 'circle' } }, 'set-tool-mode', '');
+    actions.handle({ dataset: {} }, 'context-ping', '');
+    actions.handle({ dataset: { toolMode: 'cone' } }, 'context-set-tool', '');
+
+    assert.deepEqual(calls, []);
+});
+
+test('Clear Fog requires confirmation before changing the scene', () => {
+    const calls = [];
+    const scene = { id: 'scene_one', name: 'Foggy Hall', fog: [{ id: 'fog_1' }, { id: 'fog_2' }] };
+    const draft = { activeSceneId: scene.id, scenes: [scene] };
+    let confirmed = false;
+    const tableGroup = actionGroups.find((group) => group.name === 'table');
+    const actions = tableGroup.factory.create({
+        state: {},
+        canDeleteLiveVTTState: () => true,
+        closeStageContextMenu: () => calls.push('close'),
+        confirmClearSceneFog: (currentScene) => {
+            calls.push(`confirm:${currentScene.name}:${currentScene.fog.length}`);
+            return confirmed;
+        },
+        getActiveScene: (state) => state ? state.scenes[0] : scene,
+        isDM: () => true,
+        withDraft: (mutate) => mutate(draft)
+    });
+
+    actions.handle({ dataset: {} }, 'clear-scene-fog', '');
+    assert.equal(scene.fog.length, 2);
+    assert.deepEqual(calls, ['confirm:Foggy Hall:2']);
+
+    confirmed = true;
+    actions.handle({ dataset: {} }, 'clear-scene-fog', '');
+    assert.deepEqual(scene.fog, []);
+    assert.deepEqual(calls, ['confirm:Foggy Hall:2', 'confirm:Foggy Hall:2', 'close']);
+});
+
 test('Black Moon Howl actions are DM-only and route local versus everyone audiences', () => {
     const calls = [];
     let dm = true;

@@ -121,6 +121,7 @@
             TOUCH_CONTEXT_HOLD_MS,
             TOUCH_CONTEXT_MOVE_PX
         } = deps.config;
+        const TOOL_MODE_DRAW = 'draw';
 
         const window = root;
         const document = root.document;
@@ -136,6 +137,37 @@
         let lastEvidenceNotePointerDownState = null;
         let pendingTouchContextState = null;
         let interactionRenderFrame = 0;
+        const MAX_ANNOTATION_POINTS = 500;
+
+        const getAnnotationAuthor = () => {
+            if (isDM()) return { authorKind: 'dm', authorPlayerId: '' };
+            if (!canUseSharedPlayerTools()) return null;
+            const context = typeof getLocalPlayerFocusContext === 'function'
+                ? getLocalPlayerFocusContext()
+                : null;
+            const playerId = String(context && context.playerId || '').trim();
+            return playerId ? { authorKind: 'player', authorPlayerId: playerId } : null;
+        };
+
+        const canStartAnnotation = () => {
+            if (!getAnnotationAuthor()) return false;
+            return typeof canMutateLiveVTTState !== 'function' || canMutateLiveVTTState('annotation-draw');
+        };
+
+        const appendAnnotationPoint = (placement, point) => {
+            if (!placement || !point) return false;
+            let points = Array.isArray(placement.points) ? placement.points : [];
+            if (points !== placement.points) placement.points = points;
+            const nextPoint = { x: toNumber(point.x, 0), y: toNumber(point.y, 0) };
+            const last = points[points.length - 1];
+            if (last && Math.hypot(nextPoint.x - last.x, nextPoint.y - last.y) <= 6) return false;
+            if (points.length >= MAX_ANNOTATION_POINTS) {
+                points = points.filter((_, index) => index === 0 || index % 2 === 0);
+                placement.points = points;
+            }
+            points.push(nextPoint);
+            return true;
+        };
 
         const scheduleInteractionRender = () => {
             if (interactionRenderFrame) return;
@@ -631,6 +663,7 @@
                 };
     
                 runtime.evidenceNotePlacementState = null;
+                runtime.annotationPlacementState = null;
                 runtime.templatePlacementState = null;
                 runtime.templateRotateState = null;
                 runtime.visionConeRotateState = null;
@@ -652,12 +685,35 @@
                     note: initialNote
                 };
                 runtime.selectedEvidenceNoteId = '';
+                runtime.annotationPlacementState = null;
                 runtime.templatePlacementState = null;
                 runtime.templateRotateState = null;
                 runtime.visionConeRotateState = null;
                 runtime.rulerState = null;
                 runtime.fogPlacementState = null;
                 renderToolsMenu();
+                renderStage();
+                event.preventDefault();
+                return;
+            }
+
+            if (runtime.localToolState.mode === TOOL_MODE_DRAW && canStartAnnotation()) {
+                const author = getAnnotationAuthor();
+                if (!author) return;
+                runtime.annotationPlacementState = {
+                    sceneId: scene.id,
+                    points: [{ x: toNumber(worldPoint.x, 0), y: toNumber(worldPoint.y, 0) }],
+                    kind: event.shiftKey ? 'highlighter' : (event.altKey ? 'arrow' : 'pen'),
+                    color: '#58d4f7',
+                    width: event.shiftKey ? 14 : 4,
+                    ...author
+                };
+                runtime.evidenceNotePlacementState = null;
+                runtime.fogPlacementState = null;
+                runtime.templatePlacementState = null;
+                runtime.templateRotateState = null;
+                runtime.visionConeRotateState = null;
+                runtime.rulerState = null;
                 renderStage();
                 event.preventDefault();
                 return;
@@ -825,6 +881,17 @@
                     runtime.evidenceNotePlacementState.note && runtime.evidenceNotePlacementState.note.id,
                     runtime.evidenceNotePlacementState.note || {}
                 );
+                scheduleInteractionRender();
+                return;
+            }
+            if (runtime.annotationPlacementState) {
+                const scene = getActiveScene();
+                if (!scene || runtime.annotationPlacementState.sceneId !== scene.id) {
+                    runtime.annotationPlacementState = null;
+                    renderStage();
+                    return;
+                }
+                appendAnnotationPoint(runtime.annotationPlacementState, screenToWorld(event.clientX, event.clientY));
                 scheduleInteractionRender();
                 return;
             }
@@ -997,6 +1064,40 @@
                 });
                 return;
             }
+            if (runtime.annotationPlacementState) {
+                const pendingAnnotation = { ...runtime.annotationPlacementState, points: [...(runtime.annotationPlacementState.points || [])] };
+                runtime.annotationPlacementState = null;
+                if (!event || event.type === 'pointercancel' || pendingAnnotation.points.length < 2) {
+                    renderStage();
+                    return;
+                }
+                const currentAuthor = getAnnotationAuthor();
+                if (!currentAuthor
+                    || currentAuthor.authorKind !== pendingAnnotation.authorKind
+                    || currentAuthor.authorPlayerId !== pendingAnnotation.authorPlayerId
+                    || (typeof canMutateLiveVTTState === 'function' && !canMutateLiveVTTState('add-annotation'))) {
+                    renderStage();
+                    return;
+                }
+                withDraft((draft) => {
+                    const scene = getActiveScene(draft);
+                    if (!scene) return;
+                    if (!Array.isArray(scene.annotations)) scene.annotations = [];
+                    scene.annotations.push({
+                        id: `annotation_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                        points: pendingAnnotation.points.slice(0, MAX_ANNOTATION_POINTS),
+                        kind: pendingAnnotation.kind,
+                        color: pendingAnnotation.color,
+                        width: pendingAnnotation.width,
+                        visibility: 'shared',
+                        authorKind: pendingAnnotation.authorKind,
+                        authorPlayerId: pendingAnnotation.authorPlayerId,
+                        createdAt: Date.now()
+                    });
+                    if (scene.annotations.length > 200) scene.annotations = scene.annotations.slice(-200);
+                }, { reason: 'add-annotation' });
+                return;
+            }
             if (runtime.templatePlacementState) {
                 const pendingTemplateState = runtime.templatePlacementState;
                 runtime.templatePlacementState = null;
@@ -1005,7 +1106,7 @@
                     return;
                 }
                 if (pendingTemplateState && pendingTemplateState.template && Date.now() - toNumber(pendingTemplateState.startedAt, 0) >= TEMPLATE_HOLD_PERSIST_MS) {
-                    queueSharedTransientTemplate({ ...pendingTemplateState.template });
+                    if (!queueSharedTransientTemplate({ ...pendingTemplateState.template })) renderStage();
                     return;
                 }
                 renderStage();

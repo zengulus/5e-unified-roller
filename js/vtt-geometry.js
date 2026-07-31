@@ -817,28 +817,47 @@
             return delta <= getVisionConeArcDeg(token) / 2;
         };
 
-        const getStealthVisionTargetSummary = (token, scene, state) => {
+        const getStealthVisionTargetSummary = (token, scene, state, options = {}) => {
             const summary = { detectedIds: [], unseenIds: [] };
             const resolvedState = state === undefined ? getVTTState() : state;
             if (!token || !scene || !resolvedState || !Array.isArray(scene.tokens)) return summary;
+            const visibility = options && typeof options === 'object' ? options : {};
+            const role = String(visibility.role || getLocalRole() || 'player').trim().toLowerCase();
+            const fogCellSet = visibility.fogCellSet instanceof Set
+                ? visibility.fogCellSet
+                : collectFogCellSet(scene, Array.isArray(scene.fog) ? scene.fog : []);
+            const visibleTokenIds = visibility.visibleTokenIds instanceof Set
+                ? visibility.visibleTokenIds
+                : new Set(Array.isArray(visibility.visibleTokenIds) ? visibility.visibleTokenIds.map((id) => String(id || '').trim()) : []);
             const enemyPassivePerception = getVisionPassivePerception(token);
             scene.tokens.forEach((candidate) => {
                 if (!candidate || candidate.id === token.id) return;
                 const side = String(candidate.side || '').trim().toLowerCase();
                 if (side !== 'player' && side !== 'ally') return;
+                const candidateId = String(candidate.id || '').trim();
+                // Player-facing cone status must only reflect tokens that this client can see.
+                // The local player's non-hidden token may intentionally remain above fog, so the
+                // stage passes that token ID explicitly rather than treating fog as globally visible.
+                if (
+                    role !== 'dm'
+                    && (
+                        candidate.hidden
+                        || (isTokenUnderFog(scene, candidate, fogCellSet) && !visibleTokenIds.has(candidateId))
+                    )
+                ) return;
                 const intersectsCone = getTokenFootprintPoints(candidate).some((point) => isCellPointInsideVisionCone(point, token));
                 if (!intersectsCone) return;
                 const stealthRoll = getTokenStealthRoll(candidate);
                 if (stealthRoll !== null && stealthRoll > enemyPassivePerception) {
-                    summary.unseenIds.push(candidate.id);
+                    summary.unseenIds.push(candidateId);
                     return;
                 }
-                summary.detectedIds.push(candidate.id);
+                summary.detectedIds.push(candidateId);
             });
             return summary;
         };
 
-        const buildStealthStatusMap = (scene, state, fogCellSet = null) => {
+        const buildStealthStatusMap = (scene, state, fogCellSet = null, options = {}) => {
             const statuses = new Map();
             const resolvedState = state === undefined ? getVTTState() : state;
             if (!scene || !scene.stealthMode || !Array.isArray(scene.tokens)) return statuses;
@@ -849,7 +868,10 @@
                 const side = String(token && token.side || '').trim().toLowerCase();
                 if (side !== 'enemy' && side !== 'neutral') return;
                 if (isTokenHiddenForRole(token, scene, 'player', resolvedFogCellSet)) return;
-                const summary = getStealthVisionTargetSummary(token, scene, resolvedState);
+                const summary = getStealthVisionTargetSummary(token, scene, resolvedState, {
+                    ...options,
+                    fogCellSet: resolvedFogCellSet
+                });
                 summary.unseenIds.forEach((tokenId) => {
                     if (!statuses.has(tokenId)) statuses.set(tokenId, STEALTH_STATUS_UNSEEN);
                 });

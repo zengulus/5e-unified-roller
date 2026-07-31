@@ -42,6 +42,7 @@
         TOKEN_PORTRAIT_PREVIEW_MS: 3000,
         TEMPLATE_HOLD_PERSIST_MS: 1000,
         TEMPLATE_SHARED_LIFETIME_MS: 5000,
+        MAX_SHARED_TEMPLATES_PER_SCENE: 18,
         PING_SHARED_LIFETIME_MS: 4200,
         TOKEN_DROP_PULSE_MS: 720,
         TOKEN_HP_FLASH_MS: 680,
@@ -148,6 +149,7 @@
                 tokens: [],
                 templates: [],
                 evidenceNotes: [],
+                annotations: [],
                 clocks: [],
                 pings: [],
                 fog: []

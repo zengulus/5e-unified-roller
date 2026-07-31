@@ -59,6 +59,7 @@
     });
 
     const STAGE_INPUT_PORT = Object.freeze({
+        annotationPlacementState: ['stage', 'placement', 'annotation'],
         dragState: ['stage', 'pointer', 'drag'],
         evidenceNoteDragState: ['stage', 'placement', 'evidenceNoteDrag'],
         evidenceNotePlacementState: ['stage', 'placement', 'evidenceNote'],
@@ -181,6 +182,7 @@
                     pendingAskRollRequest: null
                 },
                 placement: {
+                    annotation: null,
                     template: null,
                     templateRotate: null,
                     visionConeRotate: null,

@@ -166,6 +166,13 @@ const LEAD_STATUS_LABELS = {
 const BOARD_LEAD_TYPES = new Set(['npc', 'location', 'clue', 'event', 'requisition', 'theory', 'other']);
 const BOARD_LEAD_STATUSES = new Set(['open', 'blocked', 'resolved', 'dead-end']);
 const BOARD_LEAD_VOTES = new Set(['hot', 'cold', 'dead-end']);
+const BOARD_URL_PARAMS = new URLSearchParams(window.location.search || '');
+const BOARD_EMBED_MODE = String(BOARD_URL_PARAMS.get('embedded') || '').trim().toLowerCase();
+const VTT_EMBEDDED_CASE_ID = BOARD_EMBED_MODE === 'vtt'
+    ? sanitizeEmbeddedCaseId(BOARD_URL_PARAMS.get('caseId'))
+    : '';
+const vttEmbeddedBoardEventDedupe = new Map();
+let vttEmbeddedParentStoreWindow = null;
 const LEDGER_STATUS_LABELS = {
     stable: 'Pinned Fact',
     contested: 'Needs Review',
@@ -542,6 +549,51 @@ function normalizeCaseName(name) {
     return cleaned || 'UNNAMED CASE';
 }
 
+function sanitizeEmbeddedCaseId(value) {
+    const raw = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (!raw) return '';
+    return raw
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64);
+}
+
+function getVTTEmbeddedParentStoreWindow() {
+    if (!VTT_EMBEDDED_CASE_ID || !window.parent || window.parent === window) return null;
+    try {
+        const parentStore = window.parent.RTF_STORE;
+        if (!parentStore
+            || typeof parentStore.getBoard !== 'function'
+            || typeof parentStore.updateBoard !== 'function') {
+            return null;
+        }
+        return window.parent;
+    } catch (err) {
+        // Cross-origin frames cannot share a store. This embed is same-origin by design,
+        // but keep the standalone board safe if it is ever hosted elsewhere.
+        return null;
+    }
+}
+
+function useVTTEmbeddedParentStore() {
+    const parentWindow = getVTTEmbeddedParentStoreWindow();
+    if (!parentWindow) return false;
+    try {
+        window.RTF_STORE = parentWindow.RTF_STORE;
+        vttEmbeddedParentStoreWindow = parentWindow;
+        return true;
+    } catch (err) {
+        return false;
+    }
+}
+
+// A VTT board lives in a same-origin iframe. Reusing the table's store avoids
+// competing full-state localStorage mirrors from the iframe and its parent.
+// This is intentionally not the external-board host adapter: the Board keeps
+// its native collaboration session and its case-pinned room.
+if (VTT_EMBEDDED_CASE_ID) useVTTEmbeddedParentStore();
+
 function sanitizeImageUrl(url = '') {
     const candidate = String(url || '').trim();
     if (!candidate) return '';
@@ -566,13 +618,28 @@ function isCampaignBoardView() {
     return BOARD_VIEW_SCOPE === 'campaign';
 }
 
+function isVTTEmbeddedBoard() {
+    return !isCampaignBoardView() && !!VTT_EMBEDDED_CASE_ID;
+}
+
+function getVTTEmbeddedCaseId() {
+    return isVTTEmbeddedBoard() ? VTT_EMBEDDED_CASE_ID : '';
+}
+
 function getBoardScopeLabel() {
     return isCampaignBoardView() ? 'Campaign' : 'Case';
 }
 
 function getBoardActiveCaseId(store = window.RTF_STORE) {
+    const embeddedCaseId = getVTTEmbeddedCaseId();
+    if (embeddedCaseId) return embeddedCaseId;
     if (!store || typeof store.getActiveCaseId !== 'function') return 'case_primary';
     return String(store.getActiveCaseId() || 'case_primary');
+}
+
+function getResolvedBoardCaseId(store = window.RTF_STORE, caseId = null) {
+    const requestedCaseId = String(caseId || '').trim();
+    return requestedCaseId || getBoardActiveCaseId(store);
 }
 
 function getBoardTimelineEvents(store = window.RTF_STORE, caseId = null) {
@@ -581,7 +648,7 @@ function getBoardTimelineEvents(store = window.RTF_STORE, caseId = null) {
         return store.getCampaignMetaEvents();
     }
     if (typeof store.getEvents === 'function') {
-        return store.getEvents(caseId);
+        return store.getEvents(getResolvedBoardCaseId(store, caseId));
     }
     const campaign = store.state && store.state.campaign ? store.state.campaign : null;
     return Array.isArray(campaign && campaign.events) ? campaign.events : [];
@@ -593,7 +660,7 @@ function addBoardTimelineEvent(store, payload, caseId = null) {
         return store.addCampaignMetaEvent(payload);
     }
     if (typeof store.addEvent === 'function') {
-        return store.addEvent(payload, caseId || null);
+        return store.addEvent(payload, getResolvedBoardCaseId(store, caseId));
     }
     return '';
 }
@@ -605,7 +672,7 @@ function updateBoardTimelineEvent(store, eventId, updates, caseId = null) {
         return;
     }
     if (typeof store.updateEvent === 'function') {
-        store.updateEvent(eventId, updates, caseId || null);
+        store.updateEvent(eventId, updates, getResolvedBoardCaseId(store, caseId));
     }
 }
 
@@ -1470,10 +1537,7 @@ function saveCaseLeadEntries(caseId, leads) {
 
 function getActiveLeadCaseId() {
     if (isCampaignBoardView()) return 'campaign_meta';
-    if (window.RTF_STORE && typeof window.RTF_STORE.getActiveCaseId === 'function') {
-        return String(window.RTF_STORE.getActiveCaseId() || 'case_primary');
-    }
-    return 'case_primary';
+    return getBoardActiveCaseId(window.RTF_STORE);
 }
 
 function isTheoryNodeId(nodeId) {
@@ -1577,19 +1641,61 @@ function getHeatDeltaFromNode(summary) {
     return Number.isFinite(parsedBody) ? parsedBody : null;
 }
 
+function shouldSkipVTTEmbeddedBoardEvent(dedupeKey, windowMs = 1800) {
+    const key = String(dedupeKey || '').trim();
+    if (!key) return false;
+    const now = Date.now();
+    const lastSeen = vttEmbeddedBoardEventDedupe.get(key) || 0;
+    vttEmbeddedBoardEventDedupe.set(key, now);
+
+    if (vttEmbeddedBoardEventDedupe.size > 300) {
+        vttEmbeddedBoardEventDedupe.forEach((seenAt, seenKey) => {
+            if (now - seenAt > 10 * 60 * 1000) vttEmbeddedBoardEventDedupe.delete(seenKey);
+        });
+    }
+
+    return now - lastSeen < windowMs;
+}
+
 function logBoardTimeline(entry, options = {}) {
     if (isExternalBoardMode()) return;
-    const logger = window.RTF_SESSION_LOG;
-    if (!logger || typeof logger.logMajorEvent !== 'function') return;
     const details = entry && typeof entry === 'object' ? entry : {};
     const kind = details.kind || 'board';
     // Keep case-board timeline noise low: only clue discoveries from this board.
     if (kind !== 'clue-discovered') return;
     const tags = Array.isArray(details.tags) ? details.tags : [];
+    const opts = options && typeof options === 'object' ? options : {};
+
+    // session-log intentionally writes to the global active case. VTT embeds
+    // are pinned to a case instead, so send the event through the board's
+    // explicit case-aware helper.
+    if (isVTTEmbeddedBoard()) {
+        const dedupeWindowMs = Number.isFinite(Number(opts.dedupeWindowMs))
+            ? Number(opts.dedupeWindowMs)
+            : 1800;
+        const dedupeKey = opts.dedupeKey || details.dedupeKey;
+        if (!opts.disableDedupe && shouldSkipVTTEmbeddedBoardEvent(dedupeKey, dedupeWindowMs)) return;
+        addBoardTimelineEvent(window.RTF_STORE, {
+            title: details.title || 'Case Board Event',
+            focus: getCaseName(),
+            heatDelta: details.heatDelta,
+            tags: ['auto', 'case-board', ...tags].filter(Boolean).join(', '),
+            highlights: details.highlights || '',
+            fallout: details.fallout || '',
+            followUp: details.followUp || '',
+            source: 'board',
+            kind,
+            created: new Date().toISOString()
+        }, getBoardActiveCaseId(window.RTF_STORE));
+        return;
+    }
+
+    const logger = window.RTF_SESSION_LOG;
+    if (!logger || typeof logger.logMajorEvent !== 'function') return;
 
     const mergedOptions = isCampaignBoardView()
-        ? { ...options, scope: 'campaign' }
-        : options;
+        ? { ...opts, scope: 'campaign' }
+        : opts;
     logger.logMajorEvent({
         title: details.title || `${getBoardScopeLabel()} Board Event`,
         focus: getCaseName(),
@@ -1860,7 +1966,7 @@ function readStoreBoardPayload() {
         return sanitizeBoardPayload(window.RTF_STORE.getCampaignMetaBoard());
     }
     if (typeof window.RTF_STORE.getBoard === 'function') {
-        return sanitizeBoardPayload(window.RTF_STORE.getBoard());
+        return sanitizeBoardPayload(window.RTF_STORE.getBoard(getBoardActiveCaseId(window.RTF_STORE)));
     }
     if (isCampaignBoardView() && window.RTF_STORE.state && window.RTF_STORE.state.campaignMeta && window.RTF_STORE.state.campaignMeta.board) {
         return sanitizeBoardPayload(window.RTF_STORE.state.campaignMeta.board);
@@ -1883,7 +1989,7 @@ function writeStoreBoardPayload(payload, options = {}) {
         return true;
     }
     if (typeof window.RTF_STORE.updateBoard === 'function') {
-        window.RTF_STORE.updateBoard(clean, null, {
+        window.RTF_STORE.updateBoard(clean, getBoardActiveCaseId(window.RTF_STORE), {
             skipCloud: !!opts.skipCloud
         });
         return true;
@@ -1896,7 +2002,13 @@ function writeStoreBoardPayload(payload, options = {}) {
                 window.RTF_STORE.state.campaignMeta.board = clean;
             }
         } else {
-            window.RTF_STORE.state.board = clean;
+            const activeCaseId = getBoardActiveCaseId(window.RTF_STORE);
+            const cases = window.RTF_STORE.state.cases;
+            const caseEntry = cases && Array.isArray(cases.items)
+                ? cases.items.find((entry) => entry && String(entry.id || '') === activeCaseId)
+                : null;
+            if (caseEntry) caseEntry.board = clean;
+            else window.RTF_STORE.state.board = clean;
         }
         if (typeof window.RTF_STORE.save === 'function') {
             if (isCampaignBoardView()) {
@@ -1918,7 +2030,7 @@ function writeStoreBoardPayload(payload, options = {}) {
 }
 
 function readLegacyBoardPayload() {
-    if (isExternalBoardMode()) return null;
+    if (isExternalBoardMode() || isVTTEmbeddedBoard()) return null;
     const raw = localStorage.getItem(LEGACY_BOARD_KEY);
     if (!raw) return null;
     try {
@@ -1942,6 +2054,10 @@ function shouldRejectBlankBoardOverwrite(nextPayload, currentPayload) {
 function getPreferredBoardPayload() {
     const storePayload = readStoreBoardPayload();
     if (hasBoardContent(storePayload)) return storePayload;
+
+    // A VTT panel is explicitly scoped to a case. Never hydrate it from the
+    // pre-case legacy board, which has no reliable ownership information.
+    if (isVTTEmbeddedBoard()) return storePayload || getEmptyBoardPayload();
 
     const legacyPayload = readLegacyBoardPayload();
     if (legacyPayload) {
@@ -1989,9 +2105,12 @@ function pruneBoardTimelineNoise() {
         }
     } else {
         if (typeof store.getEvents !== 'function') return;
-        const caseIds = (typeof store.getCases === 'function')
-            ? store.getCases().map((entry) => entry && entry.id).filter(Boolean)
-            : [null];
+        const embeddedCaseId = getVTTEmbeddedCaseId();
+        const caseIds = embeddedCaseId
+            ? [embeddedCaseId]
+            : (typeof store.getCases === 'function')
+                ? store.getCases().map((entry) => entry && entry.id).filter(Boolean)
+                : [null];
         if (!caseIds.length) caseIds.push(null);
 
         caseIds.forEach((caseId) => {
@@ -2480,6 +2599,12 @@ window.addEventListener('load', async () => {
     updateViewCSS();
     initCaseNameTracking();
     window.addEventListener('rtf-store-updated', handleRemoteStoreUpdate);
+    if (vttEmbeddedParentStoreWindow) {
+        vttEmbeddedParentStoreWindow.addEventListener('rtf-store-updated', handleRemoteStoreUpdate);
+        window.addEventListener('pagehide', () => {
+            vttEmbeddedParentStoreWindow?.removeEventListener('rtf-store-updated', handleRemoteStoreUpdate);
+        }, { once: true });
+    }
     initBoardCollab().catch(() => { });
     markBoardRenderDirty();
 });
@@ -5164,7 +5289,7 @@ function persistBoardPayload(payload, options = {}) {
     const wroteSharedStore = writeStoreBoardPayload(clean, {
         skipCloud: false
     });
-    if (!wroteSharedStore) {
+    if (!wroteSharedStore && !isVTTEmbeddedBoard()) {
         const legacyPayload = readLegacyBoardPayload();
         if (shouldRejectBlankBoardOverwrite(clean, legacyPayload)) return legacyPayload;
         localStorage.setItem(LEGACY_BOARD_KEY, JSON.stringify(clean));
@@ -5553,7 +5678,7 @@ function addTargetNodeToLedger() {
             }
         }
     }
-    const caseId = String(meta.caseId || (typeof store.getActiveCaseId === 'function' ? store.getActiveCaseId() : 'case_primary'));
+    const caseId = String(meta.caseId || getBoardActiveCaseId(store));
     const certainty = clampPercent(
         meta.certainty !== undefined ? meta.certainty : (meta.confidence !== undefined ? meta.confidence : 50),
         50

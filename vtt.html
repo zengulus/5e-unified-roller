@@ -48,6 +48,15 @@
             <div class="hero-actions vtt-topbar-actions">
                 <div class="hero-action-bar primary"></div>
             </div>
+            <details class="vtt-header-board-menu" id="vtt-header-board-menu">
+                <summary class="hero-btn ghost">Case Board</summary>
+                <div class="vtt-header-board-popover">
+                    <strong>Investigation</strong>
+                    <span>Open the active case’s shared, editable investigation board without leaving the table.</span>
+                    <button class="vtt-chip-btn strong" type="button" data-action="open-case-board">Open in VTT</button>
+                    <a class="vtt-chip-btn" id="vtt-case-board-header-popout" href="board.html" target="_blank" rel="noopener">Open in tab</a>
+                </div>
+            </details>
         </div>
         <button class="vtt-topbar-tab" type="button" data-action="toggle-topbar-pin"
             id="vtt-topbar-tab" aria-controls="vtt-topbar" aria-label="Show table information and view controls">Table info</button>
@@ -235,6 +244,10 @@
                                 data-ping-variant="attention" id="vtt-player-ping-btn" aria-pressed="false">Ping</button>
                             <button class="vtt-dock-btn" type="button" data-action="toggle-ruler-mode"
                                 id="vtt-player-measure-btn" aria-pressed="false">Measure</button>
+                            <button class="vtt-dock-btn" type="button" data-action="set-tool-mode"
+                                data-tool-mode="draw" id="vtt-player-draw-btn" aria-pressed="false">Mark</button>
+                            <button class="vtt-dock-btn" type="button" data-action="undo-annotation"
+                                id="vtt-player-undo-annotation-btn">Undo mark</button>
                             <button class="vtt-dock-btn" type="button" data-action="toggle-view-menu"
                                 data-vtt-master-menu-toggle aria-controls="vtt-view-menu" aria-expanded="false">Menu</button>
                         </div>
@@ -285,8 +298,12 @@
                                         data-tool-mode="circle" id="vtt-tool-mode-circle" aria-pressed="false">Circle</button>
                                     <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
                                         data-tool-mode="cone" id="vtt-tool-mode-cone" aria-pressed="false">Cone</button>
+                                <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
+                                    data-tool-mode="note" id="vtt-tool-mode-note" aria-pressed="false">Pins</button>
                                     <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
-                                        data-tool-mode="note" id="vtt-tool-mode-note" aria-pressed="false">Pins</button>
+                                        data-tool-mode="draw" id="vtt-tool-mode-draw" aria-pressed="false">Draw</button>
+                                    <button class="vtt-chip-btn" type="button" data-action="undo-annotation">Undo my mark</button>
+                                    <button class="vtt-chip-btn danger" type="button" data-action="clear-annotations">Clear marks</button>
                                     <button class="vtt-chip-btn" type="button" data-action="set-tool-mode"
                                         data-tool-mode="fog-remove" id="vtt-tool-mode-fog-remove" aria-pressed="false">Unfog</button>
                                 </div>
@@ -369,6 +386,7 @@
                 <div class="vtt-world" id="vtt-world">
                     <div class="vtt-grid-layer" id="vtt-grid-layer"></div>
                     <div class="vtt-fog-layer" id="vtt-fog-layer"></div>
+                    <div class="vtt-annotation-layer" id="vtt-annotation-layer"></div>
                     <div class="vtt-note-layer" id="vtt-note-layer"></div>
                     <div class="vtt-template-layer" id="vtt-template-layer"></div>
                     <div class="vtt-token-layer" id="vtt-token-layer"></div>
@@ -521,7 +539,7 @@
     </script>
     <div class="vtt-spawn-ghost" id="vtt-spawn-ghost" hidden></div>
     <div class="vtt-modal-backdrop" id="vtt-roster-self-modal" hidden>
-        <div class="vtt-modal-card vtt-roster-self-card" role="dialog" aria-modal="true"
+        <div class="vtt-modal-card vtt-roster-self-card" role="dialog" aria-modal="true" tabindex="-1"
             aria-labelledby="vtt-roster-self-title">
             <div class="vtt-modal-head">
                 <h2 id="vtt-roster-self-title">Choose Your Roster Entry</h2>
@@ -540,7 +558,7 @@
         </div>
     </div>
     <div class="vtt-modal-backdrop" id="vtt-dm-unlock-modal" hidden>
-        <form class="vtt-modal-card" id="vtt-dm-unlock-form" role="dialog" aria-modal="true"
+        <form class="vtt-modal-card" id="vtt-dm-unlock-form" role="dialog" aria-modal="true" tabindex="-1"
             aria-labelledby="vtt-dm-unlock-title">
             <div class="vtt-modal-head">
                 <h2 id="vtt-dm-unlock-title">Enable DM Mode</h2>
@@ -558,6 +576,23 @@
                 <button class="vtt-inline-btn strong" type="submit">Enable DM</button>
             </div>
         </form>
+    </div>
+    <div class="vtt-modal-backdrop vtt-case-board-backdrop" id="vtt-case-board-modal" hidden>
+        <section class="vtt-modal-card vtt-case-board-card" role="dialog" aria-modal="true" tabindex="-1"
+            aria-labelledby="vtt-case-board-title" aria-describedby="vtt-case-board-case-label">
+            <header class="vtt-case-board-head">
+                <div>
+                    <h2 id="vtt-case-board-title">Case Board</h2>
+                    <p id="vtt-case-board-case-label">Loading active case…</p>
+                </div>
+                <div class="vtt-case-board-actions">
+                    <a class="vtt-inline-btn" id="vtt-case-board-popout" href="board.html" target="_blank" rel="noopener">Open in tab</a>
+                    <button class="vtt-inline-btn strong" type="button" data-action="close-case-board">Close</button>
+                </div>
+            </header>
+            <iframe class="vtt-case-board-frame" id="vtt-case-board-frame" title="Editable Case Board"
+                loading="lazy"></iframe>
+        </section>
     </div>
     <script src="js/vtt-config.js?v=20260719b"></script>
     <script src="js/vtt-runtime-state.js?v=20260718d"></script>

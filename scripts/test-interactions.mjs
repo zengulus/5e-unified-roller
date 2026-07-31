@@ -152,6 +152,269 @@ try {
         assert.equal(await page.locator('#vtt-stage-context-menu').isHidden(), true, 'Escape must close the stage context menu');
     });
 
+    await withPage('VTT modal, map recovery, and accent accessibility', async (page) => {
+        await page.goto(`${base}/vtt.html`);
+        const masterMenu = page.locator('[data-vtt-master-menu-toggle]:visible').first();
+        await masterMenu.click();
+        await page.locator('#vtt-role-toggle').click();
+
+        const dmModal = page.locator('#vtt-dm-unlock-modal');
+        await dmModal.waitFor({ state: 'visible' });
+        const modalState = await page.evaluate(() => {
+            const modal = document.querySelector('#vtt-dm-unlock-modal');
+            const topbar = document.querySelector('#vtt-topbar');
+            const shell = document.querySelector('.vtt-shell');
+            const topbarRect = topbar.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+                topbarRect.left + 8,
+                Math.max(1, Math.min(window.innerHeight - 1, topbarRect.bottom - 4))
+            );
+            return {
+                backdropZ: Number(getComputedStyle(modal).zIndex),
+                topbarZ: Number(getComputedStyle(topbar).zIndex),
+                topbarInert: topbar.hasAttribute('inert'),
+                shellInert: shell.hasAttribute('inert'),
+                backdropOnTop: !!hit?.closest('#vtt-dm-unlock-modal')
+            };
+        });
+        assert.ok(modalState.backdropZ > modalState.topbarZ, 'the modal backdrop must cover table chrome');
+        assert.deepEqual([modalState.topbarInert, modalState.shellInert, modalState.backdropOnTop], [true, true, true]);
+
+        const dmInput = page.locator('#vtt-dm-unlock-input');
+        await dmInput.focus();
+        await page.keyboard.press('Shift+Tab');
+        assert.equal(await page.evaluate(() => document.activeElement?.matches('#vtt-dm-unlock-form button[type="submit"]')), true, 'Shift+Tab must wrap within the modal');
+        await page.keyboard.press('Tab');
+        assert.equal(await page.evaluate(() => document.activeElement?.id), 'vtt-dm-unlock-input', 'Tab must wrap within the modal');
+        await page.getByRole('button', { name: 'Cancel' }).click();
+        assert.equal(await dmModal.isHidden(), true);
+        assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-vtt-master-menu-toggle')), true, 'closing must restore a visible VTT launcher');
+        assert.equal(await page.locator('#vtt-topbar').getAttribute('inert'), null);
+
+        await masterMenu.click();
+        await page.locator('#vtt-role-toggle').click();
+        await dmInput.fill('setDMMode');
+        await page.locator('#vtt-dm-unlock-form').evaluate((form) => form.requestSubmit());
+        await page.waitForFunction(() => document.body.dataset.vttRole === 'dm');
+
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            const state = structuredClone(store.getVTTState());
+            state.scenes[0].name = 'Map recovery test';
+            state.scenes[0].mapImageUrl = `/missing-vtt-map-${Date.now()}.png`;
+            store.updateVTTState(state);
+        });
+        await page.waitForFunction(() => document.querySelector('#vtt-stage-empty')?.dataset.state === 'map-error');
+        assert.equal(await page.locator('#vtt-stage-empty').isVisible(), true);
+        assert.match(await page.locator('#vtt-stage-empty').innerText(), /map image could not be loaded/i);
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            const state = structuredClone(store.getVTTState());
+            state.scenes[0].mapImageUrl = '';
+            store.updateVTTState(state);
+        });
+        await page.waitForFunction(() => document.querySelector('#vtt-stage-empty')?.dataset.state !== 'map-error');
+        assert.doesNotMatch(await page.locator('#vtt-stage-empty').innerText(), /could not be loaded/i);
+
+        await page.goto(`${base}/tools.html`);
+        await page.locator('.hero-menu-gear').click();
+        const accentOpener = page.locator('button[data-onclick="triggerAccentPicker()"]:visible');
+        await accentOpener.click();
+        const accentPanel = page.locator('#accent-panel');
+        assert.equal(await accentPanel.getAttribute('inert'), null);
+        assert.equal(await accentPanel.getAttribute('aria-hidden'), 'false');
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(() => document.querySelector('#accent-panel')?.getAttribute('aria-hidden') === 'true');
+        assert.equal(await accentPanel.getAttribute('inert'), '');
+        await page.waitForFunction(() => document.activeElement?.classList.contains('hero-menu-gear'));
+        assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('hero-menu-gear')), true, 'closing Accent Architect must restore a visible settings launcher when Player Nav closes the opener menu');
+    });
+
+    await withPage('VTT editable Case Board workspace', async (page) => {
+        await page.goto(`${base}/vtt.html`);
+        const activeCaseId = await page.evaluate(() => window.RTF_STORE.getActiveCaseId());
+        if (await page.locator('body').getAttribute('data-topbar-collapsed') === '1') {
+            await page.locator('#vtt-topbar-tab').click();
+        }
+        await page.locator('#vtt-header-board-menu > summary').click();
+        await page.getByRole('button', { name: 'Open in VTT' }).click();
+        const modal = page.locator('#vtt-case-board-modal');
+        assert.equal(await modal.isVisible(), true);
+        assert.deepEqual(await page.evaluate(() => {
+            const url = new URL(document.querySelector('#vtt-case-board-popout').href);
+            return [url.pathname, url.searchParams.get('embedded'), url.searchParams.get('caseId')];
+        }), ['/board.html', 'vtt', activeCaseId]);
+        await page.waitForFunction(() => {
+            const frame = document.querySelector('#vtt-case-board-frame');
+            return !!(frame && frame.contentDocument?.querySelector('#caseName') && frame.contentWindow?.RTF_BOARD_EMBED_API);
+        });
+        assert.equal(await page.locator('#vtt-case-board-frame').evaluate((frame) => (
+            frame.contentDocument.querySelector('#caseName').getAttribute('contenteditable')
+        )), 'true', 'the embedded board keeps its native editable controls');
+        assert.equal(await page.locator('#vtt-case-board-frame').evaluate((frame) => (
+            frame.contentWindow.RTF_STORE === window.RTF_STORE
+        )), true, 'the VTT embed must write through the table store instead of a competing iframe store');
+        const nodeId = await page.locator('#vtt-case-board-frame').evaluate((frame) => (
+            (() => {
+                const id = frame.contentWindow.RTF_BOARD_EMBED_API.spawnNode('clue', { title: 'Inline VTT clue' });
+                frame.contentWindow.saveBoard({ flushNow: true });
+                return id;
+            })()
+        ));
+        await page.waitForFunction(({ caseId, nodeId }) => {
+            const board = window.RTF_STORE.getBoard(caseId);
+            return (board.nodes || []).some((node) => (
+                node.id === nodeId && String(node.title || '').toLowerCase() === 'inline vtt clue'
+            ));
+        }, { caseId: activeCaseId, nodeId });
+        assert.equal(await page.evaluate(() => window.RTF_STORE.getActiveCaseId()), activeCaseId, 'the Board embed must not switch the VTT’s active case');
+        await page.locator('#vtt-case-board-modal [data-action="close-case-board"]').focus();
+        await page.keyboard.press('Escape');
+        assert.equal(await modal.isHidden(), true);
+        assert.equal(await page.evaluate(() => document.activeElement?.matches('#vtt-header-board-menu > summary')), true, 'closing the board returns focus to its header launcher');
+    });
+
+    await withPage('VTT player fog visibility and token ownership workflow', async (page) => {
+        await page.addInitScript(() => {
+            localStorage.setItem('unifiedSheetData.json', JSON.stringify({
+                activeId: 'character_me',
+                characters: {
+                    character_me: { meta: { sheetKey: 'sheet_me', name: 'Me' } }
+                }
+            }));
+        });
+        await page.goto(`${base}/vtt.html`);
+        await page.waitForFunction(() => document.body?.dataset.vttRole === 'player');
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            store.addPlayer({ id: 'player_me', name: 'Me' });
+            store.addPlayer({ id: 'player_unlinked', name: 'Unlinked player' });
+            store.updatePlayer('player_me', { sheetKey: 'sheet_me' });
+            const state = structuredClone(store.getVTTState());
+            const scene = state.scenes[0];
+            scene.stealthMode = true;
+            scene.grid = { cellPx: 70, offsetX: 0, offsetY: 0, cellDistance: 5 };
+            scene.fog = [
+                { id: 'fog_3_0', col: 3, row: 0 },
+                { id: 'fog_9_2', col: 9, row: 2 },
+                { id: 'fog_10_2', col: 10, row: 2 }
+            ];
+            scene.tokens = [
+                {
+                    id: 'watcher', label: 'Watcher', side: 'enemy', x: 0, y: 0, w: 1, h: 1,
+                    sourceType: 'npc', sourceId: 'watcher', moveAccess: 'dm', hidden: false,
+                    passivePerception: 12,
+                    vision: { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6 }
+                },
+                {
+                    id: 'my_fogged_token', label: 'Me', side: 'player', x: 9, y: 2, w: 1, h: 1,
+                    sourceType: 'player', sourceId: 'player_me', moveAccess: 'player', hidden: false,
+                    stealthRoll: 20
+                },
+                {
+                    id: 'fogged_peer', label: 'Fogged peer', side: 'player', x: 3, y: 0, w: 1, h: 1,
+                    sourceType: 'player', sourceId: 'player_peer', moveAccess: 'player', hidden: false,
+                    stealthRoll: 10
+                },
+                {
+                    id: 'hidden_peer', label: 'Hidden peer', side: 'ally', x: 4, y: 0, w: 1, h: 1,
+                    sourceType: 'player', sourceId: 'player_hidden', moveAccess: 'player', hidden: true,
+                    stealthRoll: 10
+                },
+                {
+                    id: 'unlinked_player_token', label: 'Unlinked player', side: 'player', x: 6, y: 7, w: 1, h: 1,
+                    sourceType: 'player', sourceId: 'player_unlinked', moveAccess: 'player', hidden: false
+                }
+            ];
+            store.updateVTTState(state);
+        });
+        await page.waitForTimeout(100);
+
+        const ownToken = page.locator('.vtt-token[data-token-id="my_fogged_token"]');
+        assert.equal(await ownToken.count(), 1, 'the local player token remains rendered over fog');
+        assert.equal(await ownToken.getAttribute('class').then((classes) => classes.includes('is-hidden')), false, 'the local fogged token should not be dimmed as hidden');
+        assert.match(await ownToken.getAttribute('aria-label'), /Movable\./);
+        assert.equal(await page.locator('.vtt-token[data-token-id="fogged_peer"]').count(), 0, 'other fogged players remain concealed');
+        assert.equal(await page.locator('.vtt-token[data-token-id="hidden_peer"]').count(), 0, 'explicitly hidden peers remain concealed');
+        assert.equal(
+            await page.locator('.vtt-vision-cone path').getAttribute('fill'),
+            'rgba(94, 176, 255, 0.22)',
+            'concealed peer tokens must not alter a visible watcher cone'
+        );
+
+        const lockedToken = page.locator('.vtt-token[data-token-id="unlinked_player_token"]');
+        assert.match(await lockedToken.getAttribute('aria-label'), /Movement locked\./);
+        const lockedBox = await lockedToken.boundingBox();
+        assert.ok(lockedBox);
+        await page.mouse.move(lockedBox.x + lockedBox.width / 2, lockedBox.y + lockedBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(lockedBox.x + lockedBox.width / 2 + 45, lockedBox.y + lockedBox.height / 2, { steps: 2 });
+        await page.mouse.up();
+        await page.waitForTimeout(50);
+        assert.deepEqual(
+            await page.evaluate(() => {
+                const token = window.RTF_STORE.getVTTState().scenes[0].tokens.find((entry) => entry.id === 'unlinked_player_token');
+                return [token.x, token.y];
+            }),
+            [6, 7],
+            'a roster player token stays locked until that roster entry is linked to this local sheet'
+        );
+
+        const ownBox = await ownToken.boundingBox();
+        assert.ok(ownBox);
+        await page.mouse.move(ownBox.x + ownBox.width / 2, ownBox.y + ownBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(ownBox.x + ownBox.width / 2 + 45, ownBox.y + ownBox.height / 2, { steps: 2 });
+        await page.mouse.up();
+        await page.waitForTimeout(50);
+        assert.ok(
+            await page.evaluate(() => window.RTF_STORE.getVTTState().scenes[0].tokens.find((entry) => entry.id === 'my_fogged_token').x > 9),
+            'the linked local player can still move their token while it is under fog'
+        );
+        assert.match(await ownToken.getAttribute('class'), /is-selected/, 'a fogged local token keeps selection after its move is persisted');
+
+        const markButton = page.locator('#vtt-player-draw-btn');
+        assert.equal(await markButton.isDisabled(), false, 'a linked player can mark the shared map');
+        await markButton.click();
+        assert.equal(await markButton.getAttribute('aria-pressed'), 'true');
+        const drawingStageBox = await page.locator('#vtt-stage').boundingBox();
+        assert.ok(drawingStageBox);
+        const markStart = {
+            x: drawingStageBox.x + drawingStageBox.width * 0.72,
+            y: drawingStageBox.y + drawingStageBox.height * 0.34
+        };
+        await page.mouse.move(markStart.x, markStart.y);
+        await page.mouse.down();
+        await page.mouse.move(markStart.x + 70, markStart.y + 34, { steps: 8 });
+        await page.mouse.up();
+        await page.waitForFunction(() => {
+            const annotations = window.RTF_STORE.getVTTState().scenes[0].annotations || [];
+            return annotations.length === 1
+                && annotations[0].authorKind === 'player'
+                && annotations[0].authorPlayerId === 'player_me';
+        });
+        assert.equal(await page.locator('.vtt-annotation').count(), 1, 'a player mark renders above the map');
+
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            const state = structuredClone(store.getVTTState());
+            state.scenes[0].annotations.push({
+                id: 'peer_annotation',
+                points: [{ x: 80, y: 80 }, { x: 140, y: 120 }],
+                kind: 'pen', color: '#ff5f5f', width: 4, visibility: 'shared',
+                authorKind: 'player', authorPlayerId: 'player_peer', createdAt: Date.now()
+            });
+            store.updateVTTState(state);
+        });
+        await page.waitForFunction(() => document.querySelector('.vtt-annotation[data-annotation-id="peer_annotation"]'));
+        await page.locator('#vtt-player-undo-annotation-btn').click();
+        await page.waitForFunction(() => {
+            const annotations = window.RTF_STORE.getVTTState().scenes[0].annotations || [];
+            return annotations.length === 1 && annotations[0].id === 'peer_annotation';
+        });
+        assert.equal(await page.locator('.vtt-annotation[data-annotation-id="peer_annotation"]').count(), 1, 'Undo mark cannot remove another player’s annotation');
+    });
+
     await withPage('VTT mobile support notice', async (page) => {
         await page.goto(`${base}/vtt.html`);
         const notice = page.locator('.vtt-mobile-unsupported');
@@ -711,4 +974,4 @@ try {
     await new Promise((resolve) => server.close(resolve));
 }
 
-console.log('Interaction workflows passed: 6');
+console.log('Interaction workflows passed: 9');

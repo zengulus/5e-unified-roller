@@ -286,7 +286,7 @@ test('VTT stage input wiring supplies every API, DOM, config, and runtime field'
     const usedRuntime = new Set(
         [...moduleSource.matchAll(/\bruntime\.([A-Za-z_$][\w$]*)/g)].map((entry) => entry[1])
     );
-    assert.equal(usedRuntime.size, 34);
+    assert.equal(usedRuntime.size, 35);
     assert.deepEqual(
         [...exposedRuntime].sort(),
         [...usedRuntime].sort(),

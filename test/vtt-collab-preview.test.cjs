@@ -81,6 +81,17 @@ test('collaboration checkpoints preserve encounter ownership and clock cadence',
         hidden: false,
         cadence: 'round'
     }];
+    snapshot.scenes[0].annotations = [{
+        id: 'annotation_player_one',
+        points: [{ x: 12.5, y: 14 }, { x: 30, y: 42.25 }],
+        kind: 'arrow',
+        color: '#58d4f7',
+        width: 4,
+        visibility: 'shared',
+        authorKind: 'player',
+        authorPlayerId: 'player_one',
+        createdAt: 1784342400000
+    }];
     snapshot.initiative = {
         entries: [{ id: 'entry_one', name: 'Hero', total: 18, tie: 14 }],
         round: 3,
@@ -101,6 +112,54 @@ test('collaboration checkpoints preserve encounter ownership and clock cadence',
     assert.equal(decoded.initiative.encounterActive, true);
     assert.equal(decoded.initiative.sceneId, 'scene_one');
     assert.equal(decoded.initiative.startedAt, 1784342400000);
+    assert.deepEqual(decoded.scenes[0].annotations, snapshot.scenes[0].annotations);
+});
+
+test('annotation changes patch through a live Y.Doc without dropping authorship', async (t) => {
+    const {
+        VTTCollabSession,
+        exportVTTCheckpointFromDoc,
+        decodeVTTCheckpointToSnapshot
+    } = await collabModulePromise;
+    const base = buildSeedSnapshot();
+    base.scenes[0].annotations = [{
+        id: 'annotation_one',
+        points: [{ x: 1, y: 2 }, { x: 3, y: 4 }],
+        kind: 'pen',
+        color: '#58d4f7',
+        width: 4,
+        visibility: 'shared',
+        authorKind: 'player',
+        authorPlayerId: 'player_one',
+        createdAt: 1784342400000
+    }];
+    const next = structuredClone(base);
+    next.scenes[0].annotations[0].points.push({ x: 5, y: 6 });
+    next.scenes[0].annotations.push({
+        id: 'annotation_two',
+        points: [{ x: 10, y: 20 }, { x: 30, y: 40 }],
+        kind: 'highlighter',
+        color: '#f0b357',
+        width: 12,
+        visibility: 'shared',
+        authorKind: 'player',
+        authorPlayerId: 'player_two',
+        createdAt: 1784342400010
+    });
+
+    const session = new VTTCollabSession({ roomId: 'annotations_delta' });
+    t.after(() => {
+        session.awareness.destroy();
+        session.doc.destroy();
+    });
+
+    const coerceSnapshot = (value) => structuredClone(value);
+    await session.syncSnapshot(base);
+    await session.syncSnapshot(next, { baseSnapshot: base });
+    const checkpoint = exportVTTCheckpointFromDoc(session.doc, coerceSnapshot);
+    const decoded = decodeVTTCheckpointToSnapshot(checkpoint, coerceSnapshot);
+
+    assert.deepEqual(decoded.scenes[0].annotations, next.scenes[0].annotations);
 });
 
 test('non-final token previews send only the compact event without Y.Doc or persistence writes', async (t) => {

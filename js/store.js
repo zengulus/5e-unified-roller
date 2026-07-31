@@ -231,6 +231,7 @@
                     tokens: [],
                     templates: [],
                     evidenceNotes: [],
+                    annotations: [],
                     clocks: [],
                     pings: [],
                     fog: []
@@ -250,6 +251,11 @@
     const VTT_TOKEN_MOVE_ACCESS = new Set(['dm', 'player']);
     const VTT_DEFENCE_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
     const VTT_CLOCK_CADENCES = new Set(['manual', 'turn', 'round']);
+    const VTT_ANNOTATION_KINDS = new Set(['pen', 'highlighter', 'arrow']);
+    const VTT_ANNOTATION_VISIBILITIES = new Set(['shared', 'dm']);
+    const VTT_ANNOTATION_LIMIT = 200;
+    const VTT_ANNOTATION_POINT_LIMIT = 500;
+    const VTT_ANNOTATION_COORDINATE_LIMIT = 1000000;
     const DEFAULT_CAMPAIGN_META_BOARD_STATE = {
         name: 'CAMPAIGN META BOARD',
         nodes: [],
@@ -976,6 +982,54 @@
         };
     };
 
+    const sanitizeVTTAnnotationPoint = (point, legacyScaleFactor = 1) => {
+        const source = point && typeof point === 'object' && !Array.isArray(point) ? point : null;
+        if (!source) return null;
+        const readCoordinate = (value) => {
+            if (value === null || value === undefined) return null;
+            if (typeof value === 'string' && !value.trim()) return null;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        };
+        const rawX = readCoordinate(source.x);
+        const rawY = readCoordinate(source.y);
+        const scale = Number(legacyScaleFactor);
+        if (rawX === null || rawY === null) return null;
+        const cleanScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+        const clampCoordinate = (value) => Math.max(
+            -VTT_ANNOTATION_COORDINATE_LIMIT,
+            Math.min(VTT_ANNOTATION_COORDINATE_LIMIT, Math.round(value * cleanScale * 100) / 100)
+        );
+        return {
+            x: clampCoordinate(rawX),
+            y: clampCoordinate(rawY)
+        };
+    };
+
+    const sanitizeVTTAnnotation = (annotation, idx = 0, legacyScaleFactor = 1) => {
+        const source = annotation && typeof annotation === 'object' && !Array.isArray(annotation) ? annotation : {};
+        const authorPlayerId = toTrimmedString(source.authorPlayerId, '', 120).trim();
+        const requestedAuthorKind = toTrimmedString(source.authorKind, '', 20).trim().toLowerCase();
+        const authorKind = requestedAuthorKind === 'player' && authorPlayerId
+            ? 'player'
+            : (requestedAuthorKind === 'dm' ? 'dm' : (authorPlayerId ? 'player' : 'dm'));
+        const kind = toTrimmedString(source.kind, 'pen', 20).trim().toLowerCase();
+        const visibility = toTrimmedString(source.visibility, 'shared', 20).trim().toLowerCase();
+        return {
+            id: toTrimmedString(source.id, `annotation_${idx + 1}`, 120).trim() || `annotation_${idx + 1}`,
+            points: (Array.isArray(source.points) ? source.points.slice(0, VTT_ANNOTATION_POINT_LIMIT) : [])
+                .map((point) => sanitizeVTTAnnotationPoint(point, legacyScaleFactor))
+                .filter(Boolean),
+            kind: VTT_ANNOTATION_KINDS.has(kind) ? kind : 'pen',
+            color: sanitizeVTTColor(source.color, '#58d4f7'),
+            width: Math.max(1, Math.min(20, Math.round(toNumber(source.width, 4) * 10) / 10)),
+            visibility: VTT_ANNOTATION_VISIBILITIES.has(visibility) ? visibility : 'shared',
+            authorKind,
+            authorPlayerId: authorKind === 'player' ? authorPlayerId : '',
+            createdAt: Math.max(0, Math.round(toNumber(source.createdAt, 0)))
+        };
+    };
+
     const sanitizeVTTEvidenceNote = (note, idx = 0) => {
         const source = note && typeof note === 'object' ? note : {};
         const category = normalizeVTTZoneCategory(source.category);
@@ -1065,6 +1119,11 @@
                         h: Math.max(1, Math.round(note.h * legacyScaleFactor))
                     };
                 })
+                : [],
+            annotations: Array.isArray(source.annotations)
+                ? source.annotations.slice(-VTT_ANNOTATION_LIMIT)
+                    .map((annotationEntry, annotationIdx) => sanitizeVTTAnnotation(annotationEntry, annotationIdx, legacyScaleFactor))
+                    .filter((annotation) => annotation.points.length >= 2)
                 : [],
             clocks: Array.isArray(source.clocks)
                 ? source.clocks.map((clockEntry, clockIdx) => sanitizeVTTClock(clockEntry, clockIdx))
@@ -1876,6 +1935,7 @@
             (Array.isArray(scene && scene.tokens) && scene.tokens.length)
             || (Array.isArray(scene && scene.templates) && scene.templates.length)
             || (Array.isArray(scene && scene.evidenceNotes) && scene.evidenceNotes.length)
+            || (Array.isArray(scene && scene.annotations) && scene.annotations.length)
             || (Array.isArray(scene && scene.clocks) && scene.clocks.length)
             || (Array.isArray(scene && scene.fog) && scene.fog.length)
             || !!toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim()
@@ -1911,6 +1971,7 @@
             score += (Array.isArray(scene && scene.tokens) ? scene.tokens.length : 0) * 1000;
             score += (Array.isArray(scene && scene.templates) ? scene.templates.length : 0) * 500;
             score += (Array.isArray(scene && scene.evidenceNotes) ? scene.evidenceNotes.length : 0) * 500;
+            score += (Array.isArray(scene && scene.annotations) ? scene.annotations.length : 0) * 300;
             score += (Array.isArray(scene && scene.clocks) ? scene.clocks.length : 0) * 400;
             score += (Array.isArray(scene && scene.fog) ? scene.fog.length : 0) * 200;
             score += toTrimmedString(scene && scene.mapImageUrl, '', 4000).trim() ? 600 : 0;

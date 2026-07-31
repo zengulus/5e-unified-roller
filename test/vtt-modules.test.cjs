@@ -442,6 +442,72 @@ test('VTT geometry keeps evidence and stealth calculations independent of the co
     assert.equal(geometry.buildStealthStatusMap(targetScene, state, new Set(['0,0'])).has('hero'), false);
 });
 
+test('VTT stealth cone summaries ignore concealed peer tokens but retain the local fogged token', () => {
+    const targetScene = {
+        ...scene,
+        stealthMode: true,
+        fog: [
+            { id: 'fog_1_0', col: 1, row: 0 },
+            { id: 'fog_3_0', col: 3, row: 0 }
+        ],
+        tokens: [
+            { id: 'watcher', side: 'enemy', x: 0, y: 0, w: 1, h: 1, passivePerception: 12, vision: { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6 } },
+            { id: 'own_fogged', side: 'player', x: 1, y: 0, w: 1, h: 1, stealthRoll: 20 },
+            { id: 'hidden_peer', side: 'ally', x: 2, y: 0, w: 1, h: 1, hidden: true, stealthRoll: 10 },
+            { id: 'fogged_peer', side: 'player', x: 3, y: 0, w: 1, h: 1, stealthRoll: 10 }
+        ]
+    };
+    const fogCellSet = geometry.collectFogCellSet(targetScene, targetScene.fog);
+    const visibility = {
+        role: 'player',
+        fogCellSet,
+        visibleTokenIds: new Set(['own_fogged'])
+    };
+
+    assert.deepEqual(
+        geometry.getStealthVisionTargetSummary(targetScene.tokens[0], targetScene, state, visibility),
+        { detectedIds: [], unseenIds: ['own_fogged'] }
+    );
+    assert.deepEqual(
+        Array.from(geometry.buildStealthStatusMap(targetScene, state, fogCellSet, visibility).entries()),
+        [['own_fogged', 'unseen']]
+    );
+
+    const markup = markupFactory.create({
+        escapeHtml,
+        toNumber,
+        clamp,
+        normalizeAngleDeg,
+        getPointAtAngle: geometry.getPointAtAngle,
+        normalizeClockMax: (value, fallback = 4) => clamp(Math.round(toNumber(value, fallback)), 1, 20),
+        normalizeClockCurrent: (value, max, fallback = 0) => clamp(Math.round(toNumber(value, fallback)), 0, max),
+        getVisionConeGeometry: geometry.getVisionConeGeometry,
+        getStealthVisionTargetSummary: geometry.getStealthVisionTargetSummary,
+        getAreaTemplateWorldGeometry: geometry.getAreaTemplateWorldGeometry,
+        getAskRollRequestFromPing: () => null,
+        getSceneCellPx,
+        normalizeHexColor: (value, fallback = '#4f8dff') => /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback,
+        getHexColorRgbString,
+        normalizePingVariant: (value) => String(value || 'attention'),
+        isEvidenceNotePin: geometry.isEvidenceNotePin,
+        normalizeEvidenceNoteCategory: geometry.normalizeEvidenceNoteCategory,
+        getEvidenceNoteCategoryLabel: geometry.getEvidenceNoteCategoryLabel,
+        getEvidenceNoteDisplayTitle: geometry.getEvidenceNoteDisplayTitle,
+        buildEvidenceNoteAreaLabel: geometry.buildEvidenceNoteAreaLabel,
+        getEvidenceNoteHighlightColor: geometry.getEvidenceNoteHighlightColor,
+        getEvidenceNoteHighlightRgb: geometry.getEvidenceNoteHighlightRgb,
+        normalizeEvidenceNoteShape: geometry.normalizeEvidenceNoteShape,
+        getEvidenceNoteCategoryShortLabel: geometry.getEvidenceNoteCategoryShortLabel,
+        getTemplateWorldPoint: geometry.getTemplateWorldPoint,
+        pingVariantOptions: { attention: { icon: '!' } }
+    });
+    assert.match(
+        markup.buildVisionConeMarkup(targetScene.tokens[0], targetScene, { width: 800, height: 600 }, { state, ...visibility }),
+        /rgba\(255, 211, 102, 0\.24\)/,
+        'the visible local token is unseen, while concealed peers cannot turn the cone red'
+    );
+});
+
 test('VTT markup builders render deterministic overlays from explicit state', () => {
     const markup = markupFactory.create({
         escapeHtml,

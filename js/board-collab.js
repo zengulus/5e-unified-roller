@@ -1531,6 +1531,7 @@ class BoardCollabSession {
         if (nextSig && nextSig === buildSnapshotSignature(currentSnapshot)) {
             if (opts.flushNow) {
                 this.scheduleCloudFlush({
+                    forceNow: true,
                     forceHistory: !!opts.forceHistory,
                     historyReason: opts.historyReason || '',
                     forceCompatibilityMirror: true
@@ -1543,6 +1544,7 @@ class BoardCollabSession {
         applySnapshotToDoc(this.doc, next, this.scope, this.caseId, this.originLocalSnapshot, stamp);
         if (opts.flushNow) {
             this.scheduleCloudFlush({
+                forceNow: true,
                 forceHistory: !!opts.forceHistory,
                 historyReason: opts.historyReason || '',
                 forceCompatibilityMirror: true
@@ -1558,7 +1560,10 @@ class BoardCollabSession {
         const stamp = Date.now();
         if (!applyPositionChangesToDoc(this.doc, list, this.originPosition, stamp)) return;
         const opts = options && typeof options === 'object' ? options : {};
-        if (opts.flushNow) this.scheduleCloudFlush({ forceCompatibilityMirror: true });
+        if (opts.flushNow) this.scheduleCloudFlush({
+            forceNow: true,
+            forceCompatibilityMirror: true
+        });
     }
 
     setCursor(cursor) {
