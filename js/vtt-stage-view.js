@@ -1361,12 +1361,8 @@
             const annotationMarkup = (Array.isArray(scene.annotations) ? scene.annotations : [])
                 .map((annotation) => markup.buildAnnotationMarkup(annotation, scene, { isDM: !!state.isDM }))
                 .join('');
-            const annotationPreviewMarkup = state.annotationPlacementState
-                && state.annotationPlacementState.sceneId === scene.id
-                ? markup.buildAnnotationMarkup(state.annotationPlacementState, scene, { isDM: !!state.isDM })
-                : '';
             const annotationsChanged = annotationLayerEl
-                ? commitLayerMarkup(annotationLayerEl, `${annotationMarkup}${annotationPreviewMarkup}`)
+                ? commitLayerMarkup(annotationLayerEl, annotationMarkup)
                 : false;
 
             const visibleTokens = derived.visibleTokens;

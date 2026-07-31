@@ -534,6 +534,32 @@ test('VTT token drag previews only the dragged DOM node and force-syncs on drop'
     ], 'drop must commit once, reconcile pending state once, and evaluate proximity once without a draft or global render');
 });
 
+test('VTT annotation strokes render locally and commit once on pen-up', () => {
+    const harness = createStageHarness();
+    harness.runtime.localToolState.mode = 'draw';
+
+    harness.input.handleStagePointerDown({
+        target: harness.stageEl,
+        button: 0,
+        clientX: 10,
+        clientY: 20,
+        shiftKey: false,
+        altKey: false,
+        preventDefault() { }
+    });
+    assert.ok(harness.runtime.annotationPlacementState, 'pen-down begins a local stroke');
+    assert.equal(harness.calls.includes('render-stage'), false, 'pen-down does not rebuild the stage');
+
+    harness.calls.length = 0;
+    harness.input.handlePointerMove({ clientX: 40, clientY: 60 });
+    harness.input.handlePointerMove({ clientX: 70, clientY: 90 });
+    assert.equal(harness.calls.includes('render-stage'), false, 'pen moves update only the local preview');
+    assert.equal(harness.calls.includes('with-draft'), false, 'pen moves do not write shared state');
+
+    harness.input.handlePointerUp({ type: 'pointerup', clientX: 70, clientY: 90 });
+    assert.equal(harness.calls.filter((call) => call === 'with-draft').length, 1, 'pen-up performs the single shared write');
+});
+
 test('VTT native token double click opens the DM inspector and is wired on the stage', () => {
     const harness = createStageHarness();
     const tokenEl = createTokenElement();

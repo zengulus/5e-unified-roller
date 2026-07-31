@@ -137,7 +137,9 @@
         let lastEvidenceNotePointerDownState = null;
         let pendingTouchContextState = null;
         let interactionRenderFrame = 0;
+        let annotationPreviewRenderFrame = 0;
         const MAX_ANNOTATION_POINTS = 500;
+        const LOCAL_ANNOTATION_PREVIEW_ID = 'vtt-local-annotation-preview';
 
         const getAnnotationAuthor = () => {
             if (isDM()) return { authorKind: 'dm', authorPlayerId: '' };
@@ -185,6 +187,73 @@
             if (!interactionRenderFrame) return;
             if (typeof window.cancelAnimationFrame === 'function') window.cancelAnimationFrame(interactionRenderFrame);
             interactionRenderFrame = 0;
+        };
+
+        // Drawing must stay entirely local until the stroke is complete. Re-rendering
+        // the complete stage for every sampled pointer position makes pen input feel
+        // noticeably delayed on maps with many tokens, fog cells, or annotations.
+        const renderLocalAnnotationPreview = () => {
+            const layer = document && typeof document.getElementById === 'function'
+                ? document.getElementById('vtt-annotation-layer')
+                : null;
+            if (!layer || typeof layer.querySelector !== 'function') return;
+
+            const placement = runtime.annotationPlacementState;
+            let preview = layer.querySelector(`#${LOCAL_ANNOTATION_PREVIEW_ID}`);
+            const points = placement && Array.isArray(placement.points) ? placement.points : [];
+            if (!placement || points.length === 0) {
+                if (preview && typeof preview.remove === 'function') preview.remove();
+                return;
+            }
+
+            const normalizedPoints = points.map((point) => ({
+                x: toNumber(point && point.x, 0),
+                y: toNumber(point && point.y, 0)
+            }));
+            const minX = Math.min(...normalizedPoints.map((point) => point.x));
+            const minY = Math.min(...normalizedPoints.map((point) => point.y));
+            const maxX = Math.max(...normalizedPoints.map((point) => point.x));
+            const maxY = Math.max(...normalizedPoints.map((point) => point.y));
+            const width = Math.max(1, maxX - minX);
+            const height = Math.max(1, maxY - minY);
+            const path = normalizedPoints.map((point, index) => `${index ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
+            const color = placement.color === '#58d4f7' ? placement.color : '#58d4f7';
+            const strokeWidth = placement.width === 14 ? 14 : 4;
+
+            if (!preview && typeof document.createElement === 'function') {
+                preview = document.createElement('div');
+                preview.id = LOCAL_ANNOTATION_PREVIEW_ID;
+                preview.className = 'vtt-overlay-item vtt-annotation';
+                preview.setAttribute('aria-hidden', 'true');
+                layer.appendChild(preview);
+            }
+            if (!preview) return;
+
+            preview.style.left = `${scaleForZoom(minX)}px`;
+            preview.style.top = `${scaleForZoom(minY)}px`;
+            preview.style.width = `${scaleForZoom(width)}px`;
+            preview.style.height = `${scaleForZoom(height)}px`;
+            preview.innerHTML = `<svg class="vtt-annotation-svg" viewBox="${minX} ${minY} ${width} ${height}" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${placement.kind === 'highlighter' ? '0.35' : '0.9'}"/></svg>`;
+        };
+
+        const scheduleLocalAnnotationPreview = () => {
+            if (annotationPreviewRenderFrame) return;
+            if (typeof window.requestAnimationFrame !== 'function') {
+                renderLocalAnnotationPreview();
+                return;
+            }
+            annotationPreviewRenderFrame = window.requestAnimationFrame(() => {
+                annotationPreviewRenderFrame = 0;
+                renderLocalAnnotationPreview();
+            });
+        };
+
+        const clearLocalAnnotationPreview = () => {
+            if (annotationPreviewRenderFrame && typeof window.cancelAnimationFrame === 'function') {
+                window.cancelAnimationFrame(annotationPreviewRenderFrame);
+            }
+            annotationPreviewRenderFrame = 0;
+            renderLocalAnnotationPreview();
         };
 
         const getEventTargetElement = (event) => {
@@ -714,7 +783,7 @@
                 runtime.templateRotateState = null;
                 runtime.visionConeRotateState = null;
                 runtime.rulerState = null;
-                renderStage();
+                renderLocalAnnotationPreview();
                 event.preventDefault();
                 return;
             }
@@ -892,7 +961,7 @@
                     return;
                 }
                 appendAnnotationPoint(runtime.annotationPlacementState, screenToWorld(event.clientX, event.clientY));
-                scheduleInteractionRender();
+                scheduleLocalAnnotationPreview();
                 return;
             }
             if (runtime.templatePlacementState) {
@@ -1067,6 +1136,7 @@
             if (runtime.annotationPlacementState) {
                 const pendingAnnotation = { ...runtime.annotationPlacementState, points: [...(runtime.annotationPlacementState.points || [])] };
                 runtime.annotationPlacementState = null;
+                clearLocalAnnotationPreview();
                 if (!event || event.type === 'pointercancel' || pendingAnnotation.points.length < 2) {
                     renderStage();
                     return;
