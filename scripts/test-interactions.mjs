@@ -287,7 +287,11 @@ try {
         await page.waitForFunction(() => document.body?.dataset.vttRole === 'player');
         await page.evaluate(() => {
             const store = window.RTF_STORE;
-            store.addPlayer({ id: 'player_me', name: 'Me' });
+            store.addPlayer({
+                id: 'player_me',
+                name: 'Me',
+                imageUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+            });
             store.addPlayer({ id: 'player_unlinked', name: 'Unlinked player' });
             store.updatePlayer('player_me', { sheetKey: 'sheet_me' });
             const state = structuredClone(store.getVTTState());
@@ -307,7 +311,7 @@ try {
                     vision: { enabled: true, facingDeg: 0, arcDeg: 90, baseRangeCells: 6 }
                 },
                 {
-                    id: 'my_fogged_token', label: 'Me', side: 'player', x: 9, y: 2, w: 1, h: 1,
+                    id: 'my_fogged_token', label: 'Me', side: 'player', x: 9.25, y: 2, w: 1, h: 1,
                     sourceType: 'player', sourceId: 'player_me', moveAccess: 'player', hidden: false,
                     stealthRoll: 20
                 },
@@ -323,7 +327,8 @@ try {
                 },
                 {
                     id: 'unlinked_player_token', label: 'Unlinked player', side: 'player', x: 6, y: 7, w: 1, h: 1,
-                    sourceType: 'player', sourceId: 'player_unlinked', moveAccess: 'player', hidden: false
+                    sourceType: 'player', sourceId: 'player_unlinked', moveAccess: 'player', hidden: false,
+                    moodEmoji: '🤔', moodLabel: 'Suspicious'
                 }
             ];
             store.updateVTTState(state);
@@ -332,6 +337,7 @@ try {
 
         const ownToken = page.locator('.vtt-token[data-token-id="my_fogged_token"]');
         assert.equal(await ownToken.count(), 1, 'the local player token remains rendered over fog');
+        await page.waitForFunction(() => !!document.querySelector('.vtt-token[data-token-id="my_fogged_token"] .vtt-token-image'));
         assert.equal(await ownToken.getAttribute('class').then((classes) => classes.includes('is-hidden')), false, 'the local fogged token should not be dimmed as hidden');
         assert.match(await ownToken.getAttribute('aria-label'), /Movable\./);
         assert.equal(await page.locator('.vtt-token[data-token-id="fogged_peer"]').count(), 0, 'other fogged players remain concealed');
@@ -347,6 +353,12 @@ try {
         const lockedBox = await lockedToken.boundingBox();
         assert.ok(lockedBox);
         await page.mouse.move(lockedBox.x + lockedBox.width / 2, lockedBox.y + lockedBox.height / 2);
+        const moodCard = lockedToken.locator('.vtt-token-hover-card');
+        await page.waitForFunction((selector) => {
+            const card = document.querySelector(selector);
+            return !!card && getComputedStyle(card).opacity === '1';
+        }, '.vtt-token[data-token-id="unlinked_player_token"] .vtt-token-hover-card');
+        assert.equal(await moodCard.locator('.vtt-token-mood-badge').innerText(), '🤔 Suspicious', 'hovering a token reveals its mood');
         await page.mouse.down();
         await page.mouse.move(lockedBox.x + lockedBox.width / 2 + 45, lockedBox.y + lockedBox.height / 2, { steps: 2 });
         await page.mouse.up();
@@ -358,6 +370,24 @@ try {
             }),
             [6, 7],
             'a roster player token stays locked until that roster entry is linked to this local sheet'
+        );
+
+        const ownPositionBeforePortrait = await page.evaluate(() => {
+            const token = window.RTF_STORE.getVTTState().scenes[0].tokens.find((entry) => entry.id === 'my_fogged_token');
+            return [token.x, token.y];
+        });
+        await ownToken.dblclick();
+        await page.waitForFunction(() => document
+            .querySelector('.vtt-token[data-token-id="my_fogged_token"]')
+            ?.classList.contains('is-preview-open'));
+        assert.equal(await ownToken.locator('.vtt-token-hover-card .vtt-token-hover-image').count(), 1, 'double-clicking a player token reveals its full portrait');
+        assert.deepEqual(
+            await page.evaluate(() => {
+                const token = window.RTF_STORE.getVTTState().scenes[0].tokens.find((entry) => entry.id === 'my_fogged_token');
+                return [token.x, token.y];
+            }),
+            ownPositionBeforePortrait,
+            'opening a player portrait must not snap the movable token to the grid'
         );
 
         const ownBox = await ownToken.boundingBox();
@@ -372,6 +402,11 @@ try {
             'the linked local player can still move their token while it is under fog'
         );
         assert.match(await ownToken.getAttribute('class'), /is-selected/, 'a fogged local token keeps selection after its move is persisted');
+        assert.match(
+            await ownToken.locator('.vtt-token-corona').evaluate((corona) => getComputedStyle(corona).animationName),
+            /vtt-token-corona-flow/,
+            'a selected token keeps its animated corona ring'
+        );
 
         const markButton = page.locator('#vtt-player-draw-btn');
         assert.equal(await markButton.isDisabled(), false, 'a linked player can mark the shared map');
@@ -743,6 +778,10 @@ try {
         const describedClock = page.locator('#vtt-clock-list .vtt-clock').first();
         assert.equal(await describedClock.getAttribute('title'), clockDescription);
         assert.equal(await describedClock.getAttribute('aria-describedby'), 'vtt-clock-description-0');
+        await describedClock.getByRole('button', { name: 'Done' }).click();
+        assert.equal(await page.locator('#vtt-clock-list [data-clock-field="title"]').count(), 0);
+        await describedClock.getByRole('button', { name: 'Edit' }).click();
+        assert.equal(await page.locator('#vtt-clock-list [data-clock-field="title"]').evaluate((input) => input === document.activeElement), true);
         await page.locator('#vtt-initiative-panel .vtt-drawer-close').click();
         assert.equal(await page.evaluate(() => {
             const clocks = document.getElementById('vtt-clock-panel');

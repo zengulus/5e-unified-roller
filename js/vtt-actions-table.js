@@ -489,6 +489,7 @@
                 state.selectedClockId = id;
                 state.combatClockEditorId = state.combatClockEditorId === id ? '' : id;
                 setCombatView('clocks');
+                render();
                 if (state.combatClockEditorId) focusClockEditor(state.combatClockEditorId);
                 return;
             }

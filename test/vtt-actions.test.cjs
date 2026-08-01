@@ -310,18 +310,19 @@ test('clock Edit toggles one editor without changing the selected combat view', 
         state,
         isDM: () => true,
         setCombatView: (view) => calls.push(`view:${view}`),
+        render: () => calls.push(`render:${state.combatClockEditorId}`),
         focusClockEditor: (id) => calls.push(`focus:${id}`)
     });
 
     actions.handle({ dataset: {} }, 'edit-clock', 'clock_new');
     assert.equal(state.selectedClockId, 'clock_new');
     assert.equal(state.combatClockEditorId, 'clock_new');
-    assert.deepEqual(calls, ['view:clocks', 'focus:clock_new']);
+    assert.deepEqual(calls, ['view:clocks', 'render:clock_new', 'focus:clock_new']);
 
     calls.length = 0;
     actions.handle({ dataset: {} }, 'edit-clock', 'clock_new');
     assert.equal(state.combatClockEditorId, '');
-    assert.deepEqual(calls, ['view:clocks']);
+    assert.deepEqual(calls, ['view:clocks', 'render:']);
 });
 
 test('deleting a scene clock repairs proximity references and keeps clock selection valid', () => {

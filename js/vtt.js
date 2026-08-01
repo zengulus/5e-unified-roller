@@ -822,7 +822,7 @@
         return !!(context && context.token && String(context.token.id || '').trim() === String(token.id || '').trim());
     };
     const canPreviewTokenPortrait = (token) => {
-        return false;
+        return !!(token && getCanonicalTokenImageUrl(token));
     };
     const clearTokenPortraitPreview = ({ render = false } = {}) => {
         if (stageState.preview.timerId) {
@@ -1140,6 +1140,7 @@
     };
     const clearTemplatePlacementState = () => {
         if (!stageState.placement.annotation && !stageState.placement.template && !stageState.placement.templateRotate && !stageState.placement.visionConeRotate && !stageState.placement.ruler && !stageState.placement.fog && !stageState.placement.evidenceNote && !stageState.placement.evidenceNoteDrag) return false;
+        const hadAnnotation = !!stageState.placement.annotation;
         stageState.placement.template = null;
         stageState.placement.templateRotate = null;
         stageState.placement.visionConeRotate = null;
@@ -1148,6 +1149,9 @@
         stageState.placement.evidenceNote = null;
         stageState.placement.evidenceNoteDrag = null;
         stageState.placement.annotation = null;
+        if (hadAnnotation && resources.stageInput && typeof resources.stageInput.clearLocalAnnotationPreview === 'function') {
+            resources.stageInput.clearLocalAnnotationPreview();
+        }
         return true;
     };
     const setToolMode = (mode) => {
@@ -1673,21 +1677,23 @@
     const focusClockEditor = (clockId) => {
         const targetId = String(clockId || '').trim();
         if (!targetId) return;
-        window.requestAnimationFrame(() => {
+        const focusEditor = () => {
             const selectorId = window.CSS && typeof window.CSS.escape === 'function'
                 ? window.CSS.escape(targetId)
                 : targetId.replace(/"/g, '\\"');
             const editor = dom.clockListEl
                 ? dom.clockListEl.querySelector(`[data-clock-editor="${selectorId}"]`)
                 : null;
-            if (!editor) return;
+            if (!editor) return false;
             if (typeof editor.scrollIntoView === 'function') editor.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             const titleInput = editor.querySelector('[data-clock-field="title"]');
             if (titleInput && typeof titleInput.focus === 'function') {
                 titleInput.focus({ preventScroll: true });
                 if (typeof titleInput.select === 'function') titleInput.select();
             }
-        });
+            return !!titleInput;
+        };
+        if (!focusEditor()) window.requestAnimationFrame(focusEditor);
     };
 
     const applyUIPreferences = () => {

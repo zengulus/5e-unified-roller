@@ -3128,10 +3128,14 @@ body:not([data-vtt-role="dm"]) .vtt-map-note.is-selected .vtt-map-note-meta {
 
 .vtt-token.is-selected .vtt-token-corona {
     opacity: 0.92;
+    animation: vtt-token-corona-flow 3s linear infinite;
 }
 
 .vtt-token.is-active-turn .vtt-token-corona {
     opacity: 0.72;
+    animation:
+        vtt-token-corona-flow 3s linear infinite,
+        vtt-active-turn-breathe 1.85s ease-in-out infinite;
 }
 
 .vtt-token.is-selected .vtt-token-corona::after {
@@ -3372,6 +3376,8 @@ body:not([data-vtt-role="dm"]) .vtt-map-note.is-selected .vtt-map-note-meta {
     transition: opacity 120ms ease, transform 120ms ease;
 }
 
+.vtt-token:not(.is-dragging):hover .vtt-token-hover-card,
+.vtt-token:not(.is-dragging):focus-within .vtt-token-hover-card,
 .vtt-token:not(.is-dragging).is-preview-open .vtt-token-hover-card {
     opacity: 1;
     transform: translateY(-50%) scale(1);

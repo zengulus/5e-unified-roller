@@ -64,9 +64,11 @@ installGlobal('HTMLInputElement', FakeHTMLInputElement);
 installGlobal('HTMLTextAreaElement', FakeHTMLTextAreaElement);
 installGlobal('HTMLSelectElement', FakeHTMLSelectElement);
 installGlobal('CSS', { escape: (value) => String(value) });
+const documentState = { annotationLayerEl: null };
 installGlobal('document', {
     activeElement: null,
-    elementsFromPoint: () => []
+    elementsFromPoint: () => [],
+    getElementById: (id) => id === 'vtt-annotation-layer' ? documentState.annotationLayerEl : null
 });
 
 test.after(() => {
@@ -136,7 +138,12 @@ const createStageHarness = () => {
             return Math.round(zoom * 1000) / 1000;
         },
         clearSpawnDrag: recordClose('clear-spawn'),
-        clearTemplatePlacementState: recordClose('clear-template'),
+        clearTemplatePlacementState: () => {
+            calls.push('clear-template');
+            return typeof runtime.clearTemplatePlacementState === 'function'
+                ? runtime.clearTemplatePlacementState()
+                : false;
+        },
         clearTokenPortraitPreview: () => calls.push('clear-preview'),
         closeActiveVTTPanel: () => {
             calls.push('close-panel');
@@ -263,6 +270,12 @@ test('VTT stage input wiring supplies every API, DOM, config, and runtime field'
     assert.ok(createMatch, 'vtt.js creates the stage input module');
     const createBlock = createMatch[1];
     assert.match(createBlock, /runtime:\s*vttStageInputRuntime/);
+    assert.match(moduleSource, /return Object\.freeze\(\{\s*clearLocalAnnotationPreview,/);
+    assert.match(
+        controllerSource,
+        /resources\.stageInput\.clearLocalAnnotationPreview\(\)/,
+        'central placement clearing removes the direct annotation preview'
+    );
     assert.match(
         controllerSource,
         /const vttStageInputRuntime = runtimeState\.ports\.stageInput;/,
@@ -560,6 +573,43 @@ test('VTT annotation strokes render locally and commit once on pen-up', () => {
     assert.equal(harness.calls.filter((call) => call === 'with-draft').length, 1, 'pen-up performs the single shared write');
 });
 
+test('VTT Escape removes a canceled local annotation preview without rebuilding the stage', () => {
+    const harness = createStageHarness();
+    let removeCount = 0;
+    documentState.annotationLayerEl = {
+        querySelector: (selector) => selector === '#vtt-local-annotation-preview'
+            ? { remove: () => { removeCount += 1; } }
+            : null
+    };
+    harness.runtime.annotationPlacementState = {
+        sceneId: harness.scene.id,
+        points: [{ x: 10, y: 10 }, { x: 40, y: 40 }]
+    };
+    harness.runtime.clearTemplatePlacementState = () => {
+        harness.runtime.annotationPlacementState = null;
+        harness.input.clearLocalAnnotationPreview();
+        return true;
+    };
+    let prevented = 0;
+
+    try {
+        harness.input.handleDocumentKeyDown({
+            target: harness.stageEl,
+            key: 'Escape',
+            preventDefault: () => {
+                prevented += 1;
+            }
+        });
+
+        assert.equal(prevented, 1);
+        assert.equal(removeCount, 1, 'the local-only preview is removed as placement state is canceled');
+        assert.equal(harness.calls.includes('render-stage'), false, 'preview cleanup does not need a stage rebuild');
+        assert.equal(harness.calls.at(-1), 'render', 'Escape still refreshes the surrounding controls');
+    } finally {
+        documentState.annotationLayerEl = null;
+    }
+});
+
 test('VTT native token double click opens the DM inspector and is wired on the stage', () => {
     const harness = createStageHarness();
     const tokenEl = createTokenElement();
@@ -589,4 +639,50 @@ test('VTT native token double click opens the DM inspector and is wired on the s
         /dom\.stageEl\.addEventListener\('dblclick', handleStageDoubleClick\)/,
         'the stage must bind the native double-click handler'
     );
+});
+
+test('VTT player double-click gestures open a portrait preview instead of snapping a movable token', () => {
+    const harness = createStageHarness();
+    const tokenEl = createTokenElement();
+    harness.runtime.localRole = 'player';
+    harness.stageEl.querySelector = () => tokenEl;
+
+    harness.input.handleStagePointerDown({
+        target: tokenEl,
+        button: 0,
+        clientX: 44,
+        clientY: 55,
+        preventDefault() { }
+    });
+    harness.input.handlePointerUp({
+        target: tokenEl,
+        type: 'pointerup',
+        clientX: 44,
+        clientY: 55
+    });
+    harness.calls.length = 0;
+
+    harness.input.handleStagePointerDown({
+        target: tokenEl,
+        button: 0,
+        clientX: 44,
+        clientY: 55,
+        preventDefault() { }
+    });
+
+    assert.ok(harness.calls.includes('show-preview:token_one'));
+    assert.equal(harness.calls.includes('snap:token_one'), false, 'the double-press path must not snap a movable player token');
+    assert.equal(harness.runtime.dragState, null);
+
+    harness.calls.length = 0;
+    harness.input.handleStageDoubleClick({
+        target: tokenEl,
+        clientX: 44,
+        clientY: 55,
+        preventDefault() { }
+    });
+
+    assert.ok(harness.calls.includes('show-preview:token_one'));
+    assert.ok(harness.calls.includes('render-stage'));
+    assert.equal(harness.calls.includes('snap:token_one'), false, 'the native dblclick path must not snap a movable player token');
 });

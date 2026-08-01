@@ -256,6 +256,13 @@
             renderLocalAnnotationPreview();
         };
 
+        const clearAnnotationPlacementState = () => {
+            const hadAnnotation = !!runtime.annotationPlacementState;
+            runtime.annotationPlacementState = null;
+            clearLocalAnnotationPreview();
+            return hadAnnotation;
+        };
+
         const getEventTargetElement = (event) => {
             const target = event && event.target;
             if (target instanceof Element) return target;
@@ -445,9 +452,12 @@
                 renderStage();
                 return true;
             }
-            if (isDoublePress && canMoveToken) {
+            if (isDoublePress && !isDM()) {
                 lastTokenPointerDownState = null;
-                snapTokenToGrid(token.id);
+                runtime.dragState = null;
+                runtime.previewTokenId = '';
+                showTokenPortraitPreview(token.id);
+                renderStage();
                 return true;
             }
             if (!canMoveToken) {
@@ -732,7 +742,7 @@
                 };
     
                 runtime.evidenceNotePlacementState = null;
-                runtime.annotationPlacementState = null;
+                clearAnnotationPlacementState();
                 runtime.templatePlacementState = null;
                 runtime.templateRotateState = null;
                 runtime.visionConeRotateState = null;
@@ -754,7 +764,7 @@
                     note: initialNote
                 };
                 runtime.selectedEvidenceNoteId = '';
-                runtime.annotationPlacementState = null;
+                clearAnnotationPlacementState();
                 runtime.templatePlacementState = null;
                 runtime.templateRotateState = null;
                 runtime.visionConeRotateState = null;
@@ -956,7 +966,7 @@
             if (runtime.annotationPlacementState) {
                 const scene = getActiveScene();
                 if (!scene || runtime.annotationPlacementState.sceneId !== scene.id) {
-                    runtime.annotationPlacementState = null;
+                    clearAnnotationPlacementState();
                     renderStage();
                     return;
                 }
@@ -1135,8 +1145,7 @@
             }
             if (runtime.annotationPlacementState) {
                 const pendingAnnotation = { ...runtime.annotationPlacementState, points: [...(runtime.annotationPlacementState.points || [])] };
-                runtime.annotationPlacementState = null;
-                clearLocalAnnotationPreview();
+                clearAnnotationPlacementState();
                 if (!event || event.type === 'pointercancel' || pendingAnnotation.points.length < 2) {
                     renderStage();
                     return;
@@ -1297,8 +1306,9 @@
                 renderTokenInspectorPopover();
                 renderToolsMenu();
                 renderStage();
-            } else if (canRoleMoveToken(token, runtime.localRole)) {
-                snapTokenToGrid(token.id);
+            } else {
+                showTokenPortraitPreview(token.id);
+                renderStage();
             }
             event.preventDefault();
         };
@@ -1616,6 +1626,7 @@
         };
 
         return Object.freeze({
+            clearLocalAnnotationPreview,
             clearPendingTouchContext,
             handleDocumentKeyDown,
             handleDocumentPointerDown,

@@ -1157,12 +1157,19 @@
                 moodText: moodText || ''
             });
             if (tokenEl.dataset.renderSignature === signature) return;
+            const hasHoverCard = !!(usableImageUrl || moodText);
             tokenEl.innerHTML = `
                 <div class="vtt-token-corona"></div>
                 <div class="vtt-token-face">
                     ${usableImageUrl ? `<img class="vtt-token-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(label)}" draggable="false" decoding="async">` : `<div class="vtt-token-initials">${escapeHtml(initials)}</div>`}
                 </div>
-                ${moodEmoji ? `<div class="vtt-token-mood-corner">${escapeHtml(moodEmoji)}</div>` : ''}
+                ${moodEmoji ? `<div class="vtt-token-mood-corner" title="${escapeHtml(moodText || moodEmoji)}">${escapeHtml(moodEmoji)}</div>` : ''}
+                ${hasHoverCard ? `
+                    <div class="vtt-token-hover-card${usableImageUrl ? '' : ' has-mood-only'}">
+                        ${usableImageUrl ? `<img class="vtt-token-hover-image" src="${escapeHtml(usableImageUrl)}" alt="${escapeHtml(label)} portrait" draggable="false" loading="lazy" decoding="async">` : ''}
+                        ${moodText ? `<div class="vtt-token-mood-badge">${escapeHtml(moodText)}</div>` : ''}
+                    </div>
+                ` : ''}
                 <div class="vtt-token-subtitle">${escapeHtml(label)}</div>
             `;
             tokenEl.dataset.renderSignature = signature;
@@ -1361,6 +1368,13 @@
             const annotationMarkup = (Array.isArray(scene.annotations) ? scene.annotations : [])
                 .map((annotation) => markup.buildAnnotationMarkup(annotation, scene, { isDM: !!state.isDM }))
                 .join('');
+            // The active stroke preview is mounted directly by stage input so pointer
+            // moves do not rebuild the whole stage. If another path clears its state,
+            // remove that ephemeral node even when the persisted layer markup is cached.
+            if (!state.annotationPlacementState && annotationLayerEl && typeof annotationLayerEl.querySelector === 'function') {
+                const localPreview = annotationLayerEl.querySelector('#vtt-local-annotation-preview');
+                if (localPreview && typeof localPreview.remove === 'function') localPreview.remove();
+            }
             const annotationsChanged = annotationLayerEl
                 ? commitLayerMarkup(annotationLayerEl, annotationMarkup)
                 : false;
