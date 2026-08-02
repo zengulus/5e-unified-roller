@@ -53,6 +53,19 @@ const createFakeDocument = () => {
                 node.parentNode = null;
             }
         };
+        if (node.tagName === 'IFRAME') {
+            const nestedForm = {
+                submit() {
+                    nestedForm.submitted = true;
+                }
+            };
+            node.contentDocument = {
+                getElementById(id) {
+                    return id === 'rtf-discord-webhook-form' ? nestedForm : null;
+                }
+            };
+            node.nestedForm = nestedForm;
+        }
         created.push(node);
         return node;
     };
@@ -81,14 +94,19 @@ test('Discord webhook sender submits a cross-origin multipart form without fetch
     assert.equal(frame.tagName, 'IFRAME');
     assert.match(frame.name, /^rtf-discord-webhook-/);
     assert.match(frame.srcdoc, /<meta name="referrer" content="no-referrer">/);
-    assert.match(frame.srcdoc, /<form method="post" action="https:\/\/discord\.com\/api\/webhooks\/123\/token" enctype="multipart\/form-data">/);
+    assert.match(frame.srcdoc, /<form id="rtf-discord-webhook-form" method="post" action="https:\/\/discord\.com\/api\/webhooks\/123\/token" enctype="multipart\/form-data">/);
     assert.match(frame.srcdoc, /<input type="hidden" name="payload_json"/);
-    assert.match(frame.srcdoc, /<\/form><script>document\.forms\[0\]\.submit\(\)<\/script>$/);
+    assert.match(frame.srcdoc, /<\/form>$/);
+    assert.equal(frame.srcdoc.includes('<script>'), false);
     const payloadJSON = JSON.stringify({
         content: 'Initiative starts now.',
         embeds: [{ title: 'Round one' }]
     });
     assert.ok(frame.srcdoc.includes(`value="${payloadJSON.replace(/"/g, '&quot;')}"`));
+    assert.equal(frame.nestedForm.submitted, undefined);
+    frame.onload();
+    assert.equal(frame.nestedForm.submitted, true);
+    assert.equal(frame.onload, null);
     assert.deepEqual(scheduled.map((entry) => entry.delay), [30000]);
 
     scheduled[0].callback();

@@ -7,6 +7,7 @@
         'canary.discord.com',
         'ptb.discord.com'
     ]);
+    const FORM_ID = 'rtf-discord-webhook-form';
     let submissionSequence = 0;
 
     const normalizeDiscordWebhookUrl = (value) => {
@@ -56,11 +57,20 @@
         frame.hidden = true;
         frame.tabIndex = -1;
         frame.setAttribute('aria-hidden', 'true');
+        let submitted = false;
+        frame.onload = () => {
+            if (submitted) return;
+            const form = frame.contentDocument && frame.contentDocument.getElementById(FORM_ID);
+            if (!form || typeof form.submit !== 'function') return;
+            submitted = true;
+            frame.onload = null;
+            form.submit();
+        };
         frame.srcdoc = [
             '<!doctype html><meta name="referrer" content="no-referrer">',
-            `<form method="post" action="${escapeHTMLAttribute(url)}" enctype="multipart/form-data">`,
+            `<form id="${FORM_ID}" method="post" action="${escapeHTMLAttribute(url)}" enctype="multipart/form-data">`,
             `<input type="hidden" name="payload_json" value="${escapeHTMLAttribute(payloadJSON)}">`,
-            '</form><script>document.forms[0].submit()</script>'
+            '</form>'
         ].join('');
 
         try {
@@ -74,6 +84,7 @@
         // begin its navigation, then reclaim the inert DOM node.
         if (typeof global.setTimeout === 'function') {
             global.setTimeout(() => {
+                frame.onload = null;
                 frame.remove();
             }, 30000);
         }
