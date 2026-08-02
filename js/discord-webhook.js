@@ -7,6 +7,7 @@
         'canary.discord.com',
         'ptb.discord.com'
     ]);
+    let submissionSequence = 0;
 
     const normalizeDiscordWebhookUrl = (value) => {
         const raw = typeof value === 'string' ? value.trim() : '';
@@ -30,36 +31,65 @@
         }
     };
 
+    const escapeHTMLAttribute = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;'
+    }[character]));
+
+    const submitPayloadForm = (url, payloadJSON) => {
+        const document = global.document;
+        if (!document || !document.body || typeof document.createElement !== 'function') {
+            throw new Error('Discord webhook sending is unavailable in this browser.');
+        }
+
+        // A normal form navigation is not a CORS fetch. Keep it inside a
+        // no-referrer srcdoc frame so the VTT URL is not sent to Discord.
+        const targetName = `rtf-discord-webhook-${Date.now()}-${++submissionSequence}`;
+        const frame = document.createElement('iframe');
+        if (!('srcdoc' in frame)) {
+            throw new Error('Discord webhook sending is unavailable in this browser.');
+        }
+        frame.name = targetName;
+        frame.hidden = true;
+        frame.tabIndex = -1;
+        frame.setAttribute('aria-hidden', 'true');
+        frame.srcdoc = [
+            '<!doctype html><meta name="referrer" content="no-referrer">',
+            `<form method="post" action="${escapeHTMLAttribute(url)}" enctype="multipart/form-data">`,
+            `<input type="hidden" name="payload_json" value="${escapeHTMLAttribute(payloadJSON)}">`,
+            '</form><script>document.forms[0].submit()</script>'
+        ].join('');
+
+        try {
+            document.body.append(frame);
+        } catch (error) {
+            frame.remove();
+            throw error;
+        }
+
+        // Leave the request target alive long enough for the nested form to
+        // begin its navigation, then reclaim the inert DOM node.
+        if (typeof global.setTimeout === 'function') {
+            global.setTimeout(() => {
+                frame.remove();
+            }, 30000);
+        }
+    };
+
     // Discord accepts multipart requests with the JSON message in payload_json.
-    // FormData keeps this a CORS-safelisted request, so browsers can submit it
-    // directly without a relay. The opaque response cannot be inspected.
+    // A form navigation avoids Firefox's cross-site fetch path entirely. Its
+    // response is intentionally not exposed, so this remains best-effort.
     const post = async (webhook, payload) => {
         const url = normalizeDiscordWebhookUrl(webhook);
         if (!url) throw new Error('Discord webhook URL is invalid.');
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
             throw new TypeError('Discord webhook payload must be an object.');
         }
-        if (typeof global.FormData !== 'function') {
-            throw new Error('Discord webhook sending is unavailable in this browser.');
-        }
-        if (typeof global.fetch !== 'function') {
-            throw new Error('Discord webhook sending is unavailable in this browser.');
-        }
-
-        const body = new global.FormData();
-        body.append('payload_json', JSON.stringify(payload));
-
-        await global.fetch(url, {
-            method: 'POST',
-            mode: 'no-cors',
-            body,
-            cache: 'no-store',
-            credentials: 'omit',
-            referrerPolicy: 'no-referrer'
-        });
-
-        // no-cors responses are opaque, so resolving only confirms that the
-        // browser submitted the request; Discord's HTTP status is unavailable.
+        const payloadJSON = JSON.stringify(payload);
+        submitPayloadForm(url, payloadJSON);
         return Object.freeze({ queued: true, verified: false });
     };
 

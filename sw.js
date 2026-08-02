@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ravnica-tools-v22';
+const CACHE_NAME = 'ravnica-tools-v23';
 const SHELL_ASSETS = [
     './',
     './manifest.json',

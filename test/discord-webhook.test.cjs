@@ -6,34 +6,67 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'js/discord-webhook.js'), 'utf8');
 
-class FakeFormData {
-    constructor() {
-        this.entries = [];
-    }
-
-    append(name, value) {
-        this.entries.push([name, value]);
-    }
-}
-
 const loadSender = ({
-    fetchImpl = async () => ({ ok: false, status: 0, type: 'opaque' }),
-    FormDataImpl = FakeFormData
+    document = null,
+    setTimeoutImpl = () => 0
 } = {}) => {
     const window = {
-        fetch: fetchImpl,
-        FormData: FormDataImpl
+        document,
+        setTimeout: setTimeoutImpl
     };
     vm.runInNewContext(source, { window, URL }, { filename: 'discord-webhook.js' });
     return window.RTF_DISCORD_WEBHOOK;
 };
 
-test('Discord webhook sender uses a no-cors multipart payload request', async () => {
-    const calls = [];
+const createFakeDocument = () => {
+    const created = [];
+    const body = {
+        children: [],
+        append(...nodes) {
+            nodes.forEach((node) => {
+                node.parentNode = body;
+                body.children.push(node);
+            });
+        }
+    };
+    const createElement = (tagName) => {
+        const node = {
+            tagName: String(tagName || '').toUpperCase(),
+            attributes: new Map(),
+            children: [],
+            hidden: false,
+            parentNode: null,
+            srcdoc: '',
+            append(...children) {
+                children.forEach((child) => {
+                    child.parentNode = node;
+                    node.children.push(child);
+                });
+            },
+            setAttribute(name, value) {
+                node.attributes.set(name, String(value));
+            },
+            remove() {
+                if (!node.parentNode) return;
+                const index = node.parentNode.children.indexOf(node);
+                if (index >= 0) node.parentNode.children.splice(index, 1);
+                node.parentNode = null;
+            }
+        };
+        created.push(node);
+        return node;
+    };
+    return { body, createElement, created };
+};
+
+test('Discord webhook sender submits a cross-origin multipart form without fetch', async () => {
+    const document = createFakeDocument();
+    const scheduled = [];
     const sender = loadSender({
-        fetchImpl: async (url, options) => {
-            calls.push({ url, options });
-            return { ok: false, status: 0, type: 'opaque' };
+        document,
+        setTimeoutImpl: (callback, delay) => {
+            scheduled.push({ callback, delay });
+            return scheduled.length;
         }
     });
 
@@ -44,29 +77,26 @@ test('Discord webhook sender uses a no-cors multipart payload request', async ()
 
     assert.equal(result.queued, true);
     assert.equal(result.verified, false);
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, 'https://discord.com/api/webhooks/123/token');
-    assert.equal(calls[0].options.method, 'POST');
-    assert.equal(calls[0].options.mode, 'no-cors');
-    assert.equal(calls[0].options.credentials, 'omit');
-    assert.equal(calls[0].options.referrerPolicy, 'no-referrer');
-    assert.equal(calls[0].options.cache, 'no-store');
-    assert.equal(Object.hasOwn(calls[0].options, 'headers'), false);
-    assert.deepEqual(calls[0].options.body.entries, [[
-        'payload_json',
-        JSON.stringify({
-            content: 'Initiative starts now.',
-            embeds: [{ title: 'Round one' }]
-        })
-    ]]);
+    const [frame] = document.body.children;
+    assert.equal(frame.tagName, 'IFRAME');
+    assert.match(frame.name, /^rtf-discord-webhook-/);
+    assert.match(frame.srcdoc, /<meta name="referrer" content="no-referrer">/);
+    assert.match(frame.srcdoc, /<form method="post" action="https:\/\/discord\.com\/api\/webhooks\/123\/token" enctype="multipart\/form-data">/);
+    assert.match(frame.srcdoc, /<input type="hidden" name="payload_json"/);
+    assert.match(frame.srcdoc, /<\/form><script>document\.forms\[0\]\.submit\(\)<\/script>$/);
+    const payloadJSON = JSON.stringify({
+        content: 'Initiative starts now.',
+        embeds: [{ title: 'Round one' }]
+    });
+    assert.ok(frame.srcdoc.includes(`value="${payloadJSON.replace(/"/g, '&quot;')}"`));
+    assert.deepEqual(scheduled.map((entry) => entry.delay), [30000]);
+
+    scheduled[0].callback();
+    assert.equal(document.body.children.length, 0);
 });
 
-test('Discord webhook sender surfaces setup and network failures', async () => {
-    const sender = loadSender({
-        fetchImpl: async () => {
-            throw new Error('offline');
-        }
-    });
+test('Discord webhook sender surfaces setup failures', async () => {
+    const sender = loadSender();
 
     await assert.rejects(
         sender.post('', { content: 'hello' }),
@@ -78,18 +108,25 @@ test('Discord webhook sender surfaces setup and network failures', async () => {
     );
     await assert.rejects(
         sender.post('https://discord.com/api/webhooks/123/token', { content: 'hello' }),
-        /offline/
+        /unavailable in this browser/
     );
 });
 
+test('Discord webhook sender escapes payload text before placing it in iframe markup', async () => {
+    const document = createFakeDocument();
+    const sender = loadSender({ document });
+    const content = '</script><script>window.webhookPayloadWasInjected = true</script>';
+
+    await sender.post('https://discord.com/api/webhooks/123/token', { content });
+
+    const markup = document.body.children[0].srcdoc;
+    assert.equal(markup.includes(content), false);
+    assert.ok(markup.includes('&lt;/script&gt;&lt;script&gt;window.webhookPayloadWasInjected = true&lt;/script&gt;'));
+});
+
 test('Discord webhook sender rejects non-Discord destinations and strips URL extras', async () => {
-    const calls = [];
-    const sender = loadSender({
-        fetchImpl: async (url) => {
-            calls.push(url);
-            return { ok: false, status: 0, type: 'opaque' };
-        }
-    });
+    const document = createFakeDocument();
+    const sender = loadSender({ document });
 
     for (const url of [
         'http://discord.com/api/webhooks/123/token',
@@ -100,10 +137,10 @@ test('Discord webhook sender rejects non-Discord destinations and strips URL ext
     ]) {
         await assert.rejects(sender.post(url, { content: 'hello' }), /webhook URL is invalid/);
     }
-    assert.equal(calls.length, 0);
+    assert.equal(document.body.children.length, 0);
 
     await sender.post('https://ptb.discord.com/api/webhooks/123/token?wait=true#ignored', { content: 'hello' });
-    assert.deepEqual(calls, ['https://ptb.discord.com/api/webhooks/123/token']);
+    assert.match(document.body.children[0].srcdoc, /action="https:\/\/ptb\.discord\.com\/api\/webhooks\/123\/token"/);
 });
 
 test('Discord-enabled pages load the shared sender before their page code', () => {
