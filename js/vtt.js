@@ -5038,6 +5038,13 @@
             defences: normalizeDefences(token.defences)
         });
     };
+    const postDiscordWebhook = (webhook, payload) => {
+        const sender = window.RTF_DISCORD_WEBHOOK;
+        if (!sender || typeof sender.post !== 'function') {
+            return Promise.reject(new Error('Discord webhook sender failed to load.'));
+        }
+        return sender.post(webhook, payload);
+    };
     const postSheetDiscordRoll = (character, label, total, formula, type = 'check', detail = '') => {
         if (!character || !character.meta || !character.meta.discordActive || !String(character.meta.webhook || '').trim()) return Promise.resolve(false);
         const color = type === 'atk' ? 0xe74c3c : (type === 'dmg' ? 0xf39c12 : 0x4ecdc4);
@@ -5049,12 +5056,7 @@
                 color
             }]
         };
-        return fetch(String(character.meta.webhook || '').trim(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then((response) => {
-            if (!response.ok) throw new Error(`Discord webhook failed (${response.status})`);
+        return postDiscordWebhook(String(character.meta.webhook || '').trim(), payload).then(() => {
             return true;
         }).catch((error) => {
             reportVTTError('vtt-character-webhook', 'network', error);
@@ -5193,12 +5195,7 @@
                 color
             }]
         };
-        return fetch(settings.webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        }).then((response) => {
-            if (!response.ok) throw new Error(`Discord webhook failed (${response.status})`);
+        return postDiscordWebhook(settings.webhook, payload).then(() => {
             return true;
         }).catch((error) => {
             reportVTTError('vtt-gm-webhook', 'network', error);

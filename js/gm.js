@@ -1253,16 +1253,11 @@ function sendDiscord(name, title, desc, color) {
 function postDiscordWebhook(payload) {
     const webhook = String(gmData.webhook || '').trim();
     if (!webhook) return Promise.reject(new Error('Discord webhook URL is missing.'));
-    return fetch(webhook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    }).then((response) => {
-        if (!response.ok) {
-            throw new Error(`Discord webhook failed (${response.status})`);
-        }
-        return response;
-    }).catch((error) => {
+    const sender = window.RTF_DISCORD_WEBHOOK;
+    if (!sender || typeof sender.post !== 'function') {
+        return Promise.reject(new Error('Discord webhook sender failed to load.'));
+    }
+    return sender.post(webhook, payload).catch((error) => {
         const report = {
             ok: false,
             operation: 'gm-session-webhook',
@@ -1317,7 +1312,7 @@ function sendTurnPing(isTest = false) {
         const payload = { content: mention ? `${mention} ${turnText}` : turnText };
         postDiscordWebhook(payload)
             .then(() => {
-                alert('Turn ping sent.');
+                alert('Turn ping submitted. Check Discord to confirm delivery.');
             })
             .catch((err) => {
                 console.error(err);

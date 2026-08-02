@@ -6710,6 +6710,14 @@ function getDiscordColor(type = 'check') {
     return 5164484;
 }
 
+function postDiscordWebhook(payload) {
+    const sender = window.RTF_DISCORD_WEBHOOK;
+    if (!sender || typeof sender.post !== 'function') {
+        return Promise.reject(new Error('Discord webhook sender failed to load.'));
+    }
+    return sender.post(data.meta.webhook, payload);
+}
+
 function sendToDiscord(label, formulaStr, result, type = 'check', customDesc = '') {
     if (!data.meta.discordActive || !data.meta.webhook) return Promise.resolve();
     const color = getDiscordColor(type);
@@ -6757,16 +6765,7 @@ function sendToDiscord(label, formulaStr, result, type = 'check', customDesc = '
 
         ;
 
-    return fetch(data.meta.webhook, {
-        method: 'POST', headers: {
-            'Content-Type': 'application/json'
-        }
-
-        , body: JSON.stringify(payload)
-    }).then((response) => {
-        if (!response.ok) throw new Error(`Discord webhook failed (${response.status}).`);
-        return response;
-    }).catch((error) => {
+    return postDiscordWebhook(payload).catch((error) => {
         const report = {
             ok: false,
             operation: 'character-sheet-webhook',
@@ -6801,16 +6800,7 @@ function sendToDiscordPlain(label, description, type = 'check') {
             }
         }]
     };
-    return fetch(data.meta.webhook, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-    }).then((response) => {
-        if (!response.ok) throw new Error(`Discord webhook failed (${response.status}).`);
-        return response;
-    }).catch((error) => {
+    return postDiscordWebhook(payload).catch((error) => {
         const report = {
             ok: false,
             operation: 'character-sheet-webhook',

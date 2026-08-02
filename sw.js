@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ravnica-tools-v21';
+const CACHE_NAME = 'ravnica-tools-v22';
 const SHELL_ASSETS = [
     './',
     './manifest.json',
@@ -59,6 +59,7 @@ const SHELL_ASSETS = [
     './js/delegated-handler.js',
     './js/dice.js',
     './js/data-migrations.js',
+    './js/discord-webhook.js',
     './js/dm-screen.js',
     './js/encounters.js',
     './js/gm.js',
