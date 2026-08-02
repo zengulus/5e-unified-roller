@@ -524,6 +524,13 @@ try {
             ?.getAttribute('aria-label')
             ?.includes('Movable.'));
         assert.match(await claimableToken.getAttribute('aria-label'), /Movable\./, 'the claimed token becomes movable for its linked sheet');
+        await claimableToken.click({ button: 'right' });
+        assert.equal(
+            await page.getByRole('button', { name: 'Claim as My Token', exact: true }).isVisible(),
+            true,
+            'the claim action remains available for an already linked player token'
+        );
+        await page.keyboard.press('Escape');
 
         const claimedBox = await claimableToken.boundingBox();
         assert.ok(claimedBox);

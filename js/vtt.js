@@ -4452,8 +4452,7 @@
         const rosterPlayer = getRosterPlayerForRecord(token);
         const rosterPlayerId = String(rosterPlayer && rosterPlayer.id || '').trim();
         if (!identity.sheetKey || !rosterPlayerId) return false;
-        const linkedPlayer = findRosterPlayerBySheetKey(identity.sheetKey);
-        return !linkedPlayer || String(linkedPlayer.id || '').trim() !== rosterPlayerId;
+        return true;
     };
 
     const claimRosterTokenForLocalSheet = (tokenId) => {
