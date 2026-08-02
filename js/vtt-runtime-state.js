@@ -217,7 +217,7 @@
                 menus: { viewOpen: false, toolsOpen: false },
                 modals: {
                     dmUnlock: { returnFocusEl: null },
-                    rosterSelf: { returnFocusEl: null, selectedId: '', error: '' }
+                    rosterSelf: { returnFocusEl: null, selectedId: '', error: '', mapLinkMode: false }
                 }
             },
             resources: {

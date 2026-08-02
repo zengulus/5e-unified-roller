@@ -450,6 +450,95 @@ try {
         assert.equal(await page.locator('.vtt-annotation[data-annotation-id="peer_annotation"]').count(), 1, 'Undo mark cannot remove another player’s annotation');
     });
 
+    await withPage('VTT player claims a roster token from the initial association prompt', async (page) => {
+        await page.addInitScript(() => {
+            localStorage.setItem('unifiedSheetData.json', JSON.stringify({
+                activeId: 'character_me',
+                characters: {
+                    character_me: { meta: { sheetKey: 'sheet_me', name: 'Me' } }
+                }
+            }));
+        });
+        await page.goto(`${base}/vtt.html`);
+        await page.waitForFunction(() => document.body?.dataset.vttRole === 'player');
+        await page.evaluate(() => {
+            const store = window.RTF_STORE;
+            store.addPlayer({ id: 'player_target', name: 'Map Target' });
+            store.updatePlayer('player_target', { sheetKey: 'sheet_previous' });
+            const state = structuredClone(store.getVTTState());
+            state.scenes[0].tokens = [{
+                id: 'claimable_player_token', label: 'Map Target', side: 'player',
+                x: 6, y: 7, w: 1, h: 1,
+                sourceType: 'player', sourceId: 'player_target', moveAccess: 'player', hidden: false
+            }];
+            store.updateVTTState(state);
+        });
+
+        const rosterSelfModal = page.locator('#vtt-roster-self-modal');
+        await rosterSelfModal.waitFor({ state: 'visible' });
+        await rosterSelfModal.getByRole('button', { name: 'Choose Token on Map', exact: true }).click();
+        await rosterSelfModal.waitFor({ state: 'hidden' });
+
+        const claimableToken = page.locator('.vtt-token[data-token-id="claimable_player_token"]');
+        assert.equal(await claimableToken.count(), 1, 'the map token remains available after leaving roster selection');
+        assert.match(await claimableToken.getAttribute('aria-label'), /Movement locked\./);
+
+        let confirmShown = false;
+        const dismissUnexpectedDialog = async (dialog) => {
+            if (dialog.type() === 'confirm') confirmShown = true;
+            await dialog.dismiss();
+        };
+        page.on('dialog', dismissUnexpectedDialog);
+        try {
+            await claimableToken.click({ button: 'right' });
+            await page.getByRole('button', { name: 'Claim as My Token', exact: true }).click();
+            await page.waitForFunction(() => window.RTF_STORE
+                .getPlayers()
+                .find((player) => player.id === 'player_target')
+                ?.sheetKey === 'sheet_me');
+        } finally {
+            page.off('dialog', dismissUnexpectedDialog);
+        }
+
+        assert.equal(confirmShown, false, 'claiming a trusted player token must not require confirmation');
+        assert.deepEqual(
+            await page.evaluate(() => {
+                const player = window.RTF_STORE.getPlayers().find((entry) => entry.id === 'player_target');
+                const token = window.RTF_STORE.getVTTState().scenes[0].tokens
+                    .find((entry) => entry.id === 'claimable_player_token');
+                return {
+                    sheetKey: player?.sheetKey,
+                    sourceType: token?.sourceType,
+                    sourceId: token?.sourceId
+                };
+            }),
+            {
+                sheetKey: 'sheet_me',
+                sourceType: 'player',
+                sourceId: 'player_target'
+            },
+            'claiming binds the local sheet to the clicked token’s existing roster entry'
+        );
+        await page.waitForFunction(() => document
+            .querySelector('.vtt-token[data-token-id="claimable_player_token"]')
+            ?.getAttribute('aria-label')
+            ?.includes('Movable.'));
+        assert.match(await claimableToken.getAttribute('aria-label'), /Movable\./, 'the claimed token becomes movable for its linked sheet');
+
+        const claimedBox = await claimableToken.boundingBox();
+        assert.ok(claimedBox);
+        await page.mouse.move(claimedBox.x + claimedBox.width / 2, claimedBox.y + claimedBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(claimedBox.x + claimedBox.width / 2 + 45, claimedBox.y + claimedBox.height / 2, { steps: 2 });
+        await page.mouse.up();
+        await page.waitForFunction(() => window.RTF_STORE
+            .getVTTState()
+            .scenes[0]
+            .tokens
+            .find((entry) => entry.id === 'claimable_player_token')
+            ?.x > 6);
+    });
+
     await withPage('VTT mobile support notice', async (page) => {
         await page.goto(`${base}/vtt.html`);
         const notice = page.locator('.vtt-mobile-unsupported');
@@ -1013,4 +1102,4 @@ try {
     await new Promise((resolve) => server.close(resolve));
 }
 
-console.log('Interaction workflows passed: 9');
+console.log('Interaction workflows passed: 10');

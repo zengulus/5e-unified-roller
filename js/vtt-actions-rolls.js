@@ -40,6 +40,7 @@
             "roll-ask-roll-ping",
             "roll-npc-dice",
             "roster-self-dm-mode",
+            "roster-self-map-link",
             "roster-self-spectator-mode",
             "run-sheet-action",
             "save-monster-roll-override",
@@ -67,6 +68,7 @@
             applyRollModeToD20Formula,
             applyTokenInitiativeRollToTracker,
             askRollFromSheetActionByKey,
+            beginRosterSelfMapLink,
             buildMonsterAssignResultsMarkup,
             buildMonsterRollPresets,
             buildSheetActionCatalog,
@@ -216,6 +218,11 @@
             if (action === 'confirm-roster-self-link') {
                 if (!isPlayer()) return;
                 linkRosterSelfSelection();
+                return;
+            }
+            if (action === 'roster-self-map-link') {
+                if (!isPlayer()) return;
+                beginRosterSelfMapLink();
                 return;
             }
             if (action === 'roster-self-dm-mode') {

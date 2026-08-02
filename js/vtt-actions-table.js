@@ -22,6 +22,7 @@
             "clear-token-monster",
             "clock-step",
             "close-token-inspector",
+            "context-claim-roster-token",
             "context-custom-roll",
             "context-make-roll",
             "context-note-delete",
@@ -134,6 +135,7 @@
             canBroadcastFromViewedScene,
             canDeleteLiveVTTState,
             canUseSharedPlayerTools,
+            claimRosterTokenForLocalSheet,
             clearTokenPortraitPreview,
             closeNPCSearch,
             closeQuickSpawnMenu,
@@ -209,6 +211,12 @@
             : () => true;
 
         const handle = (actionEl, action, id) => {
+            if (action === 'context-claim-roster-token') {
+                const tokenId = state.stageContextMenuState ? String(state.stageContextMenuState.tokenId || '').trim() : '';
+                closeStageContextMenu();
+                if (tokenId && typeof claimRosterTokenForLocalSheet === 'function') claimRosterTokenForLocalSheet(tokenId);
+                return;
+            }
             if (action === 'context-ping') {
                 if (!canBroadcastFromViewedSceneSafely() || !canUseSharedPlayerTools()) return;
                 const scene = getActiveScene();

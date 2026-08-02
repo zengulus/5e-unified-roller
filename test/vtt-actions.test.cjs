@@ -8,13 +8,13 @@ const actionGroups = [
     {
         name: 'rolls',
         controllerName: 'Rolls',
-        expectedActionCount: 43,
+        expectedActionCount: 44,
         factory: require('../js/vtt-actions-rolls.js')
     },
     {
         name: 'table',
         controllerName: 'Table',
-        expectedActionCount: 61,
+        expectedActionCount: 62,
         factory: require('../js/vtt-actions-table.js')
     },
     {
@@ -74,7 +74,7 @@ test('VTT action ownership is complete, exclusive, and rejects unknown actions',
     }));
     const allActions = instances.flatMap((group) => group.actions);
 
-    assert.equal(allActions.length, 139);
+    assert.equal(allActions.length, 141);
     instances.forEach((group) => {
         assert.equal(group.actions.length, group.expectedActionCount, `${group.name} action count`);
         assert.equal(new Set(group.actions).size, group.actions.length, `${group.name} has no duplicate entries`);
@@ -151,6 +151,20 @@ test('roll actions normalize mode before rendering dependent roll views', () => 
     ]);
 });
 
+test('roster map-link action lets an unlinked player choose a token on the stage', () => {
+    const calls = [];
+    const rollsGroup = actionGroups.find((group) => group.name === 'rolls');
+    const actions = rollsGroup.factory.create({
+        state: {},
+        beginRosterSelfMapLink: () => calls.push('begin-map-link'),
+        isPlayer: () => true
+    });
+
+    actions.handle({ dataset: {} }, 'roster-self-map-link', '');
+
+    assert.deepEqual(calls, ['begin-map-link']);
+});
+
 test('table actions clear request state before changing the active ping tool', () => {
     const calls = [];
     const state = {
@@ -210,6 +224,22 @@ test('shared marker tools cannot activate while the viewed scene is not shared',
     actions.handle({ dataset: { toolMode: 'cone' } }, 'context-set-tool', '');
 
     assert.deepEqual(calls, []);
+});
+
+test('table context claim action forwards the context token to the local roster claim', () => {
+    const calls = [];
+    const tableGroup = actionGroups.find((group) => group.name === 'table');
+    const actions = tableGroup.factory.create({
+        state: { stageContextMenuState: { tokenId: 'token_one' } },
+        claimRosterTokenForLocalSheet: (tokenId) => calls.push(`claim:${tokenId}`),
+        closeStageContextMenu: () => calls.push('close'),
+        isPlayer: () => true,
+        render: () => {}
+    });
+
+    actions.handle({ dataset: {} }, 'context-claim-roster-token', '');
+
+    assert.deepEqual(calls, ['close', 'claim:token_one']);
 });
 
 test('Clear Fog requires confirmation before changing the scene', () => {

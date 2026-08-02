@@ -4051,6 +4051,7 @@
         const canPreview = canPreviewTokenPortrait(token);
         const canEditToken = !!(isDM() && token);
         const canEditNote = !!(isDM() && note);
+        const canClaimRosterToken = canClaimRosterTokenForLocalSheet(token);
         const activeScene = getActiveScene();
         const fogCount = activeScene && Array.isArray(activeScene.fog) ? activeScene.fog.length : 0;
         const contextSource = uiRuntime.overlays.stageContextMenu.source;
@@ -4086,6 +4087,7 @@
                 ${canRollFromSheet ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-from-sheet">Roll from character sheet</button>' : ''}
                 ${canCustomRoll ? '<button class="vtt-stage-context-item" type="button" data-action="context-custom-roll">Custom roll (any dice)</button>' : ''}
                 ${canRollStatBlock ? '<button class="vtt-stage-context-item" type="button" data-action="context-roll-stat-block">Roll stat block / NPC</button>' : ''}
+                ${canClaimRosterToken ? '<button class="vtt-stage-context-item strong" type="button" data-action="context-claim-roster-token">Claim as My Token</button>' : ''}
                 ${canEditToken ? `<button class="vtt-stage-context-item" type="button" data-action="context-token-inspector">Token inspector</button>` : ''}
                 ${canEditNote ? `<button class="vtt-stage-context-item" type="button" data-action="context-note-inspector">Zone inspector</button>` : ''}
                 ${canPreview ? `<button class="vtt-stage-context-item" type="button" data-action="context-preview-token">${token.id === stageState.preview.tokenId ? 'Hide portrait' : 'Preview portrait'}</button>` : ''}
@@ -4444,6 +4446,47 @@
         };
     };
 
+    const canClaimRosterTokenForLocalSheet = (token) => {
+        if (!isPlayer() || !token) return false;
+        const identity = getLocalSheetIdentity();
+        const rosterPlayer = getRosterPlayerForRecord(token);
+        const rosterPlayerId = String(rosterPlayer && rosterPlayer.id || '').trim();
+        if (!identity.sheetKey || !rosterPlayerId) return false;
+        const linkedPlayer = findRosterPlayerBySheetKey(identity.sheetKey);
+        return !linkedPlayer || String(linkedPlayer.id || '').trim() !== rosterPlayerId;
+    };
+
+    const claimRosterTokenForLocalSheet = (tokenId) => {
+        const cleanTokenId = String(tokenId || '').trim();
+        const currentToken = cleanTokenId ? getTokenById(cleanTokenId) : null;
+        const identity = getLocalSheetIdentity();
+        const rosterPlayer = getRosterPlayerForRecord(currentToken);
+        const rosterPlayerId = String(rosterPlayer && rosterPlayer.id || '').trim();
+        const store = getStore();
+        if (!cleanTokenId || !identity.sheetKey || !rosterPlayerId || !store || typeof store.updatePlayer !== 'function') return false;
+        if (!canClaimRosterTokenForLocalSheet(currentToken)) return false;
+
+        getPlayers().forEach((player) => {
+            const playerId = String(player && player.id || '').trim();
+            if (!playerId || playerId === rosterPlayerId) return;
+            if (String(player && player.sheetKey || '').trim() === identity.sheetKey) {
+                store.updatePlayer(playerId, { sheetKey: '' });
+            }
+        });
+        const updated = store.updatePlayer(rosterPlayerId, { sheetKey: identity.sheetKey });
+        if (!updated) return false;
+
+        uiRuntime.modals.rosterSelf.mapLinkMode = false;
+        uiRuntime.modals.rosterSelf.selectedId = '';
+        closeRosterSelfModal({ restoreFocus: false });
+        refreshPlayerImageCache();
+        if (sessionState.snapshot && syncRosterLinkedPlayerPresentation(sessionState.snapshot)) {
+            normalizeSelections();
+        }
+        render();
+        return true;
+    };
+
     const getRosterSelfSuggestedPlayer = (players, identity) => {
         const cleanSheetKey = String(identity && identity.sheetKey || '').trim();
         const sheetMatches = players.filter((player) => String(player && player.sheetKey || '').trim() === cleanSheetKey);
@@ -4475,6 +4518,19 @@
         uiRuntime.modals.rosterSelf.returnFocusEl = null;
         if (restoreFocus && !focusVTTModalElement(returnFocusEl)) focusVTTModalFallback();
         return wasOpen;
+    };
+
+    const beginRosterSelfMapLink = () => {
+        const context = getRosterSelfPromptContext();
+        if (!context.shouldPrompt) return false;
+        uiRuntime.modals.rosterSelf.mapLinkMode = true;
+        uiRuntime.modals.rosterSelf.selectedId = '';
+        closeRosterSelfModal({ restoreFocus: false });
+        render();
+        window.requestAnimationFrame(() => {
+            if (dom.stageEl && typeof dom.stageEl.focus === 'function') dom.stageEl.focus();
+        });
+        return true;
     };
 
     let caseBoardReturnFocusEl = null;
@@ -4548,9 +4604,14 @@
     const renderRosterSelfModal = () => {
         if (!dom.rosterSelfModalEl) return;
         const context = getRosterSelfPromptContext();
+        if (uiRuntime.modals.rosterSelf.mapLinkMode && context.shouldPrompt) {
+            closeRosterSelfModal();
+            return;
+        }
         if (!context.shouldPrompt) {
             closeRosterSelfModal();
             uiRuntime.modals.rosterSelf.selectedId = '';
+            uiRuntime.modals.rosterSelf.mapLinkMode = false;
             return;
         }
 
@@ -4674,6 +4735,7 @@
         }
 
         uiRuntime.modals.rosterSelf.selectedId = '';
+        uiRuntime.modals.rosterSelf.mapLinkMode = false;
         closeRosterSelfModal({ restoreFocus: true });
         refreshPlayerImageCache();
         if (sessionState.snapshot && syncRosterLinkedPlayerPresentation(sessionState.snapshot)) {
@@ -6283,6 +6345,7 @@
         const activePanel = getAllowedVTTPanel(uiRuntime.preferences.activeVttPanel);
         const isRulerActive = stageState.tool.current.mode === C.TOOL_MODE_RULER;
         const playerContext = isPlayer() ? getLocalPlayerFocusContext() : null;
+        const isChoosingRosterToken = !!uiRuntime.modals.rosterSelf.mapLinkMode;
         const playerCanDraw = !!(
             playerContext
             && String(playerContext.playerId || '').trim()
@@ -6323,12 +6386,16 @@
             const name = context.linkedPlayer && context.linkedPlayer.name
                 ? context.linkedPlayer.name
                 : (context.identity && context.identity.characterName ? context.identity.characterName : 'Unlinked');
-            const heading = !context.linkedPlayer
-                ? 'Character not linked'
-                : (context.isTurn ? 'Your Turn' : name);
-            const detail = !context.linkedPlayer
-                ? 'Choose your roster entry to continue'
-                : (context.token ? 'Ready at the table' : 'Waiting for a visible token');
+            const heading = isChoosingRosterToken
+                ? 'Choose a player token'
+                : (!context.linkedPlayer
+                    ? 'Character not linked'
+                    : (context.isTurn ? 'Your Turn' : name));
+            const detail = isChoosingRosterToken
+                ? 'Right-click your token, then choose Claim as My Token.'
+                : (!context.linkedPlayer
+                    ? 'Choose your roster entry to continue'
+                    : (context.token ? 'Ready at the table' : 'Waiting for a visible token'));
             dom.playerDockStatusEl.innerHTML = `<strong>${escapeHtml(heading)}</strong><span>${escapeHtml(detail)}</span>`;
             if (dom.playerFindTokenEl) dom.playerFindTokenEl.disabled = !context.token;
         }
@@ -7218,6 +7285,7 @@
         applyRollModeToD20Formula,
         applyTokenInitiativeRollToTracker,
         askRollFromSheetActionByKey,
+        beginRosterSelfMapLink,
         buildMonsterAssignResultsMarkup,
         buildMonsterRollPresets,
         buildSheetActionCatalog,
@@ -7305,6 +7373,7 @@
         canBroadcastFromViewedScene,
         canDeleteLiveVTTState,
         canUseSharedPlayerTools,
+        claimRosterTokenForLocalSheet,
         clearTokenPortraitPreview,
         closeNPCSearch,
         closeQuickSpawnMenu,
